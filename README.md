@@ -1,11 +1,16 @@
-# liminal-axis-mnemosyne
-A memory system for stories that refuse to remain fictional.
+# Liminal Axis: Mnemosyne
 
-# RP Memory Blueprint
+*A memory system for stories that refuse to remain fictional.*
 
-版本 v0.1 · 2026-09-17 · 设计与实施文档包
+面向长篇 AI RP 的平台无关持久化叙事记忆与检索基础设施。
 
-这不是已完成的软件，没有可启动的记忆服务。它是为球球的长期 RP 记忆系统准备的可版本化建设基线：独立后端、TT 适配器、可复用管理界面、可选 MCP。
+> 核心原则：记忆属于 Mnemosyne，平台只是适配器。
+
+## Mnemosyne Blueprint v0.1
+
+2026-09-17 · 设计与实施基线
+
+这不是已完成的软件，目前还没有可启动的记忆服务。当前仓库保存 Mnemosyne 的可版本化建设基线：独立后端、TT 适配器、可复用管理界面、可选 MCP，以及后续实现需要遵守的接口、验收与数据保护约束。
 
 ## 从哪里开始
 
@@ -24,15 +29,16 @@ A memory system for stories that refuse to remain fictional.
 | `AGENTS.md` | 给 Codex／编码助手的仓库工作约束 |
 | `CHANGELOG.md` | 文档版本更新记录 |
 
-## 建议仓库结构
+## 仓库结构
 
-现在只创建文档。实现阶段再逐个增加 `apps/memory-server`、`apps/tt-adapter`、`apps/workbench` 与 `packages/domain`、`packages/contracts`、`packages/context-compiler`。不要一次生成一堆未验证的空实现来冒充项目进展。
+当前阶段以文档为主。实现阶段再逐个增加 `apps/memory-server`、`apps/tt-adapter`、`apps/workbench` 与 `packages/domain`、`packages/contracts`、`packages/context-compiler`。不要一次生成一堆未验证的空实现来冒充项目进展。
 
-建议代码与文档放同一私有 GitHub 仓库；真实聊天、密钥、备份留在独立私有数据存储。私有仓库也不应提交生产密钥。
+代码与工程文档以本私有 GitHub 仓库为主版本。真实聊天、模型密钥、数据库备份和生产配置保存在独立受控的数据存储中；即使仓库是私有的，也不提交生产密钥或真实 RP 档案。
 
-## 状态
+## 当前状态
 
-已完成：v0.1 文档、示例与验收设计。
+已完成：v0.1 架构、路线、接口示例与验收设计；项目已建立私有 GitHub 主仓库。
+
 未完成：代码实现、VPS 部署、TT 真机联调、实际数据导入与性能测量。
 
-本包未复制柏宝书实现代码，也未创建远程仓库。未来若复用现有项目代码，先单独核查其许可证与发布条件。
+本仓库未复制柏宝书实现代码，也未导入真实聊天。未来若复用现有项目代码，先单独核查其许可证与发布条件。
