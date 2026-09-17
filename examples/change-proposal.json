@@ -1,0 +1,38 @@
+{
+  "schema_version": "0.1-draft",
+  "proposal_id": "proposal-demo-1",
+  "illustrative_only": true,
+  "status": "awaiting_user_confirmation",
+  "scope": {
+    "story_id": "story-demo",
+    "branch_id": "branch-main",
+    "module_id": "memory-echoes",
+    "storage_mode": "local_persistent"
+  },
+  "operations": [
+    {
+      "op": "update_fields",
+      "row_id": "echo-1",
+      "expected_revision": "echo-1-r2",
+      "changes": {
+        "resolution": {
+          "before": "未解释",
+          "after": "部分解释"
+        }
+      },
+      "source_refs": [
+        {
+          "message_id": "msg-100",
+          "revision_id": "msg-100-r1"
+        }
+      ]
+    }
+  ],
+  "constraints": {
+    "may_modify_author_truth": false,
+    "may_modify_locked_fields": false,
+    "may_modify_raw_messages": false,
+    "requires_user_confirmation": true
+  },
+  "applied": false
+}

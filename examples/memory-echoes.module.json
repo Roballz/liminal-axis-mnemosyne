@@ -1,0 +1,108 @@
+{
+  "schema_version": "0.1-draft",
+  "module_id": "memory-echoes",
+  "display_name": "记忆残响",
+  "storage": {
+    "mode": "local_persistent",
+    "exportable": true
+  },
+  "network_permissions": {
+    "send_to_memory_server": false,
+    "send_to_remote_embedding": false,
+    "send_selected_fields_to_auxiliary_api": false,
+    "send_selected_fields_to_prose_model": true
+  },
+  "policy": {
+    "resident_mode": "none",
+    "recall_enabled": true,
+    "recording_enabled": true,
+    "placement": {
+      "role": "user",
+      "position": "at_depth",
+      "depth": 0
+    },
+    "activation": {
+      "local_keyword_enabled": true,
+      "remote_search_enabled": false
+    },
+    "extraction_commit_mode": "proposal"
+  },
+  "fields": [
+    {
+      "field_id": "occurred_at",
+      "label": "发生时间",
+      "type": "story_time",
+      "required": false,
+      "model_visibility": "viewpoint_allowed"
+    },
+    {
+      "field_id": "surface_echo",
+      "label": "表层残响",
+      "type": "multiline_text",
+      "required": true,
+      "model_visibility": "viewpoint_allowed"
+    },
+    {
+      "field_id": "trigger",
+      "label": "触发因素",
+      "type": "text",
+      "model_visibility": "viewpoint_allowed"
+    },
+    {
+      "field_id": "related_entities",
+      "label": "相关人物或物品",
+      "type": "entity_ref_list",
+      "model_visibility": "viewpoint_allowed"
+    },
+    {
+      "field_id": "interpretation",
+      "label": "当前解读",
+      "type": "multiline_text",
+      "model_visibility": "viewpoint_allowed"
+    },
+    {
+      "field_id": "epistemic_status",
+      "label": "证据性质",
+      "type": "enum",
+      "options": [
+        "正文明确",
+        "角色猜测",
+        "助手推测",
+        "用户设定"
+      ],
+      "model_visibility": "viewpoint_allowed"
+    },
+    {
+      "field_id": "resolution",
+      "label": "恢复状态",
+      "type": "enum",
+      "options": [
+        "未解释",
+        "部分解释",
+        "已恢复"
+      ],
+      "model_visibility": "viewpoint_allowed"
+    },
+    {
+      "field_id": "sources",
+      "label": "来源",
+      "type": "source_ref_list",
+      "model_visibility": "viewpoint_allowed"
+    },
+    {
+      "field_id": "author_truth",
+      "label": "作者私有真相",
+      "type": "multiline_text",
+      "model_visibility": "author_only",
+      "send_to_auxiliary_api_by_default": false
+    },
+    {
+      "field_id": "payoff_sources",
+      "label": "兑现来源",
+      "type": "source_ref_list",
+      "model_visibility": "viewpoint_allowed"
+    }
+  ],
+  "extraction_instructions": "只记录本轮明确呈现的残响，不由作者真相补全角色未知内容。未经单独授权，不向任何副 API 发送本模块内容。",
+  "schema_changes_require_confirmation": true
+}
