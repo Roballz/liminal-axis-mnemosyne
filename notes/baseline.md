@@ -88,12 +88,11 @@ T-02 应重新命名并定义领域对象；当前名称保持 TBD，不为兼�
 
 ## 当前待复核
 
-- TT 2.2.0 dev 实际扩展 API 与目标注入位置行为
-- `before_history`、`user @d0`、`system @d0` 的最终实际 payload 与顺序
-- 取消／切聊天／连续生成时异步拦截行为
+- T-01 已在 TT 2.2.0 dev/Canary 现场复核扩展 API、目标注入位置、假 prepare、取消、失败／超时和 raw payload；脱敏证据见 `notes/t-01-runtime-trace.md`
+- TT 生成期间不能切换聊天，也不能并发触发第二次生成；切聊天与 provider 层重叠响应乱序保持宿主受限，未将生成后的普通切换记为通过
 - 测试聊天导出格式是否包含稳定身份、swipe／编辑历史和足够版本信息
 - 柏宝书 1.2.9 安装包与已核验仓库提交之间的具体差异
 
 ## 当前阻塞
 
-- T-01 仍需在 TT 运行中验证拦截器等待、取消／切聊天、生成 ID／聊天 ID 复核，以及三类注入位置的最终 payload 和顺序。
+- T-01 provider 层重叠生成仍无法在当前 TT UI 复现；这不是当前实现或数据迁移阻塞，按 `tasks/T-01-adapter-probe.md` 的 `implemented_unverified` 限制交给 Chat review。

@@ -25,3 +25,5 @@
 
 - 流程修正：正式 `T-XX` 任务卡由 Chat／用户在 review 后创建；Codex 默认只交付当前 task 的实施证据与下一步建议，不提前生成后续 task。T-00 中“直接产出 T-01”的旧指令标记为已废止。
 - Chat review 修订 T-01：补回独立 HTTPS 接入验证，并保持真实 Memory Engine／正式身份契约在后续任务中处理。
+
+- T-01 现场验证：确认 TT 2.2.0 的生成前 await、三类最终 payload、探针取消、原生 Stop、失败／超时清槽和运行时 request gate supersede；记录 HTTPS/CORS 限制，以及生成期间切聊天／并发生成的宿主限制。

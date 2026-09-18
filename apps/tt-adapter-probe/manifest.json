@@ -1,0 +1,12 @@
+{
+  "display_name": "Mnemosyne TT Adapter Probe",
+  "loading_order": 90,
+  "requires": [],
+  "optional": [],
+  "js": "index.js?ver=0.1.0",
+  "css": "",
+  "author": "Mnemosyne",
+  "version": "0.1.0",
+  "auto_update": false,
+  "generate_interceptor": "mnemosyneProbeGenerateInterceptor"
+}

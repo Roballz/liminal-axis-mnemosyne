@@ -1,6 +1,6 @@
 # T-01：最小 TT Adapter 探针
 
-状态：planned
+状态：implemented_unverified
 
 ## 用户目标
 
@@ -77,7 +77,12 @@
 - 环境：Windows 10 x64，`E:\TauriTavern\tauritavern.exe`，2.2.0 dev/Canary，git `5e33bf6fead6`。
 - 柏宝书：1.2.9，纯前端本地模式。
 - 扩展目录／测试聊天：见 `notes/baseline.md`。
-- 命令／时间／结果：pending。
+- 本地逻辑测试：`node --test apps/tt-adapter-probe/tests/probe.test.js`，5/5 通过。
+- 语法检查：`node --check apps/tt-adapter-probe/index.js`，通过。
+- 运行时第一批：宿主能力、假 prepare 时序和三类最终 payload 已验证；脱敏证据见 `notes/t-01-runtime-trace.md`。
+- 运行时后续批次：探针取消、TT 原生 Stop、失败／超时、下一轮无残留、解释性 HTTPS/CORS 限制和运行时 request gate supersede 已验证。
+- TT 生成期间不能切换聊天，也不能并发触发第二次生成；生成中切聊天和 provider 层重叠响应乱序无法在当前宿主 UI 直接复现，已按宿主限制记录，未伪造为通过。
+- Tailscale VPS 测试发生在服务关闭前后，结果包含 timeout 与 `Failed to fetch`，网络／TLS／CORS 无法唯一归因，未标记为 HTTPS 成功。
 
 ## 回退
 
@@ -98,4 +103,43 @@
 
 ## 实施回报／交接
 
-待实施。
+### 实际改动
+
+- 新增隔离探针：`apps/tt-adapter-probe/manifest.json`、`index.js`、`README.md` 和 `tests/probe.test.js`。
+- 新增脱敏运行记录：`notes/t-01-runtime-trace.md`。
+- 未修改 TT 客户端、柏宝书源码、聊天文件、IndexedDB、生产配置或远程服务；未保存 prompt、响应正文、密钥或完整生产日志。
+
+### 环境、命令与测试
+
+- 当前 Mnemosyne checkout：`ec77812`，分支 `main`。
+- 现场环境：Windows x64、TT 2.2.0 dev/Canary、柏宝书 1.2.9；实际路径与版本见 `notes/baseline.md`。
+- `node --test apps/tt-adapter-probe/tests/probe.test.js`：5/5 通过。
+- `node --check apps/tt-adapter-probe/index.js`：通过。
+- 部署文件与 checkout 中探针文件哈希一致。
+
+### 已确认的宿主事实
+
+- `window.__TAURITAVERN__.api.chat.current.ref()`、`handle.stableId()`、`windowInfo()`、`history.tail()`、`setExtensionPrompt` 和 `api.dev.llmApiLogs.index/getRaw` 在目标 TT 运行时可用。
+- 假 prepare 完成后才会发送正文请求；`before_history`、`user @d0`、`system @d0` 均在最终 payload 中得到 role、索引和 marker 证据。
+- 探针取消只取消 Mnemosyne prepare 并 fail-open 放行宿主；TT 原生 Stop 会在 prepare 完成前取消并阻止正文请求。
+- `fail`／`timeout` 路径均不注入探针；失败后宿主继续生成，最终 raw 无 marker。
+- 新 manual prepare 会以 `superseded` 取消旧 prepare；TT 不允许生成中并发生成。
+- 生成中不能切换聊天；生成结束后的切换不作为旧响应丢弃证据。
+
+### 偏差、未验证与宿主限制
+
+- provider 层重叠生成和旧响应晚于新响应的真实 TT raw trace 未取得，因为宿主 UI 在一次生成期间禁止第二次生成；当前以 request gate 单元测试和 TT 运行时 manual prepare supersede 作为边界证据。
+- 生成期间切聊天未取得真实样本，记录为宿主限制，不静默宣称支持。
+- `https://example.com/` 得到带自定义请求头时的 `Failed to fetch`，解释为可预期的 CORS/请求头限制；Tailscale VPS 测试受服务开关时序影响，未标记成功。正式 Memory API 仍需 CORS 或宿主侧代理实验。
+- 移动端、生产聊天、真实 Memory Engine、真实召回质量保持 pending。
+
+### 数据、契约与回退
+
+- 无 schema、API 或用户数据迁移；没有冻结 `generation_id`、`head_revision` 或 T-02 领域身份字段。
+- 探针只使用独立 extension prompt keys，并在取消、失败、Stop、下一轮和生成结束时清理。
+- 回退方式：禁用或移除 `mnemosyne-tt-adapter-probe` 扩展；探针不写正式档案，无数据迁移。
+
+### 下一步依赖与需要决定的问题
+
+- Chat review 需要决定：在 TT 不允许并发生成和生成中切聊天的前提下，是否接受“request gate 已验证、provider 层乱序保持宿主受限”作为 T-01 的 `implemented_unverified` 收尾状态。
+- T-02 仍需冻结 Mnemosyne 自己的 Story、Branch、SourceMessage、Revision、ContextBlock 和正式身份语义；本任务不提前定案。
