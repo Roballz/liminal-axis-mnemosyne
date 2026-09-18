@@ -297,7 +297,7 @@ T-02A 只有在以下条件满足后才可交 Chat review：
 TT 当前源码在实际删除完成后执行：
 `eventSource.emit(MESSAGE_DELETED, chat.length)`
 
-所以事件参数是**删除后的聊天总长度**，不是被删除 message index。现有现场样本 `MESSAGE_DELETED[6]` 与 count `7 -> 6` 正好一致。
+所以事件参数在源码语义上是**删除后的聊天总长度**，不是被删除 message index。现有现场样本 `MESSAGE_DELETED[6]` 与 count `7 -> 6` 数值正好重合；若删除的恰好也是 index 6，这两个值会完全一样，因此该单一样本不能靠数值本身区分两种解释，语义以宿主源码为准。
 
 T-02A 可据此收口为：
 - 删除发生：可自动侦测；
