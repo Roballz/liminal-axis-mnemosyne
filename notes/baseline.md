@@ -1,6 +1,17 @@
 # T-00 环境基线
 
-状态：user_provided，待 Codex 在实际环境复核。记录日期：2026-09-18。
+状态：in_progress（部分已复核）。记录日期：2026-09-18。
+
+## Codex 实测复核（2026-09-18）
+
+- 工作区来自 GitHub 源码压缩包，当前没有 `.git`，因此基线 commit：unknown。
+- TT 安装路径：`E:\TauriTavern`。
+- `E:\TauriTavern\tauritavern.exe` 的 FileVersion/ProductVersion 均为 `2.2.0`。
+- TT 进程在复核时正在运行。
+- 安装目录可见 `default/` 与 `frontend-templates/`；未在该安装目录发现柏宝书扩展源码或用户聊天数据目录。
+- 未读取 API key、token、聊天正文或生产数据。
+
+以上仅确认客户端安装位置与版本；扩展 API、网络、生成拦截、注入 payload、导出格式仍需 T-01 及后续现场验证。
 
 ## TT 测试环境
 
@@ -25,6 +36,29 @@
 - 自动摘要：当前关闭
 - 当前召回摘要注入：`system @d0`
 - 调试时允许用户手动开启／调整相关设置
+
+### 现场复核
+
+- 扩展路径：`C:\Users\Administrator\AppData\Roaming\com.tauritavern.client\data\extensions\third-party\ST-BaiBai-Book`
+- `manifest.json` 与 `package.json` 均为 `1.2.9`。
+- 当前源码 commit：`32dbb48a0a643804256d496bc35bf7699dea9ebe`；分支 `main`，工作树干净。
+- manifest 注册生成拦截器 `bbs_generateInterceptor`；源码通过 `window.SillyTavern.getContext()` 接触宿主。
+- 已确认的代码级宿主边界：`eventSource`／`eventTypes`、`setExtensionPrompt`、`saveChat`、`saveMetadata`、`getCurrentChatId`、`generateRaw` 等均由扩展自己的 `src/st/context.ts` 单点封装。
+- 已确认的代码级责任分工：
+  - `src/index.ts`：生成前 `await` 拦截器；先处理待摘要楼层，再按生成类型运行向量召回。
+  - `src/memory/inject.ts`：通过 `setExtensionPrompt` 写入历史摘要、结构化状态和时间标签；隐藏旧楼使用 `is_system=true`，派生数据放在消息 `extra.bbs_leaf`。
+  - `src/memory/vector/recall.ts`：独立写入 `baibai_book_vector_recall` 召回槽；失败时清空槽并放行生成。
+- 以上为源码观察；`before_history`、`user @d0`、`system @d0` 的实际 payload 与顺序尚未在运行中验证。
+
+## 测试聊天现场复核
+
+- 数据根目录：`C:\Users\Administrator\AppData\Roaming\com.tauritavern.client\data`
+- 实际文件路径：`C:\Users\Administrator\AppData\Roaming\com.tauritavern.client\data\default-user\chats\default_Seraphina\Seraphina - 2026-09-15@09h43m03s004ms.jsonl`
+- 用户提供的 `chats\default\_Seraphina\...` 路径在磁盘上不存在；实际 TT 目录名为 `default_Seraphina`。
+- 文件大小：71,774 bytes；JSONL 记录：26 条。
+- 记录分布：`is_user=true` 12 条、`is_user=false` 13 条、元数据记录 1 条；含 13 条记录的 `swipes` 数据、12 条生成时间字段。
+- 已见字段包括 `is_user`、`is_system`、`mes`、`send_date`、`swipe_id`、`swipes`、`extra`、`chat_metadata`；未见 `mesid` 或 `role` 字段。
+- `extra` 字段已包含柏宝书相关派生字段；未读取或写回任何正文。
 
 ## 当前副 API / 模型
 
@@ -59,3 +93,7 @@ T-02 应重新命名并定义领域对象；当前名称保持 TBD，不为兼�
 - 取消／切聊天／连续生成时异步拦截行为
 - 测试聊天导出格式是否包含稳定身份、swipe／编辑历史和足够版本信息
 - 柏宝书 1.2.9 安装包与已核验仓库提交之间的具体差异
+
+## 当前阻塞
+
+- T-01 仍需在 TT 运行中验证拦截器等待、取消／切聊天、生成 ID／聊天 ID 复核，以及三类注入位置的最终 payload 和顺序。

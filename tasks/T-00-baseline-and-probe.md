@@ -1,6 +1,6 @@
 # T-00：固定现状与验证计划
 
-状态：planned。任务类型：环境盘点与证据记录，不是编写完整记忆系统。
+状态：implemented_unverified。任务类型：环境盘点与证据记录，不是编写完整记忆系统。
 
 ## 目标
 
@@ -41,3 +41,53 @@
 ## 给编码助手的开工语句
 
 > 阅读 AGENTS.md 和这张任务卡，只执行 T-00。先说明已有证据与缺失项，再产出现状记录及 T-01 验证任务。不要改动现用柏宝书、不要写整套应用、不要把未运行的测试标记为通过。
+
+## 实施回报／交接
+
+### 实际改动
+
+- 更新 `notes/baseline.md`：记录 TT 实际安装路径与 2.2.0 版本、柏宝书实际路径／1.2.9／commit、源码观察到的生成拦截与注入责任、测试聊天实际路径和脱敏结构统计。
+- 新增 `tasks/T-01-adapter-probe.md`：限定最小 TT Adapter 探针与真实 payload 验收范围。
+- 更新 `CHANGELOG.md`。
+- 未修改 TT、柏宝书、聊天文件、IndexedDB、设置或生产数据。
+
+### 环境、命令与测试
+
+- 环境：Windows x64；`E:\TauriTavern\tauritavern.exe` FileVersion/ProductVersion `2.2.0`。
+- 只读核验：PowerShell 文件枚举、扩展 `manifest.json`／`package.json`、Git commit/status、JSONL 结构统计；结果写入 `notes/baseline.md`。
+- 测试命令：T-00 未运行扩展构建或测试，原因是本任务只做环境盘点；T-01 pending。
+
+### 实际观察
+
+- 柏宝书当前 commit 为 `32dbb48a0a643804256d496bc35bf7699dea9ebe`，分支 `main`，工作树干净。
+- manifest 注册 `bbs_generateInterceptor`；源码声明生成拦截器签名为 `(chat, contextSize, abort, type)`，并在放行前等待摘要／向量流程。
+- 注入使用 `setExtensionPrompt`，不是直接修改生成 payload；历史、状态、时间标签和向量召回使用独立 key。
+- 测试聊天实际使用 `default_Seraphina` 目录；JSONL 没有 `mesid`／`role`，包含 `swipe_id`／`swipes` 和 `extra`。
+
+### 与任务卡的偏差
+
+- 用户给出的聊天路径目录层级与实际磁盘不同，已按实际路径记录；不影响只读复核。
+- 尚未完成运行时注入 payload 和取消／切聊天实验，这些转入 T-01，不标记为已验证。
+
+### 未验证／阻塞
+
+- `before_history`、`user @d0`、`system @d0` 的最终 payload、顺序和清理行为：pending。
+- 生成拦截器的真实 await、取消、切聊天和过期响应处理：pending。
+- TT 导出的稳定消息身份、编辑／swipe 历史的完整语义：pending；当前样本未见 `mesid`。
+
+### 契约与数据影响
+
+- 无 schema、API 或用户数据迁移。
+- 记录确认 Mnemosyne 不能直接把 TT `mesid` 作为前提；后续 T-02 需定义自己的 SourceMessage／Revision 身份映射。
+
+### 回退
+
+- 文档回退到本次变更前版本即可；没有运行时开关、数据或配置改动需要恢复。
+
+### 下一任务依赖
+
+- T-01 使用已定位的 TT 安装、柏宝书扩展和测试聊天；只需在隔离桌面环境进行探针，不触碰手机或生产存档。
+
+### 需要 Chat／用户决定
+
+- 无架构决策阻塞。T-01 只需用户确认可在该桌面 TT 测试聊天中进行非破坏性生成探针。
