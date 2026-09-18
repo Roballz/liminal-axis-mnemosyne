@@ -32,3 +32,11 @@
 - T-01 二次 Chat review 通过：核对 `dd3fa38` 的 gate 竞态修复与 A/B snapshot 乱序并发测试，任务升为 `verified`；阶段 A 下一步进入 T-02 方案／任务卡规划。
 
 - 新增 T-02A 前置验证任务：在冻结 T-02 契约前，用隔离 TT 真机验证 stableId/integrity、Branch、深层 Edit、Delete、Swipe/Regenerate 与 reopen/rename 行为；禁止提前设计正式 schema。
+
+- T-02A 探针实现增量：补充宿主事件参数、身份和消息/swipe 的脱敏 trace 与 9 项纯逻辑测试；首轮 computer-use 不可控仅作为历史现场记录，未冻结 T-02 契约。
+- T-02A 探针版本升至 `0.1.2`：增加 `Copy host`、`T-02A trace`、`Copy trace` 面板操作，便于隔离 TT 手工复测并避免旧脚本缓存。
+
+## 2026-09-19
+
+- T-02A 收到用户提供的脱敏现场 trace：确认 reopen／rename 的 stableId 保持、Branch 产生不同 stableId、Edit 事件顺序及 Swipe 候选变化；Delete 与 Regenerate 因索引平移和模型失败分别降级记录，未冻结 T-02 契约。
+- T-02A 探针升至 `0.1.3`：trace 导出按事件序号排序，`windowInfo.chatRef` 仅保留类型、计数与标识符哈希；`integrity` 不可读时以 `null` 表示未知。

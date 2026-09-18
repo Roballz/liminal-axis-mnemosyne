@@ -3,10 +3,10 @@
   "loading_order": 90,
   "requires": [],
   "optional": [],
-  "js": "index.js?ver=0.1.0",
+  "js": "index.js?ver=0.1.3",
   "css": "",
   "author": "Mnemosyne",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "auto_update": false,
   "generate_interceptor": "mnemosyneProbeGenerateInterceptor"
 }

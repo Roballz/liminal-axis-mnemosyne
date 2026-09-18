@@ -95,3 +95,9 @@ T-02 应重新命名并定义领域对象；当前名称保持 TBD，不为兼�
 ## 当前阻塞
 
 - 无。T-01 已通过二次 Chat review；下一步进入 T-02 方案与任务卡规划。
+
+## T-02A 探针实施与现场检查点（2026-09-19）
+
+- 现有探针已增加事件参数、身份摘要、消息计数／邻近指纹、history 摘要和 swipe 候选数的脱敏记录；不保存正文、prompt 或完整 ref。
+- 已部署副本路径：`C:\Users\Administrator\AppData\Roaming\com.tauritavern.client\data\extensions\third-party\mnemosyne-tt-adapter-probe`。
+- 用户已在隔离虚构聊天中完成 T-02A 手工现场验证并提供脱敏 trace：reopen／rename stableId 保持，Branch 身份变化，Edit 双事件和 Delete 后索引平移可观测，Swipe 候选变化及 generation lifecycle 可观测；Delete 参数语义和失败 regenerate 的新候选仍为 `degraded`，详见 `notes/t-02a-runtime-trace.md`。

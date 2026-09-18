@@ -39,6 +39,10 @@ TT 来源为核验时 main 文档，后续可能变化。T-00 要记录用户实
 - 柏宝书固定提交 32dbb48... 已实现显式 Carryover：由用户主动“带数据创建新对话”，携带合并摘要／派生状态／近期原文；向量层按角色选择 database，以 chat:<chatId> 作为当前聊天 scope，并可把旧聊天快照为 bundle:<hash>，在新聊天 metadata 中保存 bundle hash 继承召回范围。该实现证明“用户显式续接 + scope/bundle 复用旧记忆”是现成可行模式，但其 per-character database 与 seed/bundle 数据模型不直接作为 Mnemosyne canonical schema。
 - 独立柏宝库本身是通用 KV/SQLite 服务：每个 database 一个 SQLite 文件，并不定义 Story/Branch 语义；跨聊天语义主要由柏宝书前端的 database/scope/carryover 逻辑决定。
 
+### T-02A 探针实施与现场边界（2026-09-19）
+
+现有 TT adapter probe 已增加 `MESSAGE_EDITED`、`MESSAGE_UPDATED`、`MESSAGE_DELETED`、`MESSAGE_SWIPED` 与生成生命周期事件的脱敏 trace；事件参数中的字符串只保留长度和短哈希，消息只保留计数、邻近指纹和 swipe 候选数，`windowInfo.chatRef` 不保留角色显示名或文件名。用户在固定 TT 2.2.0 dev/Canary 上提供的现场 trace 确认了 reopen／rename stableId 保持、Branch 身份变化、Edit 双事件、Delete 后索引平移、Swipe 候选变化及 generation lifecycle；integrity 不可读，Delete 参数精确语义和失败 regenerate 新候选仍属 degraded。正式 T-02 仍不能据此冻结身份／版本语义。
+
 ## 3. 检索引擎参考
 
 **Q01 — [Qdrant Hybrid and Multi-Stage Queries](https://qdrant.tech/documentation/search/hybrid-queries/)**

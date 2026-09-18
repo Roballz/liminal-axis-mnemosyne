@@ -43,6 +43,133 @@
       return (hash >>> 0).toString(16).padStart(8, '0');
     }
 
+    function redactText(value) {
+      const text = String(value ?? '');
+      return { length: text.length, hash: fnv1a(text) };
+    }
+
+    function summarizeWindowInfo(value) {
+      if (value == null) return null;
+      if (typeof value !== 'object') return { kind: typeof value };
+
+      const output = {};
+      for (const key of ['mode', 'chatKind']) {
+        if (typeof value[key] === 'string') output[key] = value[key];
+      }
+      for (const key of ['totalCount', 'windowStartIndex', 'windowLength']) {
+        if (Number.isInteger(value[key])) output[key] = value[key];
+      }
+
+      if (value.chatRef && typeof value.chatRef === 'object') {
+        const chatRef = {};
+        if (typeof value.chatRef.kind === 'string') chatRef.kind = value.chatRef.kind;
+        for (const key of ['characterId', 'fileName', 'chatId', 'id']) {
+          const item = value.chatRef[key];
+          if (typeof item === 'string' || typeof item === 'number') {
+            chatRef[key] = redactText(item);
+          }
+        }
+        output.chatRef = chatRef;
+      }
+      return output;
+    }
+
+    function messageFingerprint(message, index = null) {
+      const text = typeof message?.mes === 'string' ? message.mes : '';
+      const swipes = Array.isArray(message?.swipes) ? message.swipes : [];
+      const rawSwipeId = message?.swipe_id;
+      const swipeId = rawSwipeId == null || rawSwipeId === '' || !Number.isInteger(Number(rawSwipeId))
+        ? null
+        : Number(rawSwipeId);
+      const activeSwipe = swipeId != null && typeof swipes[swipeId] === 'string'
+        ? swipes[swipeId]
+        : null;
+
+      return {
+        index,
+        isUser: Boolean(message?.is_user),
+        isSystem: Boolean(message?.is_system),
+        text: redactText(text),
+        hasProbeMarker: text.includes('MNEMOSYNE_TT_PROBE') || text.includes('T02A_TEST_'),
+        swipeId,
+        swipeCount: swipes.length,
+        activeSwipe: activeSwipe == null ? null : redactText(activeSwipe),
+      };
+    }
+
+    function messageStateFromChat(chat, indexes = []) {
+      const messages = Array.isArray(chat) ? chat : [];
+      const requested = Array.isArray(indexes) ? indexes : [indexes];
+      const anchors = requested
+        .flatMap(value => [Number(value) - 1, Number(value), Number(value) + 1])
+        .concat(messages.length ? messages.length - 1 : [])
+        .filter(Number.isInteger)
+        .filter(index => index >= 0 && index < messages.length);
+      const selectedIndexes = [...new Set(anchors)].slice(0, 12).sort((left, right) => left - right);
+
+      return {
+        count: messages.length,
+        selected: selectedIndexes.map(index => messageFingerprint(messages[index], index)),
+      };
+    }
+
+    function inferMessageIndexes(args) {
+      const explicit = [];
+      const numeric = [];
+      const seen = new WeakSet();
+      const visit = (value, key = '') => {
+        if (Number.isInteger(value)) {
+          numeric.push(value);
+          if (/^(index|messageIndex|message_index|mesId|mes_id)$/i.test(key)) explicit.push(value);
+          return;
+        }
+        if (!value || typeof value !== 'object' || seen.has(value)) return;
+        seen.add(value);
+        if (Array.isArray(value)) {
+          value.forEach(item => visit(item));
+          return;
+        }
+        Object.entries(value).forEach(([entryKey, item]) => visit(item, entryKey));
+      };
+      visit(args);
+      const unique = values => [...new Set(values.filter(value => value >= 0))];
+      const numericValues = unique(numeric);
+      const candidates = unique(explicit.length ? explicit : numericValues.slice(0, 1));
+      return {
+        candidates,
+        numericValues,
+        inference: explicit.length ? 'keyed' : numericValues.length ? 'numeric_candidate' : 'none',
+      };
+    }
+
+    function summarizeEventValue(value, key = '', depth = 0, seen = new WeakSet()) {
+      if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
+      if (typeof value === 'string') return redactText(value);
+      if (typeof value !== 'object') return { type: typeof value };
+      if (seen.has(value)) return { type: 'cycle' };
+      if (depth >= 3) return { type: Array.isArray(value) ? 'array' : 'object' };
+      seen.add(value);
+      if (Array.isArray(value)) return value.slice(0, 12).map(item => summarizeEventValue(item, '', depth + 1, seen));
+
+      const output = {};
+      for (const [entryKey, item] of Object.entries(value).slice(0, 24)) {
+        if (/^(mes|content|prompt|response|requestRaw|responseRaw|text)$/i.test(entryKey) && typeof item === 'string') {
+          output[`${entryKey}LengthHash`] = redactText(item);
+        } else {
+          output[entryKey] = summarizeEventValue(item, entryKey, depth + 1, seen);
+        }
+      }
+      return output;
+    }
+
+    function orderTrace(entries) {
+      return (Array.isArray(entries) ? entries : []).slice().sort((left, right) => {
+        const leftSequence = Number.isFinite(left?.sequence) ? left.sequence : Number.MAX_SAFE_INTEGER;
+        const rightSequence = Number.isFinite(right?.sequence) ? right.sequence : Number.MAX_SAFE_INTEGER;
+        return leftSequence - rightSequence;
+      });
+    }
+
     function abortError(reason = 'aborted') {
       const error = new Error(reason);
       error.name = 'AbortError';
@@ -214,9 +341,16 @@
       createRequestGate,
       fakePrepare,
       fnv1a,
+      inferMessageIndexes,
+      messageFingerprint,
+      messageStateFromChat,
       makeToken,
+      orderTrace,
+      redactText,
       sameSnapshot,
       snapshotFromState,
+      summarizeEventValue,
+      summarizeWindowInfo,
       summarizeRaw,
     });
   }
@@ -238,6 +372,10 @@
       hostReady: false,
       latestLlmIndex: [],
       lastRawSummary: null,
+      latestMessageState: null,
+      eventTrace: [],
+      eventSequence: 0,
+      traceVisible: false,
     };
 
     const gate = probeCore.createRequestGate(readSnapshot);
@@ -255,12 +393,41 @@
       const output = {};
       for (const [key, item] of Object.entries(value)) {
         if (/^(mes|content|prompt|response|requestRaw|responseRaw|text)$/i.test(key)) {
+          if (item && typeof item === 'object'
+            && Number.isInteger(item.length)
+            && typeof item.hash === 'string') {
+            output[key] = { length: item.length, hash: item.hash };
+            continue;
+          }
           output[`${key}Length`] = typeof item === 'string' ? item.length : item == null ? 0 : JSON.stringify(item).length;
           continue;
         }
         output[key] = sanitize(item);
       }
       return output;
+    }
+
+    function summarizeIdentityValue(value) {
+      if (value == null) return null;
+      const text = typeof value === 'string' ? value : JSON.stringify(value);
+      return {
+        kind: typeof value,
+        ...probeCore.redactText(text),
+      };
+    }
+
+    function summarizeHistory(value) {
+      if (value == null) return null;
+      if (Array.isArray(value)) return { kind: 'array', count: value.length };
+      if (typeof value !== 'object') return { kind: typeof value };
+      const result = { kind: 'object', keys: Object.keys(value).sort() };
+      for (const key of ['count', 'total', 'length', 'hasMoreBefore', 'hasMoreAfter']) {
+        if (typeof value[key] === 'number' || typeof value[key] === 'boolean') result[key] = value[key];
+      }
+      for (const key of ['messages', 'items', 'entries']) {
+        if (Array.isArray(value[key])) result[`${key}Count`] = value[key].length;
+      }
+      return result;
     }
 
     function getContext() {
@@ -334,6 +501,56 @@
       return null;
     }
 
+    async function readIdentity(options = {}) {
+      const refs = options.refs ?? await waitForCurrentRefs();
+      let stableId = null;
+      try {
+        stableId = await callMaybe(refs.handle, 'stableId');
+      } catch (error) {
+        if (!options.quiet) addLog('stable-id-error', { message: error.message });
+      }
+      const context = getContext();
+      let currentChatId = null;
+      try {
+        currentChatId = await callMaybe(context, 'getCurrentChatId');
+      } catch (error) {
+        if (!options.quiet) addLog('context-chat-id-error', { message: error.message });
+      }
+      const integrity = context?.chat_metadata?.integrity ?? null;
+      const identity = {
+        stableId: summarizeIdentityValue(stableId),
+        integrity: summarizeIdentityValue(integrity),
+        ref: summarizeIdentityValue(refs.ref),
+        currentChatId: summarizeIdentityValue(currentChatId),
+      };
+      identity.stableIdMatchesIntegrity = identity.stableId && identity.integrity
+        ? identity.stableId.hash === identity.integrity.hash
+        : null;
+      return identity;
+    }
+
+    async function readMessageState(indexes = []) {
+      const context = getContext();
+      const chat = Array.isArray(context?.chat) ? context.chat : [];
+      const refs = await waitForCurrentRefs(2500);
+      let tail;
+      let summary;
+      try {
+        tail = await refs.handle?.history?.tail?.({ limit: 3 });
+        summary = await callMaybe(refs.handle?.history, 'summary');
+      } catch (error) {
+        addLog('history-state-error', { message: error.message });
+      }
+      return {
+        ...probeCore.messageStateFromChat(chat, indexes),
+        history: {
+          tailCount: Array.isArray(tail?.messages) ? tail.messages.length : null,
+          tailHasMoreBefore: typeof tail?.hasMoreBefore === 'boolean' ? tail.hasMoreBefore : null,
+          summary: summarizeHistory(summary),
+        },
+      };
+    }
+
     async function readSnapshot() {
       const context = getContext();
       const chat = Array.isArray(context?.chat) ? context.chat : [];
@@ -387,6 +604,8 @@
       const context = getContext();
       const eventTypes = context?.eventTypes ?? context?.event_types ?? {};
       const chat = Array.isArray(context?.chat) ? context.chat : [];
+      const identity = await readIdentity({ refs, quiet: true });
+      const messageState = await readMessageState();
       return {
         observedAt: Date.now(),
         tauri: {
@@ -396,13 +615,15 @@
           dev: Object.keys(dev ?? {}),
         },
         chat: {
-          ref: sanitize(refs.ref),
+          ref: summarizeIdentityValue(refs.ref),
           ready: Boolean(refs.ref || refs.handle),
           stableIdAvailable: typeof refs.handle?.stableId === 'function',
-          windowInfo: sanitize(windowInfo),
+          identity,
+          windowInfo: probeCore.summarizeWindowInfo(windowInfo),
           tailCount: Array.isArray(tail?.messages) ? tail.messages.length : null,
           tailHasMoreBefore: typeof tail?.hasMoreBefore === 'boolean' ? tail.hasMoreBefore : null,
           contextCount: chat.length,
+          messageState,
         },
         context: {
           available: Boolean(context),
@@ -416,6 +637,32 @@
           recent: sanitize(llmIndex),
         },
       };
+    }
+
+    async function captureHostEvent(name, args, sequence) {
+      const inferred = probeCore.inferMessageIndexes(args);
+      const before = state.latestMessageState;
+      const observedAt = Date.now();
+      const identity = await readIdentity({ quiet: true });
+      const immediate = await readMessageState(inferred.candidates);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const after = await readMessageState(inferred.candidates);
+      const record = {
+        sequence,
+        observedAt,
+        eventName: name,
+        eventArgs: probeCore.summarizeEventValue(args),
+        indexInference: inferred,
+        identity,
+        before,
+        immediate,
+        after,
+      };
+      state.latestMessageState = after;
+      state.eventTrace.push(record);
+      if (state.eventTrace.length > 40) state.eventTrace.shift();
+      addLog('host-event', record);
+      return record;
     }
 
     function promptSink() {
@@ -564,14 +811,16 @@
       for (const [typeKey, name, invalidates] of events) {
         const eventName = types[typeKey];
         if (!eventName) continue;
-        source.on(eventName, () => {
+        source.on(eventName, (...args) => {
+          const sequence = state.eventSequence += 1;
           if (invalidates) {
             gate.cancel(name);
             const cleared = clearPrompts();
             addLog('probe-cleared', { reason: name, applied: cleared });
           }
-          addLog(name);
-          if (name === 'chat-changed' || name === 'chat-loaded') void refreshHost();
+          void captureHostEvent(name, args, sequence).then(() => {
+            if (name === 'chat-changed' || name === 'chat-loaded') void refreshHost();
+          });
         });
       }
     }
@@ -615,6 +864,7 @@
 
     async function refreshHost() {
       const snapshot = await inspectHost();
+      state.latestMessageState = snapshot.chat.messageState;
       render(snapshot);
       return snapshot;
     }
@@ -638,6 +888,43 @@
         addLog('manual-prepare-complete', { requestToken: request.requestToken, mode: state.mode, preparedAt: prepared.preparedAt });
       } catch (error) {
         addLog('manual-prepare-failed', { requestToken: request.requestToken, error: error?.message ?? String(error) });
+      }
+    }
+
+    function t02aTraceText() {
+      return JSON.stringify(probeCore.orderTrace(state.eventTrace), null, 2);
+    }
+
+    function hostSnapshotText() {
+      return JSON.stringify(hostSnapshot, null, 2);
+    }
+
+    async function copyHostSnapshot() {
+      const clipboard = globalObject.navigator?.clipboard;
+      if (!hostSnapshot || typeof clipboard?.writeText !== 'function') {
+        addLog('host-copy-unavailable');
+        return;
+      }
+      try {
+        await clipboard.writeText(hostSnapshotText());
+        addLog('host-snapshot-copied');
+      } catch (error) {
+        addLog('host-copy-failed', { error: error?.message ?? String(error) });
+      }
+    }
+
+    async function copyT02aTrace() {
+      state.traceVisible = true;
+      const clipboard = globalObject.navigator?.clipboard;
+      if (typeof clipboard?.writeText !== 'function') {
+        addLog('t02a-copy-unavailable', { events: state.eventTrace.length });
+        return;
+      }
+      try {
+        await clipboard.writeText(t02aTraceText());
+        addLog('t02a-trace-copied', { events: state.eventTrace.length });
+      } catch (error) {
+        addLog('t02a-copy-failed', { error: error?.message ?? String(error) });
       }
     }
 
@@ -675,7 +962,7 @@
           .muted { color: #9aa7b3; }
         </style>
         <section class="box">
-          <div class="head"><span>Mnemosyne TT Probe</span><span class="muted" id="version">0.1.0</span></div>
+          <div class="head"><span>Mnemosyne TT Probe</span><span class="muted" id="version">0.1.3</span></div>
           <div class="body">
             <div class="row">
               <label>mode <select id="mode"><option value="immediate">immediate</option><option value="delay">delay</option><option value="timeout">timeout</option><option value="fail">fail</option></select></label>
@@ -688,12 +975,16 @@
             </div>
             <div class="row">
               <button id="refresh">Refresh host</button>
+              <button id="copy-host">Copy host</button>
               <button id="prepare">Prepare</button>
               <button id="cancel">Cancel</button>
               <button id="clear">Clear</button>
               <button id="raw">LLM raw summary</button>
+              <button id="trace">T-02A trace</button>
+              <button id="copy-trace">Copy trace</button>
             </div>
             <pre id="status"></pre>
+            <pre id="trace-output" hidden></pre>
             <pre id="log"></pre>
           </div>
         </section>`;
@@ -713,6 +1004,7 @@
         if (!state.armed) clearPrompts();
       });
       panel.getElementById('refresh').addEventListener('click', () => void refreshHost());
+      panel.getElementById('copy-host').addEventListener('click', () => void copyHostSnapshot());
       panel.getElementById('prepare').addEventListener('click', () => void runPrepareOnly());
       panel.getElementById('cancel').addEventListener('click', cancelActive);
       panel.getElementById('clear').addEventListener('click', () => {
@@ -721,12 +1013,18 @@
       });
       panel.getElementById('raw').addEventListener('click', () => void readNewestRaw());
       panel.getElementById('https').addEventListener('click', () => void runHttpsProbe());
+      panel.getElementById('trace').addEventListener('click', () => {
+        state.traceVisible = !state.traceVisible;
+        render();
+      });
+      panel.getElementById('copy-trace').addEventListener('click', () => void copyT02aTrace());
     }
 
     function render(snapshot) {
       if (snapshot) hostSnapshot = snapshot;
       if (!panel) return;
       const status = panel.getElementById('status');
+      const trace = panel.getElementById('trace-output');
       const log = panel.getElementById('log');
       status.textContent = JSON.stringify({
         armed: state.armed,
@@ -736,6 +1034,8 @@
         lastRawSummary: state.lastRawSummary,
         httpsUrl: safeOrigin(state.httpsUrl),
       }, null, 2);
+      trace.hidden = !state.traceVisible;
+      trace.textContent = t02aTraceText();
       log.textContent = logEntries.slice(-12).map(entry => JSON.stringify(entry)).join('\n');
     }
 
@@ -748,6 +1048,7 @@
         cancelActive,
         runHttpsProbe,
         logs: () => logEntries.map(entry => ({ ...entry })),
+        t02aTrace: () => probeCore.orderTrace(state.eventTrace).map(entry => ({ ...entry })),
         state,
       }),
       start,

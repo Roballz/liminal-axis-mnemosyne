@@ -97,3 +97,76 @@ test('raw log summary exposes role order without prompt content', () => {
   assert.deepEqual(summary.markerMessageIndexes, [{ index: 1, role: 'user', hits: ['userD0'] }]);
   assert.equal(Object.prototype.hasOwnProperty.call(summary, 'content'), false);
 });
+
+test('message fingerprints retain edit and swipe evidence without message text', () => {
+  const fingerprint = core.messageFingerprint({
+    is_user: false,
+    mes: 'T02A_TEST_EDITED',
+    swipe_id: 1,
+    swipes: ['T02A_TEST_OLD', 'T02A_TEST_ACTIVE'],
+  }, 4);
+
+  assert.equal(fingerprint.index, 4);
+  assert.equal(fingerprint.text.length, 16);
+  assert.equal(fingerprint.text.hash, core.fnv1a('T02A_TEST_EDITED'));
+  assert.equal(fingerprint.swipeId, 1);
+  assert.equal(fingerprint.swipeCount, 2);
+  assert.equal(fingerprint.activeSwipe.length, 16);
+  assert.equal(Object.prototype.hasOwnProperty.call(fingerprint, 'mes'), false);
+});
+
+test('event index inference keeps numeric candidates separate from redacted args', () => {
+  assert.deepEqual(core.inferMessageIndexes([{ index: 7, text: 'secret body' }]), {
+    candidates: [7],
+    numericValues: [7],
+    inference: 'keyed',
+  });
+
+  const summary = core.summarizeEventValue({ index: 7, mes: 'secret body' });
+  assert.equal(summary.index, 7);
+  assert.equal(summary.mesLengthHash.length, 11);
+  assert.equal(Object.prototype.hasOwnProperty.call(summary, 'mes'), false);
+  assert.equal(JSON.stringify(summary).includes('secret body'), false);
+});
+
+test('message state reports count and a bounded neighboring fingerprint window', () => {
+  const state = core.messageStateFromChat([
+    { mes: 'zero' },
+    { mes: 'one' },
+    { mes: 'two' },
+  ], [1]);
+
+  assert.equal(state.count, 3);
+  assert.deepEqual(state.selected.map(message => message.index), [0, 1, 2]);
+  assert.deepEqual(state.selected.map(message => message.text.length), [4, 3, 3]);
+  assert.equal(state.selected[0].swipeId, null);
+});
+
+test('window info redacts chat display identifiers while retaining hashes', () => {
+  const summary = core.summarizeWindowInfo({
+    mode: 'off',
+    chatKind: 'character',
+    chatRef: {
+      kind: 'character',
+      characterId: 'default_Seraphina',
+      fileName: 'Seraphina - chat - RENAME',
+    },
+    totalCount: 7,
+    windowStartIndex: 0,
+    windowLength: 7,
+  });
+
+  assert.equal(summary.chatRef.kind, 'character');
+  assert.deepEqual(summary.chatRef.characterId, core.redactText('default_Seraphina'));
+  assert.deepEqual(summary.chatRef.fileName, core.redactText('Seraphina - chat - RENAME'));
+  assert.equal(JSON.stringify(summary).includes('Seraphina'), false);
+  assert.equal(summary.totalCount, 7);
+});
+
+test('trace export orders entries by sequence without mutating capture order', () => {
+  const captured = [{ sequence: 3 }, { sequence: 1 }, { sequence: 2 }];
+  const ordered = core.orderTrace(captured);
+
+  assert.deepEqual(ordered.map(entry => entry.sequence), [1, 2, 3]);
+  assert.deepEqual(captured.map(entry => entry.sequence), [3, 1, 2]);
+});

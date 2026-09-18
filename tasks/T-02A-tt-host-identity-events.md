@@ -1,6 +1,6 @@
 # T-02A：TT 宿主身份与消息变更事件探针
 
-状态：planned
+状态：implemented_unverified
 
 ## 目标
 
@@ -213,3 +213,57 @@ T-02A 只有在以下条件满足后才可交 Chat review：
 - 对正式 T-02 的事实输入；
 - 回退方式；
 - **只报告下一步需要 Chat／用户决定的问题，不创建正式 T-02 任务卡。**
+
+## Codex 实施回报（2026-09-19）
+
+### 实际改动
+
+- `apps/tt-adapter-probe/index.js`：在现有探针中增加事件参数脱敏、stableId/integrity/ref 的长度与短哈希、消息计数与邻近指纹、history tail/summary 摘要、swipe 候选数和事件序号；新增 `mnemosyneProbe.t02aTrace()` 读取脱敏事件记录。
+- `apps/tt-adapter-probe/index.js`：增加 `Copy host`、`T-02A trace`、`Copy trace` 面板操作；版本升至 `0.1.3`，trace 导出按 sequence 排序，`windowInfo.chatRef` 只保留类型、计数和标识符哈希，integrity 不可读时输出 `null`。
+- `apps/tt-adapter-probe/tests/probe.test.js`：新增消息指纹、事件参数脱敏、邻近状态窗口、windowInfo 脱敏和 trace 排序测试。
+- `apps/tt-adapter-probe/README.md`：补充 T-02A 监听范围、脱敏边界和读取 trace 的方式。
+- 已将 `0.1.3` 探针副本同步到用户确认的 `C:\Users\Administrator\AppData\Roaming\com.tauritavern.client\data\extensions\third-party\mnemosyne-tt-adapter-probe`，并核对仓库与部署副本 `index.js` SHA-256 一致；未修改 TT／柏宝书源码或聊天文件。
+
+当前相对 `dc532a0` 的工作树 diff 统计为：`index.js` 307 行新增／6 行删除，纯逻辑测试 73 行新增，README 12 行新增；增量仍局限在现有探针边界内。
+
+### 环境、命令与结果
+
+- Mnemosyne commit：`dc532a00cb4502ee821564da3dc5b68af665256c`，分支 `main`；上游已快进同步。
+- `node --test apps/tt-adapter-probe/tests/probe.test.js`：11/11 通过。
+- `node --check apps/tt-adapter-probe/index.js`：通过。
+- `git diff --check`：通过。
+- 用户现场附件为脱敏 `HOST-REOPEN`、`EDIT-TRACE`、`DELETE-TRACE`、`SWIPE-TRACE`、`REGENERATE-TRACE`；仓库只写摘要，不保存附件原文。
+
+### 五项现场验证与脱敏证据
+
+用户在隔离虚构测试聊天中手工完成现场操作，并在 reopen 后刷新 host 复制 trace；未修改真实长期 RP。以下为运行事实，整体任务仍保持 `implemented_unverified`，因为 integrity、Delete 参数完整语义和失败 regenerate 的新候选仍未确认：
+
+| 能力 | 实测结果 | 关键参数／身份 | 可否自动定位 | 宿主限制／降级 |
+| --- | --- | --- | --- | --- |
+| Chat reopen | verified | stableId hash `58c6aa96`；chatId/ref 重开后保持 | verified（stableId） | integrity 不可读 |
+| Rename | verified | stableId hash `58c6aa96` 保持；chatId/ref 改变 | verified（stableId）；ref 需重新读取 | 文件身份变化，不能只依赖 ref |
+| Branch | verified | parent `58c6aa96`；child `15d97193`；child chatId/ref 不同，count `7 -> 2` | verified（stableId 可区分） | integrity 缺失，未比较其关系 |
+| Deep Edit | verified | `MESSAGE_EDITED[3]` 后 `MESSAGE_UPDATED[3]`；index 3 指纹 `512b617a -> 502b5fe7` | verified（事件 index + 指纹） | 仅验证本次旧消息样本 |
+| Delete | degraded | `MESSAGE_DELETED[6]`；count `7 -> 6`；用户确认删除中间层，后续指纹由 index 6 移到 index 5 | degraded | 参数是删除前/后索引还是其他标识未冻结；summary 不可用 |
+| Swipe | degraded | `MESSAGE_SWIPED[5]`；候选 `1 -> 2`，swipeId 改变 | degraded | 模型无输出并断开，但事件检测有效 |
+| Regenerate | degraded | generation lifecycle 可见；失败路径有删除／重建相关事件 | degraded | 模型无输出并断开，未证明新的可用 candidate/Revision |
+
+脱敏证据摘要位置：`notes/t-02a-runtime-trace.md`。完整附件不入库。
+
+### 源码观察与运行事实
+
+- 源码观察：现有探针可从 `eventTypes` 注册 `MESSAGE_EDITED`、`MESSAGE_UPDATED`、`MESSAGE_DELETED`、`MESSAGE_SWIPED` 和生成生命周期事件；T-02A 代码现在会保留事件参数的安全结构摘要，并以当前 chat 数组和 `history` 读取结果形成前后窗口。
+- 运行事实：现场确认 reopen／rename stableId 保持、Branch 身份变化、Edit 双事件和正文指纹变化、Delete 后索引平移、Swipe 候选变化及 generation lifecycle；`integrity` 当前路径不可读，失败 regenerate 未形成可确认的新候选。
+- 运行事实与设计决定分开：以上不把 stableId、chatId、ref、楼层号或 message index 升级为 Mnemosyne 永久主键，也不冻结 Story／Branch／SourceMessage／Revision/head 字段。
+
+### 数据、契约与回退
+
+- 未新增 schema、API、迁移、正式 Mnemosyne 数据或 Story/Branch/SourceMessage/Revision/head 字段决定。
+- 正文只进入长度与 FNV-1a 短哈希；事件参数中的字符串也只保留长度与哈希；trace 不保存 prompt、路径正文或完整聊天对象。
+- 回退方式：禁用或移除部署的 `mnemosyne-tt-adapter-probe`，并删除本次新增探针逻辑；探针不写正式档案，无数据迁移。不要删除用户聊天作为回退动作。
+
+### 未验证项、下一步依赖与需要决定的问题
+
+- 未验证项：stableId 与 integrity 的关系；Delete 参数的精确前／后索引语义；失败 regenerate 是否产生可复用的新 candidate／Revision；`history.summary` 的实际内容。
+- 下一步依赖：正式 T-02 需要决定事件不足时的手动 repair/rescan／映射边界，并定义 Mnemosyne 内部版本身份；不由本 task 静默定案。
+- 需要 Chat／用户决定：是否接受当前 Delete／Regenerate 的 degraded 证据作为 T-02 输入，或在独立虚构样本上补测；本回报不创建正式 T-02 任务卡。
