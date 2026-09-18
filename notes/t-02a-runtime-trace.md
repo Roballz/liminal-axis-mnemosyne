@@ -63,6 +63,6 @@
 
 - 现场 `integrity = null` 不是宿主能力结论。探针读取了不存在的 `context.chat_metadata`；当前 TT `getContext()` 对外字段是 `chatMetadata`，正式 Chat handle 还提供 `metadata.get()`。等待返修后重新取得 parent/branch metadata。
 - 现场 `history.summary = null` 也不是用户未开启“摘要功能”。探针误调用 `handle.history.summary()`；正确接口是 `handle.summary({ includeMetadata })`，它是聊天文件概况 API，不是 AI 剧情摘要。
-- TT 当前删除源码在 splice / 截断完成后 emit `MESSAGE_DELETED(chat.length)`；因此现有参数 `[6]` 表示删除后的总消息数，而非被删除 index。Deep delete 的具体来源定位需要前后状态比较，T-02A 不再把该参数当 message-index 候选。
+- TT 当前删除源码在 splice / 截断完成后 emit `MESSAGE_DELETED(chat.length)`。现有 `[6]` 又恰好与用户所删楼层可能使用的 index 6 数值重合，所以现场单样本无法仅凭数字判断含义；宿主源码明确其语义为删除后的总消息数。Deep delete 的具体来源定位仍需要前后状态比较，T-02A 不把该参数当稳定 message-index。
 - Swipe 的事件与候选状态变化已有足够现场证据；该次模型失败不否定 Swipe 事件能力。
 - Regenerate 仍缺一条成功生成样本，返修后补测。
