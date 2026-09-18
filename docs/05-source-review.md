@@ -28,7 +28,7 @@ TT 来源为核验时 main 文档，后续可能变化。T-00 要记录用户实
 
 ### T-01 现场补充（2026-09-18）
 
-在用户实际 TT 2.2.0 dev/Canary Windows x64 环境中，隔离探针确认了 `api.chat.current`、稳定聊天 ID、`windowInfo()`、`history.tail()`、`setExtensionPrompt` 和 `api.dev.llmApiLogs` 的可用性。三类注入位置均在最终 raw payload 中出现；延迟 prepare、探针取消、TT 原生 Stop、失败／超时和 request gate supersede 均有脱敏运行证据。生成期间 TT 不允许切换聊天或并发开始第二次生成，因此 provider 层旧响应乱序不能在该 UI 中直接复现。HTTPS 测试记录了自定义请求头下的 `Failed to fetch`，按 CORS／宿主限制处理，不把它标为远程服务成功。完整证据见 `notes/t-01-runtime-trace.md`。
+在用户实际 TT 2.2.0 dev/Canary Windows x64 环境中，隔离探针确认了 `api.chat.current`、稳定聊天 ID、`windowInfo()`、`history.tail()`、`setExtensionPrompt` 和 `api.dev.llmApiLogs` 的可用性。三类注入位置均在最终 raw payload 中出现；延迟 prepare、探针取消、TT 原生 Stop、失败／超时和 request gate supersede 均有脱敏运行证据。生成期间 TT 不允许切换聊天或并发开始第二次生成，因此 provider 层旧响应乱序不能在该 UI 中直接复现。HTTPS 测试记录了自定义请求头下的 `Failed to fetch`，按 CORS／宿主限制处理，不把它标为远程服务成功。Chat review 后发现并返修了异步 snapshot 乱序下的 request gate 竞态；`dd3fa38` 通过确定性 A/B 并发测试关闭该问题。T-01 已于 2026-09-18 二次 review 标记为 `verified`。完整运行证据见 `notes/t-01-runtime-trace.md`。
 
 ## 3. 检索引擎参考
 
