@@ -12,7 +12,8 @@
 | --- | --- | --- |
 | T-00 ✅ | 固定真实 TT／柏宝书／测试数据与副 API 基线 | 已验证；后续不再靠猜测安装版本、存储模式或测试输入 |
 | T-01 ✅ | 做最小 TT Adapter 探针 | 已验证：真实 await、三类 payload、取消/清槽、宿主限制与 request gate 防过期响应边界 |
-| T-02 | 定义 Mnemosyne 自己的身份、版本和上下文契约 | 先完成 T-02A 宿主事实验证；随后冻结编辑、swipe、分叉、引用和错误语义 |
+| T-02A ▶ | TT 宿主身份与变更事件验证 | Branch/Edit/Delete/Swipe/Regenerate/reopen 的真实能力矩阵与脱敏证据 |
+| T-02 | 定义 Mnemosyne 自己的身份、版本和上下文契约 | T-02A review 后冻结编辑、swipe、分叉、引用和错误语义 |
 | T-03 | 建立最小可恢复后端 | 数据重启仍在，能迁移、导出、备份并在空环境恢复 |
 
 ## 3. 阶段完成线
@@ -41,7 +42,7 @@ T-02 重新定义 Mnemosyne 领域术语，不沿用柏宝书 `Leaf` 作为正�
 
 无设计级阻塞。T-01 已于 2026-09-18 二次 Chat review 通过并升为 `verified`；request gate 并发竞态已在 `dd3fa38` 修复并由确定性乱序并发测试覆盖。
 
-下一步先做 T-02A：TT 宿主身份与变更事件验证，范围仅限 stableId/integrity、Edit/Delete/Swipe/Regenerate 事件参数与稳定性。完成 T-02A 后再由 Chat／用户冻结正式 T-02 契约；真正的攻坚项仍是旧档身份重识别、fork cutoff/head revision、派生来源与 input hash。正式 T-02 主任务卡暂不创建。
+T-02A 任务卡已创建：`tasks/T-02A-tt-host-identity-events.md`。下一步由 Codex 仅验证 stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 的真实宿主行为；完成并经 Chat review 后，再冻结正式 T-02 契约。真正的攻坚项仍是旧档身份重识别、fork cutoff/head revision、派生来源与 input hash。正式 T-02 主任务卡暂不创建。
 
 工程流程要求：Codex 只实现当前 task，并在收尾报告下一任务依赖／建议验证点；不得自动创建 T-02。
 
