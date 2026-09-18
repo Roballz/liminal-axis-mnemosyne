@@ -267,3 +267,71 @@ T-02A 只有在以下条件满足后才可交 Chat review：
 - 未验证项：stableId 与 integrity 的关系；Delete 参数的精确前／后索引语义；失败 regenerate 是否产生可复用的新 candidate／Revision；`history.summary` 的实际内容。
 - 下一步依赖：正式 T-02 需要决定事件不足时的手动 repair/rescan／映射边界，并定义 Mnemosyne 内部版本身份；不由本 task 静默定案。
 - 需要 Chat／用户决定：是否接受当前 Delete／Regenerate 的 degraded 证据作为 T-02 输入，或在独立虚构样本上补测；本回报不创建正式 T-02 任务卡。
+
+
+## Chat review（2026-09-19）
+
+结论：**暂不升为 verified，保持 implemented_unverified。**
+
+主体实现与现场取证范围正确，没有越界冻结正式 T-02 schema；Branch、reopen、rename、Deep Edit 已形成可用真机证据。当前只需小范围返修，不重做整轮实验。
+
+### 必须返修 1：integrity 读取路径错误
+
+当前探针从 `getContext().chat_metadata.integrity` 读取，但 TT 当前 `getContext()` 暴露的是 `chatMetadata`（camelCase），不是 `chat_metadata`。因此现场 `integrity = null` 不能解释为宿主不可读，只能解释为探针读取路径错误。
+
+优先使用正式 Chat API：`handle.metadata.get()` 读取 metadata，并与 `handle.stableId()` 比较；`context.chatMetadata` 可作为同轮交叉证据。修复后只需在 parent / branch 各刷新一次 host，确认：
+- stableId 是否等于各自 metadata.integrity；
+- parent / child integrity 是否不同；
+- reopen / rename 结论不需要重做，除非修复后出现矛盾。
+
+### 必须返修 2：chat summary API 调用位置错误
+
+当前探针调用 `handle.history.summary()`，但 TT Chat API 的接口是 `handle.summary({ includeMetadata })`；`history` 下只有 tail / before / beforePages。
+
+这里的 “summary” 不是 AI 剧情摘要功能，而是聊天文件概况 API，返回 message_count / metadata 等轻量信息，不依赖用户开启 TT 或柏宝书摘要。
+
+修复后用 `handle.summary({ includeMetadata: false })` 记录 message_count；Delete 验证可用它与 context chat count 交叉检查。
+
+### Delete：不要求重测参数语义
+
+TT 当前源码在实际删除完成后执行：
+`eventSource.emit(MESSAGE_DELETED, chat.length)`
+
+所以事件参数是**删除后的聊天总长度**，不是被删除 message index。现有现场样本 `MESSAGE_DELETED[6]` 与 count `7 -> 6` 正好一致。
+
+T-02A 可据此收口为：
+- 删除发生：可自动侦测；
+- 删除后总长度：可直接得到；
+- 深层“具体删了哪条 SourceMessage”：**不能仅靠事件参数定位**，需要删除前后指纹／有限 rescan 或后续手动 repair 策略；
+- 这是正式 T-02 的事实输入，不是 T-02A 继续绕宿主解决的事项。
+
+### Swipe：事件能力可接受
+
+现有真机已经观测到 `MESSAGE_SWIPED[5]`、候选数 `1 -> 2`、swipeId 与 active 指纹变化。即使后续模型连接失败，也足够证明“Swipe 候选变化可被探针观察”。
+
+因此 Swipe 不作为本轮返修阻塞；文档可把“事件／候选定位能力”标 verified，把“该次生成后续失败”单独记为运行样本降级。
+
+### 必须补测 3：一次成功 Regenerate
+
+现有 Regenerate 样本因模型无有效输出，只证明 generation lifecycle 与失败路径可见，没有回答任务卡要求的：
+- 成功 regenerate 是否仍对应同一 assistant message；
+- candidate / swipe 数量怎样变化；
+- active swipe 是否可可靠定位。
+
+修复上述两个读取路径后，在同一虚构测试聊天上补一次**成功的 regenerate** 即可。不需要重复其他真机实验。
+
+若当前模型仍不可用，可临时换一个已确认能正常返回的测试模型；不测模型质量，只取宿主事件和候选状态。
+
+### 返修验收
+
+返修后需：
+1. 增加/调整纯逻辑测试，覆盖 metadata / summary 的正确读取封装（若相关逻辑可纯测）；
+2. `node --test apps/tt-adapter-probe/tests/probe.test.js` 全通过；
+3. `node --check apps/tt-adapter-probe/index.js` 通过；
+4. parent / child 的 stableId ↔ integrity 关系有真机证据；
+5. Delete 文档按“参数 = 删除后 chat.length”修正；
+6. Swipe 事件定位能力与后续生成失败分开描述；
+7. 至少一条成功 Regenerate trace；
+8. 不创建正式 T-02 任务卡。
+
+预计属于小返修，原则上只改现有探针、测试和事实文档；若实现明显超出该范围，先停下报告。
