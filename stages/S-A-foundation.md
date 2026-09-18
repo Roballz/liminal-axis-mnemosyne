@@ -41,7 +41,7 @@ T-02 重新定义 Mnemosyne 领域术语，不沿用柏宝书 `Leaf` 作为正�
 
 无设计级阻塞。T-01 已于 2026-09-18 二次 Chat review 通过并升为 `verified`；request gate 并发竞态已在 `dd3fa38` 修复并由确定性乱序并发测试覆盖。
 
-下一步继续由 Chat／用户规划 T-02。首轮 1～12 项已有一批 accepted 领域原则，见 `docs/03-decisions-and-open-questions.md`；当前重点攻坚旧档身份重识别、深层手动编辑检测、fork cutoff/head revision 的正式表达。正式 T-02 任务卡尚未创建。
+下一步继续由 Chat／用户规划 T-02。首轮 1～12 项与第二轮 13～24 已形成一批 accepted/proposed 原则，见 `docs/03-decisions-and-open-questions.md`。代码级取证已确认 TT 存在 stableId/integrity 与消息编辑事件，柏宝书也有显式 Carryover；当前重点攻坚旧档身份重识别、分支 integrity 实测、fork cutoff/head revision、派生来源与 input hash 正式契约。正式 T-02 任务卡尚未创建。
 
 工程流程要求：Codex 只实现当前 task，并在收尾报告下一任务依赖／建议验证点；不得自动创建 T-02。
 
