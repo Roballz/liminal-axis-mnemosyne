@@ -30,3 +30,5 @@
 - T-01 review 返修：修正异步 snapshot 乱序导致旧 request 夺回 active 的 gate 竞态，新增确定性 A/B 并发测试，逻辑测试通过 6/6。
 
 - T-01 二次 Chat review 通过：核对 `dd3fa38` 的 gate 竞态修复与 A/B snapshot 乱序并发测试，任务升为 `verified`；阶段 A 下一步进入 T-02 方案／任务卡规划。
+
+- 新增 T-02A 前置验证任务：在冻结 T-02 契约前，用隔离 TT 真机验证 stableId/integrity、Branch、深层 Edit、Delete、Swipe/Regenerate 与 reopen/rename 行为；禁止提前设计正式 schema。
