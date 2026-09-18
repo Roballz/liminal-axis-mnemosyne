@@ -30,6 +30,15 @@ TT 来源为核验时 main 文档，后续可能变化。T-00 要记录用户实
 
 在用户实际 TT 2.2.0 dev/Canary Windows x64 环境中，隔离探针确认了 `api.chat.current`、稳定聊天 ID、`windowInfo()`、`history.tail()`、`setExtensionPrompt` 和 `api.dev.llmApiLogs` 的可用性。三类注入位置均在最终 raw payload 中出现；延迟 prepare、探针取消、TT 原生 Stop、失败／超时和 request gate supersede 均有脱敏运行证据。生成期间 TT 不允许切换聊天或并发开始第二次生成，因此 provider 层旧响应乱序不能在该 UI 中直接复现。HTTPS 测试记录了自定义请求头下的 `Failed to fetch`，按 CORS／宿主限制处理，不把它标为远程服务成功。Chat review 后发现并返修了异步 snapshot 乱序下的 request gate 竞态；`dd3fa38` 通过确定性 A/B 并发测试关闭该问题。T-01 已于 2026-09-18 二次 review 标记为 `verified`。完整运行证据见 `notes/t-01-runtime-trace.md`。
 
+
+### T-02 宿主身份／编辑／Carryover 补充（2026-09-19）
+
+- TT 当前 api.chat.open(...).stableId()：角色聊天直接读取 chat_metadata.integrity；官方 Chat API 将 stableId() 描述为可持久化稳定 ID。该值可作为宿主 provenance，但不是 Mnemosyne 永久主键。
+- TT/ST 前端事件表公开 MESSAGE_EDITED、MESSAGE_UPDATED、MESSAGE_DELETED、MESSAGE_SWIPED。当前普通消息编辑完成路径会先 emit(MESSAGE_EDITED, messageIndex)，随后 emit(MESSAGE_UPDATED, messageIndex)；因此扩展具备按消息索引侦测手动编辑的代码级能力。仍需在用户固定 TT 2.2.0 dev/Canary 安装上做一次真机编辑事件验证。
+- ST/TT 分支创建会截取分叉点以前的消息快照，并以当前 chat_metadata 为基底写入新分支，只额外加入 main_chat 等字段；保存新文件时现有 integrity 校验不会要求新目标换一个 integrity。因此父线和分支可能共享 chat_metadata.integrity，不能假定它是“每个聊天文件绝对唯一”的 ID；需真机确认目标版本实际结果。
+- 柏宝书固定提交 32dbb48... 已实现显式 Carryover：由用户主动“带数据创建新对话”，携带合并摘要／派生状态／近期原文；向量层按角色选择 database，以 chat:<chatId> 作为当前聊天 scope，并可把旧聊天快照为 bundle:<hash>，在新聊天 metadata 中保存 bundle hash 继承召回范围。该实现证明“用户显式续接 + scope/bundle 复用旧记忆”是现成可行模式，但其 per-character database 与 seed/bundle 数据模型不直接作为 Mnemosyne canonical schema。
+- 独立柏宝库本身是通用 KV/SQLite 服务：每个 database 一个 SQLite 文件，并不定义 Story/Branch 语义；跨聊天语义主要由柏宝书前端的 database/scope/carryover 逻辑决定。
+
 ## 3. 检索引擎参考
 
 **Q01 — [Qdrant Hybrid and Multi-Stage Queries](https://qdrant.tech/documentation/search/hybrid-queries/)**
