@@ -143,3 +143,27 @@
 
 - Chat review 需要决定：在 TT 不允许并发生成和生成中切聊天的前提下，是否接受“request gate 已验证、provider 层乱序保持宿主受限”作为 T-01 的 `implemented_unverified` 收尾状态。
 - T-02 仍需冻结 Mnemosyne 自己的 Story、Branch、SourceMessage、Revision、ContextBlock 和正式身份语义；本任务不提前定案。
+
+
+## Chat review（2026-09-18）
+
+结论：**暂不升为 `verified`**。T-01 的现场证据总体可信，TT 生成期间不能切聊天／不能并发发起第二次生成可作为宿主限制接受；HTTPS 失败也已形成可解释的 CORS／宿主边界结论。当前仅保留一个会影响核心验收的实现阻塞。
+
+### 必须返修
+
+- `createRequestGate.begin()` 当前在 `await readSnapshot()` 之前只取消已有 `active`，但要到异步 snapshot 返回后才把本次 request 写入 `active`。若两个 `begin()` 真正并发进入，较新的请求 B 可能先完成并成为 active，随后较早的请求 A 再完成并把自己重新写回 active，导致“旧请求重新覆盖新请求”的竞态。
+- 现有 `a newer request cancels the older request` 测试是串行 `await gate.begin()`，没有覆盖上述乱序完成场景。
+- 因 TT UI 本身不允许生成期间启动第二次生成，T-01 对“旧请求不会污染新请求”的替代证据高度依赖 request gate；因此该竞态属于 T-01 收尾阻塞，不下放为普通后续优化。
+
+### 复核要求
+
+- 调整 gate，使“最新请求身份”在任何异步 snapshot 读取期间都不会被较旧 begin 重新夺回；可采用先占位 active、sequence 校验或等价方案，但不在本 review 冻结具体实现。
+- 增加确定性的并发单测：同时启动两个 `begin()`，人为让旧请求的 `readSnapshot()` 后完成，断言旧请求不能重新成为 active／不能 `canApply`，新请求保持唯一有效。
+- 若返修只触及纯 gate 逻辑与测试，不要求重做现有 TT 真机 payload、Stop、fail/timeout、HTTPS 现场实验；重新执行逻辑测试与语法检查即可。
+- 生成拦截器的 `_abort` 参数本身尚未被单独刻画；当前已验证的是 TT `GENERATION_STOPPED/ENDED` 事件路径能取消 prepare。文档应继续区分这两件事，不把未观测参数写成已确认事实。
+
+### 已接受的宿主限制
+
+- TT 2.2.0 dev/Canary 在一次生成期间禁止切换聊天，也禁止从 UI 并发开始第二次生成；不要求为了 T-01 人为绕开宿主制造 provider 层重叠请求。
+- `https://example.com/` 的自定义请求头 CORS 失败足以证明“TT 扩展网络受 Web/CORS 约束”这一边界；真正 CORS-enabled Memory API 的成功连通应在最小后端存在后再验证，不作为本次返修阻塞。
+- T-02 正式任务卡仍由 Chat／用户在 T-01 复核通过后创建；Codex 不提前生成。
