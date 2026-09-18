@@ -27,3 +27,4 @@
 - Chat review 修订 T-01：补回独立 HTTPS 接入验证，并保持真实 Memory Engine／正式身份契约在后续任务中处理。
 
 - T-01 现场验证：确认 TT 2.2.0 的生成前 await、三类最终 payload、探针取消、原生 Stop、失败／超时清槽和运行时 request gate supersede；记录 HTTPS/CORS 限制，以及生成期间切聊天／并发生成的宿主限制。
+- T-01 review 返修：修正异步 snapshot 乱序导致旧 request 夺回 active 的 gate 竞态，新增确定性 A/B 并发测试，逻辑测试通过 6/6。

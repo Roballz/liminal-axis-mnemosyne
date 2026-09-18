@@ -95,14 +95,22 @@
             sequence: sequence += 1,
             controller,
             signal: controller.signal,
-            snapshot: await readSnapshot(),
+            snapshot: null,
             meta,
             startedAt: now(),
             cancel(reason = 'cancelled') {
               if (!controller.signal.aborted) controller.abort(reason);
             },
           };
+
+          // Claim active before awaiting so an older snapshot cannot reclaim the gate.
           active = request;
+          try {
+            request.snapshot = await readSnapshot();
+          } catch (error) {
+            if (active === request) active = null;
+            throw error;
+          }
           return request;
         },
         async canApply(request) {

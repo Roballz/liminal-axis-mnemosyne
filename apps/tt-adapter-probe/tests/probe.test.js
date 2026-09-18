@@ -41,6 +41,34 @@ test('a newer request cancels the older request', async () => {
   assert.equal(await gate.canApply(second), true);
 });
 
+test('an older concurrent begin cannot reclaim active after snapshot reorder', async () => {
+  let callCount = 0;
+  let releaseFirstSnapshot;
+  const firstSnapshot = new Promise(resolve => {
+    releaseFirstSnapshot = resolve;
+  });
+  const snapshot = core.snapshotFromState({ chatId: 'chat-a', chat: [] });
+  const gate = core.createRequestGate(async () => {
+    callCount += 1;
+    return callCount === 1 ? firstSnapshot : snapshot;
+  });
+
+  const firstPromise = gate.begin({ label: 'A' });
+  await Promise.resolve();
+  const secondPromise = gate.begin({ label: 'B' });
+  const second = await secondPromise;
+
+  assert.equal(gate.current(), second);
+  releaseFirstSnapshot(snapshot);
+  const first = await firstPromise;
+
+  assert.equal(first.signal.aborted, true);
+  assert.equal(first.signal.reason, 'superseded');
+  assert.equal(await gate.canApply(first), false);
+  assert.equal(gate.current(), second);
+  assert.equal(await gate.canApply(second), true);
+});
+
 test('fake prepare supports delay, failure, timeout, and cancellation', async () => {
   const delayed = await core.fakePrepare({ mode: 'delay', delayMs: 1, marker: 'x' });
   assert.equal(delayed.marker, 'x');

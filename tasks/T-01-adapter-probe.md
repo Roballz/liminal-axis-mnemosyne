@@ -111,7 +111,7 @@
 
 ### 环境、命令与测试
 
-- 当前 Mnemosyne checkout：`ec77812`，分支 `main`。
+- 现场验证基线：`ec77812`；Chat review 同步：`9649a72`；返修提交见后续 Git 历史，分支 `main`。
 - 现场环境：Windows x64、TT 2.2.0 dev/Canary、柏宝书 1.2.9；实际路径与版本见 `notes/baseline.md`。
 - `node --test apps/tt-adapter-probe/tests/probe.test.js`：5/5 通过。
 - `node --check apps/tt-adapter-probe/index.js`：通过。
@@ -143,6 +143,23 @@
 
 - Chat review 需要决定：在 TT 不允许并发生成和生成中切聊天的前提下，是否接受“request gate 已验证、provider 层乱序保持宿主受限”作为 T-01 的 `implemented_unverified` 收尾状态。
 - T-02 仍需冻结 Mnemosyne 自己的 Story、Branch、SourceMessage、Revision、ContextBlock 和正式身份语义；本任务不提前定案。
+
+## Chat review 返修实施（2026-09-18）
+
+### 修改
+
+- 修正 `createRequestGate.begin()`：创建 request 后立即占位为 `active`，再异步读取 snapshot；旧 request 的晚返回不能重新夺回 active。
+- snapshot 读取失败时，仅当该 request 仍是 active 才清理 active，避免影响更新后的 request。
+- 新增确定性并发单测：A/B 同时启动，A 的 snapshot 故意晚于 B 返回；断言 A 被 `superseded`、`canApply(A) === false`，B 仍是唯一有效 request。
+
+### 返修验证
+
+- `node --test apps/tt-adapter-probe/tests/probe.test.js`：6/6 通过。
+- `node --check apps/tt-adapter-probe/index.js`：通过。
+- `git diff --check`：通过。
+- 未重做 TT 真机 payload、Stop、失败／超时或 HTTPS 实验；本次只触及 gate 逻辑与纯逻辑测试。
+
+返修提交后交 Chat 二次 review；在 review 通过前，任务状态保持 `implemented_unverified`。
 
 
 ## Chat review（2026-09-18）
