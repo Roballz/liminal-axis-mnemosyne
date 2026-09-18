@@ -1,6 +1,6 @@
 # T-01：最小 TT Adapter 探针
 
-状态：implemented_unverified
+状态：verified
 
 ## 用户目标
 
@@ -77,7 +77,7 @@
 - 环境：Windows 10 x64，`E:\TauriTavern\tauritavern.exe`，2.2.0 dev/Canary，git `5e33bf6fead6`。
 - 柏宝书：1.2.9，纯前端本地模式。
 - 扩展目录／测试聊天：见 `notes/baseline.md`。
-- 本地逻辑测试：`node --test apps/tt-adapter-probe/tests/probe.test.js`，5/5 通过。
+- 本地逻辑测试：`node --test apps/tt-adapter-probe/tests/probe.test.js`，返修后 6/6 通过。
 - 语法检查：`node --check apps/tt-adapter-probe/index.js`，通过。
 - 运行时第一批：宿主能力、假 prepare 时序和三类最终 payload 已验证；脱敏证据见 `notes/t-01-runtime-trace.md`。
 - 运行时后续批次：探针取消、TT 原生 Stop、失败／超时、下一轮无残留、解释性 HTTPS/CORS 限制和运行时 request gate supersede 已验证。
@@ -113,7 +113,7 @@
 
 - 现场验证基线：`ec77812`；Chat review 同步：`9649a72`；返修提交见后续 Git 历史，分支 `main`。
 - 现场环境：Windows x64、TT 2.2.0 dev/Canary、柏宝书 1.2.9；实际路径与版本见 `notes/baseline.md`。
-- `node --test apps/tt-adapter-probe/tests/probe.test.js`：5/5 通过。
+- `node --test apps/tt-adapter-probe/tests/probe.test.js`：返修后 6/6 通过。
 - `node --check apps/tt-adapter-probe/index.js`：通过。
 - 部署文件与 checkout 中探针文件哈希一致。
 
@@ -141,7 +141,7 @@
 
 ### 下一步依赖与需要决定的问题
 
-- Chat review 需要决定：在 TT 不允许并发生成和生成中切聊天的前提下，是否接受“request gate 已验证、provider 层乱序保持宿主受限”作为 T-01 的 `implemented_unverified` 收尾状态。
+- 已解决：二次 Chat review 接受“request gate 已验证、provider 层乱序保持宿主受限”作为 T-01 收尾边界；T-01 升为 `verified`。
 - T-02 仍需冻结 Mnemosyne 自己的 Story、Branch、SourceMessage、Revision、ContextBlock 和正式身份语义；本任务不提前定案。
 
 ## Chat review 返修实施（2026-09-18）
@@ -184,3 +184,16 @@
 - TT 2.2.0 dev/Canary 在一次生成期间禁止切换聊天，也禁止从 UI 并发开始第二次生成；不要求为了 T-01 人为绕开宿主制造 provider 层重叠请求。
 - `https://example.com/` 的自定义请求头 CORS 失败足以证明“TT 扩展网络受 Web/CORS 约束”这一边界；真正 CORS-enabled Memory API 的成功连通应在最小后端存在后再验证，不作为本次返修阻塞。
 - T-02 正式任务卡仍由 Chat／用户在 T-01 复核通过后创建；Codex 不提前生成。
+
+
+## Chat 二次 review（2026-09-18）
+
+结论：**通过，T-01 升为 `verified`。**
+
+- 已核对返修提交 `dd3fa383c58670c568bf0a3254cd0b7f5523f641`。
+- `createRequestGate.begin()` 现在先把 request 占位为 `active`，再异步读取 snapshot；较旧 request 的 snapshot 即使晚返回，也不会重新夺回 active。
+- 新增并发测试确实构造 A 先开始、B 后开始、A snapshot 晚于 B 返回的顺序，并断言 A 被 `superseded`、`canApply(A) === false`、`current() === B`、`canApply(B) === true`。
+- 返修范围只涉及 gate 逻辑和逻辑测试，因此按上一轮 review 约定，不要求重做 TT 真机 payload、Stop、fail/timeout 或 HTTPS 实验。
+- TT 生成期间禁止切聊天／并发开始第二次生成继续作为宿主限制；provider 层真实重叠响应未在 UI 中复现，不影响 T-01 关卡。
+- 生成拦截器 `_abort` 参数本身仍未单独刻画；当前验证的是 TT `GENERATION_STOPPED/ENDED` 事件取消路径。此边界留作事实记录，不阻塞 T-01。
+- 下一步进入 T-02 的方案与任务卡规划；Codex 不自动创建 T-02。
