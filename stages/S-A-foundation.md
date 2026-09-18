@@ -33,6 +33,7 @@ T-02 重新定义 Mnemosyne 领域术语，不沿用柏宝书 `Leaf` 作为正�
 
 - T-01 后：TT 三类注入语义与真实能力矩阵。
 - T-02 前／中：Story、Branch、SourceMessage、Revision、单段派生记忆对象、ContextBlock 的正式字段与命名；稳定身份、swipe／编辑／分叉语义；规范化 input hash。
+- T-02 首轮讨论已确认：Story 与宿主聊天文件解耦；同一 Story 可跨聊天文件续聊；平台分支映射为同 Story 下 Branch，并按 fork cutoff 引用复用祖先历史；SourceMessage/Revision 分离；swipe/regenerate 采用候选 Revision；共享 canonical store 按 story/branch 逻辑隔离。
 - T-03 前：最小后端技术栈、正式存储、认证、migration／backup／restore 方案。
 - T-03 实验：中文词法／BM25 候选实现与 Qdrant 角色；只冻结已测试边界。
 
@@ -40,7 +41,7 @@ T-02 重新定义 Mnemosyne 领域术语，不沿用柏宝书 `Leaf` 作为正�
 
 无设计级阻塞。T-01 已于 2026-09-18 二次 Chat review 通过并升为 `verified`；request gate 并发竞态已在 `dd3fa38` 修复并由确定性乱序并发测试覆盖。
 
-下一步由 Chat／用户规划 T-02：冻结 Mnemosyne 自己的身份、版本和上下文契约。正式 T-02 任务卡尚未创建。
+下一步继续由 Chat／用户规划 T-02。首轮 1～12 项已有一批 accepted 领域原则，见 `docs/03-decisions-and-open-questions.md`；当前重点攻坚旧档身份重识别、深层手动编辑检测、fork cutoff/head revision 的正式表达。正式 T-02 任务卡尚未创建。
 
 工程流程要求：Codex 只实现当前 task，并在收尾报告下一任务依赖／建议验证点；不得自动创建 T-02。
 
