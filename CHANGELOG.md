@@ -22,3 +22,6 @@
 - 明确 T-02 不沿用柏宝书 `Leaf` 作为 Mnemosyne 正式领域对象名。
 - T-00 首轮现场复核：确认 `E:\TauriTavern\tauritavern.exe` 为 2.2.0；安装目录未发现柏宝书扩展源码或用户聊天数据，补充 T-01 探针任务卡，待扩展入口与安全测试样本。
 - T-00 路径补全：确认柏宝书 1.2.9 实际源码与 commit `32dbb48a0a643804256d496bc35bf7699dea9ebe`，确认测试聊天 JSONL 的实际路径与字段边界；运行时 payload 与取消／切聊天行为转入 T-01。
+
+- 流程修正：正式 `T-XX` 任务卡由 Chat／用户在 review 后创建；Codex 默认只交付当前 task 的实施证据与下一步建议，不提前生成后续 task。T-00 中“直接产出 T-01”的旧指令标记为已废止。
+- Chat review 修订 T-01：补回独立 HTTPS 接入验证，并保持真实 Memory Engine／正式身份契约在后续任务中处理。
