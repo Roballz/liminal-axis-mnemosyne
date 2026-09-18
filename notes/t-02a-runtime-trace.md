@@ -57,3 +57,12 @@
 
 - 回退：禁用或移除部署的 `mnemosyne-tt-adapter-probe`，或恢复本 task 前的探针版本；探针不写正式档案，无迁移和正式数据回退。
 - 下一任务依赖：正式 T-02 仍需决定宿主事件不足时的手动 repair/rescan／映射边界，并单独定义内部版本身份；本 task 不创建正式 T-02 任务卡。
+
+
+## Chat review 校正（2026-09-19）
+
+- 现场 `integrity = null` 不是宿主能力结论。探针读取了不存在的 `context.chat_metadata`；当前 TT `getContext()` 对外字段是 `chatMetadata`，正式 Chat handle 还提供 `metadata.get()`。等待返修后重新取得 parent/branch metadata。
+- 现场 `history.summary = null` 也不是用户未开启“摘要功能”。探针误调用 `handle.history.summary()`；正确接口是 `handle.summary({ includeMetadata })`，它是聊天文件概况 API，不是 AI 剧情摘要。
+- TT 当前删除源码在 splice / 截断完成后 emit `MESSAGE_DELETED(chat.length)`；因此现有参数 `[6]` 表示删除后的总消息数，而非被删除 index。Deep delete 的具体来源定位需要前后状态比较，T-02A 不再把该参数当 message-index 候选。
+- Swipe 的事件与候选状态变化已有足够现场证据；该次模型失败不否定 Swipe 事件能力。
+- Regenerate 仍缺一条成功生成样本，返修后补测。
