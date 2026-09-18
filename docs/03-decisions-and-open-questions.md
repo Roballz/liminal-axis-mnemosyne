@@ -62,3 +62,35 @@ D 仅留入口，不提前自动删旧总结或把所有内容归到一个“永
 新建决策 ID，记录：问题、状态、用户要求、选项、选中方案、取舍、影响的数据／接口、测试证据、迁移和回退、替代的旧 ID。
 
 没有证据时标 proposed，不把建议改成 accepted。旧记录被替代时标 superseded，保留理由。
+
+
+## 5. T-02 身份／版本讨论确认（2026-09-19）
+
+以下为用户与 Chat 基于 TT/ST 实际工作流确认的领域原则；正式字段名与完整 schema 仍由 T-02 任务冻结。
+
+| ID | 状态 | 结论 |
+| --- | --- | --- |
+| T02-D01 | accepted | **Story 是逻辑剧情连续体，不等同于单个宿主聊天文件。** 普通新建空聊天默认创建新 Story；但为缓解高楼层客户端负担而“新开空聊天继续旧剧情”时，可显式绑定到原 Story／原 Branch，作为新的宿主聊天段继续，不复制整套记忆。完全一致的旧档重新导入也不应自动生成另一套 Story。 |
+| T02-D02 | accepted | **宿主聊天文件与 Mnemosyne Story/Branch 必须解耦。** 一个 Story/Branch 可以跨多个 TT/ST 聊天文件连续承载；单个宿主文件只作为来源／绑定，不作为长期主键。该绑定对象名称待 T-02 定名。 |
+| T02-D03 | accepted | **平台“从某楼新建分支”映射为同一 Story 下的新 Branch，而不是复制成独立 Story。** 子 Branch 继承父 Branch 到分叉点为止的既有历史；分叉后双方独立推进。 |
+| T02-D04 | accepted | **分支继承按引用／可见性复用，不复制分叉前记忆。** 子 Branch 保存 parent branch 与 fork cutoff，并复用祖先在 cutoff 之前的有效来源及派生记录；父线分叉后的内容对子线不可见。 |
+| T02-D05 | accepted | **分叉继承的是当时的历史快照。** 父 Branch 在分叉之后再编辑旧内容，不应静默改写已经存在的子 Branch 历史；正式 cutoff 必须能绑定到具体有效版本，而非只记楼层号。 |
+| T02-D06 | accepted | **Mnemosyne 自己生成的稳定 ID 才是正式身份。** TT/ST 的 session/conversation/chat ID、文件名、楼层号等只作为 provenance / adapter mapping，不能充当跨平台永久主键。 |
+| T02-D07 | accepted | **SourceMessage 与 Revision 分离。** 同一逻辑消息被编辑时保留同一 SourceMessage，生成新的 Revision；旧 Revision 默认保留但退出当前有效历史，不用覆盖唯一原文。旧派生记录是否长期物理保留属于后续存储／GC 策略。 |
+| T02-D08 | accepted | **Swipe 与 regenerate 视为同一 assistant SourceMessage 的候选 Revision 家族。** 当前选中的候选才参与当前 Branch；操作类型仍保留 provenance 以便诊断。若宿主可提供旧 swipe 候选，导入时可保存为非活动 Revision；无需为每个临时候选都生成派生记忆。 |
+| T02-D09 | accepted | **派生记忆可以延后一轮生成，但这是调度策略，不改变版本语义。** 当最新回复仍可能 swipe/regenerate 时可保持 provisional；一旦后续消息推进，该 Branch 采用的 Revision 即成为该历史路径上的有效版本。即时生成模式下则必须在 swipe/regenerate 后失效旧派生并重建当前版本。 |
+| T02-D10 | accepted | **Edit / Swipe / Regenerate 需要保留不同操作来源，但版本模型可统一。** Edit = 同一 SourceMessage 的正文新 Revision；Swipe/Regenerate = assistant 消息的候选 Revision 切换/新增。手动深层 Edit 无法依赖单一事件保证发现，需另有同步／修复策略。 |
+| T02-D11 | accepted | **宿主删除默认先变成当前 Branch 不可见／tombstone，而不是立即物理擦除。** 对应派生记忆立即退出召回；真正永久删除由显式 purge 流程处理。是否长期保留被删原文及派生历史的物理副本由 T-03 存储/保留策略决定。 |
+| T02-D12 | accepted | **来源顺序与剧情内时间是两个不同维度。** 楼层号只作显示／宿主映射；正式先后关系由 Branch 内来源顺序／版本关系维护。剧情内 YYYY-MM-DD HH:MM 等时间可作为 Event/摘要的 world-time 字段和展示辅助，但不能代替来源顺序，因为存在倒叙、回忆和时间不确定。 |
+| T02-D13 | accepted | **Branch Head 仍是正式概念。** 它表示某条 Branch 当前推进到哪个有效版本／截止点，用于防止未来内容越界召回、异步结果过期判断和跨聊天文件续聊；它不等于“一个聊天文件一个库”。 |
+| T02-D14 | accepted | **逻辑隔离采用共享 canonical store + story_id / branch_id / message_id 等作用域，不按聊天文件或角色卡各建独立数据库。** 同 Story 的多个聊天文件和多个 Branch 才能复用共同历史；角色卡不是数据隔离主键。物理数据库部署与表结构仍留给 T-03。 |
+| T02-D15 | accepted | **当前有效历史由 Branch lineage + fork cutoff + active Revision 共同决定。** “失效/不可见”与“物理删除”严格区分；检索与派生结果必须按这套有效性视图过滤。 |
+
+### T-02 当前未决／攻坚项
+
+1. **旧档重新导入与身份重识别。** 内部 ID 为正式身份已经确定，但原始 JSONL / 跨平台导入缺少 Mnemosyne ID 时，怎样结合内容 hash、顺序、宿主 metadata、前缀匹配与用户确认来判断“同一档／副本／分支／全新 Story”尚未冻结。单纯相同 hash 只能证明内容相同，不能自动证明用户语义上希望合并。
+2. **深层手动编辑的自动发现。** TT/ST 若没有可靠事件或只暴露当前窗口，需决定同步时扫描范围、指纹链／revision detection、显式 repair/rescan 的边界；首版不能假装能无成本实时监控整份超长聊天。
+3. **正式 fork cutoff / head revision 表达。** 已确定必须绑定具体有效版本快照，但字段结构、版本向量或其他表示仍需设计与正反例验证。
+4. **SourceMessage / Revision 的导入匹配算法与冲突语义。** 包括重复导入、内容相同但用户故意复制成另一故事、部分前缀相同、文件改名、跨 TT/ST 迁移等。
+5. **被删除／旧 Revision 的物理保留与 GC。** 领域语义已确定为默认不立即硬删，但具体保留期、备份传播和永久 purge 由 T-03 存储方案决定。
+
