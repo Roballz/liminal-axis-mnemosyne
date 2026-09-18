@@ -28,3 +28,5 @@
 
 - T-01 现场验证：确认 TT 2.2.0 的生成前 await、三类最终 payload、探针取消、原生 Stop、失败／超时清槽和运行时 request gate supersede；记录 HTTPS/CORS 限制，以及生成期间切聊天／并发生成的宿主限制。
 - T-01 review 返修：修正异步 snapshot 乱序导致旧 request 夺回 active 的 gate 竞态，新增确定性 A/B 并发测试，逻辑测试通过 6/6。
+
+- T-01 二次 Chat review 通过：核对 `dd3fa38` 的 gate 竞态修复与 A/B snapshot 乱序并发测试，任务升为 `verified`；阶段 A 下一步进入 T-02 方案／任务卡规划。
