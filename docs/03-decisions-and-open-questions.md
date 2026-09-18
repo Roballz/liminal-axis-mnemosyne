@@ -107,7 +107,7 @@ D 仅留入口，不提前自动删旧总结或把所有内容归到一个“永
 | T02-D18 | accepted | **无原文的派生记忆允许存在并参与召回。** 必须显式标记 source unavailable / derived-only，不伪造原文或假装完整覆盖。 |
 | T02-D19 | accepted | **V1 默认采用上帝视角记忆。** 不按单个角色知识范围过滤普通召回；仅保留最小 visibility/audience 扩展字段，为未来单角色 Agent／多 Agent 分饰模式预留，不在当前 RP 模式启用复杂知识屏蔽。 |
 | T02-D20 | accepted | **身份冲突、来源缺失、无法确定的合并禁止自动写入。** 冲突进入 needs-resolution；由用户手动修复或未来 AI 助手给出提案，确认无冲突后才能继续该受影响范围的写入。 |
-| T02-D21 | accepted | **基础派生单位以“当前一轮用户输入 + 对应 assistant 输出”为默认。** 派生摘要／记忆归属于实际 SourceMessage Revision 集合，而不是仅绑定楼层号；楼层、message index、剧情时间仅作定位与展示。 |
+| T02-D21 | accepted | **基础派生单位固定为“一轮 User + 对应 Assistant 输出”这一对。** 默认不单独为 User 楼生成独立摘要／记忆；User 内容作为该轮输入来源与 Assistant 输出共同组成派生源。派生摘要／记忆归属于这组实际 SourceMessage Revision，而不是仅绑定楼层号；楼层、message index、剧情时间只作定位与展示。 |
 
 ### 待确认／方案候选
 
@@ -117,5 +117,20 @@ D 仅留入口，不提前自动删旧总结或把所有内容归到一个“永
 4. **Run / Generation identity。** 候选方案：每次生成前拦截由 Mnemosyne 自己创建 run_id，不依赖 TT 原生 generation id；生命周期覆盖 prepare → context compile/inject → generation end/cancel。
 5. **Branch History Revision / Head snapshot。** 候选方案：每次会改变当前有效历史的 append/edit/swipe/delete/branch mapping 都推进内部 revision/epoch；生成开始时捕获它，结果返回前复核。楼层号和剧情时间只用于 UI/日志，不作为唯一并发控制键。
 6. **Derivation input hash。** 候选方案：hash 用于幂等/缓存，不充当消息身份。输入应至少包含实际 source revision IDs + 规范化正文 + derivation schema/prompt version；“相同楼层号 + 相同文本 hash”不足以跨 Branch 唯一判断同一来源。
-7. **TT chat_metadata.integrity 的角色。** 已确认它是当前 TT character chat stableId() 的来源，但分支创建代码会复制当前 metadata，因此父线/分支可能共享同一 integrity。暂按强 provenance/lineage 信号而非 Mnemosyne chat/branch 主键；需在用户固定 TT 版本真机创建分支后比较 parent/child integrity。
+7. **TT chat_metadata.integrity 的角色。** 已确认它是当前 TT character chat stableId() 的来源。用户已人工检查约 7～8 个实际存档，其中包含多个 Branch，所见 integrity 均不重复；这说明当前实际环境中它很可能是聊天文档级稳定身份。由于源码分支路径的 metadata 继承行为仍可能受保存端重写影响，T-02A 再做一次受控 parent/child 实测后冻结其 adapter 语义。即便验证为文档级唯一 ID，它仍只作为宿主稳定 ID，不替代 Mnemosyne 的 Story/Branch 主键。
 8. **旧档与重复导入匹配。** integrity、内容 hash、顺序前缀、文件名/chatRef 都可作证据，但最终仍保留用户确认和手动映射；自动判定规则待集中攻坚。
+
+
+## 7. T-02A 前置验证决定（2026-09-19）
+
+在冻结正式 T-02 契约前，先执行一个小型宿主事实验证子任务 T-02A；它属于 T-02 的前置验证，不改变 S-A 的主任务编号。
+
+T-02A 只回答以下事实问题：
+
+1. 当前 TT 2.2.0 dev/Canary 创建 Branch 后，parent / child 的 stableId()/chat_metadata.integrity 是否确实不同。
+2. 普通 UI 手动编辑旧消息时，扩展侧是否稳定收到 MESSAGE_EDITED(messageIndex) 与 MESSAGE_UPDATED(messageIndex)，以及事件发生时能否读取到编辑后的正文。
+3. 删除消息时 MESSAGE_DELETED 提供什么参数；删除后历史索引如何变化。
+4. Swipe / regenerate 时 MESSAGE_SWIPED / generation lifecycle 能否稳定定位当前 assistant message 与 active swipe。
+5. 文件改名、普通重新打开聊天是否保持 stableId 不变。
+
+T-02A 不设计数据库、不实现正式 Memory Engine、不冻结 Story/Branch/Revision schema；它只产出宿主能力矩阵和脱敏运行证据。若事件能力不足，正式 T-02 必须保留手动 repair/rescan/映射入口作为降级路径。
