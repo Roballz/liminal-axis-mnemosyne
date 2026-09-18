@@ -294,6 +294,8 @@ T-02A 只有在以下条件满足后才可交 Chat review：
 
 ### Delete：不要求重测参数语义
 
+补充现场事实：用户确认删除前共有 7 条 chat message，删除的是倒数第二条 User 消息。若按 TT/JS `chat` 数组的 0-based index，该消息应为 index 5；事件实参却为 `[6]`，与删除后的 `chat.length = 6` 一致。这进一步排除了“参数是被删 index”的解释。前端楼层显示编号或日志中的 human-readable `message[n]` 不应与内部数组 index 混为一谈。
+
 TT 当前源码在实际删除完成后执行：
 `eventSource.emit(MESSAGE_DELETED, chat.length)`
 
