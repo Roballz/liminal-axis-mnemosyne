@@ -42,7 +42,7 @@ T-02 重新定义 Mnemosyne 领域术语，不沿用柏宝书 `Leaf` 作为正�
 
 无设计级阻塞。T-01 已于 2026-09-18 二次 Chat review 通过并升为 `verified`；request gate 并发竞态已在 `dd3fa38` 修复并由确定性乱序并发测试覆盖。
 
-T-02A 任务卡已创建：`tasks/T-02A-tt-host-identity-events.md`。下一步由 Codex 仅验证 stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 的真实宿主行为；完成并经 Chat review 后，再冻结正式 T-02 契约。真正的攻坚项仍是旧档身份重识别、fork cutoff/head revision、派生来源与 input hash。正式 T-02 主任务卡暂不创建。
+T-02A 主体验证已完成，但 Chat review 发现两处探针读取路径错误（context `chatMetadata` / handle `summary()`）并缺一条成功 Regenerate 样本。下一步仅返修这三点；Branch、reopen、rename、Deep Edit 不重测，Delete 已确认事件参数是删除后的 `chat.length`，Swipe 事件定位能力可接受。T-02A 复核通过后再冻结正式 T-02 契约；正式 T-02 主任务卡暂不创建。
 
 工程流程要求：Codex 只实现当前 task，并在收尾报告下一任务依赖／建议验证点；不得自动创建 T-02。
 
