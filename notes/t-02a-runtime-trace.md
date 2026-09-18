@@ -61,6 +61,8 @@
 
 ## Chat review 校正（2026-09-19）
 
+- 用户补充确认：删除前共有 7 条 chat message，实际删除的是倒数第二条 User 消息；按 TT/JS `chat` 数组应为 0-based index 5，而事件实参为 `[6]`。这与删除后的 `chat.length = 6` 精确吻合，进一步确认 `MESSAGE_DELETED` 参数不是被删 message index。前端楼层号或人工显示的 `message[n]` 可能采用不同编号习惯，不作为内部 index 语义。
+
 - 现场 `integrity = null` 不是宿主能力结论。探针读取了不存在的 `context.chat_metadata`；当前 TT `getContext()` 对外字段是 `chatMetadata`，正式 Chat handle 还提供 `metadata.get()`。等待返修后重新取得 parent/branch metadata。
 - 现场 `history.summary = null` 也不是用户未开启“摘要功能”。探针误调用 `handle.history.summary()`；正确接口是 `handle.summary({ includeMetadata })`，它是聊天文件概况 API，不是 AI 剧情摘要。
 - TT 当前删除源码在 splice / 截断完成后 emit `MESSAGE_DELETED(chat.length)`。现有 `[6]` 又恰好与用户所删楼层可能使用的 index 6 数值重合，所以现场单样本无法仅凭数字判断含义；宿主源码明确其语义为删除后的总消息数。Deep delete 的具体来源定位仍需要前后状态比较，T-02A 不把该参数当稳定 message-index。
