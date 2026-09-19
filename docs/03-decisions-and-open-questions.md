@@ -134,3 +134,23 @@ T-02A 只回答以下事实问题：
 5. 文件改名、普通重新打开聊天是否保持 stableId 不变。
 
 T-02A 不设计数据库、不实现正式 Memory Engine、不冻结 Story/Branch/Revision schema；它只产出宿主能力矩阵和脱敏运行证据。若事件能力不足，正式 T-02 必须保留手动 repair/rescan/映射入口作为降级路径。
+
+
+## 8. TT `api.db` / TriviumDB 宿主能力取证（2026-09-19）
+
+2026-09-18，TauriTavern 合并 PR #17，将 TriviumDB 重构为原生 adapter crate 并通过 `window.__TAURITAVERN__.api.db` 暴露给扩展。该变化影响 T-03 技术栈评估，但不改变 T-02 的 Story / Branch / SourceMessage / Revision 领域契约。
+
+### 已验证宿主事实
+
+1. **不是 WebView / IndexedDB。** 前端 `api.db` 只是 JS bridge；实际 CRUD、向量检索、文本索引、图操作与 TQL 由 TT Rust 后端的 `tt-adapter-triviumdb` 执行。
+2. **是 TT data root 下的原生嵌入式数据库。** 每个 namespace 使用独立数据库实例／文件组，TT 文档给出的路径为 `_tauritavern/databases/db-<namespace>/`。
+3. **完整 TT 数据归档已纳入数据库。** 导出前会 flush，并在归档期间暂停数据库操作；导入按 namespace 替换文件组，导入后扩展需要重新 `open()`。
+4. **索引与真相源仍需分离。** TT 对 TriviumDB 0.8.8 的说明明确指出：手工 `indexText` / `indexKeyword` 不进入 WAL；批量索引后应调用 `buildTextIndex()`，并保留可重建索引的源文本。这与 B-02“原文／版本为正式数据，索引可重建”一致。
+5. **它不是外部数据库服务。** `window.__TAURITAVERN__.api.db` 只存在于 TT 宿主 WebView；独立 Mnemosyne Engine / MCP 进程不能把它当网络数据库直接连接。若使用，必须通过 TT Adapter 调用，或另做明确的宿主桥接。
+
+### 对 Mnemosyne 的当前影响
+
+- **T-02：不改。** canonical identity、Branch lineage、Revision、派生来源与有效历史语义仍由 Mnemosyne 自己定义。
+- **T-03：新增强候选。** 需要把“TT 内嵌 TriviumDB provider”与独立后端方案做对照实验；若验证通过，它可能在 TT-only / 本机模式下同时承担 JSON 真相数据、向量、文本和图查询，从而减少首版外部组件。
+- **跨平台约束不变。** 不能把 TT namespace、NodeId、TQL 或 TriviumDB 文件格式提升为 Mnemosyne 的跨平台正式身份／领域契约；它们最多属于 storage adapter / deployment provider。
+- **中文检索仍需 E-01 实测。** 上游 TriviumDB 当前文档描述 TextIndex 使用 AC + BM25 2-Gram，这对无空格中文很有潜力，但必须在 TT 实际固定版本与我们的中文 RP 测试集上验证，不直接当成方案已冻结。
