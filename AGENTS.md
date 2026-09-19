@@ -4,7 +4,7 @@
 
 先读取 README.md、对应 `stages/` 阶段导读、用户指定的当前 task；再按 task 读取架构、决策和契约相关章节。不要每次盲读全部历史聊天；报告使用的 commit 和文档版本。
 
-当前 T-02：`tasks/T-02-identity-version-context.md` 为 planned；Head 设计见 `docs/08-history-snapshot-and-rebuild.md`，用户已确认。`tasks/T-03-storage-foundation.proposal.md` 只是预备卡，不能自动执行或改成 planned。
+当前 T-02：`tasks/T-02-identity-version-context.md` 为 implemented_unverified，待 Chat review；Head 设计见 `docs/08-history-snapshot-and-rebuild.md`，用户已确认。`tasks/T-03-storage-foundation.proposal.md` 只是预备卡，不能自动执行或改成 planned。
 
 用户最新明确确认、当前决策记录及 task 优先于早期建议/示例；T-02 会同步更新 `docs/06-contracts.md`。发现冲突先报告，不拿旧 Leaf、宿主 generation ID 或服务器先行示意覆盖新确认。
 

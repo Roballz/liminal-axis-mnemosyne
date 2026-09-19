@@ -1,12 +1,12 @@
 
 # 人工示例，不是服务运行结果
 
-全部内容为虚构数据，只用于明确 v0.1 契约。
+全部内容为虚构数据，不是宿主或模型运行结果。
 
-`context-prepare.request.json` 与响应共享输入、分支、head 和 generation ID；请求指定期望位置，但设备能力尚未验证，响应明确提醒 Adapter 必须验证。
+`context-prepare.request.json` 与响应使用 T-02 schema_version=1；响应 echo 完整回显 Mnemosyne run、分支快照、绑定/观察代次、记忆视图、策略及输入指纹。固定 UUID 仅为可复现 fixture，生产身份使用安全随机 UUIDv4。测试从相同 fixture 重建状态，核对指纹、引用及应用门禁；role/位置不代表设备验证。
 
-`memory-echoes.module.json` 展示本地持久化、自定义字段、默认不向副 API 发送、作者字段排除，以及可独立配置的注入位置。它默认允许可见字段注入正文，因此不属于严格不离机模式。
+`memory-echoes.module.json` 仍是后续模块的 0.1-draft UX 样例，不属于 T-02 校验器。它展示字段级发送权限、作者字段排除；允许普通字段注入远程正文，因此不属于严格不离机模式。V1 的普通剧情采用上帝视角，不按角色知情过滤。
 
-`change-proposal.json` 展示未提交提案，须确认与版本检查后才能变更；不是已经调用模型或应用修改。
+`change-proposal.json` 仍是后续模块提案样例，须确认后才能变更；不是 T-02 command，也未调用模型或应用修改。其中短 ID 不可作为 schema_version=1 领域身份导入。
 
-正式 schema、HTTP 客户端、数据迁移及完整验证器均待开发。
+T-02 形状/跨引用/状态转换校验入口见 `packages/contracts/index.mjs`。HTTP、正式导入器、持久化恢复、模块 schema 和最终宿主注入仍未实现。旧 head_revision/generation_id/input_hash 查询示意已从当前 prepare 样例移除；历史证据不重写。

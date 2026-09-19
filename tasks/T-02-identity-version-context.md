@@ -1,6 +1,6 @@
 # T-02：身份、历史版本与上下文契约
 
-状态：planned
+状态：implemented_unverified（实现与本地测试完成，交 Chat review）
 
 创建：2026-09-19。规划阅读基线：`dd62510852c840e8cc2510348bbc90fa6d284b72`；开工必须读取包含本任务及本轮确认的最新提交。
 
@@ -175,4 +175,80 @@ schema 搬写、字段注释、文档样例相对常规。模型更强不替代�
 
 ## 实测/实施回报
 
-尚未执行。Codex 在实际完成后按 `tasks/TEMPLATE.md` 填写；本卡创建时所有测试均 pending。
+### 开工基线与范围（2026-09-19）
+
+- Git：main，从 214dcf9 快进至 `1f01168b0757b99b73173519bb347ba188f49fc4`；施工收尾时未 commit/push，随后用户明确要求提交并推送以供 Chat 线上 review。原工作树只有未跟踪 `.codex/`，排除在提交之外。
+- 已读：README、AGENTS、S-A、当前 T-02、架构 0～4、03/06/07/08、路线 T-02/T-03、T-02A 最终 review 和脱敏 trace、examples、模板/CHANGELOG。T-03 仅只读了解依赖。
+- 文档输入：架构/决策 v0.1 及 2026-09-19 收口，08 accepted Head；交付的 06 为 v0.2/schema_version=1。宿主输入沿用 T-02A verified 证据，没有重做现场取证。
+- 已知环境：Windows PowerShell、Node v24.19.0；仓库无 package.json，不臆造 npm 命令，无新安装依赖。原拟逻辑500～800行、校验250～400行、测试/fixture600～900行，先 C2 再补 C1/C3。无必需输入缺失。
+
+### 实际改动与代码量
+
+- 新增 `packages/contracts/`：primitives（UUID/JCS/指纹/错误）、schema（精确字段形状）、history（不可变快照/分块共享/固定 fork/幂等/expected Head）、memory（来源/coverage/分支视图/逐层重建计划）、context（prepare/绑定/确认后 regenerate 解释）、transfer（逻辑包及跨引用校验）、index 和 README。
+- 测试先覆盖父线改共同历史、跨 User fork cutoff、区间插入、非连续事件复核、上级/累计状态逐层失效、丢确认幂等重试和两种异步过期判定；然后补形状、导出、样例和异常输入。
+- 实际 .mjs 行数（含空行/注释）：逻辑及跨对象校验697行，形状schema129行；测试451行、fixture84行，共535行；合计1361行。不含文档/JSON。较开工估计更少，无凑行数扩展。
+- 更新 06、当前 prepare request/response、examples说明及模块样例普通可见性；同步 README、架构相关旧术语、路线、03任务进度、S-A、AGENTS当前状态和CHANGELOG。未改 accepted 决定、历史原始证据、探针或 T-03 卡。
+
+### 环境、命令与测试证据
+
+所有最终测试为本机纯逻辑，不是 TT/Android 或生产 IO 结果。
+
+| 实际命令 | 结果 |
+| --- | --- |
+| `git pull --ff-only` | 首次 FETCH_HEAD 权限失败；获授权后 fetch 成功，但本地 main 无 upstream |
+| `git pull --ff-only origin main` | 获授权后快进 214dcf9 → 1f01168；未修改远程/跟踪配置 |
+| `node --version` | v24.19.0 |
+| `node --test packages/contracts/tests/contracts.test.mjs` | 最终32/32通过，0失败/跳过；A01～A18和额外反例，约1.14秒仅供本次运行记录 |
+| `node --test apps/tt-adapter-probe/tests/probe.test.js` | 18/18通过，0失败/跳过 |
+| `node --check apps/tt-adapter-probe/index.js` | 通过 |
+| `Get-ChildItem packages/contracts -Recurse -Filter *.mjs … node --check` | 9个.mjs语法检查通过；完整可复现命令见下 |
+| `git diff --check` | 授权宿主身份后通过；仅LF→CRLF提示，无空白错误 |
+
+```powershell
+Get-ChildItem packages/contracts -Recurse -Filter *.mjs | ForEach-Object { node --check $_.FullName; if ($LASTEXITCODE -ne 0) { throw "Syntax check failed: $($_.FullName)" } }
+```
+
+过程中真实失败：测试 runner 在沙箱首次 spawn EPERM，获授权后重跑；首轮25/26为非连续 fixture 错用默认 interval，修正后通过；补充样例测试曾因相对路径多一层报 ENOENT，已修正重跑。Git 后续沙箱身份出现 dubious ownership，改为授权宿主只读检查，未修改全局 safe.directory。没有把失败记录当通过。
+
+可复现证据：`packages/contracts/tests/contracts.test.mjs` 测试名含 A 编号，fixture 每次重置固定 UUID序列；组合测试固定 seed=20260919，30步保留所有旧快照并校验逻辑往返。没有保存真实剧情/模型请求/凭证或生产日志。
+
+### A01～A18 对应
+
+| 范围 | 已运行断言 |
+| --- | --- |
+| A01～A03 | 空历史/UUID/重复与错属引用/计数/清单环；深层edit保留count与尾部却变Head；空/User/Assistant fork及锚反例 |
+| A04～A06 | 父线edit/delete与子线隔离；旧swipe复用及restore新快照/旧run不复活；同文本不同身份与重排/映射缺失 |
+| A07～A08 | 丢确认重试先于expected Head；同键异payload冲突；两个竞争操作/失败校验/ID碰撞不改原状态 |
+| A09～A12 | 回合→大小总结/Event/累计状态依赖序；额外实际前文也失效；coverage中插删重排；范围外推进可用；跨cutoff拒绝；修摘要不改正文Head |
+| A13～A15 | derived-only与悬空/隐私区分；必需待重建不伪装empty；prepare各相关身份/输入与pending变化；后台按自身来源判断；JCS顺序/数字/非法Unicode反例 |
+| A16～A18 | T-02A失败/中间删除/成功Regenerate解释；非标准回合保留来源不伪造配对；逻辑往返保留ID/fork/操作结果/记忆选择并拒绝损坏 |
+
+额外断言：上级不能采用生成基线之外的传递前文；source对象键顺序不改变引用匹配；私有/禁发/重点详情压缩/rerank冒充拒绝；当前JSON样例真实指纹与canApply通过。测试数量不是性能或生产完备性证明。
+
+### 观察事实与设计落实分开
+
+- 本次观察：Node 能运行零安装依赖的校验器/纯模型；克隆返回的新状态与冻结旧状态在上述序列中满足不变量；只有内存提交边界得到测试。
+- 宿主事实来自既有 T-02A：stableId是宿主证据；Delete参数是删除后长度；成功Regenerate可删/重建且候选数不增；summary可滞后。此次未接 TT，不新增宿主 API 结论。
+- 设计落实：采用已确认的固定snapshot/fork、User+Assistant回合、分支相对有效性、来源/coverage逐层重建。新增技术字段拼写、严格 schema、错误码、指纹投影交本次 review，不把设计 accepted 当实现 verified。
+
+### 24 项与偏差/未验证
+
+1～3：Story/Branch/显式绑定和固定fork；4～12/17：来源版本/清单/Head转换和隔离；13～14：input_refs/coverage、普通TurnMemory和Summary/Event/Record；15～18：ContextBlock/run/分离视图与指纹；19～21：已知映射/历史操作去重/provenance；22～24：显式derived-only、V1普通可见性、范围化未就绪/修复入口。均有最小契约/测试，不宣称24项生产功能全部实现。
+
+- 技术偏差：采用可执行JS shape schema，而非新增TS工具链或通用JSON Schema库；对象/状态转换同样做机器校验。无package.json/依赖下载。
+- 安全下界待 review：derived-only 当前只在声明的精确 Branch/snapshot完整视图可用，不自动扩展到未来Head/子线；非标准分组unsupported保留全部来源；成员事件span变化needs-review，不自动吸纳新成员。上述不是永久产品拒绝规则。
+- pending：数据库/块树/持久化与崩溃恢复、TT新联调/Android、百万/亿字性能、完整模糊导入/repair-rescan、真实摘要与自动重建、完整查询编译/预算/字段权限UI、认证/HTTP、模块存储与完整生产备份、自动GC/purge。未调用模型，未触碰真实存档。
+- 包只接内存JSON值；生产文本入口的重复key/大小限制、跨语言JCS及资源上限尚未实现。Node crypto需在B运行时另适配/验证；不能直接当作TT WebView可导入库。
+- archiveMemory/selectMemory是逻辑步骤，无持久化作业账本或通用写入幂等包装；需要调用者显式选适用版本。后台自动找旧版本、实际重建与重放执行仍后续，当前仅有效性/计划。
+
+### 契约与数据影响、回退
+
+06 v0.2/schema_version=1取代旧人工prepare示意：head_revision/generation_id/input_hash/memory_revision不机械改前缀，分别对应真实snapshot、Mnemosyne run、用途指纹及分支记忆视图。Leaf与角色知情示意按新决定对齐；模块/提案JSON仍标draft，不冒充生产schema。
+
+无线上协议/生产数据写入，无真实存档迁移。回退时撤销本次新增 `packages/contracts/` 及配套文档/样例diff，恢复到1f01168对应内容；先保护用户后来改动，不用全仓库reset。保留原探针和 .codex，勿删除聊天或清理共享历史。若代码尚未提交，按本次文件清单逐项撤回；未来提交后可单独revert该实现提交。
+
+### 下一任务依赖与 Chat review 事项
+
+T-03 文件保持原样proposal，未执行、未改planned、未创建新task。review后由Chat/用户修订启用；需提供精确ID/完整枚举、不可变冲突保护、Head/操作结果/重建标记的完整持久发布、失败恢复、稳定导出与空环境恢复、索引重建及设备实测。内存双条目叶块不是冻结的生产参数，逻辑包不包含未来全部模块/作业状态。
+
+请Chat审查：正式技术字段/指纹投影和错误码；derived-only精确快照下界后续如何扩展；required_memory_revision_ids作为本轮必需范围的界面/调用约定；是否接受当前Node参考模型/机器schema作为T-03测试oracle。非标准分组/模糊阈值/GC/品牌/完整模板仍按原未决表，不由本轮静默定案。最终保持 implemented_unverified。

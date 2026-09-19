@@ -1,127 +1,50 @@
 {
-  "api_version": "v1-draft",
-  "illustrative_only": true,
-  "story_id": "story-demo",
-  "branch_id": "branch-main",
-  "head_revision": "head-101",
-  "generation_id": "gen-demo-1",
-  "input_hash": "sha256:34056d11d304f8eb438709f6a9609d283c4609a9c039b3b9e6707f04a05732e7",
-  "memory_revision": "memory-7",
-  "policy_version": "policy-3",
-  "coverage": {
-    "archive_complete": true,
-    "derived_through_message_id": "msg-100",
-    "pending_source_refs": [
-      {
-        "message_id": "msg-101",
-        "revision_id": "msg-101-r1"
-      }
+  "schema_version": 1,
+  "echo": {
+    "schema_version": 1,
+    "story_id": "st_00000000-0000-4000-8000-000000000001",
+    "branch_id": "br_00000000-0000-4000-8000-000000000002",
+    "head_snapshot_id": "hs_00000000-0000-4000-8000-000000000009",
+    "run_id": "run_00000000-0000-4000-8000-00000000000f",
+    "binding_id": "hb_00000000-0000-4000-8000-00000000000e",
+    "binding_generation": 0,
+    "observation_generation": 0,
+    "memory_view_version": "mv_00000000-0000-4000-8000-00000000000d",
+    "policy_version": "fixture-policy-v1",
+    "cutoff_length": 2,
+    "user_input": "Fictional input",
+    "recent_source_refs": [
+      { "message_id": "msg_00000000-0000-4000-8000-000000000003", "revision_id": "rev_00000000-0000-4000-8000-000000000004" },
+      { "message_id": "msg_00000000-0000-4000-8000-000000000005", "revision_id": "rev_00000000-0000-4000-8000-000000000006" }
     ],
-    "notes": [
-      "本条用户输入未产生叶子；本次已作为查询使用。"
-    ]
+    "memory_tokens_max": 1000,
+    "placement_profile": "fixture-v1",
+    "required_memory_revision_ids": ["mr_00000000-0000-4000-8000-00000000000c"],
+    "input_fingerprint": "sha256:prepare-input:v1:fc8e2fac571ef11ecbe602fb2ca96c7749b5fed2a873a30e85875a5d7e18106d"
   },
+  "status": "ready",
   "blocks": [
     {
-      "block_id": "record:jade:stable",
-      "kind": "record_stable",
-      "content_revision": "jade-r2",
-      "origin": "user_defined",
-      "content": "物品：青纹玉佩。外缘有一道细裂纹，与同名仿品区分。",
-      "source_refs": [],
-      "record_refs": [
-        {
-          "record_id": "jade",
-          "revision_id": "jade-r2"
-        }
-      ],
-      "activation_reasons": [
-        "pinned_detail"
-      ],
-      "residency": "detail",
-      "placement": {
-        "role": "system",
-        "position": "before_history"
-      },
-      "priority": 100,
-      "compressible": false,
-      "token_count_estimate": {
-        "value": 55,
-        "exact": false,
-        "method": "illustrative"
-      }
-    },
-    {
-      "block_id": "event:jade-promise:evidence",
-      "kind": "narrative_evidence",
-      "content_revision": "event-jade-r1",
+      "block_id": "cb_00000000-0000-4000-8000-000000000010",
+      "kind": "TurnMemory",
+      "content": "Fictional memory",
+      "content_revision": "mr_00000000-0000-4000-8000-00000000000c",
       "origin": "source_derived",
-      "content": "关于玉佩归还的约定：此前双方约定在下一次会面时归还；该约定发生于边关寄存之后。此处仅为接口示例，不是真实聊天内容。",
-      "source_refs": [
-        {
-          "message_id": "msg-020",
-          "revision_id": "msg-020-r1",
-          "projection": "clean-body-v1"
-        },
-        {
-          "message_id": "msg-022",
-          "revision_id": "msg-022-r1",
-          "projection": "clean-body-v1"
-        }
+      "input_refs": [
+        { "type": "memory", "memory_id": "mem_00000000-0000-4000-8000-00000000000b", "memory_revision_id": "mr_00000000-0000-4000-8000-00000000000c" }
       ],
-      "activation_reasons": [
-        "exact_entity",
-        "lexical_match",
-        "bounded_event_expansion"
-      ],
-      "residency": "none",
-      "placement": {
-        "role": "user",
-        "position": "at_depth",
-        "depth": 0
-      },
-      "priority": 60,
-      "compressible": true,
-      "token_count_estimate": {
-        "value": 120,
-        "exact": false,
-        "method": "illustrative"
-      }
+      "source_declaration": null,
+      "activation_reasons": ["exact_match"],
+      "placement": { "role": "user", "position": "at_depth", "depth": 0 },
+      "priority": 10,
+      "compressible": false,
+      "residency": "detail",
+      "token_count_estimate": { "value": 10, "exact": false, "method": "illustrative" },
+      "visibility": "normal",
+      "send_allowed": true
     }
   ],
-  "warnings": [
-    {
-      "code": "EXAMPLE_NOT_EXECUTED",
-      "message": "本响应为人工构造的契约示例，不表示运行测试成功。"
-    },
-    {
-      "code": "HOST_PLACEMENT_UNVERIFIED",
-      "message": "Adapter 必须在实际 TT 版本验证 role 和 depth，未验证不能直接视为可用。"
-    }
-  ],
-  "trace": {
-    "run_id": "trace-demo-1",
-    "strategy_version": "draft-0.1",
-    "dense_status": "not_run_in_fixture",
-    "lexical_status": "illustrative",
-    "fusion_status": "not_run_in_fixture",
-    "rerank_status": "unavailable",
-    "candidates": [
-      {
-        "source_ref": {
-          "message_id": "msg-022",
-          "revision_id": "msg-022-r1"
-        },
-        "dense_score": null,
-        "lexical_score": null,
-        "lexical_rank": 1,
-        "rrf_score": null,
-        "rerank_score": null,
-        "rerank_status": "unavailable",
-        "upgrade_reason": "explicit_detail_request_with_available_source"
-      }
-    ],
-    "tokens_estimate": 175,
-    "measured_latency_ms": null
-  }
+  "warnings": ["ILLUSTRATIVE_NOT_A_HOST_RESULT"],
+  "rerank_status": "not_run",
+  "rerank_score": null
 }

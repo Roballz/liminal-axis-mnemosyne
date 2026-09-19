@@ -33,32 +33,32 @@
       "label": "发生时间",
       "type": "story_time",
       "required": false,
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     },
     {
       "field_id": "surface_echo",
       "label": "表层残响",
       "type": "multiline_text",
       "required": true,
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     },
     {
       "field_id": "trigger",
       "label": "触发因素",
       "type": "text",
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     },
     {
       "field_id": "related_entities",
       "label": "相关人物或物品",
       "type": "entity_ref_list",
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     },
     {
       "field_id": "interpretation",
       "label": "当前解读",
       "type": "multiline_text",
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     },
     {
       "field_id": "epistemic_status",
@@ -70,7 +70,7 @@
         "助手推测",
         "用户设定"
       ],
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     },
     {
       "field_id": "resolution",
@@ -81,13 +81,13 @@
         "部分解释",
         "已恢复"
       ],
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     },
     {
       "field_id": "sources",
       "label": "来源",
       "type": "source_ref_list",
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     },
     {
       "field_id": "author_truth",
@@ -100,9 +100,9 @@
       "field_id": "payoff_sources",
       "label": "兑现来源",
       "type": "source_ref_list",
-      "model_visibility": "viewpoint_allowed"
+      "model_visibility": "normal"
     }
   ],
-  "extraction_instructions": "只记录本轮明确呈现的残响，不由作者真相补全角色未知内容。未经单独授权，不向任何副 API 发送本模块内容。",
+  "extraction_instructions": "记录有效正文已发生的内容，不把作者私有计划写成已发生事实。V1 普通剧情不按角色知情过滤；作者私有字段不发送。未经单独授权，不向任何副 API 发送本模块内容。",
   "schema_changes_require_confirmation": true
 }

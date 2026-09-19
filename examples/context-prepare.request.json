@@ -1,67 +1,22 @@
 {
-  "api_version": "v1-draft",
-  "story_id": "story-demo",
-  "branch_id": "branch-main",
-  "head_revision": "head-101",
-  "generation_id": "gen-demo-1",
-  "input_hash": "sha256:34056d11d304f8eb438709f6a9609d283c4609a9c039b3b9e6707f04a05732e7",
-  "query": {
-    "text": "那枚寄存在边关的玉佩，当时答应什么时候归还？",
-    "rewrite_policy": "single_pass_optional",
-    "max_vector_queries": 5
-  },
-  "cutoff": {
-    "message_id": "msg-101",
-    "revision_id": "msg-101-r1",
-    "inclusive": true
-  },
-  "recent_visible_source_refs": [
-    {
-      "message_id": "msg-100",
-      "revision_id": "msg-100-r1",
-      "projection": "clean-body-v1"
-    },
-    {
-      "message_id": "msg-101",
-      "revision_id": "msg-101-r1",
-      "projection": "raw-v1"
-    }
+  "schema_version": 1,
+  "story_id": "st_00000000-0000-4000-8000-000000000001",
+  "branch_id": "br_00000000-0000-4000-8000-000000000002",
+  "head_snapshot_id": "hs_00000000-0000-4000-8000-000000000009",
+  "run_id": "run_00000000-0000-4000-8000-00000000000f",
+  "binding_id": "hb_00000000-0000-4000-8000-00000000000e",
+  "binding_generation": 0,
+  "observation_generation": 0,
+  "memory_view_version": "mv_00000000-0000-4000-8000-00000000000d",
+  "policy_version": "fixture-policy-v1",
+  "cutoff_length": 2,
+  "user_input": "Fictional input",
+  "recent_source_refs": [
+    { "message_id": "msg_00000000-0000-4000-8000-000000000003", "revision_id": "rev_00000000-0000-4000-8000-000000000004" },
+    { "message_id": "msg_00000000-0000-4000-8000-000000000005", "revision_id": "rev_00000000-0000-4000-8000-000000000006" }
   ],
-  "knowledge_scope": {
-    "viewpoint_entity_ids": [
-      "entity-protagonist"
-    ],
-    "allow_author_only": false
-  },
-  "budgets": {
-    "memory_tokens_max": 4000,
-    "pinned_tokens_reserved": 800,
-    "evidence_expansion_tokens_max": 1200,
-    "rerank_candidate_max": 20,
-    "rerank_input_tokens_max": 20000
-  },
-  "host_capabilities": {
-    "adapter": "tt-probe-draft",
-    "verified_on_device": false,
-    "requested_placements": [
-      {
-        "role": "system",
-        "position": "before_history"
-      },
-      {
-        "role": "user",
-        "position": "at_depth",
-        "depth": 0
-      },
-      {
-        "role": "system",
-        "position": "at_depth",
-        "depth": 0
-      }
-    ]
-  },
-  "failure_mode": "strict",
-  "local_module_policy": {
-    "remote_inclusion": false
-  }
+  "memory_tokens_max": 1000,
+  "placement_profile": "fixture-v1",
+  "required_memory_revision_ids": ["mr_00000000-0000-4000-8000-00000000000c"],
+  "input_fingerprint": "sha256:prepare-input:v1:fc8e2fac571ef11ecbe602fb2ca96c7749b5fed2a873a30e85875a5d7e18106d"
 }
