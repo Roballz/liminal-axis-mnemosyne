@@ -42,3 +42,5 @@
 - T-02A 探针升至 `0.1.3`：trace 导出按事件序号排序，`windowInfo.chatRef` 仅保留类型、计数与标识符哈希；`integrity` 不可读时以 `null` 表示未知。
 - T-02A review 返修 `0.1.4`：以 `handle.metadata.get()` / `context.chatMetadata` 交叉检查 integrity；改用 `handle.summary({ includeMetadata: false })`。旧 null 是探针路径错误，不作为宿主限制。Delete 参数按删除后 chat.length 处理，Swipe 事件定位与模型失败分开记录。增加标题栏拖动、可选邻接观察索引及 7 项回归测试（总计 18/18）；成功 Regenerate、身份补采及明确 Delete 样本仍待用户实机验证。
 - T-02A `0.1.4` 实机补测到齐：metadata 三方一致、summary 稳态计数一致、第三次 Regenerate 成功（同 index4，候选1→1，正文改变），明确 Delete 为 N5/k3/参数4并观测邻接平移；记录前两轮失败、过渡采样与 summary 时差，面板拖动及最小化不溢出通过。任务待 Chat review，无 schema 决定。
+
+- T-02A 二次 Chat review 通过：核对 `214dcf9` 的 metadata/summary 修复、明确 Delete 样本、成功 Regenerate、18/18 测试与 UI 真机确认，任务升为 `verified`；正式 T-02 仍待 Chat／用户完成方案攻坚后创建。
