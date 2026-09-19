@@ -94,7 +94,7 @@ T-02 应重新命名并定义领域对象；当前名称保持 TBD，不为兼�
 
 ## 当前阻塞
 
-- 无。T-01 已通过二次 Chat review；下一步进入 T-02 方案与任务卡规划。
+- 无。T-01、T-02A 均已通过 Chat review；下一步进入正式 T-02 方案攻坚与任务卡规划。
 
 ## T-02A 探针实施与现场检查点（2026-09-19）
 
@@ -104,4 +104,4 @@ T-02 应重新命名并定义领域对象；当前名称保持 TBD，不为兼�
 
 2026-09-19 review 校正：Delete 参数是删除后的 chat.length（review 源码事实），不足以独自定位具体来源；Swipe 事件／候选定位已可接受。`0.1.4` 修正 metadata 和 summary 读取路径，增加面板拖动；parent/child 身份、成功 Regenerate 和任务卡追加的明确 Delete 样本待实测，不把旧 null 当作宿主不可用。
 
-0.1.4 后续实机回传：身份与 summary 修复已核对成功，第三次 regenerate 在 index4 得到新非空正文（候选数仍1），明确删除 index3 时事件参数4且count5→4。事件中 summary 可滞后于 context，稳定 host 后一致；用户确认面板拖动和窗口最小化不溢出。等待 Chat review，不再要求重做以上宿主实验。
+0.1.4 后续实机回传：身份与 summary 修复已核对成功，第三次 regenerate 在 index4 得到新非空正文（候选数仍1），明确删除 index3 时事件参数4且count5→4。事件中 summary 可滞后于 context，稳定 host 后一致；用户确认面板拖动和窗口最小化不溢出。T-02A 已于 2026-09-19 二次 Chat review 通过并升为 `verified`。
