@@ -117,7 +117,7 @@ D 仅留入口，不提前自动删旧总结或把所有内容归到一个“永
 4. **Run / Generation identity。** 候选方案：每次生成前拦截由 Mnemosyne 自己创建 run_id，不依赖 TT 原生 generation id；生命周期覆盖 prepare → context compile/inject → generation end/cancel。
 5. **Branch History Revision / Head snapshot。** 候选方案：每次会改变当前有效历史的 append/edit/swipe/delete/branch mapping 都推进内部 revision/epoch；生成开始时捕获它，结果返回前复核。楼层号和剧情时间只用于 UI/日志，不作为唯一并发控制键。
 6. **Derivation input hash。** 候选方案：hash 用于幂等/缓存，不充当消息身份。输入应至少包含实际 source revision IDs + 规范化正文 + derivation schema/prompt version；“相同楼层号 + 相同文本 hash”不足以跨 Branch 唯一判断同一来源。
-7. **TT chat_metadata.integrity 的角色。** 已确认它是当前 TT character chat stableId() 的来源。用户已人工检查约 7～8 个实际存档，其中包含多个 Branch，所见 integrity 均不重复；这说明当前实际环境中它很可能是聊天文档级稳定身份。由于源码分支路径的 metadata 继承行为仍可能受保存端重写影响，T-02A 再做一次受控 parent/child 实测后冻结其 adapter 语义。即便验证为文档级唯一 ID，它仍只作为宿主稳定 ID，不替代 Mnemosyne 的 Story/Branch 主键。
+7. **TT chat_metadata.integrity 的角色。** T-02A 已真机确认：当前 TT 2.2.0 dev/Canary 中，parent / child 的 stableId 可区分，且 stableId、`handle.metadata.get().integrity`、`context.chatMetadata.integrity` 在各自稳定样本中一致；rename / reopen 后 stableId 保持。故它可冻结为 TT Adapter 的宿主稳定身份 / provenance 信号。它仍不替代 Mnemosyne 自己的 Story / Branch / SourceMessage 永久主键，也不能单靠它决定跨平台导入是否应合并。
 8. **旧档与重复导入匹配。** integrity、内容 hash、顺序前缀、文件名/chatRef 都可作证据，但最终仍保留用户确认和手动映射；自动判定规则待集中攻坚。
 
 
