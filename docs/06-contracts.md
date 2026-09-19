@@ -1,6 +1,6 @@
 # T-02 最小可执行契约
 
-版本：v0.3 / schema_version=1（逻辑包 format_version=2）；2026-09-19；状态：implemented_unverified，待 Chat 二次 review。返修依据见 notes/t-02-chat-review.md 的 R1～R4。
+版本：v0.3 / schema_version=1（逻辑包 format_version=2）；2026-09-19；状态：implemented_unverified，R1～R4已由Chat二次review复核，R5返修待复核。依据见 notes/t-02-chat-review-round2.md。
 
 规则依据：03 的 T02-D01～D25 / P01、08 的 accepted Head 设计。实现入口为 `packages/contracts/index.mjs`，机器形状规范为 `schema.mjs` 的显式字段检查器；另有跨对象及转换校验。不是 JSON Schema 标准文件，不用静态类型冒充运行时校验。范围限 Node 内存参考模型，不是生产 Engine/数据库/HTTP SDK。
 
@@ -63,6 +63,8 @@ input_refs 两种明确形状：
 - validity和planner共用dependencyTarget：current取当前selection，checkpoint取固定引用，再沿该分支显式corrections解析。实际引用与解析目标不同则旧结果待重建。实际执行图用active/done三色拓扑检查，合法共享依赖只访问一次；选择/纠错产生环则发布前NEEDS_RESOLUTION，validateState也拒绝，防御性planner返回blocked且无rebuild队列。
 
 corrections是版本级纠错关系，不是字段级状态依赖系统。正文编辑仍由原来源/coverage判失效；不需要把每次正文变更强制登记成一次提取纠错。历史归档校验只看当时不可变来源是否成立，当前选择图校验另做，不能用现在的selection否定合法旧档案的存在。
+
+R5交叉不变量：每个selection选中的根版本，沿本分支corrections解析后必须仍为自身。旧版本或纠错链中间版本仍被选中的矛盾状态，validateState/exportLogical/importLogical以NEEDS_RESOLUTION拒绝，即使导入checksum正确；不自动改selection或删corrections。memoryStatus对已被纠正的旧版本返回needs-rebuild，因此绕过导入的调用也不能通过prepareAvailability/canApply注入旧摘要；planner对矛盾视图返回blocked且无重建队列。此规则不要求所有历史版本等于当前selection，也不要求每条历史纠错链终点被选中：合法advance留下的未纠正检查点、历史检查点纠正后的非当前终点仍可按原规则使用，父线纠错不改变已固定子线。字段及逻辑包版本不变。
 
 coverage 含 mode=interval/members、members（当时有序版本集合）、boundary（首尾 message_id；空为 null）、observed_span（当时首尾之间全部版本）。interval 的 members 必须等于整段；members 不要求连续，但 observed_span 用来检测中间新增/删除/重排并请求局部关联复核，不自动吸收新成员。
 

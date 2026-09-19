@@ -144,6 +144,11 @@ export function dependencyTarget(view, ref) {
   }
   return target;
 }
+function isUncorrected(view, revisionId) {
+  return dependencyTarget(view, {
+    dependency_mode: 'checkpoint', memory_revision_id: revisionId,
+  }) === revisionId;
+}
 export function correctMemory(original, branchId, oldId, replacementId, expectedView, makeId = newId) {
   const view = get(original.views, branchId), old = get(original.memories, oldId);
   const replacement = get(original.memories, replacementId);
@@ -176,7 +181,11 @@ export function checkExecutionGraph(state, branchId) {
     done.add(key);
     order.push(key);
   }
-  Object.values(view.selections).forEach(visit);
+  Object.values(view.selections).forEach(key => {
+    requireThat(isUncorrected(view, key), 'NEEDS_RESOLUTION',
+      'Selected revision is redirected by corrections', { branch_id: branchId });
+    visit(key);
+  });
   return order;
 }
 export function memoryStatus(state, revisionId, branchId, cutoffLength, path = new Set()) {
@@ -189,7 +198,10 @@ export function memoryStatus(state, revisionId, branchId, cutoffLength, path = n
   const memory = state.memories[revisionId];
   if (!memory || path.has(revisionId)) return 'needs-resolution';
   if (memory.story_id !== branch.story_id) return 'out-of-scope';
-  try { checkMemory(state, memory); } catch { return 'needs-resolution'; }
+  try {
+    checkMemory(state, memory);
+    if (!isUncorrected(get(state.views, branchId), revisionId)) return 'needs-rebuild';
+  } catch { return 'needs-resolution'; }
   if (!memory.recall_enabled || memory.visibility === 'private') return 'excluded';
   if (memory.origin === 'derived_only') {
     if (memory.scope_branch_id !== branchId) return 'out-of-scope';

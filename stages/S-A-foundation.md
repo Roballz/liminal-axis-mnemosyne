@@ -15,7 +15,7 @@
 | T-00 ✅ | 固定真实 TT／柏宝书／测试数据与副 API 基线 | verified；不再猜安装版本、存储模式或输入 |
 | T-01 ✅ | 做最小 TT Adapter 探针 | verified；await、payload、取消与 request gate 边界已验证 |
 | T-02A ✅ | TT 宿主身份与变更事件验证 | verified；stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 边界 |
-| T-02 ↺ | 身份、历史版本与上下文的最小可执行契约 | implemented_unverified；二次 review 已复核 R1～R4、独立重跑42项契约通过；剩余R5：导入纠错/当前选择一致性 |
+| T-02 ↺ | 身份、历史版本与上下文的最小可执行契约 | implemented_unverified；二次review已复核R1～R4；R5返修后Codex回归48项契约+18项探针通过，待Chat复核 |
 | T-03 ◇ | 可迁移、可恢复的存储地基 | proposal；`tasks/T-03-storage-foundation.proposal.md`，T-02 review 后修订启用 |
 
 T-03 预备卡是用户本轮明确要求由 Chat 提前准备的方案；它存在不等于可施工。Codex 不自动生成下一张卡、不自动把 proposal 改成 planned。
@@ -48,7 +48,7 @@ T-02 不沿用柏宝书 `Leaf` 作为正式对象名；普通派生按 User + As
 
 ## 6. 当前阻塞、未决项与收尾门禁
 
-T-02 当前剩余验收阻塞为 **R5：corrections 与 selections 的导入交叉不变量**。刻意构造“旧版本仍被选中、同时已被纠正到新版本”的语义矛盾包，当前 validateState/importLogical 仍接受，最终 canApply 也允许旧摘要。需在原 T-02 内补齐状态/导入一致性校验与最终放行保护；复现步骤、实际输出及有界返修要求见 `notes/t-02-chat-review-round2.md`。这不是普通 selectMemory 自然产生该状态的证据，也不是要求现在实现生产存储恢复。R1～R4 不重写，T-03 不改、不执行。
+T-02 当前剩余验收门禁为 **R5返修的Chat复核**。二次review基线中，刻意构造“旧版本仍被选中、同时已被纠正到新版本”的语义矛盾包，validateState/importLogical及最终canApply曾允许旧摘要；原始证据见 `notes/t-02-chat-review-round2.md`。Codex现补齐所选根版本不得被corrections重定向的不变量及最终有效性保护，新增6项确定性测试，原42项不改且回归通过。实现证据见T-02返修回报，尚非Chat验收通过。这不是普通selectMemory自然产生该状态的证据，也不代表生产存储恢复已实现。R1～R4不重写，T-03不改、不执行。
 
 无新增宿主事实阻塞。T-01 的 gate 竞态和 T-02A 的 API 路径/成功 Regenerate/Delete 补证已通过 review，不重做无关探针。
 

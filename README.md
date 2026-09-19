@@ -25,7 +25,7 @@
 | `tasks/T-03-storage-foundation.proposal.md` | T-03 预案；T-02 review 后修订启用，不能自动施工 |
 | `docs/08-history-snapshot-and-rebuild.md` | 已接受的 Head、正文权威、来源重建与分叉边界 |
 | `docs/03-decisions-and-open-questions.md` | 当前决定、未决项与实验门禁 |
-| `docs/06-contracts.md` | v0.3 / schema_version=1、逻辑包v2；R1～R4返修待二次review |
+| `docs/06-contracts.md` | v0.3 / schema_version=1、逻辑包v2；R5返修待Chat复核 |
 | `docs/07-t02-contract-proposal.md` | 首轮候选讨论；新确认以 03/08 为准 |
 | `docs/01-architecture.md`、`docs/02-roadmap.md` | 总体架构与后续路线；当前进度以阶段导读和 task 为准 |
 | `docs/04-working-with-chatgpt-codex.md` | 协作与交接流程 |

@@ -1,5 +1,11 @@
 # 更新记录
 
+## 2026-09-19 T-02 R5 返修（implemented_unverified）
+
+- 基线28b94d4：补齐selections/corrections交叉不变量，拒绝正确checksum但所选根版本已被纠正的矛盾逻辑包；最终注入检查同样拒绝已纠正旧摘要。
+- 保留合法未纠正历史检查点、非当前历史纠错终点及固定子线隔离，不删除selection校验，不重写R1～R4；字段/schema/逻辑包版本不变。
+- 新增6项确定性反例与正例，旧实现6项均失败，修复后原42项+新增6项契约及18项探针通过。未执行持久化/TT/手机验证，T-03未修改、未执行，待Chat复核。
+
 ## 2026-09-19 T-02 R1～R4 返修（implemented_unverified）
 
 - 基线a679a20，落实Chat组合反例：同Record显式checkpoint/advance、分支corrections与历史检查点纠错；current依赖仍复核selection，执行图采用active/done检测环，拒绝伪拓扑顺序。

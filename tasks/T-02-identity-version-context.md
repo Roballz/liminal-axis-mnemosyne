@@ -300,3 +300,42 @@ Windows PowerShell / Node v24.19.0，纯虚构数据，无宿主部署/模型请
 - 回退：单独revert本次返修提交，保留a679a20基线和原v1逻辑包；已产生的v2包先完整保全，不能删除corrections/模式字段后假装可无损喂给旧代码。无生产数据迁移或存档删除。
 - 下一依赖：T-03必须保留分支corrections与view版本一致发布、拒绝执行环、支持v2逻辑包和恢复；当前仅交接，不修改/执行T-03，不创建新任务。
 - 交Chat二次review重点：checkpoint仅限同Record前缀、advance/replace/correctMemory边界、分支纠错传播与v1兼容是否完整；确认R4同分支前缀规则符合无原文记忆续聊需求。用户已授权本次commit/push，提交仍保持implemented_unverified。
+
+## R5 返修回报（2026-09-19）
+
+状态仍为 **implemented_unverified，待Chat复核R5**。仅落实 `notes/t-02-chat-review-round2.md`，不重写已复核的R1～R4，不修改或执行T-03。
+
+### 基线、范围与实际改动
+
+- `main` 从d99e1d5快进至 **28b94d4**；开工工作树仅有未跟踪.codex，未触碰或纳入提交。已读最新README、S-A、当前任务及二次review全文，沿用03/08已接受规则与06 v0.3；无缺失必需资料。
+- 开工估计实现15～25行、测试120～160行。实际仅改memory.mjs **+14/-2行**；新增review-round2.test.mjs **113行、6项测试**。同步README、06、S-A、CHANGELOG与本回报。无需新增依赖或服务。
+- 共享dependencyTarget解析本分支纠错链；checkExecutionGraph要求每个所选根版本解析后仍为自身。validateState/exportLogical/importLogical复用该检查，对矛盾状态报NEEDS_RESOLUTION，不篡改selection或corrections。合法历史纠错终点不必等于当前selection。
+- memoryStatus对已纠正旧版本返回needs-rebuild；prepareAvailability/canApply沿用原有效性与selection校验，拒绝旧摘要，包括绕过导入且未列入required范围、仅在响应块引用的路径。防御性planner对矛盾选择返回blocked和空rebuild。
+- 未修改R1～R4的选择/纠错写入方法、context/history/schema/transfer实现，原42项测试及fixture逐字保留。没有移除selection检查或改写固定历史依赖规则。
+
+### 确定性证据与实际执行
+
+Windows PowerShell，Node v24.19.0；仅虚构fixture、固定UUID序列，不调用模型或操作真实存档。
+
+| 命令/检查 | 结果 |
+| --- | --- |
+| `git pull --ff-only origin main` | d99e1d5 → 28b94d4，取得二次review |
+| 修复前 `node --test packages/contracts/tests/review-round2.test.mjs` | 6项均失败：矛盾状态未抛错、已纠正旧版本仍返回valid；各测试在首个失败断言停止 |
+| 修复后同命令 | 新增6/6通过 |
+| `node --test packages/contracts/tests/contracts.test.mjs packages/contracts/tests/review.test.mjs` | 原42/42通过，0失败/跳过 |
+| `node --test packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js` | 66/66通过：48项契约+18项探针，0失败/跳过 |
+| PowerShell遍历contracts所有.mjs执行 `node --check` | 11个模块全部通过 |
+| `node --check apps/tt-adapter-probe/index.js` | 通过 |
+| `git diff --check` | 通过，仅LF→CRLF平台提示 |
+| `git diff --exit-code --` 指定原42项测试/fixture、context/history/schema/transfer、探针目录与T-03卡 | 无差异 |
+
+新增反例覆盖一跳及两跳纠错，独立构造正确checksum的矛盾v2包，验证状态/导出/导入均拒绝且输入不变；两跳链中间版本被选择同样拒绝。绕过导入的旧根版本不能通过必需范围或仅响应块的最终注入检查。正例覆盖正常两次纠错及逻辑往返、父线只注入新版本而固定子线仍注入旧版本、advance后未纠正旧检查点有效、历史检查点纠正终点未被选中仍有效且累计后缀待重建。
+
+### 契约、限制与交接
+
+- 设计落实：所选根版本不能同时已被纠正；未被选择不等于失效，固定历史版本与当前替代传播仍按R1～R4规则区分。观察事实：仅上述Node参考模型测试通过，不代替Chat独立review。
+- 06保持v0.3，schema_version=1、逻辑包format_version=2均不变，无字段或迁移新增。以前被误收的矛盾v2包现在拒绝，需显式解决冲突；不自动猜选新版本、不删除纠错记录。原合法v1/v2兼容测试继续通过。
+- 未验证：真实持久化与崩溃恢复、生产导入器、TT/Android新联调、大规模性能和真实LLM重建；没有新增宿主/API事实。无阻塞必需输入，验收门禁仍为Chat复核。
+- 回退仅撤销本次R5提交，保留28b94d4基线及用户其他改动；不会删除归档或降级逻辑包。回退会重新暴露R5，不能将其作为接收矛盾包的修复方式。
+- 按此前在线review要求commit/push；T-03保持proposal且文件不变。后续存储必须保留本交叉不变量及分支独立纠错语义，当前只报告依赖，不启动下一任务。
+- 请Chat重点复核：所选根版本的一跳/多跳拒绝、绕过导入的最终放行保护，以及未选中历史检查点和非当前纠错终点的合法性；不申请将任务升为verified。
