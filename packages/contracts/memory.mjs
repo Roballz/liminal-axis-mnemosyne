@@ -29,7 +29,8 @@ export const derivedFingerprint = memory => fingerprint('derived-input', derived
 
 function inputsFitBasis(state, memory, basis, entries) {
   if (memory.origin === 'derived_only') {
-    return memory.scope_branch_id === basis.branch_id && memory.basis_snapshot_id === basis.snapshot_id;
+    return memory.scope_branch_id === basis.branch_id &&
+      equal(history(state, memory.basis_snapshot_id), entries.slice(0, history(state, memory.basis_snapshot_id).length));
   }
   const coverage = memory.coverage;
   const start = entries.findIndex(x => x.message_id === coverage.boundary.start);
@@ -72,6 +73,12 @@ export function checkMemory(state, memory, path = new Set()) {
         requireThat(child.memory_id === ref.memory_id && child.story_id === memory.story_id,
           'NEEDS_RESOLUTION', 'Wrong memory reference owner');
         checkMemory(state, child, path);
+        if (ref.dependency_mode === 'checkpoint') {
+          requireThat(memory.kind === 'Record' && child.memory_id === memory.memory_id &&
+            child.origin === 'source_derived' && child.coverage.members.length < memory.coverage.members.length &&
+            equal(child.coverage.members, memory.coverage.members.slice(0, child.coverage.members.length)),
+          'INVALID_TRANSITION', 'Checkpoint must be a strictly earlier prefix of the same Record');
+        }
         requireThat(inputsFitBasis(state, child, basis, entries),
           'NEEDS_RESOLUTION', 'Dependency was not applicable to generation basis');
         child.coverage.members.forEach(source => evidence.add(canonicalize(source)));
@@ -100,19 +107,77 @@ export function archiveMemory(original, memory) {
     'NEEDS_RESOLUTION', 'Memory family owner/kind changed');
   return freeze(state);
 }
-export function selectMemory(original, branchId, revisionId, expectedView, makeId = newId) {
+export function selectMemory(original, branchId, revisionId, expectedView, makeId = newId, mode = 'replace') {
   const branch = get(original.branches, branchId);
   const memory = get(original.memories, revisionId);
   const view = get(original.views, branchId);
   requireThat(branch.story_id === memory.story_id && view.version === expectedView,
     'VERSION_CONFLICT', 'Memory view owner/version changed');
+  requireThat(['replace', 'advance'].includes(mode), 'INVALID_SCHEMA', 'Unknown selection mode');
   if (view.selections[memory.memory_id] === revisionId) return original;
+  const previous = view.selections[memory.memory_id];
+  if (mode === 'advance') requireThat(previous && memory.input_refs.some(ref =>
+    ref.type === 'memory' && ref.dependency_mode === 'checkpoint' && ref.memory_revision_id === previous),
+  'INVALID_TRANSITION', 'Advance must consume the selected fixed checkpoint');
   const state = structuredClone(original);
   const version = id('memoryView', makeId('memoryView'));
   requireThat(Object.values(original.views).every(v => v.version !== version), 'ID_COLLISION', 'Memory view ID collision');
-  state.views[branchId] = { version,
+  const corrections = { ...view.corrections };
+  delete corrections[revisionId];
+  if (previous && mode === 'replace') corrections[previous] = revisionId;
+  state.views[branchId] = { version, corrections,
     selections: { ...view.selections, [memory.memory_id]: revisionId } };
+  checkExecutionGraph(state, branchId);
+  if (mode === 'advance') requireThat(memoryStatus(state, revisionId, branchId) === 'valid',
+    'NOT_READY', 'Cannot advance an invalid checkpoint');
   return freeze(state);
+}
+
+// Both validity and planning use this resolution rule; immutable input refs never change.
+export function dependencyTarget(view, ref) {
+  let target = ref.dependency_mode === 'checkpoint' ? ref.memory_revision_id : view.selections[ref.memory_id];
+  const seen = new Set();
+  while (target && view.corrections[target]) {
+    requireThat(!seen.has(target), 'NEEDS_RESOLUTION', 'Correction cycle');
+    seen.add(target);
+    target = view.corrections[target];
+  }
+  return target;
+}
+export function correctMemory(original, branchId, oldId, replacementId, expectedView, makeId = newId) {
+  const view = get(original.views, branchId), old = get(original.memories, oldId);
+  const replacement = get(original.memories, replacementId);
+  requireThat(view.version === expectedView, 'VERSION_CONFLICT', 'Memory view changed');
+  requireThat(oldId !== replacementId && old.memory_id === replacement.memory_id &&
+    old.story_id === get(original.branches, branchId).story_id &&
+    equal(old.coverage, replacement.coverage), 'INVALID_TRANSITION', 'Correction must retain checkpoint scope/family');
+  const state = structuredClone(original), version = id('memoryView', makeId('memoryView'));
+  requireThat(Object.values(original.views).every(v => v.version !== version), 'ID_COLLISION', 'Memory view ID collision');
+  const corrections = { ...view.corrections, [oldId]: replacementId };
+  delete corrections[replacementId];
+  const selections = { ...view.selections };
+  if (selections[old.memory_id] === oldId) selections[old.memory_id] = replacementId;
+  state.views[branchId] = { version, selections, corrections };
+  checkExecutionGraph(state, branchId);
+  return freeze(state);
+}
+export function checkExecutionGraph(state, branchId) {
+  const view = get(state.views, branchId), active = new Set(), done = new Set(), order = [];
+  function visit(key) {
+    requireThat(!active.has(key), 'NEEDS_RESOLUTION', 'Selected dependency cycle', { branch_id: branchId });
+    if (done.has(key)) return;
+    active.add(key);
+    for (const ref of get(state.memories, key).input_refs) {
+      if (ref.type !== 'memory') continue;
+      const target = dependencyTarget(view, ref);
+      if (target) visit(target);
+    }
+    active.delete(key);
+    done.add(key);
+    order.push(key);
+  }
+  Object.values(view.selections).forEach(visit);
+  return order;
 }
 export function memoryStatus(state, revisionId, branchId, cutoffLength, path = new Set()) {
   const branch = get(state.branches, branchId);
@@ -127,8 +192,9 @@ export function memoryStatus(state, revisionId, branchId, cutoffLength, path = n
   try { checkMemory(state, memory); } catch { return 'needs-resolution'; }
   if (!memory.recall_enabled || memory.visibility === 'private') return 'excluded';
   if (memory.origin === 'derived_only') {
-    return memory.scope_branch_id === branchId && memory.basis_snapshot_id === branch.head_snapshot_id &&
-      cutoff === full.length ? 'valid' : 'out-of-scope';
+    if (memory.scope_branch_id !== branchId) return 'out-of-scope';
+    const declared = history(state, memory.basis_snapshot_id);
+    return equal(declared, entries.slice(0, declared.length)) ? 'valid' : 'needs-review';
   }
   path.add(revisionId);
   try {
@@ -136,7 +202,7 @@ export function memoryStatus(state, revisionId, branchId, cutoffLength, path = n
       if (ref.type === 'source') {
         if (!entries.some(x => x.message_id === ref.message_id && x.revision_id === ref.revision_id)) return 'needs-rebuild';
       } else {
-        if (get(state.views, branchId).selections[ref.memory_id] !== ref.memory_revision_id) return 'needs-rebuild';
+        if (dependencyTarget(get(state.views, branchId), ref) !== ref.memory_revision_id) return 'needs-rebuild';
         const childStatus = memoryStatus(state, ref.memory_revision_id, branchId, cutoff, path);
         if (childStatus !== 'valid') return childStatus === 'needs-resolution' ? childStatus : 'needs-rebuild';
       }
@@ -152,21 +218,21 @@ export function memoryStatus(state, revisionId, branchId, cutoffLength, path = n
 }
 export function rebuildPlan(state, branchId, cutoffLength) {
   const view = get(state.views, branchId), statuses = {}, rebuild = [], review = [], blocked = [];
-  const visited = new Set();
-  function visit(revisionId) {
-    if (visited.has(revisionId)) return;
-    visited.add(revisionId);
-    const memory = state.memories[revisionId];
-    for (const ref of memory?.input_refs ?? []) {
-      if (ref.type === 'memory' && view.selections[ref.memory_id]) visit(view.selections[ref.memory_id]);
-    }
+  let order;
+  try { order = checkExecutionGraph(state, branchId); }
+  catch (error) {
+    if (error.code !== 'NEEDS_RESOLUTION') throw error;
+    const keys = Object.values(view.selections);
+    return { statuses: Object.fromEntries(keys.map(key => [key, 'needs-resolution'])),
+      rebuild: [], review: [], blocked: keys };
+  }
+  for (const revisionId of order) {
     const status = memoryStatus(state, revisionId, branchId, cutoffLength);
     statuses[revisionId] = status;
     if (status === 'needs-rebuild') rebuild.push(revisionId);
     if (status === 'needs-review') review.push(revisionId);
     if (status === 'needs-resolution') blocked.push(revisionId);
   }
-  Object.values(view.selections).forEach(visit);
   return { statuses, rebuild, review, blocked };
 }
 export function groupTurns(state, entries) {

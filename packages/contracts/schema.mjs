@@ -27,7 +27,8 @@ const digest = purpose => v => text(v) &&
 export const sourceRef = object({ message_id: identity('message'), revision_id: identity('revision') });
 export const inputRef = v => {
   if (v?.type === 'source') object({ type: oneOf('source'), ...sourceFields })(v);
-  else object({ type: oneOf('memory'), memory_id: identity('memory'), memory_revision_id: identity('memoryRevision') })(v);
+  else object({ type: oneOf('memory'), memory_id: identity('memory'), memory_revision_id: identity('memoryRevision'),
+    ...(Object.hasOwn(v ?? {}, 'dependency_mode') ? { dependency_mode: oneOf('current', 'checkpoint') } : {}) })(v);
 };
 const sourceFields = { message_id: identity('message'), revision_id: identity('revision') };
 const boundary = object({ start: identity('message'), end: identity('message') });
@@ -78,6 +79,7 @@ export const schemas = {
   }),
   view: object({
     version: identity('memoryView'), selections: dictionary(identity('memory'), identity('memoryRevision')),
+    corrections: dictionary(identity('memoryRevision'), identity('memoryRevision')),
   }),
   binding: object({
     schema_version: oneOf(1), binding_id: identity('binding'), story_id: identity('story'),

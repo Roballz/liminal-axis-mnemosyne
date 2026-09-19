@@ -252,3 +252,51 @@ Get-ChildItem packages/contracts -Recurse -Filter *.mjs | ForEach-Object { node 
 T-03 文件保持原样proposal，未执行、未改planned、未创建新task。review后由Chat/用户修订启用；需提供精确ID/完整枚举、不可变冲突保护、Head/操作结果/重建标记的完整持久发布、失败恢复、稳定导出与空环境恢复、索引重建及设备实测。内存双条目叶块不是冻结的生产参数，逻辑包不包含未来全部模块/作业状态。
 
 请Chat审查：正式技术字段/指纹投影和错误码；derived-only精确快照下界后续如何扩展；required_memory_revision_ids作为本轮必需范围的界面/调用约定；是否接受当前Node参考模型/机器schema作为T-03测试oracle。非标准分组/模糊阈值/GC/品牌/完整模板仍按原未决表，不由本轮静默定案。最终保持 implemented_unverified。
+
+## R1～R4 返修回报（2026-09-19）
+
+状态仍为 **implemented_unverified，交Chat二次review**。本节取代前文“derived-only精确Head下界”及累计依赖未区分的实现描述；保留首轮真实测试记录，不将Chat源码推导伪称已独立执行。
+
+### 基线与实际修改
+
+- 已从8b4bc93快进至 `a679a20`，读取 `notes/t-02-chat-review.md` 全文；沿用README/S-A/本任务与03/08已接受规则，06阅读版本v0.2，返修更新为v0.3。原工作区只有未跟踪.codex，排除提交。
+- R1：memory引用增加可选dependency_mode，缺省current保持旧selection语义；checkpoint仅限同Record家族严格较早coverage前缀。selectMemory新增显式advance，正常累计不登记历史检查点被纠正；replace仍传播当前替代。correctMemory允许对历史检查点做同范围提取纠正，保留当前累计选择，用分支corrections逐层失效。正文改动仍检查实际来源，不能靠checkpoint逃避。
+- R2：validity与planner共用dependencyTarget；current走selection，checkpoint走固定版本，再沿显式corrections解析。active/done检测实际执行图循环，选择/纠错发布前拒绝，validateState同样拒绝。防御性planner遇环返回blocked、空rebuild，不声称已排出拓扑顺序；原不可变版本无环检查保留。
+- R3：bindHost在发布前禁止同binding_id原地更改story_id，类型化NEEDS_RESOLUTION。新binding/明确后续修复才能跨故事纠正；同故事rename/carryover/generation更新不受影响。
+- R4：derived-only不要求当前Head等于basis；scope_branch_id相同、声明basis历史仍为当前有效前缀且处于cutoff内时，正常追加继续valid。前缀改动/过早cutoff为needs-review，子线/其他故事out-of-scope。必需范围任何非valid都不再聚合empty。
+- 修改memory/context/history/schema/transfer；新增tests/review.test.mjs；更新06、包README、examples说明、仓库README/S-A/CHANGELOG及本回报。原contracts.test.mjs、fixture、探针实现/测试和T-03卡不改。
+- 实际代码diff：实现/校验 **+110/-21行**，新增确定性测试 **211行**（10项）；不含文档。开工估计实现120～200行、测试180～260行；实际更小，无新增依赖/服务/正式任务。
+
+### 实际命令与结果
+
+Windows PowerShell / Node v24.19.0，纯虚构数据，无宿主部署/模型请求。
+
+| 命令 | 结果 |
+| --- | --- |
+| `git pull --ff-only origin main` | 8b4bc93 → a679a20，取得评审文件 |
+| `node --test packages/contracts/tests/contracts.test.mjs` | 原32/32通过，测试文件未改动 |
+| `node --test packages/contracts/tests/review.test.mjs` | 新增10/10通过 |
+| `node --test apps/tt-adapter-probe/tests/probe.test.js` | 18/18通过 |
+| `node --test packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js` | 合并60/60通过，0失败/跳过 |
+| 前文PowerShell遍历.mjs执行 `node --check` | 当前10个.mjs全部通过 |
+| `node --check apps/tt-adapter-probe/index.js` | 通过 |
+| `git diff --check` / 提交前cached检查 | 通过；仅平台LF→CRLF提示 |
+
+第一轮返修新增9项时41/41通过，补充检查点标签滥用反例及纠正后逐层恢复后，最终42项契约+18项探针通过。本轮未先在旧实现上执行红灯诊断，不把评审中的推导改写为旧代码实测失败记录；新增测试实际运行结果如上。
+
+### 反例、状态不变量与观察
+
+- R1：同memory_id的R1→R2→R3两次advance有效；编辑早期正文时三个依赖层按顺序失效，子线不变。纠正历史R1后R2/R3失效但当前选择仍为R3；依次修正R2/R3后恢复有效。普通下级替换仍影响上级；checkpoint不能用于同范围Record或任意Summary绕过检查。
+- R2：A2→B1→当前A2选择被拒绝且输入状态不变；人为损坏视图的planner无正常重建队列。合法菱形共享依赖不误报环；旧32项中的不可变版本真实环反例仍通过。
+- R3：有SourceRevision.provenance引用的跨故事改属被拒绝；原状态保持可validate/export/import；同故事rename/carryover成功并可往返。
+- R4：同线追加后声明/基线不变且可召回；edit/delete/reorder/过早cutoff待确认，必需记忆空响应被拒绝；其他故事、子线、私有必需项均不能成为empty。逻辑往返保留作用域和无原文声明。
+- 新增测试在成功归档/选择/纠错/历史提交/绑定变更后检查validateState与逻辑往返，拒绝路径检查原状态不变。这里只证明参考模型中的状态一致性，没有新增TT/API或持久化事实。
+
+### 契约兼容、未验证与回退
+
+- 06 v0.3；对象schema_version仍为1，新增可选引用模式及必需view.corrections，逻辑包明确升级format_version=2。旧v1先验checksum再补corrections={}；旧引用缺模式保持current，不重算输入指纹/改ID。不能把checkpoint或corrections塞进伪v1；发现旧包不合法选择环仍拒绝，不自动猜修复。
+- 新增字段/调用方式是本次最小领域实现，供Chat审查；不构建通用字段依赖系统或持久化作业账本。归档与选用仍分开：合法历史对象可以保存但当前不适用，不意味着允许注入。
+- 未验证：生产存储/崩溃恢复、TT/Android新联调、大规模性能、LLM实际重建、完整同步/模糊导入、认证/完整UI/GC。没有读写真实RP、付费API或生产库。
+- 回退：单独revert本次返修提交，保留a679a20基线和原v1逻辑包；已产生的v2包先完整保全，不能删除corrections/模式字段后假装可无损喂给旧代码。无生产数据迁移或存档删除。
+- 下一依赖：T-03必须保留分支corrections与view版本一致发布、拒绝执行环、支持v2逻辑包和恢复；当前仅交接，不修改/执行T-03，不创建新任务。
+- 交Chat二次review重点：checkpoint仅限同Record前缀、advance/replace/correctMemory边界、分支纠错传播与v1兼容是否完整；确认R4同分支前缀规则符合无原文记忆续聊需求。用户已授权本次commit/push，提交仍保持implemented_unverified。

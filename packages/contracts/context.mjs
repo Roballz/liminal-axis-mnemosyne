@@ -74,7 +74,7 @@ export function prepareAvailability(state, branchId, revisionIds, cutoffLength, 
     return memoryStatus(state, key, branchId, cutoffLength);
   });
   if (statuses.includes('needs-resolution')) return 'needs_resolution';
-  if (statuses.some(s => ['needs-rebuild', 'needs-review'].includes(s))) return 'not_ready';
+  if (statuses.some(s => s !== 'valid')) return 'not_ready';
   if (indexBehind) return 'index_behind';
   return statuses.includes('valid') ? 'ready' : 'empty';
 }
@@ -90,6 +90,8 @@ export function bindHost(original, binding) {
   const state = structuredClone(original);
   const previous = state.bindings[binding.binding_id];
   if (previous) {
+    requireThat(binding.story_id === previous.story_id, 'NEEDS_RESOLUTION',
+      'Cross-story rebinding requires a new binding ID', { story_id: previous.story_id });
     requireThat(binding.binding_generation === previous.binding_generation + 1,
       'VERSION_CONFLICT', 'Binding generation must advance');
     state.bindings[binding.binding_id] = structuredClone(binding);

@@ -1,5 +1,12 @@
 # 更新记录
 
+## 2026-09-19 T-02 R1～R4 返修（implemented_unverified）
+
+- 基线a679a20，落实Chat组合反例：同Record显式checkpoint/advance、分支corrections与历史检查点纠错；current依赖仍复核selection，执行图采用active/done检测环，拒绝伪拓扑顺序。
+- HostBinding不可原地跨Story；derived-only同Branch声明前缀不变时续聊可用，前缀变化待确认，本轮必需不可用不再聚合为empty。
+- 原32项不改动；新增10项确定性组合测试，总计42项契约+18项探针通过。逻辑包v2保留纠错关系，v1校验后显式补空关系，旧ID/输入指纹不改。
+- 06 v0.3及样例说明/任务回报同步，待Chat二次review。无真实数据、持久化/手机验证；T-03卡与探针实现不改。
+
 ## 2026-09-19 T-02 实施（implemented_unverified）
 
 - 基于 1f01168 新增 packages/contracts：显式字段/跨引用校验、不可变快照/分块共享 oracle、固定 fork、历史操作幂等和 expected Head、来源/coverage 逐层有效性与重建计划、prepare 过期门禁、逻辑包校验。

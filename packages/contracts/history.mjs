@@ -125,6 +125,7 @@ export function commitHistory(original, command, makeId = newId) {
     const version = id('memoryView', makeId('memoryView'));
     requireThat(Object.values(state.views).every(v => v.version !== version), 'ID_COLLISION', 'Memory view ID collision');
     state.views[branch_id] = { version,
+      corrections: fork ? structuredClone(get(state.views, fork.parent_branch_id).corrections) : {},
       selections: fork ? structuredClone(get(state.views, fork.parent_branch_id).selections) : {} };
   } else {
     requireThat(branch.story_id === story_id && expected_head === branch.head_snapshot_id,

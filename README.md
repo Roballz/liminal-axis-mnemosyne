@@ -25,7 +25,7 @@
 | `tasks/T-03-storage-foundation.proposal.md` | T-03 预案；T-02 review 后修订启用，不能自动施工 |
 | `docs/08-history-snapshot-and-rebuild.md` | 已接受的 Head、正文权威、来源重建与分叉边界 |
 | `docs/03-decisions-and-open-questions.md` | 当前决定、未决项与实验门禁 |
-| `docs/06-contracts.md` | v0.2 / schema_version=1 契约、指纹字段表和迁移边界，待 review |
+| `docs/06-contracts.md` | v0.3 / schema_version=1、逻辑包v2；R1～R4返修待二次review |
 | `docs/07-t02-contract-proposal.md` | 首轮候选讨论；新确认以 03/08 为准 |
 | `docs/01-architecture.md`、`docs/02-roadmap.md` | 总体架构与后续路线；当前进度以阶段导读和 task 为准 |
 | `docs/04-working-with-chatgpt-codex.md` | 协作与交接流程 |
@@ -35,7 +35,7 @@
 
 ## 实现与数据边界
 
-实现位于 `apps/tt-adapter-probe/` 与 `packages/contracts/`。后者使用 Node 原生测试，不新增服务或依赖安装。运行 `node --test packages/contracts/tests/contracts.test.mjs`；当前测试及局限见 T-02 实施回报。
+实现位于 `apps/tt-adapter-probe/` 与 `packages/contracts/`。后者使用 Node 原生测试，不新增服务或依赖安装。运行 `node --test packages/contracts/tests/*.test.mjs`；当前测试及局限见 T-02 实施回报。
 
 B/A 共用 Mnemosyne 的领域身份、规则与逻辑导出；宿主 stableId、数据库 NodeId 与物理文件格式不能替代正式 ID。用户主要在单手机长期 RP，已接受单权威写入与跨端明确交接，不建设离线多主自动合并。
 

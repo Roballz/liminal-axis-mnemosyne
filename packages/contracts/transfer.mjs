@@ -1,7 +1,7 @@
 import { canonicalize, equal, fingerprint, freeze, id, requireThat } from './primitives.mjs';
 import { validate } from './schema.mjs';
 import { TABLES, checkEntries, checkFork, checkTransition, expand, get, history } from './history.mjs';
-import { checkMemory } from './memory.mjs';
+import { checkMemory, checkExecutionGraph, dependencyTarget } from './memory.mjs';
 
 function acyclic(table, key, parent, path = new Set()) {
   requireThat(!path.has(key), 'NEEDS_RESOLUTION', 'History/branch cycle');
@@ -115,11 +115,18 @@ export function validateState(state) {
   for (const [branchId, view] of Object.entries(state.views)) {
     id('branch', branchId);
     validate('view', view);
+    for (const [oldId, newId] of Object.entries(view.corrections)) {
+      const old = get(state.memories, oldId), replacement = get(state.memories, newId);
+      requireThat(old.story_id === state.branches[branchId].story_id && old.memory_id === replacement.memory_id,
+        'NEEDS_RESOLUTION', 'Correction owner mismatch');
+      dependencyTarget(view, { dependency_mode: 'checkpoint', memory_revision_id: oldId });
+    }
     for (const [memoryId, revisionId] of Object.entries(view.selections)) {
       const memory = get(state.memories, revisionId);
       requireThat(memory.memory_id === memoryId && memory.story_id === state.branches[branchId].story_id,
         'NEEDS_RESOLUTION', 'Wrong selected memory owner');
     }
+    checkExecutionGraph(state, branchId);
   }
   requireThat(new Set(Object.values(state.views).map(v => v.version)).size === Object.keys(state.views).length,
     'NEEDS_RESOLUTION', 'Duplicate active memory view ID');
@@ -135,15 +142,26 @@ export function validateState(state) {
 }
 export function exportLogical(state) {
   validateState(state);
-  const payload = { format_version: 1, state: structuredClone(state) };
+  const payload = { format_version: 2, state: structuredClone(state) };
   return freeze({ ...payload, checksum: fingerprint('logical-export', payload) });
 }
 export function importLogical(bundle) {
   canonicalize(bundle);
   requireThat(bundle !== null && typeof bundle === 'object' && !Array.isArray(bundle) &&
     equal(Object.keys(bundle).sort(), ['checksum', 'format_version', 'state']) &&
-    bundle.format_version === 1, 'INVALID_SCHEMA', 'Unsupported logical package');
+    [1, 2].includes(bundle.format_version), 'INVALID_SCHEMA', 'Unsupported logical package');
   requireThat(bundle.checksum === fingerprint('logical-export',
     { format_version: bundle.format_version, state: bundle.state }), 'NEEDS_RESOLUTION', 'Export checksum mismatch');
-  return freeze(structuredClone(validateState(bundle.state)));
+  const state = structuredClone(bundle.state);
+  if (bundle.format_version === 1 && state?.views) {
+    for (const memory of Object.values(state.memories ?? {})) {
+      requireThat(Array.isArray(memory.input_refs) && memory.input_refs.every(ref =>
+        !Object.hasOwn(ref, 'dependency_mode')), 'INVALID_SCHEMA', 'Version 1 cannot encode dependency modes');
+    }
+    for (const view of Object.values(state.views)) {
+      requireThat(!Object.hasOwn(view, 'corrections'), 'INVALID_SCHEMA', 'Version 1 cannot encode corrections');
+      view.corrections = {};
+    }
+  }
+  return freeze(validateState(state));
 }
