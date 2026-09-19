@@ -190,7 +190,7 @@ B→A 只验迁移材料和 B→空环境的恢复；A 尚未实现时不称真�
 
 ### 基线、环境与范围
 
-- `git pull --ff-only origin main`：从1891043快进到 `852260acd8d3e65d9d756af81cdf72e52c50046b`；实施提交为 `548b575`（`feat(storage): implement T-03 P0-P2 recovery prototype`）；分支 main，原有未跟踪 `.codex/` 未修改。
+- `git pull --ff-only origin main`：从1891043快进到 `852260acd8d3e65d9d756af81cdf72e52c50046b`；实施提交为 `3e583e7`（`feat(storage): implement T-03 P0-P2 recovery prototype`）；分支 main，原有未跟踪 `.codex/` 未修改。
 - 已读 README、AGENTS、S-A、本卡、T-02最终review、06 v0.3/逻辑包v2、08 Head设计、03单写/存储决策、07数据库边界、baseline、T-02A回报、contracts及三组测试；历史“proposal”状态按正式任务覆盖。
 - Windows 10 Pro x64；Node v24.19.0；Git 2.55.0.windows.3；WebView2 153.0.4234.32。用户更新后的 TT `dev (367b0c7e9410)`，File/ProductVersion仍2.2.0；二进制60186112 bytes，SHA256 `11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4`。旧安装5e33标记只保留为更新前事实。
 - 只复制程序/default/frontend-templates到 `D:\Mnemosyne\.t03-local\tt-367b0c7`，portable.flag选择独立 `data`，WebView profile单独放在 `webview-profile`。源码与实际进程路径/profile均核对；未复制现用聊天、模型配置或令牌。
