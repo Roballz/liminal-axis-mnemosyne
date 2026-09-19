@@ -35,8 +35,8 @@ T-02 重新定义 Mnemosyne 领域术语，不沿用柏宝书 `Leaf` 作为正�
 - T-01 后：TT 三类注入语义与真实能力矩阵。
 - T-02 前／中：Story、Branch、SourceMessage、Revision、单段派生记忆对象、ContextBlock 的正式字段与命名；稳定身份、swipe／编辑／分叉语义；规范化 input hash。
 - T-02 首轮讨论已确认：Story 与宿主聊天文件解耦；同一 Story 可跨聊天文件续聊；平台分支映射为同 Story 下 Branch，并按 fork cutoff 引用复用祖先历史；SourceMessage/Revision 分离；swipe/regenerate 采用候选 Revision；共享 canonical store 按 story/branch 逻辑隔离。
-- T-03 前：最小后端技术栈、正式存储、认证、migration／backup／restore 方案。
-- T-03 实验：中文词法／BM25 候选实现与 Qdrant 角色；只冻结已测试边界。
+- T-03 前：最小后端技术栈、正式存储、认证、migration／backup／restore 方案。2026-09-18 TT 已合并 `window.__TAURITAVERN__.api.db`（TriviumDB 0.8.8）；新增“TT 宿主内嵌 TriviumDB provider”作为候选，与独立 Engine 存储方案对照，不因宿主提供 DB 而把 Mnemosyne 核心领域模型绑定 TT。
+- T-03 实验：中文词法／BM25 候选实现，以及 Qdrant / TT-TriviumDB 各自在向量、文本、图查询中的角色；同时验证超长 RP 数据量、备份恢复、索引重建和跨宿主迁移。只冻结已测试边界。
 
 ## 6. 当前阻塞
 
