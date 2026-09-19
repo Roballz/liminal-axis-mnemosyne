@@ -15,10 +15,10 @@
 | T-00 ✅ | 固定真实 TT／柏宝书／测试数据与副 API 基线 | verified；不再猜安装版本、存储模式或输入 |
 | T-01 ✅ | 做最小 TT Adapter 探针 | verified；await、payload、取消与 request gate 边界已验证 |
 | T-02A ✅ | TT 宿主身份与变更事件验证 | verified；stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 边界 |
-| T-02 ↺ | 身份、历史版本与上下文的最小可执行契约 | implemented_unverified；二次review已复核R1～R4；R5返修后Codex回归48项契约+18项探针通过，待Chat复核 |
-| T-03 ◇ | 可迁移、可恢复的存储地基 | proposal；`tasks/T-03-storage-foundation.proposal.md`，T-02 review 后修订启用 |
+| T-02 ✅ | 身份、历史版本与上下文的最小可执行契约 | verified；1891043 最终复核关闭 R1～R5，Chat 独立48项契约及11文件语法通过；范围限最小参考模型 |
+| T-03 ◇ | 可迁移、可恢复的存储地基 | proposal；`tasks/T-03-storage-foundation.proposal.md`，待按 T-02 最终契约修订并明确启用 |
 
-T-03 预备卡是用户本轮明确要求由 Chat 提前准备的方案；它存在不等于可施工。Codex 不自动生成下一张卡、不自动把 proposal 改成 planned。
+T-03 预备卡是用户明确要求由 Chat 提前准备的方案；它存在不等于可施工。Codex 不自动生成下一张卡、不自动把 proposal 改成 planned。
 
 ## 3. 阶段完成线
 
@@ -40,15 +40,16 @@ T-02 不沿用柏宝书 `Leaf` 作为正式对象名；普通派生按 User + As
 
 - **Head 已接受。** 2026-09-19 用户明确采用 `Branch.head_snapshot_id` → `hs_<UUIDv4>` HistorySnapshot → 有序分块共享 HistoryManifest。固定父快照前缀及锚；父线改旧楼不改变既有子线，回滚建新快照，正文与记忆版本分离。具体字段和边界见 `docs/08-history-snapshot-and-rebuild.md`。
 - **正文权威与逐层重建。** 已发生剧情以当前分支正文为准；人物状态等为派生。匹配适用回合复用，受影响大小总结/事件/累计状态按轻量 input_refs/coverage 逐层重建，不建独立状态权威或通用字段依赖引擎。
-- **T-02 二次 review。** `d99e1d5` 的 R1～R4 已复核：固定检查点/current依赖、分支纠错和执行图拒环、跨故事重绑拦截、derived-only同线续用。42项契约测试在Chat隔离Node环境独立通过，10个模块语法检查通过；探针18项与完整diff检查仍注明为Codex回报。本轮额外实测发现R5，详见 `notes/t-02-chat-review-round2.md`。未实现生产导入器、LLM重建器或数据库。
+- **T-02 最终 review 通过。** `1891043` 的 R5 修复关闭矛盾 selections/corrections 导入与旧摘要注入缺口。Chat 在隔离 Linux / Node v22.16.0 实际复跑48项契约、11个.mjs语法检查均通过，13文件blob一致；同一R5测试在修复前实际旧blob上6项失败，本次实现全通过。R1～R4回归保留；完整记录见 `notes/t-02-final-review.md`。探针18项及完整diff检查为Codex回报，不混称Chat独立66项通过。
+- **当前契约基线。** `docs/06-contracts.md` v0.3 / schema_version=1 / 逻辑包format_version=2，及 `packages/contracts/` 的Node参考模型。固定检查点、分支纠错、执行图拒环、不可原地跨Story重绑、derived-only同线前缀续用、R5根选择交叉不变量均需由存储实现保留。不等同生产引擎、导入器或LLM重建器已经实现。
 - **B/A 共用核心。** 宿主标识/Trivium NodeId/TQL 不成为正式领域身份；迁移保留已有原文/版本/正确记忆与来源，不全量重摘。
 - **T-03 预案。** 先核对真实 api.db 能力，再决定 TriviumDB 是否承载正式数据与索引；必须验证无 embedding 原文保存、精确 ID/完整枚举、业务提交、崩溃恢复、逻辑导出和索引重建。物理块参数与性能预算仍未冻结。
 
-文件优先级：用户最新明确确认与本节/决策记录 → 当前指定 task/最新Chat返修review → 08 具体设计 → 06 契约（T-02 v0.3，待R5复核）→ 07 首轮候选 → 早期架构/roadmap 示意。旧建议不能覆盖新确认；冲突需报告，不静默发明产品决定。
+文件优先级：用户最新明确确认与本节/决策记录 → 当前指定 task/最新Chat review（T-02 最终记录）→ 08 具体设计 → 06 契约（T-02 v0.3，已验收最小范围）→ 07 首轮候选 → 早期架构/roadmap 示意。旧建议不能覆盖新确认；冲突需报告，不静默发明产品决定。
 
 ## 6. 当前阻塞、未决项与收尾门禁
 
-T-02 当前剩余验收门禁为 **R5返修的Chat复核**。二次review基线中，刻意构造“旧版本仍被选中、同时已被纠正到新版本”的语义矛盾包，validateState/importLogical及最终canApply曾允许旧摘要；原始证据见 `notes/t-02-chat-review-round2.md`。Codex现补齐所选根版本不得被corrections重定向的不变量及最终有效性保护，新增6项确定性测试，原42项不改且回归通过。实现证据见T-02返修回报，尚非Chat验收通过。这不是普通selectMemory自然产生该状态的证据，也不代表生产存储恢复已实现。R1～R4不重写，T-03不改、不执行。
+**T-02 无剩余验收阻塞。** R1～R5 已在最小契约与Node参考模型范围关闭，历史review文件保留但不再代表当前任务待返修。下一步是核对并修订T-03预备方案，而非继续修改T-02或自动启动数据库实施。本轮未修改、未执行T-03卡。
 
 无新增宿主事实阻塞。T-01 的 gate 竞态和 T-02A 的 API 路径/成功 Regenerate/Delete 补证已通过 review，不重做无关探针。
 
@@ -56,14 +57,14 @@ T-02 当前剩余验收门禁为 **R5返修的Chat复核**。二次review基线�
 
 这些不交给 Codex 静默决定：T-02 先支持普通明确回合并保留全部来源；未知结构明确待处理，不丢数据、不伪造配对；自动 GC 和复杂导入算法不在本任务实现。进入对应后续功能前仍需确认/验证。
 
-T-02 review 完成后，核对 T-03 卡中的 schema/provider 需求、隔离设备、性能预算与允许依赖，再由 Chat/用户将其改为 planned。预案可能随实测调整，不把“之后小改”当成不许变更设计的承诺。
+核对 T-03 卡中的最终schema/provider需求、隔离设备、性能预算与允许依赖后，再由 Chat/用户将其改为 planned。预案可能随实测调整，不把“之后小改”当成不许变更设计的承诺。
 
 ## 7. 需要用户提供
 
-T-02 没有新的必需资料；只使用仓库规则及虚构 fixture。模型、设备路径和单端偏好已存在，不重复索要。
+T-02 已收尾，无新增必需资料。模型、设备路径和单端偏好已存在，不重复索要。
 
 T-03 未来启动前需确认实际含 api.db 的安装版、安全测试环境与数据授权，以及预算/指标。当前不要求为预案安装服务、升级生产手机或上传真实聊天。
 
 ## 8. 阶段收尾 review
 
-待 T-02 和选定 T-03 实施边界完成后填写。设计 accepted、任务 planned、实现 implemented_unverified 与 review verified 严格分开。
+T-00、T-01、T-02A、T-02 已 verified；S-A 尚待选定的 T-03 实施边界完成。设计 accepted、任务 planned、实现 implemented_unverified 与 review verified 严格分开；尚未验收持久化/崩溃恢复或手机生产使用。
