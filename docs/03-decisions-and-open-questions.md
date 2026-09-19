@@ -1,8 +1,6 @@
 # 决策记录与未决问题
 
-v0.1 · 2026-09-17
-
-> 2026-09-19 最新收口见第 10 节及 `08-history-snapshot-and-rebuild.md`。用户确认的正文权威、逐层重建、单权威写入及固定分支历史优先于先前候选措辞；新 Head 字段方案仍标为设计建议，不冒充已实现或逐字段批准。
+v0.1 · 2026-09-17；当前收口更新：2026-09-19，见第 10～11 节。
 
 ## 1. 建议基线（B，尚非用户逐项批准）
 
@@ -10,12 +8,12 @@ v0.1 · 2026-09-17
 | --- | --- | --- |
 | B-01 | 独立 Engine + TT Adapter + Workbench | 降低数据迁移成本；需维护自己的 API |
 | B-02 | 原文／版本为正式数据，索引可重建 | 更换模型不丢根基；需备份与迁移 |
-| B-03 | 保留每楼 Leaf，跨楼事件用链接表达 | 不必二选一大叶子／碎片；事件边界需校正 |
+| B-03 | 保留每楼 Leaf，跨楼事件用链接表达 | 历史建议；正式普通派生单位已由 T02-D21 替代，不沿用 Leaf 命名 |
 | B-04 | 展示、常驻、召回、录入分别控制 | 实现“隐藏但能回忆”；设置需直观 |
 | B-05 | ContextBlock 独立编译到宿主位置 | 用户可调各类位置；需 provider 联调 |
 | B-06 | 助手提案后确认写入 | 减少覆盖与幻觉污染；多一步确认 |
 | B-07 | 只读影子迁移，逐类替换注入 | 不破坏现用档案；阶段内维护两套入口 |
-| B-08 | HTTP 先行，MCP 可选 | 当前 TT 接入不被 MCP 进度阻塞 |
+| B-08 | HTTP 先行，MCP 可选 | 当前 TT 接入不被 MCP 进度阻塞；B 本机/A 服务器路线见后续确认 |
 
 ## 2. 必须实验的部分（E）
 
@@ -65,38 +63,35 @@ D 仅留入口，不提前自动删旧总结或把所有内容归到一个“永
 
 没有证据时标 proposed，不把建议改成 accepted。旧记录被替代时标 superseded，保留理由。
 
-
 ## 5. T-02 身份／版本讨论确认（2026-09-19）
 
-以下为用户与 Chat 基于 TT/ST 实际工作流确认的领域原则；正式字段名与完整 schema 仍由 T-02 任务冻结。
+以下为用户与 Chat 基于 TT/ST 实际工作流确认的领域原则；完整 schema 与可执行校验由 T-02 落实。accepted 表示设计确认，不是实现 verified。
 
 | ID | 状态 | 结论 |
 | --- | --- | --- |
 | T02-D01 | accepted | **Story 是逻辑剧情连续体，不等同于单个宿主聊天文件。** 普通新建空聊天默认创建新 Story；若用户为了降低高楼聊天负担而新开空聊天继续旧剧情，必须由用户显式选择“继续现有 Story／Branch”或等价 Carryover 操作，系统不根据“新建空聊天”自动猜测意图。完全一致旧档的重导入可提示为同源候选，但最终映射语义允许用户确认／覆盖。 |
 | T02-D02 | accepted | **宿主聊天文件与 Mnemosyne Story/Branch 必须解耦。** 一个 Story/Branch 可以跨多个 TT/ST 聊天文件连续承载；单个宿主文件只作为来源／绑定，不作为长期主键。该绑定对象名称待 T-02 定名。 |
 | T02-D03 | accepted | **平台“从某楼新建分支”映射为同一 Story 下的新 Branch，而不是复制成独立 Story。** 子 Branch 继承父 Branch 到分叉点为止的既有历史；分叉后双方独立推进。 |
-| T02-D04 | accepted | **分支继承按引用／可见性复用，不复制分叉前记忆。** 子 Branch 保存 parent branch 与 fork cutoff，并复用祖先在 cutoff 之前的有效来源及派生记录；父线分叉后的内容对子线不可见。 |
-| T02-D05 | accepted（方向） | **分叉固定当时历史，父线后续修改不自动新开 Branch C，也不改写子线。** 用户在本轮接受不可变正文版本与分支历史快照方向；父线可选择新 Revision，子线保留分叉时选择的旧 Revision。具体 snapshot、清单与 cutoff 字段见 `08-history-snapshot-and-rebuild.md`，仍为待定稿设计。 |
+| T02-D04 | accepted | **分支继承按引用／可见性复用，不复制分叉前记忆。** 子 Branch 保存 parent branch 与 fork cutoff，并复用祖先在 cutoff 之前的有效来源及派生记录；父线分叉后的内容对子线不可见。固定父快照的具体表达见 T02-P01。 |
+| T02-D05 | accepted | **分叉继承当时的历史版本，而不是跟随父线后续修改。** 子 Branch 固定 fork 时所引用的历史快照前缀；父线后续编辑只改变父线的新快照选择，子线仍读取旧 Revision，无需把父线强制改名为另一 Branch。本轮随 Head 方案确认，原 proposed 状态结束。 |
 | T02-D06 | accepted | **Mnemosyne 自己生成的稳定 ID 才是正式身份。** TT/ST 的 session/conversation/chat ID、文件名、楼层号等只作为 provenance / adapter mapping，不能充当跨平台永久主键。 |
 | T02-D07 | accepted | **SourceMessage 与 Revision 分离。** 同一逻辑消息被编辑时保留同一 SourceMessage，生成新的 Revision；旧 Revision 默认保留但退出当前有效历史，不用覆盖唯一原文。旧派生记录是否长期物理保留属于后续存储／GC 策略。 |
-| T02-D08 | accepted | **Swipe 与 regenerate 视为同一 assistant SourceMessage 的候选 Revision 家族。** 当前选中的候选才参与当前 Branch；操作类型仍保留 provenance 以便诊断。若宿主可提供旧 swipe 候选，导入时可保存为非活动 Revision；无需为每个临时候选都生成派生记忆。 |
+| T02-D08 | accepted | **Swipe 与 regenerate 视为同一 assistant SourceMessage 的候选 Revision 家族。** 当前选中的候选才参与当前 Branch；操作类型仍保留 provenance 以便诊断。若宿主可提供旧 swipe 候选，导入时可保存为非活动 Revision；无需为每个临时候选都生成派生记忆。宿主 Regenerate 可能删除/重建且不保留旧候选，不因此自动改变领域消息身份，也不伪称已保存从未取得的旧正文。 |
 | T02-D09 | accepted | **派生记忆可以延后一轮生成，但这是调度策略，不改变版本语义。** 当最新回复仍可能 swipe/regenerate 时可保持 provisional；一旦后续消息推进，该 Branch 采用的 Revision 即成为该历史路径上的有效版本。即时生成模式下则必须在 swipe/regenerate 后失效旧派生并重建当前版本。 |
-| T02-D10 | accepted | **Edit / Swipe / Regenerate 需要保留不同操作来源，但版本模型可统一。** Edit = 同一 SourceMessage 的正文新 Revision；Swipe/Regenerate = assistant 消息的候选 Revision 切换/新增。手动深层 Edit 无法依赖单一事件保证发现，需另有同步／修复策略。 |
-| T02-D11 | accepted | **宿主删除默认先变成当前 Branch 不可见／tombstone，而不是立即物理擦除。** 对应派生记忆立即退出召回；真正永久删除由显式 purge 流程处理。是否长期保留被删原文及派生历史的物理副本由 T-03 存储/保留策略决定。 |
+| T02-D10 | accepted | **Edit / Swipe / Regenerate 需要保留不同操作来源，但版本模型可统一。** Edit = 同一 SourceMessage 的正文新 Revision；Swipe/Regenerate = assistant 消息的候选 Revision 切换/新增。T-02A 已确认普通 UI Edit 可观察；漏事件/外部编辑仍需同步／修复策略，不能由单样本推导所有编辑方式实时可见。 |
+| T02-D11 | accepted | **宿主删除默认先变成当前 Branch 不可见／tombstone，而不是立即物理擦除。** 对应派生记忆立即退出召回；真正永久删除由显式 purge 流程处理。是否长期保留被删原文及派生历史的物理副本由后续存储/保留策略决定，T-02 不实现硬删。 |
 | T02-D12 | accepted | **来源顺序与剧情内时间是两个不同维度。** 楼层号只作显示／宿主映射；正式先后关系由 Branch 内来源顺序／版本关系维护。剧情内 YYYY-MM-DD HH:MM 等时间可作为 Event/摘要的 world-time 字段和展示辅助，但不能代替来源顺序，因为存在倒叙、回忆和时间不确定。 |
-| T02-D13 | proposed（具体设计已给出） | **Head 推荐为 `head_snapshot_id`，指向不可变 HistorySnapshot；有序清单选定消息与正文版本。** `hs_<UUIDv4>`、分块共享清单、固定父快照的 cutoff 及提交规则见 `08-history-snapshot-and-rebuild.md` 第 4～6 节。楼层/剧情时间只作显示；尚不把本轮新增字段当作用户逐字段确认或已实现接口。 |
+| T02-D13 | accepted；具体方案见 T02-P01 | **Branch Head 指向当前完整提交的历史快照。** 采用 head_snapshot_id，不用最高楼层/剧情日期拼成版本主键。可读组合仅用于显示和诊断，原 proposed 状态由本轮 Head 确认取代。 |
 | T02-D14 | accepted | **逻辑隔离采用共享 canonical store + story_id / branch_id / message_id 等作用域，不按聊天文件或角色卡各建独立数据库。** 同 Story 的多个聊天文件和多个 Branch 才能复用共同历史；角色卡不是数据隔离主键。物理数据库部署与表结构仍留给 T-03。 |
-| T02-D15 | accepted | **当前有效历史由 Branch lineage + fork cutoff + active Revision 共同决定。** “失效/不可见”与“物理删除”严格区分；检索与派生结果必须按这套有效性视图过滤。 |
+| T02-D15 | accepted | **当前有效历史由固定快照、分支继承和所选 Revision 共同决定。** “失效/不可见”与“物理删除”严格区分；检索与派生结果必须按目标分支有效性视图过滤，不能在共享记忆上全局失效。 |
 
-### T-02 当前未决／攻坚项
+### T-02 当前未决／攻坚项（本轮校正）
 
-1. **旧档重新导入与身份重识别。** 内部 ID 为正式身份已经确定，但原始 JSONL / 跨平台导入缺少 Mnemosyne ID 时，怎样结合内容 hash、顺序、宿主 metadata、前缀匹配与用户确认来判断“同一档／副本／分支／全新 Story”尚未冻结。单纯相同 hash 只能证明内容相同，不能自动证明用户语义上希望合并。
-2. **变化对账与漏事件修复。** T-02A 已验证普通 UI 旧楼 Edit 可观测、Delete 参数为删除后长度、Regenerate 可删除重建；现在需决定有限对账与手动修复的边界，不再把“普通 UI Edit 是否有事件”作为未决事实。
-3. **正式 fork cutoff / head revision 表达。** 固定历史的方向已接受；具体方案已写入 `08-history-snapshot-and-rebuild.md`，待定稿与正反例验证，不重复从零讨论。
-4. **SourceMessage / Revision 的导入匹配算法与冲突语义。** 包括重复导入、内容相同但用户故意复制成另一故事、部分前缀相同、文件改名、跨 TT/ST 迁移等。
-5. **被删除／旧 Revision 的物理保留与 GC。** 领域语义已确定为默认不立即硬删，但具体保留期、备份传播和永久 purge 由 T-03 存储方案决定。
-
-
+1. **旧档重新导入与身份重识别。** 内部 ID、已知映射及歧义人工确认原则已定；内容 hash、顺序和前缀对齐的自动识别算法/阈值仍待专门实现。T-02 先冻结精确匹配/已确认变更的契约，不冒充已实现完整导入器。
+2. **漏事件与深层变更对账。** 普通 UI Edit 的宿主事实已在 T-02A 关闭；外部改文件、删除后具体来源定位、恢复后的有界对账仍是后续同步任务，保留 repair/rescan 边界。
+3. **fork / Head 表达已确认。** T02-P01 与 08 文档给出字段和不变量；剩余工作是 T-02 校验与测试、T-03 物理分块/崩溃恢复，不再列为用户尚未选择的方案。
+4. **非标准回合与具体输出边界。** 普通 User + Assistant 已确定；开场白、连续多条消息、Continue、群聊分组及品牌名仍待定。最小 ContextBlock/指纹/错误字段在 T-02 落实，完整 UI/模板后续。
+5. **被删除／旧 Revision 的物理保留与 GC。** 领域语义已确定为默认不立即硬删；具体保留期、备份传播、永久 purge 与容量策略以后确认，不在 T-02 静默启用自动删除。
 
 ## 6. T-02 第二轮讨论与宿主取证（2026-09-19）
 
@@ -108,93 +103,97 @@ D 仅留入口，不提前自动删旧总结或把所有内容归到一个“永
 | T02-D17 | accepted | **手动映射是正式兜底能力。** 当自动身份匹配、跨平台导入或分支关系无法可靠判断时，允许用户明确指定“这个宿主聊天属于哪个 Story/Branch/Segment”，系统不得为了全自动而冒险合并。 |
 | T02-D18 | accepted | **无原文的派生记忆允许存在并参与召回。** 必须显式标记 source unavailable / derived-only，不伪造原文或假装完整覆盖。 |
 | T02-D19 | accepted | **V1 默认采用上帝视角记忆。** 不按单个角色知识范围过滤普通召回；仅保留最小 visibility/audience 扩展字段，为未来单角色 Agent／多 Agent 分饰模式预留，不在当前 RP 模式启用复杂知识屏蔽。 |
-| T02-D20 | accepted | **身份冲突、来源缺失、无法确定的合并禁止自动写入。** 冲突进入 needs-resolution；由用户手动修复或未来 AI 助手给出提案，确认无冲突后才能继续该受影响范围的写入。 |
-| T02-D21 | accepted | **基础派生单位固定为“一轮 User + 对应 Assistant 输出”这一对。** 默认不单独为 User 楼生成独立摘要／记忆；User 内容作为该轮输入来源与 Assistant 输出共同组成派生源。派生摘要／记忆归属于这组实际 SourceMessage Revision，而不是仅绑定楼层号；楼层、message index、剧情时间只作定位与展示。 |
+| T02-D20 | accepted | **身份冲突、损坏引用、无法确定的合并禁止自动写入。** 冲突进入 needs-resolution；由用户手动修复或未来 AI 助手给出提案，确认无冲突后才能继续该受影响范围的正常写入。显式 derived-only 不是损坏；修复写入和诊断入口不能一并封死。 |
+| T02-D21 | accepted | **基础派生单位固定为“一轮 User + 对应 Assistant 输出”这一对。** 默认不单独为 User 楼生成独立摘要／记忆；User 内容作为该轮输入来源与 Assistant 输出共同组成派生源。派生摘要／记忆归属于这组实际 SourceMessage Revision，而不是仅绑定楼层号；楼层、message index、剧情时间只作定位与展示。非标准分组另议，不伪造缺少的一方。 |
 
-### 待确认／方案候选
+### 契约落实与后续候选
 
-1. **Derived Memory 的正式来源契约。** 当前建议：摘要、事件、实体变化等派生对象必须保存一个或多个 source_revision_id（必要时再带 source span）；楼层号、message index、world time 只作 provenance/display，不能作为唯一来源键。最新正文驱动重建规则见第 10 节及 `08-history-snapshot-and-rebuild.md`，不为独立状态编辑建设通用依赖系统。
-2. **派生对象类型与命名。** 用户倾向不同层级使用不同对象：单轮／单段小记忆、跨非连续楼层事件、实体／状态记录分别建模；正式名字兼顾 Mnemosyne 品牌与技术清晰度，尚未冻结。
-3. **ContextBlock 正式字段。** 当前理解：它是 Engine 发给 Adapter 的临时“待注入记忆块”，不是数据库正文格式本身。不同记忆类型可以有不同渲染模板；role/位置可由用户配置，默认通常 system。
-4. **Run / Generation identity。** 候选方案：每次生成前拦截由 Mnemosyne 自己创建 run_id，不依赖 TT 原生 generation id；生命周期覆盖 prepare → context compile/inject → generation end/cancel。
-5. **Branch History Revision / Head snapshot。** 最新具体建议为 `head_snapshot_id` 指向不可变历史快照，见 `08-history-snapshot-and-rebuild.md`；不同时保留含义重叠的 epoch/UUID/楼层组合三套历史身份。运行中未提交的宿主变化另由观察代次阻止旧结果应用。
-6. **Derivation input hash。** 候选方案：hash 用于幂等/缓存，不充当消息身份。输入应至少包含实际 source revision IDs + 规范化正文 + derivation schema/prompt version；“相同楼层号 + 相同文本 hash”不足以跨 Branch 唯一判断同一来源。
-7. **TT chat_metadata.integrity 的角色。** T-02A 已真机确认：当前 TT 2.2.0 dev/Canary 中，parent / child 的 stableId 可区分，且 stableId、`handle.metadata.get().integrity`、`context.chatMetadata.integrity` 在各自稳定样本中一致；rename / reopen 后 stableId 保持。故它可冻结为 TT Adapter 的宿主稳定身份 / provenance 信号。它仍不替代 Mnemosyne 自己的 Story / Branch / SourceMessage 永久主键，也不能单靠它决定跨平台导入是否应合并。
-8. **旧档与重复导入匹配。** integrity、内容 hash、顺序前缀、文件名/chatRef 都可作证据，但最终仍保留用户确认和手动映射；自动判定规则待集中攻坚。
+1. **Derived Memory 来源契约。** 轻量 input_refs + coverage，引用原文/下级派生的具体版本；楼层号和剧情时间不作为唯一来源键。细节由 T-02 可执行校验闭环。
+2. **派生对象类型与命名。** 单轮记忆、跨非连续楼层事件、实体／状态记录分别表达；工程暂用 TurnMemory、Summary、Event、Record，品牌显示名尚未冻结。
+3. **ContextBlock。** Engine 发给 Adapter 的临时待注入记忆块，不等同数据库正文格式。role/位置用户可配置；T-02 落实最小契约，不实现完整渲染器。
+4. **Run identity。** 本系统创建 run_id；生命周期和事件过期校验在 T-02 固化，不依赖 TT 原生 generation id。
+5. **Head snapshot。** 已由 T02-P01 收口；宿主变化先令待应用准备失效，不能等落库完成才拒绝旧结果。
+6. **Input hash。** 用于内容校验/幂等/缓存，不充当消息身份。T-02 固化有用途/版本的 SHA-256/JCS 输入字段表；实际来源版本、顺序、coverage、规则/profile 与宿主噪音分开，不因 provider 改变全量重摘。
+7. **TT chat_metadata.integrity 的角色。** T-02A 已真机确认：当前 TT 2.2.0 dev/Canary 中，parent / child 的 stableId 可区分，且 stableId、`handle.metadata.get().integrity`、`context.chatMetadata.integrity` 在各自稳定样本中一致；rename / reopen 后 stableId 保持。故它可作为 TT Adapter 的宿主稳定身份 / provenance 信号。它不替代 Mnemosyne 的永久主键，也不能单靠它决定跨平台导入是否应合并。
+8. **旧档与重复导入匹配。** integrity、内容 hash、顺序前缀、文件名/chatRef 都可作证据；保留用户确认与手动映射。详细对齐器不是 T-02 内存契约参考模型。
 
+## 7. T-02A 前置验证决定（2026-09-19，现已完成）
 
-## 7. T-02A 前置验证决定（2026-09-19）
+在冻结正式 T-02 契约前，执行小型宿主事实验证子任务 T-02A；它属于 T-02 的前置验证，不改变 S-A 的主任务编号。
 
-在冻结正式 T-02 契约前，先执行一个小型宿主事实验证子任务 T-02A；它属于 T-02 的前置验证，不改变 S-A 的主任务编号。
+T-02A 回答以下事实问题：
 
-T-02A 只回答以下事实问题：
+1. 当前 TT 2.2.0 dev/Canary 创建 Branch 后，parent / child 的 stableId()/chat_metadata.integrity 是否不同。
+2. 普通 UI 手动编辑旧消息时，扩展侧是否收到 MESSAGE_EDITED / MESSAGE_UPDATED，以及正文指纹变化。
+3. MESSAGE_DELETED 提供什么参数，删除后索引如何变化。
+4. Swipe / Regenerate 的事件、active 正文与候选变化。
+5. 文件改名、重新打开聊天时 stableId 是否保持。
 
-1. 当前 TT 2.2.0 dev/Canary 创建 Branch 后，parent / child 的 stableId()/chat_metadata.integrity 是否确实不同。
-2. 普通 UI 手动编辑旧消息时，扩展侧是否稳定收到 MESSAGE_EDITED(messageIndex) 与 MESSAGE_UPDATED(messageIndex)，以及事件发生时能否读取到编辑后的正文。
-3. 删除消息时 MESSAGE_DELETED 提供什么参数；删除后历史索引如何变化。
-4. Swipe / regenerate 时 MESSAGE_SWIPED / generation lifecycle 能否稳定定位当前 assistant message 与 active swipe。
-5. 文件改名、普通重新打开聊天是否保持 stableId 不变。
-
-T-02A 不设计数据库、不实现正式 Memory Engine、不冻结 Story/Branch/Revision schema；它只产出宿主能力矩阵和脱敏运行证据。若事件能力不足，正式 T-02 必须保留手动 repair/rescan/映射入口作为降级路径。
-
+最终结果见 T-02A 任务及 `docs/05-source-review.md` 二次 review。任务 verified；其中 Delete 参数是删除后长度，不能单独定位被删消息；Regenerate 不保证保留旧候选；summary 在过程中可滞后。这些限制不是重新开探针的理由，正式契约需要尊重它们。
 
 ## 8. TT `api.db` / TriviumDB 宿主能力取证（2026-09-19）
 
 2026-09-18，TauriTavern 合并 PR #17，将 TriviumDB 重构为原生 adapter crate 并通过 `window.__TAURITAVERN__.api.db` 暴露给扩展。该变化影响 T-03 技术栈评估，但不改变 T-02 的 Story / Branch / SourceMessage / Revision 领域契约。
 
-### 已验证宿主事实
+### 源码／文档已核对的宿主事实（不等于用户现装数据库真机验收）
 
 1. **不是 WebView / IndexedDB。** 前端 `api.db` 只是 JS bridge；实际 CRUD、向量检索、文本索引、图操作与 TQL 由 TT Rust 后端的 `tt-adapter-triviumdb` 执行。
 2. **是 TT data root 下的原生嵌入式数据库。** 每个 namespace 使用独立数据库实例／文件组，TT 文档给出的路径为 `_tauritavern/databases/db-<namespace>/`。
 3. **完整 TT 数据归档已纳入数据库。** 导出前会 flush，并在归档期间暂停数据库操作；导入按 namespace 替换文件组，导入后扩展需要重新 `open()`。
-4. **索引与真相源仍需分离。** TT 对 TriviumDB 0.8.8 的说明明确指出：手工 `indexText` / `indexKeyword` 不进入 WAL；批量索引后应调用 `buildTextIndex()`，并保留可重建索引的源文本。这与 B-02“原文／版本为正式数据，索引可重建”一致。
-5. **它不是外部数据库服务。** `window.__TAURITAVERN__.api.db` 只存在于 TT 宿主 WebView；独立 Mnemosyne Engine / MCP 进程不能把它当网络数据库直接连接。若使用，必须通过 TT Adapter 调用，或另做明确的宿主桥接。
+4. **索引与真相源仍需分离。** TT 对 TriviumDB 0.8.8 的说明指出：手工 `indexText` / `indexKeyword` 不进入 WAL；批量索引后应调用 `buildTextIndex()`，并保留可重建索引的源文本。这与 B-02 一致。
+5. **不是外部数据库服务。** `api.db` 只存在于 TT 宿主；独立 Engine/MCP 进程不能把它当网络数据库直接连接。使用时必须通过适配器或明确的桥接。
 
 ### 对 Mnemosyne 的当前影响
 
-- **T-02：不改。** canonical identity、Branch lineage、Revision、派生来源与有效历史语义仍由 Mnemosyne 自己定义。
-- **T-03：新增强候选。** 需要把“TT 内嵌 TriviumDB provider”与独立后端方案做对照实验；若验证通过，它可能在 TT-only / 本机模式下同时承担 JSON 真相数据、向量、文本和图查询，从而减少首版外部组件。
-- **跨平台约束不变。** 不能把 TT namespace、NodeId、TQL 或 TriviumDB 文件格式提升为 Mnemosyne 的跨平台正式身份／领域契约；它们最多属于 storage adapter / deployment provider。
-- **中文检索仍需 E-01 实测。** 上游 TriviumDB 当前文档描述 TextIndex 使用 AC + BM25 2-Gram，这对无空格中文很有潜力，但必须在 TT 实际固定版本与我们的中文 RP 测试集上验证，不直接当成方案已冻结。
-
+- **T-02 不改领域契约。** 身份、Branch、Revision、派生来源与有效历史由 Mnemosyne 定义。
+- **T-03 新增强候选。** 将 TT TriviumDB 与独立后端方案对照；能否同时承担正式数据和索引，需实际验证，不凭接口名称定案。
+- **跨平台约束不变。** namespace、NodeId、TQL、文件格式最多属于 storage provider，不能成为跨平台正式身份。
+- **中文检索仍需 E-01 实测。** 上游 TextIndex 文档的 AC + BM25 2-Gram 描述是候选依据，不替代固定版本与中文 RP 测试集验证。
 
 ## 9. T-03 渐进式 Storage Provider 路线（2026-09-19）
 
-状态：proposed，待 T-03 实测后冻结。
+状态：B 先行/可迁移方向已接受；具体 provider 仍 proposed，待 T-03 实测后冻结。
 
-用户当前只有约百万字真实 RP 样本，历史千万字记录无法从原商业平台导出。由此采用“两类测试集分工”，不等待真实数据自然增长到千万字：
+用户当前约百万字真实 RP 样本，历史千万字记录无法从原商业平台导出；两类测试集分工：
 
-1. **真实百万字集**：用于检索质量、中文 BM25/向量混合召回、事件与角色连续性、误召回/漏召回等语义评测。
-2. **合成放大集（5x/10x 或更高）**：从真实样本的结构、长度分布、元数据与关系密度生成压力数据，用于存储规模、冷启动、RSS/heap、p95/p99 查询延迟、索引构建、flush/compact、备份恢复和迁移演练。合成集不得替代真实集的语义质量结论。
+1. **真实百万字集**：在获得明确数据权限后用于检索质量、中文混合召回、事件/角色连续性和误召回/漏召回的语义评测。
+2. **合成放大集（5x/10x 或更高）**：按结构、长度分布、元数据与关系密度测容量、冷启动、RSS/heap、p95/p99、索引构建、flush/compact、备份恢复。合成集不替代真实语义质量结论。
 
 ### 渐进式实现候选
 
-若 T-03 A/B 证明 TT 内嵌 TriviumDB 在百万字真实集 + 合成规模集上达到首版门槛，优先交付：
+若 T-03 证明 TT 内嵌 TriviumDB 达到首版正确性/恢复/性能门槛，优先交付 **B：TT 本机 provider**；Core、canonical IDs、逻辑导出与索引重建保持独立。后续完善 **A：独立 backend**，用于跨宿主、服务端运行与更高规模。
 
-- **Provider B：TT TriviumDB 本机 provider**，让用户尽早在现有 TT 手机/桌面环境实际使用；
-- 同时保持 Mnemosyne Core 的 storage contract、canonical IDs、逻辑导出格式与索引重建规则独立于 TriviumDB；
-- 后续继续实现 **Provider A：独立 Mnemosyne backend**，用于更高规模、跨宿主、服务端部署和更强扩缩容；
-- 当真实剧情增长或 A 成熟时，从 B 迁移到 A；迁移依赖 Mnemosyne 自己的 canonical 数据与可重建索引，不依赖 Trivium NodeId/TQL 作为永久身份。
+从 B 迁 A 依赖自己的正式数据与可重建索引，保留已有正确摘要而非重新调用 LLM 总结全档。迁移触发由需求、性能与 A 成熟度决定，不以字数达到某一值作为唯一条件。
 
 ### 必须守住的迁移边界
 
-- TriviumDB NodeId 只能是 storage-local ID，不得成为 SourceMessage/Revision/Event 等正式身份。
-- 原文、Revision、派生对象及其来源关系必须能逻辑导出；向量/TextIndex/QuIVer 等视为可重建索引。
-- Provider contract 不暴露 TQL 作为 Mnemosyne Core 必需语义，避免未来 A provider 被迫复刻 TriviumDB。
-- B 版验收必须包含“导出 B → 空环境重建/导入”的演练，否则不得视为可迁移。
+- TriviumDB NodeId 只能是 storage-local ID。
+- 原文、Revision、派生对象和来源关系必须可逻辑导出；向量/TextIndex/QuIVer 为可重建索引。
+- provider 接口不要求 Core 使用 TQL，避免 A 被迫复刻 vendor 语法。
+- B 先验收“导出 → 空环境恢复”，A 存在后才验收实际 B→A 迁移。
+- 单权威写入和明确交接；TT namespace 整库同步不等于记录合并或跨端写锁。
 
 ## 10. 正文权威与逐层重建收口（2026-09-19）
 
-依据用户本轮对 `07-t02-contract-proposal.md` 的确认与修正；不把随后新增的 Head 字段默认当成已批准。
+依据用户对 07 文档的确认与修正，以及本轮“就用这套 Head 方案”的明确批准。
 
 | ID | 状态 | 结论 |
 | --- | --- | --- |
-| T02-D22 | accepted | **B 版单权威写入。** 用户接受同一记忆库同一时刻仅一端写入，长期 RP 主要使用单台手机；跨端切换明确交接，暂不建设离线多主自动合并。 |
+| T02-D22 | accepted | **B 版单权威写入。** 同一记忆库同一时刻仅一端写入，长期 RP 主要使用单台手机；跨端切换明确交接，暂不建设离线多主自动合并。 |
 | T02-D23 | accepted | **有效历史正文是已发生剧情的权威。** 人物、关系、物品、势力等随正文派生，不是另一套可独立改写历史的真相源；用户大纲与初始设定不自动变成已发生事件。 |
-| T02-D24 | accepted | **匹配复用，变化逐层重建。** 可确认匹配且适用的回合记忆复用；没有适用已有版本才重生成。包含变化回合的大小总结、事件串及受影响累计状态退出当前有效视图，按加工关系重建；不全局破坏其他分支仍采用的旧版本。 |
-| T02-D25 | accepted（需求边界） | **不为独立改状态的假定玩法建设通用生成依赖系统。** 只需支撑正文来源追溯及上一条的上下级重建关系。具体轻量实现建议为输入版本引用与覆盖范围，不要求用户维护字段级依赖图。 |
-| T02-P01 | proposed | **Head 具体方案。** `Branch.head_snapshot_id` 指向 `hs_<UUIDv4>` 的不可变 HistorySnapshot；snapshot 引用有序消息/版本清单的根，物理分块共享；新增/编辑/删除/切版本推进快照，重摘摘要不推进正文 Head。完整字段、fork 锚、重试与发布规则见 `08-history-snapshot-and-rebuild.md`。 |
+| T02-D24 | accepted | **匹配复用，变化逐层重建。** 可确认匹配且适用的回合记忆复用；没有适用已有版本才重生成。包含变化回合的大小总结、事件串及累计状态退出当前有效视图，按加工关系重建；不全局破坏其他分支仍采用的旧版本。 |
+| T02-D25 | accepted（需求边界） | **不为独立改状态的假定玩法建设通用生成依赖系统。** 只需正文来源追溯及上下级重建关系；用输入版本引用与覆盖范围落实，不要求用户维护字段级依赖图。 |
+| T02-P01 | accepted（由 proposed 转入，保留原 ID） | **Head 具体方案正式采用。** `Branch.head_snapshot_id` 指向 `hs_<UUIDv4>` 的不可变 HistorySnapshot；snapshot 引用有序消息/版本清单的根，物理分块共享。新增/编辑/删除/切版本推进快照，重摘摘要不推进正文 Head。固定父 snapshot/prefix/锚，回滚建新快照，操作重试与完整发布规则见 `08-history-snapshot-and-rebuild.md`。设计 accepted 不等于数据库/实现 verified。 |
 
-依赖简化不等于丢弃加工记录：大总结要知道用了哪些小总结，摘要器若实际读取前文也应计入同一份输入引用，而非单独建立状态权威层。正文没变但纠正摘要提取错误时，其上层结果仍可能需要重建，这是加工正确性修复，不是改写故事。区间内插入/删除/重排也必须复核覆盖范围，不能只检查旧引用仍存在。
+依赖简化不等于丢弃加工记录：大总结要知道用了哪些小总结，摘要器实际读取的前文也计入同一份输入引用，而非另建状态权威层。正文没变但纠正摘要时，上层结果也可能重建。区间内插入/删除/重排必须复核 coverage，不能只检查旧引用仍存在。
 
-`07-t02-contract-proposal.md` 保留为首轮候选；与本节冲突的依赖描述由 `08-history-snapshot-and-rebuild.md` 取代。S-A 当前仍是 T-02 契约讨论；未创建正式 T-02 任务卡，未开始实现。
+07 保留为首轮候选；冲突的依赖描述由本节和 08 取代。Head 当前以 08 的确认版本为准。正式 T-02 任务卡已创建，尚未实现；T-03 为预备 proposal。
+
+## 11. 任务就绪与剩余事项（2026-09-19）
+
+- **T-02：planned。** `tasks/T-02-identity-version-context.md`。交付最小可执行契约/校验、内存参考模型与正反例，不建正式数据库/导入器/LLM 重建器。原24项对应关系和安全未决状态列于卡内。
+- **T-03：proposal。** `tasks/T-03-storage-foundation.proposal.md`。已应用户要求预备 B provider 评估、分块持久化、提交/恢复、导出/迁移方案。T-02 review 后核对修订，由 Chat/用户改为 planned 才可执行；不自动顺延。
+- **不阻塞 T-02 的未决项。** 非标准回合自动分组、品牌名、模糊身份对齐阈值、自动保留/清理周期、物理数据库/块参数、完整渲染/摘要模板。当前任务不悄悄决定这些产品行为；普通待回复 User 为正常 pending，复杂未知分组保留原文并明确待处理。
+- **后续必须关闭的门禁。** 非标准回合在自动派生前确认；模糊对齐在正式导入同步前验证；保留/清理在任何自动 GC/purge 前确认；provider/恢复/设备性能按 T-03 门禁验收。
+
+任务规划权继续归 Chat/用户。创建 T-03 预备卡不授权 Codex 自动创建、批准或执行后续卡；所有 task 完成后仍需 Chat review。
