@@ -236,17 +236,17 @@ T-02A 只有在以下条件满足后才可交 Chat review：
 
 ### 五项现场验证与脱敏证据
 
-用户在隔离虚构测试聊天中手工完成现场操作，并在 reopen 后刷新 host 复制 trace；未修改真实长期 RP。以下为运行事实，整体任务仍保持 `implemented_unverified`，因为 integrity、Delete 参数完整语义和失败 regenerate 的新候选仍未确认：
+用户在隔离虚构测试聊天中手工完成现场操作，并在 reopen 后刷新 host 复制 trace；未修改真实长期 RP。以下矩阵已按 Chat review 及 0.1.4 补测校正；整体保持 `implemented_unverified` 待 Chat 复核，面板拖动已由用户确认通过：
 
 | 能力 | 实测结果 | 关键参数／身份 | 可否自动定位 | 宿主限制／降级 |
 | --- | --- | --- | --- | --- |
-| Chat reopen | verified | stableId hash `58c6aa96`；chatId/ref 重开后保持 | verified（stableId） | integrity 不可读 |
+| Chat reopen | verified | stableId hash `58c6aa96`；chatId/ref 重开后保持 | verified（stableId） | metadata 交叉证据已补采 |
 | Rename | verified | stableId hash `58c6aa96` 保持；chatId/ref 改变 | verified（stableId）；ref 需重新读取 | 文件身份变化，不能只依赖 ref |
-| Branch | verified | parent `58c6aa96`；child `15d97193`；child chatId/ref 不同，count `7 -> 2` | verified（stableId 可区分） | integrity 缺失，未比较其关系 |
+| Branch | verified | parent `58c6aa96`；原 child `15d97193`；0.1.4 各自 stableId=integrity=contextIntegrity | verified（宿主身份可区分） | 另一个 CHILD-HOST 身份 c7f7849b 独立记录，不混同 |
 | Deep Edit | verified | `MESSAGE_EDITED[3]` 后 `MESSAGE_UPDATED[3]`；index 3 指纹 `512b617a -> 502b5fe7` | verified（事件 index + 指纹） | 仅验证本次旧消息样本 |
-| Delete | degraded | `MESSAGE_DELETED[6]`；count `7 -> 6`；用户确认删除中间层，后续指纹由 index 6 移到 index 5 | degraded | 参数是删除前/后索引还是其他标识未冻结；summary 不可用 |
-| Swipe | degraded | `MESSAGE_SWIPED[5]`；候选 `1 -> 2`，swipeId 改变 | degraded | 模型无输出并断开，但事件检测有效 |
-| Regenerate | degraded | generation lifecycle 可见；失败路径有删除／重建相关事件 | degraded | 模型无输出并断开，未证明新的可用 candidate/Revision |
+| Delete | verified（明确目标样本） | N5、k3、UI#3；seq29 参数[4]，count5→4，旧 index4 指纹移至3 | 事件参数单独定位仍 degraded；本样本邻接可核对 | summary 在事件中暂为5，稳定后为4 |
+| Swipe | verified（事件／候选定位） | `MESSAGE_SWIPED[5]`；候选 `1 -> 2`，swipeId 改变 | verified | 该次后续模型失败作为生成样本 degraded 单列 |
+| Regenerate | verified（成功样本） | seq25～28：index4、count5，active 正文2297→2068字符、hash 改变 | 同一宿主槽位的新正文可定位 | 候选1→1、swipeId0，无 swiped 事件；不证明保留旧候选 |
 
 脱敏证据摘要位置：`notes/t-02a-runtime-trace.md`。完整附件不入库。
 
@@ -342,3 +342,56 @@ T-02A 可据此收口为：
 
 - Delete 现场样本信息不足，用户要求下次返修时重新做一次更明确的删除实验；当前不把该样本作为最终 Delete 定位语义的唯一真机证据。
 - 下次 Delete 复测应在操作前明确记录总 message 数、目标消息的前端楼层号、内部 0-based index、前后邻接指纹，并在删除后再次记录 count/邻接平移；同时保留源码事实 `MESSAGE_DELETED(chat.length)` 作为解释性证据。
+
+## Codex review 返修（2026-09-19，0.1.4）
+
+状态仍为 `implemented_unverified`；本段替代旧回报中“integrity 宿主不可读、summary 不可用、Delete 参数语义未定”的解释，不覆盖原始现场事实。
+
+### 范围与实际改动
+
+- 基线 `d235263`（本轮 `git pull --ff-only origin main` 快进），文档基线 v0.1 及 2026-09-19 review；已读 README、AGENTS、架构 0～3、决策、S-A 导读、T-02A、来源核验与运行记录。保留 `.codex/`，不创建正式 T-02 卡。
+- `index.js` / `manifest.json`：探针 0.1.4，读取 `handle.metadata.get()` 的 integrity；以 `context.chatMetadata.integrity` 独立交叉取证，不回退伪装正式 metadata 成功。原始值比较后只输出布尔/null与身份短哈希；错误／缺失分开记录。
+- 正确调用 `handle.summary({ includeMetadata: false })`，只导出 `status` 和 `message_count`。输出暂沿用 `messageState.history.summary` 分组，此分组不是宿主 API 路径；tail 失败不会阻止 summary 读取。
+- Delete 事件数字标为 `post_delete_count`，不推断为被删索引；generation/chat 事件数字也不充当消息索引。增加 `Index (0-based)`，只采指定位置及邻居，不实现 rescan/repair。
+- 补充 `MESSAGE_RECEIVED` 观察与 generation type 白名单；成功与否仍需用户确认非空有效回复并提交前后快照，不能凭 ended 事件判定成功。
+- 用户明确要求的范围扩展：标题栏 pointer 拖动、pointer capture/cancel、视口限制及缩放／面板尺寸变化时回收；适配窄窗口，位置仅当前页面有效。无新依赖、无数据迁移。
+- 修改现有探针／测试／README、任务卡、运行记录、基线、来源核验、CHANGELOG；不修改 TT/ST／柏宝书源码、模型配置或聊天档案。
+
+### 环境、测试与事实边界
+
+- Windows PowerShell / Node；`node --test apps/tt-adapter-probe/tests/probe.test.js`：18/18 通过（新增 7 项）。
+- `node --check apps/tt-adapter-probe/index.js`、`git diff --check`：通过。
+- 相对 `d235263`：探针 JS +113/-34 行，测试 +122 行；未引入 package.json 或依赖安装。
+- 已用 `Copy-Item -LiteralPath` 更新既定 TT third-party 扩展目录的 index.js / manifest.json / README.md；`Get-FileHash` 核对部署与仓库两份 JS、manifest SHA-256 分别一致。JS：`BD69CDEC6937C9F1C57D519613630F66979FBA03875DA0914C28EA9269F968A2`。部署成功不等于 TT 已重新加载，待用户刷新确认 0.1.4。
+- 自动测试涵盖 metadata 正确方法与 camelCase 字段、直接相等比较、缺失／异常、summary 正确调用和安全字段筛选、Delete 参数非索引、目标邻居平移、拖动捕获／取消／边界／缩放。
+- 测试 stub 和模拟 pointer 不是真机结果；0.1.4 的 TT metadata/summary、成功 Regenerate 和拖动均已取得用户实机回传。此前缺失状态已由下方“0.1.4 实机回传核对”修正。
+- Delete 源码事实、Swipe 已验证能力依据本任务卡 Chat review；本轮不重复访问外部上游源码，也不将“有限 rescan”实现为正式方案。
+
+### 用户复测顺序
+
+只用既有虚构测试聊天；刷新 TT 前端，确认面板 `0.1.4`、`arm` 不勾选。每次点击 Refresh host 后，等 host 的 observedAt 更新再 Copy host；Copy trace 是当前页面最近 40 条累计事件，测试中不要刷新前端。
+
+1. 拖标题栏到左上／空白位置，滚动面板、缩小再放大窗口，检查标题栏始终可拖，按钮仍能点击。回传“DRAG：通过／问题描述”。
+2. 打开原 parent，清空 Index，Refresh host → Copy host，标为 `PARENT-HOST`。打开已有 child 同样操作，标为 `CHILD-HOST`。检查 integrity/contextIntegrity 与 stableId 哈希及三个比较字段，summary.message_count 与 contextCount 交叉比较；不重新创建 Branch，不重做 rename/reopen。
+3. 回到 parent。先确保测试模型能返回有效回复，最新消息为非空 assistant；必要时只在测试聊天发送一条简短虚构请求取得正常回复。清空 Index，Refresh host → Copy host 为 `REGEN-BEFORE`。执行原生 Regenerate，等待有效非空输出完整结束；不要点 Stop。再 Refresh host → Copy host 为 `REGEN-AFTER`，Copy trace 为 `REGEN-SUCCESS-TRACE`，附“看到有效输出：是/否”。若仍失败，回传失败，不把空候选标为成功。
+4. 最后在虚构聊天选择一条有前后邻居的中间消息。记录前端显示楼层号和内部 0-based index k（从第一条含开场白算 index 0，不从 UI 显示号猜）；若选择倒数第二条，k = 当前 contextCount - 2。在 Index 填 k，Refresh host → Copy host 为 `DELETE-BEFORE`；附总数 N、UI 楼层号（无则写无）、k。只删除目标一条，不选择“从此往后删除”。等保存后保持 Index 不变，Refresh host → Copy host 为 `DELETE-AFTER`，Copy trace 为 `DELETE-TRACE`。若界面只支持截断删除，停止并说明，不改为批量删除。
+
+预期检查：Delete count 由 N 到 N-1，事件实参为 N-1，旧 k+1 指纹移动到 k；summary 与 context count 若不同，保留实际返回，不手改结果。成功 regenerate 的候选数是否增加不预设结论，由 trace 决定。
+
+### 回退、未验证与后续
+
+- 回退：禁用探针，或将 `d235263` 中的 index.js / manifest.json / README.md 恢复到部署目录并刷新；不要回退／删除聊天。
+- 契约影响：仅诊断输出新增 status、交叉身份、generationType/watchIndex；无正式 schema、存档或迁移变更。
+- 仍需上述真实回传与 Chat 复核；T-02 依赖的是已核实宿主事实和明确降级边界，不自动推进任务或冻结身份契约。
+
+### 0.1.4 实机回传核对（2026-09-19）
+
+已收到用户附件 `c356e6b7-741c-4b48-8396-754406e5eac9`，详细脱敏证据见 `notes/t-02a-runtime-trace.md` 的“0.1.4 补测结果”。本段更新前文等待实测的状态：
+
+- 两处 API 修复均取得现场证据。parent、原 child（seq7/8）及本次 CHILD-HOST 中，stableId/metadata.integrity/contextIntegrity 的三个比较均 true；六份 host 的 summary.message_count 均与 contextCount 一致。
+- 第三次 Regenerate 有成功证据（用户确认输出 + seq25～28 + REGEN-AFTER）。前两次失败与 seq24 中间删除单列；不能把 REGEN-BEFORE 的 count6/index5 直接与成功后 count5/index4 当作单轮变化。第三轮前后 index4/count5，候选数1→1，active 正文指纹 bacb4d89→75257157，长度2297→2068。宿主删除／重建不等于领域 SourceMessage 永久身份改变，此问题由 T-02 决定。
+- 明确 Delete 样本也已补齐：N5、内部k3、UI#3，seq29 参数4，后续指纹从index4移至3；参数不是被删index，和删除后长度一致。事件参数独自定位具体来源仍不足，不实现 rescan。
+- 额外限制：事件采样期间 summary 与 context 可不同步；seq29 时 summary5/context4，稳定 HOST 后两者均4。切聊天过渡 seq9 不作为身份比较证据；before 不是事务快照。ended/received 也在失败轮出现，不能单凭事件名称判成功。
+- 面板标题栏拖动、TT 窗口最小化后不溢出、按钮可用已由用户确认；宿主三项返修及 Delete 样本无需重做。任务保持 implemented_unverified，等待 Chat review，不自动升级 verified。
+- 用户补充：删除两条连续 assistant 中后一条后第三次 regenerate 成功，支持“上游要求 USER/ASSISTANT 交替”的猜测；没有 API 错误证据，记录为非正式运行假设，不影响宿主事件结论。
+- 本轮仅写事实记录／矩阵、来源和基线／CHANGELOG，未修改代码或部署；最终测试命令见本段更新后的环境记录。附件用 PowerShell ConvertFrom-Json 解析按序核对，原始附件不入库。回退仍为禁用探针／恢复 d235263 探针，正式数据与契约无变更；本提交待 push。

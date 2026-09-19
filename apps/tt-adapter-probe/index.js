@@ -48,6 +48,84 @@
       return { length: text.length, hash: fnv1a(text) };
     }
 
+    function summarizeIdentityValue(value) {
+      if (value == null) return null;
+      return { kind: typeof value, ...redactText(typeof value === 'string' ? value : JSON.stringify(value)) };
+    }
+
+    async function readMetadataEvidence(handle, context, stableId) {
+      let metadata;
+      let metadataStatus = 'unavailable';
+      if (typeof handle?.metadata?.get === 'function') {
+        try {
+          metadata = await handle.metadata.get();
+          metadataStatus = 'ok';
+        } catch {
+          metadataStatus = 'error';
+        }
+      }
+      const integrity = metadata?.integrity ?? null;
+      const contextIntegrity = context?.chatMetadata?.integrity ?? null;
+      const matches = (left, right) => left == null || right == null ? null : left === right;
+      return {
+        metadataStatus,
+        integrity: summarizeIdentityValue(integrity),
+        contextIntegrity: summarizeIdentityValue(contextIntegrity),
+        stableIdMatchesIntegrity: matches(stableId, integrity),
+        stableIdMatchesContextIntegrity: matches(stableId, contextIntegrity),
+        metadataMatchesContextIntegrity: matches(integrity, contextIntegrity),
+      };
+    }
+
+    async function readChatSummary(handle) {
+      if (typeof handle?.summary !== 'function') return { status: 'unavailable', message_count: null };
+      try {
+        const summary = await handle.summary({ includeMetadata: false });
+        return {
+          status: summary == null ? 'empty' : 'ok',
+          message_count: Number.isInteger(summary?.message_count) ? summary.message_count : null,
+        };
+      } catch {
+        return { status: 'error', message_count: null };
+      }
+    }
+
+    function bindPanelDrag(host, header, viewport) {
+      let drag = null;
+      const place = (left, top) => {
+        const rect = host.getBoundingClientRect();
+        host.style.left = `${Math.max(0, Math.min(left, viewport.innerWidth - rect.width))}px`;
+        host.style.top = `${Math.max(0, Math.min(top, viewport.innerHeight - rect.height))}px`;
+        host.style.right = 'auto';
+        host.style.bottom = 'auto';
+      };
+      header.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || drag) return;
+        const rect = host.getBoundingClientRect();
+        drag = { id: event.pointerId, x: event.clientX - rect.left, y: event.clientY - rect.top };
+        header.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      header.addEventListener('pointermove', event => {
+        if (drag?.id !== event.pointerId) return;
+        place(event.clientX - drag.x, event.clientY - drag.y);
+      });
+      const stop = event => {
+        if (drag?.id !== event.pointerId) return;
+        drag = null;
+        if (header.hasPointerCapture(event.pointerId)) header.releasePointerCapture(event.pointerId);
+      };
+      header.addEventListener('pointerup', stop);
+      header.addEventListener('pointercancel', stop);
+      header.addEventListener('lostpointercapture', stop);
+      const clamp = () => {
+        const rect = host.getBoundingClientRect();
+        place(rect.left, rect.top);
+      };
+      viewport.addEventListener('resize', clamp);
+      if (typeof viewport.ResizeObserver === 'function') new viewport.ResizeObserver(clamp).observe(host);
+    }
+
     function summarizeWindowInfo(value) {
       if (value == null) return null;
       if (typeof value !== 'object') return { kind: typeof value };
@@ -113,7 +191,13 @@
       };
     }
 
-    function inferMessageIndexes(args) {
+    function inferMessageIndexes(args, eventName) {
+      if (eventName === 'message-deleted') {
+        return { candidates: [], numericValues: args.filter(Number.isInteger), inference: 'post_delete_count' };
+      }
+      if (eventName && !['message-edited', 'message-updated', 'message-swiped', 'message-received'].includes(eventName)) {
+        return { candidates: [], numericValues: [], inference: 'not_a_message_index' };
+      }
       const explicit = [];
       const numeric = [];
       const seen = new WeakSet();
@@ -338,6 +422,7 @@
     return Object.freeze({
       PLACEMENTS,
       abortError,
+      bindPanelDrag,
       createRequestGate,
       fakePrepare,
       fnv1a,
@@ -347,9 +432,12 @@
       makeToken,
       orderTrace,
       redactText,
+      readMetadataEvidence,
+      readChatSummary,
       sameSnapshot,
       snapshotFromState,
       summarizeEventValue,
+      summarizeIdentityValue,
       summarizeWindowInfo,
       summarizeRaw,
     });
@@ -376,6 +464,7 @@
       eventTrace: [],
       eventSequence: 0,
       traceVisible: false,
+      watchIndex: null,
     };
 
     const gate = probeCore.createRequestGate(readSnapshot);
@@ -408,26 +497,7 @@
     }
 
     function summarizeIdentityValue(value) {
-      if (value == null) return null;
-      const text = typeof value === 'string' ? value : JSON.stringify(value);
-      return {
-        kind: typeof value,
-        ...probeCore.redactText(text),
-      };
-    }
-
-    function summarizeHistory(value) {
-      if (value == null) return null;
-      if (Array.isArray(value)) return { kind: 'array', count: value.length };
-      if (typeof value !== 'object') return { kind: typeof value };
-      const result = { kind: 'object', keys: Object.keys(value).sort() };
-      for (const key of ['count', 'total', 'length', 'hasMoreBefore', 'hasMoreAfter']) {
-        if (typeof value[key] === 'number' || typeof value[key] === 'boolean') result[key] = value[key];
-      }
-      for (const key of ['messages', 'items', 'entries']) {
-        if (Array.isArray(value[key])) result[`${key}Count`] = value[key].length;
-      }
-      return result;
+      return probeCore.summarizeIdentityValue(value);
     }
 
     function getContext() {
@@ -516,37 +586,35 @@
       } catch (error) {
         if (!options.quiet) addLog('context-chat-id-error', { message: error.message });
       }
-      const integrity = context?.chat_metadata?.integrity ?? null;
       const identity = {
         stableId: summarizeIdentityValue(stableId),
-        integrity: summarizeIdentityValue(integrity),
+        ...await probeCore.readMetadataEvidence(refs.handle, context, stableId),
         ref: summarizeIdentityValue(refs.ref),
         currentChatId: summarizeIdentityValue(currentChatId),
       };
-      identity.stableIdMatchesIntegrity = identity.stableId && identity.integrity
-        ? identity.stableId.hash === identity.integrity.hash
-        : null;
       return identity;
     }
 
     async function readMessageState(indexes = []) {
       const context = getContext();
       const chat = Array.isArray(context?.chat) ? context.chat : [];
+      const watched = state.watchIndex == null ? indexes : [...indexes, state.watchIndex];
+      const messages = probeCore.messageStateFromChat(chat, watched);
       const refs = await waitForCurrentRefs(2500);
       let tail;
-      let summary;
       try {
         tail = await refs.handle?.history?.tail?.({ limit: 3 });
-        summary = await callMaybe(refs.handle?.history, 'summary');
       } catch (error) {
         addLog('history-state-error', { message: error.message });
       }
+      const summary = await probeCore.readChatSummary(refs.handle);
       return {
-        ...probeCore.messageStateFromChat(chat, indexes),
+        ...messages,
+        watchIndex: state.watchIndex,
         history: {
           tailCount: Array.isArray(tail?.messages) ? tail.messages.length : null,
           tailHasMoreBefore: typeof tail?.hasMoreBefore === 'boolean' ? tail.hasMoreBefore : null,
-          summary: summarizeHistory(summary),
+          summary,
         },
       };
     }
@@ -607,6 +675,7 @@
       const identity = await readIdentity({ refs, quiet: true });
       const messageState = await readMessageState();
       return {
+        probeVersion: '0.1.4',
         observedAt: Date.now(),
         tauri: {
           present: Boolean(globalObject.__TAURITAVERN__),
@@ -640,7 +709,7 @@
     }
 
     async function captureHostEvent(name, args, sequence) {
-      const inferred = probeCore.inferMessageIndexes(args);
+      const inferred = probeCore.inferMessageIndexes(args, name);
       const before = state.latestMessageState;
       const observedAt = Date.now();
       const identity = await readIdentity({ quiet: true });
@@ -653,6 +722,8 @@
         eventName: name,
         eventArgs: probeCore.summarizeEventValue(args),
         indexInference: inferred,
+        generationType: name === 'generation-started' && ['normal', 'regenerate', 'swipe', 'continue'].includes(args[0])
+          ? args[0] : null,
         identity,
         before,
         immediate,
@@ -800,6 +871,7 @@
         ['CHAT_CHANGED', 'chat-changed', true],
         ['CHAT_LOADED', 'chat-loaded', true],
         ['MESSAGE_SENT', 'message-sent', false],
+        ['MESSAGE_RECEIVED', 'message-received', false],
         ['MESSAGE_EDITED', 'message-edited', false],
         ['MESSAGE_UPDATED', 'message-updated', false],
         ['MESSAGE_DELETED', 'message-deleted', false],
@@ -949,8 +1021,8 @@
       panel.innerHTML = `
         <style>
           :host { all: initial; }
-          .box { width: 360px; max-height: 72vh; overflow: auto; background: #141820; color: #e8edf2; border: 1px solid #46515d; border-radius: 6px; box-shadow: 0 10px 30px #0008; font: 12px/1.45 system-ui, sans-serif; }
-          .head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid #303944; font-weight: 700; }
+          .box { width: min(360px, calc(100vw - 24px)); max-height: 72vh; overflow: auto; background: #141820; color: #e8edf2; border: 1px solid #46515d; border-radius: 6px; box-shadow: 0 10px 30px #0008; font: 12px/1.45 system-ui, sans-serif; }
+          .head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid #303944; font-weight: 700; cursor: move; touch-action: none; user-select: none; position: sticky; top: 0; background: #141820; }
           .body { padding: 8px 10px; display: grid; gap: 7px; }
           .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
           button, select, input { font: inherit; color: inherit; background: #202833; border: 1px solid #586574; border-radius: 4px; padding: 4px 6px; }
@@ -962,7 +1034,7 @@
           .muted { color: #9aa7b3; }
         </style>
         <section class="box">
-          <div class="head"><span>Mnemosyne TT Probe</span><span class="muted" id="version">0.1.3</span></div>
+          <div class="head" id="drag-handle" title="Drag panel"><span>Mnemosyne TT Probe</span><span class="muted" id="version">0.1.4</span></div>
           <div class="body">
             <div class="row">
               <label>mode <select id="mode"><option value="immediate">immediate</option><option value="delay">delay</option><option value="timeout">timeout</option><option value="fail">fail</option></select></label>
@@ -983,12 +1055,19 @@
               <button id="trace">T-02A trace</button>
               <button id="copy-trace">Copy trace</button>
             </div>
+            <div class="row"><label>Index (0-based) <input id="watch-index" type="number" min="0" step="1"></label></div>
             <pre id="status"></pre>
             <pre id="trace-output" hidden></pre>
             <pre id="log"></pre>
           </div>
         </section>`;
 
+      probeCore.bindPanelDrag(host, panel.getElementById('drag-handle'), globalObject);
+      panel.getElementById('watch-index').addEventListener('change', event => {
+        const value = event.target.value;
+        state.watchIndex = value !== '' && Number.isInteger(Number(value)) && Number(value) >= 0
+          ? Number(value) : null;
+      });
       panel.getElementById('mode').addEventListener('change', event => {
         state.mode = event.target.value;
       });

@@ -101,3 +101,7 @@ T-02 应重新命名并定义领域对象；当前名称保持 TBD，不为兼�
 - 现有探针已增加事件参数、身份摘要、消息计数／邻近指纹、history 摘要和 swipe 候选数的脱敏记录；不保存正文、prompt 或完整 ref。
 - 已部署副本路径：`C:\Users\Administrator\AppData\Roaming\com.tauritavern.client\data\extensions\third-party\mnemosyne-tt-adapter-probe`。
 - 用户已在隔离虚构聊天中完成 T-02A 手工现场验证并提供脱敏 trace：reopen／rename stableId 保持，Branch 身份变化，Edit 双事件和 Delete 后索引平移可观测，Swipe 候选变化及 generation lifecycle 可观测；Delete 参数语义和失败 regenerate 的新候选仍为 `degraded`，详见 `notes/t-02a-runtime-trace.md`。
+
+2026-09-19 review 校正：Delete 参数是删除后的 chat.length（review 源码事实），不足以独自定位具体来源；Swipe 事件／候选定位已可接受。`0.1.4` 修正 metadata 和 summary 读取路径，增加面板拖动；parent/child 身份、成功 Regenerate 和任务卡追加的明确 Delete 样本待实测，不把旧 null 当作宿主不可用。
+
+0.1.4 后续实机回传：身份与 summary 修复已核对成功，第三次 regenerate 在 index4 得到新非空正文（候选数仍1），明确删除 index3 时事件参数4且count5→4。事件中 summary 可滞后于 context，稳定 host 后一致；用户确认面板拖动和窗口最小化不溢出。等待 Chat review，不再要求重做以上宿主实验。

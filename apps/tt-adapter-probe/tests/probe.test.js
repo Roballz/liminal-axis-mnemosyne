@@ -170,3 +170,125 @@ test('trace export orders entries by sequence without mutating capture order', (
   assert.deepEqual(ordered.map(entry => entry.sequence), [1, 2, 3]);
   assert.deepEqual(captured.map(entry => entry.sequence), [3, 1, 2]);
 });
+
+test('metadata uses handle.metadata.get and camelCase context evidence, without exporting metadata', async () => {
+  const metadata = { integrity: 'test-parent-id', secret: 'not for export' };
+  const handle = { metadata: { async get() { assert.equal(this, handle.metadata); return metadata; } } };
+  const evidence = await core.readMetadataEvidence(handle, {
+    chatMetadata: metadata,
+    chat_metadata: { integrity: 'wrong-legacy-path' },
+  }, 'test-parent-id');
+  assert.equal(evidence.metadataStatus, 'ok');
+  assert.equal(evidence.stableIdMatchesIntegrity, true);
+  assert.equal(evidence.stableIdMatchesContextIntegrity, true);
+  assert.equal(evidence.metadataMatchesContextIntegrity, true);
+  assert.equal(evidence.integrity.hash, core.fnv1a('test-parent-id'));
+  assert.equal(JSON.stringify(evidence).includes('test-parent-id'), false);
+  assert.equal(JSON.stringify(evidence).includes('not for export'), false);
+});
+
+test('metadata mismatch, missing API and rejected API remain distinct', async () => {
+  const context = { chatMetadata: { integrity: 'context-id' } };
+  const mismatch = await core.readMetadataEvidence({
+    metadata: { get: async () => ({ integrity: 'metadata-id' }) },
+  }, context, 'stable-id');
+  assert.equal(mismatch.stableIdMatchesIntegrity, false);
+  assert.equal(mismatch.metadataMatchesContextIntegrity, false);
+  const absent = await core.readMetadataEvidence({}, context, 'context-id');
+  assert.equal(absent.metadataStatus, 'unavailable');
+  assert.equal(absent.integrity, null);
+  assert.equal(absent.stableIdMatchesIntegrity, null);
+  assert.equal(absent.stableIdMatchesContextIntegrity, true);
+  const failed = await core.readMetadataEvidence({
+    metadata: { get: async () => { throw new Error('private detail'); } },
+  }, {}, 'stable-id');
+  assert.equal(failed.metadataStatus, 'error');
+  assert.equal(failed.contextIntegrity, null);
+  assert.equal(JSON.stringify(failed).includes('private detail'), false);
+});
+
+test('chat summary is invoked on handle with includeMetadata false and only exports message_count', async () => {
+  let called = false;
+  const handle = {
+    history: { summary() { throw new Error('wrong API path'); } },
+    async summary(options) {
+      called = true;
+      assert.equal(this, handle);
+      assert.deepEqual(options, { includeMetadata: false });
+      return { message_count: 7, metadata: { secret: 'private' }, file_name: 'private' };
+    },
+  };
+  assert.deepEqual(await core.readChatSummary(handle), { status: 'ok', message_count: 7 });
+  assert.equal(called, true);
+});
+
+test('chat summary distinguishes zero count, missing API, empty response and API failure', async () => {
+  assert.deepEqual(await core.readChatSummary({ summary: async () => ({ message_count: 0 }) }),
+    { status: 'ok', message_count: 0 });
+  assert.deepEqual(await core.readChatSummary({}), { status: 'unavailable', message_count: null });
+  assert.deepEqual(await core.readChatSummary({ summary: async () => null }), { status: 'empty', message_count: null });
+  assert.deepEqual(await core.readChatSummary({ summary: async () => { throw new Error('private'); } }),
+    { status: 'error', message_count: null });
+});
+
+test('delete length and generation arguments are not inferred as message indexes', () => {
+  assert.deepEqual(core.inferMessageIndexes([6], 'message-deleted'), {
+    candidates: [], numericValues: [6], inference: 'post_delete_count',
+  });
+  assert.deepEqual(core.inferMessageIndexes([6], 'generation-ended').candidates, []);
+  assert.deepEqual(core.inferMessageIndexes([3], 'message-edited').candidates, [3]);
+});
+
+test('watched delete neighborhood retains shifted fingerprints independently of event arguments', () => {
+  const chat = Array.from({ length: 7 }, (_, index) => ({ mes: `T02A_TEST_${index}` }));
+  const before = core.messageStateFromChat(chat, [5]);
+  chat.splice(5, 1);
+  const after = core.messageStateFromChat(chat, [5]);
+  assert.deepEqual(before.selected.map(message => message.index), [4, 5, 6]);
+  assert.deepEqual(after.selected.map(message => message.index), [4, 5]);
+  assert.equal(before.selected[2].text.hash, after.selected[1].text.hash);
+});
+
+test('panel drag uses pointer capture, clamps to viewport, ends on cancel and reclamps on resize', () => {
+  const listeners = {};
+  let captured = null;
+  let resized;
+  const header = {
+    addEventListener: (name, callback) => { listeners[name] = callback; },
+    setPointerCapture: id => { captured = id; },
+    hasPointerCapture: id => captured === id,
+    releasePointerCapture: () => { captured = null; },
+  };
+  const host = {
+    style: {},
+    getBoundingClientRect: () => ({
+      left: parseFloat(host.style.left ?? '100'),
+      top: parseFloat(host.style.top ?? '100'),
+      width: 360, height: 300,
+    }),
+  };
+  const viewport = { innerWidth: 1000, innerHeight: 800, addEventListener: (_, callback) => { resized = callback; } };
+  core.bindPanelDrag(host, header, viewport);
+  const event = { button: 0, pointerId: 1, clientX: 110, clientY: 110, preventDefault() {} };
+  listeners.pointerdown({ ...event, button: 2 });
+  assert.equal(captured, null);
+  listeners.pointerdown(event);
+  assert.equal(captured, 1);
+  listeners.pointermove({ ...event, pointerId: 2, clientX: 400 });
+  assert.equal(host.style.left, undefined);
+  listeners.pointermove({ ...event, clientX: 400, clientY: 300 });
+  assert.equal(host.style.left, '390px');
+  assert.equal(host.style.top, '290px');
+  listeners.pointermove({ ...event, clientX: 2000, clientY: -100 });
+  assert.equal(host.style.left, '640px');
+  assert.equal(host.style.top, '0px');
+  listeners.pointercancel(event);
+  assert.equal(captured, null);
+  listeners.pointermove({ ...event, clientX: 400 });
+  assert.equal(host.style.left, '640px');
+  viewport.innerWidth = 500;
+  resized();
+  assert.equal(host.style.left, '140px');
+  assert.equal(host.style.right, 'auto');
+  assert.equal(host.style.bottom, 'auto');
+});

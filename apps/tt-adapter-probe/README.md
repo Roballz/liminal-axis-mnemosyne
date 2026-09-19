@@ -17,6 +17,8 @@ T-01 的隔离桌面 TT 探针。它只验证宿主接入能力，不实现 Memo
 
 重启或重新加载扩展后，右下角出现 `Mnemosyne TT Probe` 面板。只在隔离测试聊天中勾选 `arm`。
 
+`0.1.4` 可按住标题栏拖动面板；鼠标／触摸均可，窗口变小时位置限制在可见范围。位置仅本次页面有效，不写入聊天或持久存储。
+
 ## 验证顺序
 
 1. 点击 `Refresh host`，记录 `api.chat.current`、`windowInfo`、`history.tail` 和 `api.dev.llmApiLogs` 的可用性。
@@ -28,15 +30,17 @@ T-01 的隔离桌面 TT 探针。它只验证宿主接入能力，不实现 Memo
 
 ## T-02A 事件验证
 
-探针同时监听 `CHAT_CHANGED`、`CHAT_LOADED`、`MESSAGE_EDITED`、`MESSAGE_UPDATED`、`MESSAGE_DELETED`、`MESSAGE_SWIPED`、`GENERATION_STARTED`、`GENERATION_STOPPED` 和 `GENERATION_ENDED`。事件日志只保留：
+探针同时监听 `CHAT_CHANGED`、`CHAT_LOADED`、`MESSAGE_SENT`、`MESSAGE_RECEIVED`、`MESSAGE_EDITED`、`MESSAGE_UPDATED`、`MESSAGE_DELETED`、`MESSAGE_SWIPED`、`GENERATION_STARTED`、`GENERATION_STOPPED` 和 `GENERATION_ENDED`。事件日志只保留：
 
-- 脱敏后的 stableId、`chat_metadata.integrity`、chat ref 和当前 chat id；
+- 脱敏后的 stableId、`handle.metadata.get().integrity`、`context.chatMetadata.integrity`、chat ref 和当前 chat id；身份比较在脱敏前完成，缺失返回 null，不使用短哈希代替相等比较；
 - `windowInfo.chatRef` 的类型及标识符长度／短哈希，不保留角色显示名或文件名；
 - 事件参数的类型／数字候选；正文只保留长度和哈希；
-- 事件前、立即读取、下一 tick 后的消息数、邻近消息指纹、`history.tail`／`summary` 摘要；
+- 上次已完成采样、异步事件采样、下一 tick 后的消息数及邻近指纹（不是宿主事务快照）；`history.tail` 与 `handle.summary({ includeMetadata: false })` 的安全摘要；
 - `swipe_id`、候选数量、active swipe 的长度和哈希。
 
 在隔离测试聊天中用 `T02A_TEST_*` marker 做 Branch、深层 Edit、Delete、Swipe 和 Regenerate。点击 `Refresh host` 后可用 `Copy host` 复制当前身份／状态摘要；点击 `T-02A trace` 展开脱敏 JSON，或点击 `Copy trace` 复制事件记录。不要复制 `context.chat`、完整 ref 或 prompt。控制台仍可读取 `mnemosyneProbe.t02aTrace()`。
+
+`Index (0-based)` 指定额外观察的数组索引；填入后点 `Refresh host`，`messageState.selected` 保留目标、左右邻居及尾消息的指纹。Delete 参数按 review 源码事实解释为删除后的 `chat.length`，不据此推断删除位置。summary 的 `message_count` 保存在 `messageState.history.summary`（此为探针输出分组，不是宿主调用路径）；独立记录 `ok/error/unavailable/empty`，不导出完整 metadata。成功 Regenerate 必须由用户确认有效输出，并提供前后 host 和 trace，不能仅凭 `generation-ended` 宣称成功。
 
 ## 测试
 

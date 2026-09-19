@@ -43,6 +43,14 @@ TT 来源为核验时 main 文档，后续可能变化。T-00 要记录用户实
 
 现有 TT adapter probe 已增加 `MESSAGE_EDITED`、`MESSAGE_UPDATED`、`MESSAGE_DELETED`、`MESSAGE_SWIPED` 与生成生命周期事件的脱敏 trace；事件参数中的字符串只保留长度和短哈希，消息只保留计数、邻近指纹和 swipe 候选数，`windowInfo.chatRef` 不保留角色显示名或文件名。用户在固定 TT 2.2.0 dev/Canary 上提供的现场 trace 确认了 reopen／rename stableId 保持、Branch 身份变化、Edit 双事件、Delete 后索引平移、Swipe 候选变化及 generation lifecycle；integrity 不可读，Delete 参数精确语义和失败 regenerate 新候选仍属 degraded。正式 T-02 仍不能据此冻结身份／版本语义。
 
+### T-02A review 返修（2026-09-19）
+
+以仓库 `d235263` 的 Chat review 为本轮接口依据：integrity 由 `handle.metadata.get()` 读取、`context.chatMetadata` 交叉检查；文件概况由 `handle.summary({ includeMetadata: false })` 读取 message_count。此前 null 来自探针错误路径，不能作为宿主能力限制。review 指明 `MESSAGE_DELETED` 实参为删除后的 chat.length，不能独自定位被删来源。Swipe 事件／候选定位已有证据，失败生成另记。`0.1.4` 封装回归测试通过，修正路径、成功 Regenerate、明确 Delete 和面板拖动均已取得实机回传，待 Chat review 收口。
+
+### T-02A 0.1.4 实机补证（2026-09-19）
+
+用户回传已确认 handle metadata/context camelCase/stableId 三方一致、handle summary 在稳定 HOST 中计数正确。成功 regenerate 的 seq25～28 保持宿主 index4/count5，旧正文 hash bacb4d89 更新为75257157，候选数仍1；有删除／重建相关事件，不可推断宿主保存旧候选。明确 Delete 样本为 N5/k3/参数4、旧 index4 指纹移到3，支持参数是删除后总长度。事件期 summary/context 暂不一致，稍后 host 一致；面板拖动及最小化不溢出已确认。依据为本地用户附件，不是本轮新查上游源码；不冻结正式 T-02 身份／版本规则。
+
 ## 3. 检索引擎参考
 
 **Q01 — [Qdrant Hybrid and Multi-Stage Queries](https://qdrant.tech/documentation/search/hybrid-queries/)**
