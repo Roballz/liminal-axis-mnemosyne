@@ -1,6 +1,6 @@
 # T-02A：TT 宿主身份与消息变更事件探针
 
-状态：implemented_unverified
+状态：verified
 
 ## 目标
 
@@ -395,3 +395,19 @@ T-02A 可据此收口为：
 - 面板标题栏拖动、TT 窗口最小化后不溢出、按钮可用已由用户确认；宿主三项返修及 Delete 样本无需重做。任务保持 implemented_unverified，等待 Chat review，不自动升级 verified。
 - 用户补充：删除两条连续 assistant 中后一条后第三次 regenerate 成功，支持“上游要求 USER/ASSISTANT 交替”的猜测；没有 API 错误证据，记录为非正式运行假设，不影响宿主事件结论。
 - 本轮仅写事实记录／矩阵、来源和基线／CHANGELOG，未修改代码或部署；最终测试命令见本段更新后的环境记录。附件用 PowerShell ConvertFrom-Json 解析按序核对，原始附件不入库。回退仍为禁用探针／恢复 d235263 探针，正式数据与契约无变更；本提交待 push。
+
+
+## Chat 二次 review（2026-09-19）
+
+结论：**通过，T-02A 升为 `verified`。**
+
+- 已核对返修提交 `214dcf96192fc75f78332571eb9aa4473c711a47`，`origin/main` 当前指向该提交。
+- integrity 读取已改为 `handle.metadata.get()`，并以 `context.chatMetadata.integrity` 交叉验证；parent 与已观测 child 的 stableId / metadata.integrity / contextIntegrity 在真机样本中三方一致。TT 宿主 stableId 可作为 adapter provenance / host identity，但不升级为 Mnemosyne Story/Branch 永久主键。
+- 文件概况已改为正确的 `handle.summary({ includeMetadata: false })`；稳定 HOST 样本的 `message_count` 与 contextCount 一致。事件过程中的短暂不一致只记录为采样/落盘时序边界，不把 summary 当原子实时 head。
+- Delete 补测使用非重合样本：N=5、内部 k=3、事件参数=4，且旧 index4 指纹移动到 index3。结合 TT 源码 `MESSAGE_DELETED(chat.length)`，确认事件参数表示删除后的总长度，不能单独定位被删 SourceMessage；正式 T-02 必须保留前后状态比较 / repair-rescan 边界。
+- Swipe 已有事件、candidate 数与 active swipe 真机证据；该轮后续模型失败与 Swipe 事件能力分开记录。
+- 成功 Regenerate 已补齐：同一宿主 assistant 槽位 index4 / count5，active 正文指纹与长度发生变化，candidate 数仍为 1，且未触发 MESSAGE_SWIPED。只能确认“当前槽位正文被替换并可定位”，不能据此推断宿主保留旧 candidate。
+- “删除后一条 assistant 后第三次才成功”仅保留为上游输入格式猜测，没有错误响应证据，不作为 TT 或 Mnemosyne 契约。
+- 18/18 纯逻辑测试、`node --check`、`git diff --check` 均记录通过；面板拖动与最小化不溢出也有用户真机确认。
+- 未发现提前冻结 Story / Branch / SourceMessage / Revision / head / input hash schema 的越界改动。
+- 正式 T-02 仍由 Chat / 用户继续方案攻坚；本 review 不创建 T-02 任务卡。
