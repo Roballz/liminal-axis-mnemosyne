@@ -1,0 +1,37 @@
+{
+  "phase": "g1-repair",
+  "run": "20260919g1",
+  "events": [
+    {
+      "type": "done",
+      "phase": "g1-repair",
+      "validation": "passed",
+      "namespaces": {
+        "lifecycle": "mnemo-t03-20260919g1-lifecycle",
+        "malformedRoot": "mnemo-t03-20260919g1-malformed-root",
+        "nullPayload": "mnemo-t03-20260919g1-null-payload"
+      },
+      "lifecycle": {
+        "oldRecover": "OWNER_CLOSED",
+        "oldRead": "STALE_HANDLE",
+        "oldIo": "OWNER_CLOSED",
+        "replacementOwner": true,
+        "confirmedStateRetained": true,
+        "ledgerCount": 2
+      },
+      "malformedRoot": {
+        "reject": "NEEDS_RESOLUTION",
+        "physicalNodePreserved": true,
+        "nodeCountBefore": 20,
+        "nodeCountAfter": 20
+      },
+      "nullPayload": {
+        "reject": "NEEDS_RESOLUTION",
+        "physicalNodePreserved": true,
+        "nodeCountBefore": 20,
+        "nodeCountAfter": 20
+      },
+      "paidApiCalls": 0
+    }
+  ]
+}

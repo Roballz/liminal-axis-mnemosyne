@@ -2,10 +2,12 @@
 
 状态：本增量 implemented_unverified，T-03 总任务 in_progress；停在 G1。协议与限制见 `../../docs/09-storage-provider-and-recovery.md`，证据见 `../../evals/t03/`。不是手机/生产 provider，不进入 P3。
 
+当前R1/R2返修代码、150项Node回归和隔离TT `20260919g1` 小验证已完成；G1仍待Chat review。关闭成功后旧owner永久失效，必须经openTestStore取得替代owner；关闭失败保留同一owner，可显式recover或重试close。恢复只把原生null视为缺记录，损坏payload/root报NEEDS_RESOLUTION。证据见 `../../evals/t03/g1-repair/`。
+
 运行自动测试：
 
 ```powershell
-node --test packages/storage/tests/storage.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js
+node --test packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js
 ```
 
 原型 API：以契约函数得到 before/after，再调用 `prepareTransaction`，保存生成的完整编译请求；`openTestStore(api.db, namespace)` 返回共享 owner，使用 `owner.handle().commit/read/export`。不要绕过 handle 直接并发调用内部方法。失败进入 recovery-required，待原生 promise settle 后调用 `owner.recover()` 并获取新 handle；重试使用原请求。
@@ -21,6 +23,7 @@ node --test packages/storage/tests/storage.test.mjs packages/contracts/tests/*.t
 3. 启动 collector，再启动副本或刷新其前端。例如 `node packages/storage/native/collector.mjs p0 <new-run>`；run 只用小写字母/数字，使用新值避免碰到已有测试库。
 4. 断点顺序：collector `before` → 收到 kill-ready → `isolated-tt.ps1 -Action Crash -Phase before -Run <run>` → collector `recover-before` → `isolated-tt.ps1 -Action Start`。`after/recover-after` 同理。Crash 脚本只接受匹配的本轮断点、固定哈希和唯一精确副本路径。
 5. `roundtrip <new-run>` 完成小库备份/空库恢复/竞争/中断导入。`reopen-check <same-run>` 只核对已有 restored 库与重试账本。所有结果先落 `.t03-local/evidence`，人工检查仅含合成信息后才放 evals。
+6. `g1-repair <new-run>` 只做本轮 owner 生命周期和损坏 root/payload 小验证；结果需核对 `OWNER_CLOSED`、`STALE_HANDLE`、`NEEDS_RESOLUTION` 及物理材料未减少后再归档。
 
 collector 仅监听 127.0.0.1:19374，完成/错误/kill-ready 后自行停止；无需远程调试端口。未实现生产操作面板。首次引导只需进入主界面，不配模型或导入聊天。
 

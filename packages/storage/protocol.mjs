@@ -75,6 +75,7 @@ function apply(state, request) {
 // One owner per namespace; every handle shares this queue. Host/native promises
 // are never raced with an AbortSignal: stopping a waiter cannot release ownership.
 export class StoreOwner {
+  #retired = false;
   constructor(io) {
     this.io = io; this.tail = Promise.resolve(); this.generation = 0;
     this.status = 'recovery-required'; this.state = emptyState();
@@ -114,6 +115,7 @@ export class StoreOwner {
     return id;
   }
   async commit(request) {
+    check(!this.#retired, 'OWNER_CLOSED', 'Closed owner cannot write again');
     const checksum = hash(request), prior = this.ledger.get(request.operation_id);
     // Idempotency precedes expected-state validation, including after restart.
     if (prior) {
@@ -152,11 +154,18 @@ export class StoreOwner {
   }
   recover() {
     return this.queue(async () => {
+      check(!this.#retired, 'OWNER_CLOSED', 'Closed owner must be replaced through the registry');
       this.status = 'recovery-required'; this.generation++;
+      // A failed native close may have closed the namespace before losing its reply.
+      // Reopen only under the retained owner/registry lease, never a second queue.
+      await this.io.reopen?.();
       // Drain happened through the owner queue. flush failures never become "not committed".
       await this.io.flush();
       const root = await this.io.get(0);
-      check(root === null || root.format === FORMAT && root.kind === 'root' && typeof root.staging === 'boolean',
+      check(root === null || root && typeof root === 'object' && !Array.isArray(root) &&
+        equal(Object.keys(root).sort(), ['format', 'kind', 'staging', 'tip']) &&
+        root.format === FORMAT && root.kind === 'root' && typeof root.staging === 'boolean' &&
+        (root.tip === null || Number.isSafeInteger(root.tip) && root.tip > 0),
         'NEEDS_RESOLUTION', 'Foreign root');
       const objects = new Map(), nodes = new Map();
       let cursor = 1;
@@ -164,7 +173,8 @@ export class StoreOwner {
       for (; cursor <= 8192; cursor++) {
         const node = await this.io.get(cursor);
         if (node === null) break;
-        check(node.format === FORMAT, 'NEEDS_RESOLUTION', 'Foreign node in dedicated namespace');
+        check(node && typeof node === 'object' && !Array.isArray(node) && node.format === FORMAT &&
+          ['object', 'commit'].includes(node.kind), 'NEEDS_RESOLUTION', 'Foreign node in dedicated namespace');
         nodes.set(cursor, node);
         if (node.kind === 'object') {
           check(hash(node.value) === node.checksum, 'NEEDS_RESOLUTION', 'Object checksum mismatch');
@@ -173,7 +183,7 @@ export class StoreOwner {
       }
       check(cursor <= 8192, 'P2_LIMIT', 'P2 physical scan limit');
       const chain = [], visited = new Set();
-      let tip = root?.tip ?? null;
+      let tip = root === null ? null : root.tip;
       while (tip !== null) {
         check(Number.isSafeInteger(tip) && tip > 0 && !visited.has(tip) && chain.length < LIMITS.commits,
           'NEEDS_RESOLUTION', 'Invalid/cyclic commit chain');
@@ -198,7 +208,7 @@ export class StoreOwner {
         ledger.set(commit.operation_id, { checksum: commit.checksum, result: commit.result });
         journal.push(request);
       }
-      this.state = freeze(state); this.tip = root?.tip ?? null; this.ledger = ledger;
+      this.state = freeze(state); this.tip = root === null ? null : root.tip; this.ledger = ledger;
       this.objects = objects; this.nextId = cursor; this.journal = journal;
       this.staging = root?.staging ?? false; this.status = this.staging ? 'staging' : 'ready';
       return this.handle();
@@ -206,8 +216,11 @@ export class StoreOwner {
   }
   close() {
     return this.queue(async () => {
-      this.status = 'closed'; this.generation++;
-      await this.io.close();
+      if (this.#retired) return; // Never close a replacement owner's native namespace.
+      this.status = 'closing'; this.generation++;
+      try { await this.io.close(); }
+      catch (error) { this.status = 'recovery-required'; throw error; }
+      this.#retired = true; this.status = 'closed';
     });
   }
   bundle() {

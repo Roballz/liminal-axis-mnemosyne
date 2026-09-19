@@ -16,7 +16,7 @@
 | T-01 ✅ | 做最小 TT Adapter 探针 | verified；await、payload、取消与 request gate 边界已验证 |
 | T-02A ✅ | TT 宿主身份与变更事件验证 | verified；stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 边界 |
 | T-02 ✅ | 身份、历史版本与上下文的最小可执行契约 | verified；1891043 最终复核关闭 R1～R5，范围限最小参考模型 |
-| T-03 ↺ | 可迁移、可恢复的存储地基 | in_progress；G1 首轮未通过，返修 G1-R1/R2；P3～P5未放行、未执行 |
+| T-03 ↺ | 可迁移、可恢复的存储地基 | in_progress；R1/R2返修及150项Node/隔离TT小验证已完成；待Chat review，G1未放行 |
 
 用户已授权 Chat 核对后发布正式卡并高难前置。旧 `tasks/T-03-storage-foundation.proposal.md` 为 superseded 历史入口；Codex 不修改关卡许可、不自动生成 T-04。
 
@@ -60,6 +60,8 @@ T-02 不沿用柏宝书 Leaf 作为正式对象名；普通派生按 User + Assi
 - **G1-R2：无效发布信息被当成空库。** root缺tip或原生节点存在但payload为null时，恢复会返回ready和空历史/账本。需区分记录不存在与无效记录，完整校验root，错误保留为待修复而非空库成功；合法初始/暂存/未提交孤儿仍须支持。
 
 修复并补定向测试后再交 G1 review，不进入P3～P5，不将部分进度升为总任务完成。仅需相关生命周期/异常记录的隔离原生小验证；发布协议未实质改变时不重复整套强杀矩阵。无须立即切B2/A或推翻全部协议。
+
+2026-09-19返修验证检查点：基线26f4171，关闭成功的owner永久终止、失败保留唯一协调归属；恢复严格区分缺记录与损坏payload/root。Node原131+新增19共150项通过；隔离TT `20260919g1` 证明旧owner拒绝复活、缺tip/null payload拒绝且物理材料20→20；23个相关源码文件语法检查和diff检查通过。完整状态和证据见正式task末节；两项仍待Chat复核。
 
 **后续P3条件，不扩大本次返修：** 持久化原请求/生成ID的正式入口、外部维护换代协调、command/view/expected/journal/目录有界化与完整备份格式。B1仍为候选，未批准生产使用；现有小样本硬上限可保留，S05、流式恢复、索引恢复、规模和手机仍未完成。
 

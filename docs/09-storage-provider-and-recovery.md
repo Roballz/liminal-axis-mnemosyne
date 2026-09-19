@@ -1,6 +1,6 @@
 # T-03 P0～P2：存储发布与恢复候选协议
 
-版本：v0.1，2026-09-20。状态：implemented_unverified（仅本增量）；**G1 待 Chat review，B1 尚未选定为生产 provider，P3 未执行。**
+版本：v0.3，2026-09-19。状态：G1-R1/R2返修实现与隔离验证完成，待Chat review。**G1未放行，B1尚未选定为生产provider，P3未执行。**
 实施基线 `852260acd8d3e65d9d756af81cdf72e52c50046b`；继承 06 v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。本文没有更改领域语义。
 
 ## 1. 已观察的宿主原语
@@ -57,6 +57,10 @@ Windows TT Canary `dev (367b0c7e9410)` / TriviumDB API。独立便携副本、�
 任何存储调用或故障钩子失败后，owner 进入 `recovery-required`，拒绝继续读写。保留底层错误作为 cause。超时/调用者取消等待不取消原生 promise，也不释放队列所有权；原生调用未 settle 时，后续提交与 close 仍等待。
 
 恢复在队列清空后执行 flush/get，读取 root，精确回读对象和提交链，验证对象 checksum、请求指纹、operation/result 对应、逐次 expected 条件、完整领域状态及重建标记。只有全部一致才恢复 ready。无法读取/验证、断链或不明 IO 结果不当成空库，不删除纠错、不自动选新版。恢复/close 推进 owner 代次，旧包装 handle 拒绝。
+
+G1-R1返修收紧生命周期：关闭成功后owner永久终止，recover/commit返回OWNER_CLOSED，重复close不再触及原生库。关闭失败保留唯一registry登记，进入recovery-required；恢复在原owner队列内重新open原生namespace，再执行既有flush/get校验。open等待正在关闭的队列并重查登记，只有成功关闭且登记仍属于本owner才释放；适配层每次IO验证登记归属，旧owner无法关闭替代owner的资源。初次open/recover失败尚未向调用方暴露owner时，可释放该失败的opening记录。
+
+G1-R2返修明确读取边界：只有native.get返回null才表示不存在；现有节点null/missing/非法payload不能映射成空槽。root必须完整含format/kind/staging/tip；tip显式为null或正安全整数，否则NEEDS_RESOLUTION并保持待恢复。合法空库、显式null tip的初始/暂存状态、首次发布前孤儿仍可恢复，不猜选最新commit或清理材料。两项已由Node和隔离TT `20260919g1` 验证；原生结果见 `evals/t03/g1-repair/native-20260919g1.json`。
 
 发布前材料是孤儿，不作为当前剧情；已存对象可按 checksum 复用，分配位置从实际连续槽恢复。此次测试重试保留同一编译请求与已生成 ID；**尚无正式业务命令入口的 durable intent/ID 预留机制**。若调用者丢失编译请求，不能重新随机生成一组 ID 并宣称是同一请求重试。这是 G1 必须审查的生产化前置条件。
 

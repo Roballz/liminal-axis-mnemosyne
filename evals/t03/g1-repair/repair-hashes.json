@@ -1,0 +1,23 @@
+{
+  "generatedAt": "2026-09-19T20:18:47.4476002Z",
+  "worktreeHead": "26f41713a6fd178162c2b633f419bbc67f526726",
+  "node": "v24.19.0",
+  "nativeRun": "20260919g1",
+  "sourceSha256": {
+    "packages/storage/protocol.mjs": "06be81cb311eef00d52fb7a48df22633bae4d798ec44bc9aa002c0b27fc610cb",
+    "packages/storage/tt-adapter.mjs": "3f38b669bf6675518a08a5d6e792ddf245fc2ec65a8ed62f0926baa6804db401",
+    "packages/storage/native/collector.mjs": "3888315f70ba8803378a656acd0499f54417cfb80bcf920024f2b68514dd83aa",
+    "packages/storage/native/suite.mjs": "dd43082ad2c4011b82fcdc02e98b89f36060f14d65e3baf7f8c0a1c57b9425ce",
+    "packages/storage/tests/g1-review.test.mjs": "291523b1cb5b774d2d20f9b0d2909a2d1cc17457a675e3e0146a89ad8f2bffc1",
+    "packages/storage/tests/storage.test.mjs": "88ed788ce5536cc5339b93fc82044485d6c05456eada5c3f709ce0a7d6670875",
+    "packages/storage/tests/scenario.mjs": "4bebb7114dd40edb958de5b6a66539b3e69b6dca64c41097ddd7a9ff5efe0ef0"
+  },
+  "deployedHarnessSha256": {
+    ".t03-local/tt-367b0c7/data/extensions/third-party/mnemosyne-t03-storage/packages/storage/protocol.mjs": "06be81cb311eef00d52fb7a48df22633bae4d798ec44bc9aa002c0b27fc610cb",
+    ".t03-local/tt-367b0c7/data/extensions/third-party/mnemosyne-t03-storage/packages/storage/tt-adapter.mjs": "3f38b669bf6675518a08a5d6e792ddf245fc2ec65a8ed62f0926baa6804db401",
+    ".t03-local/tt-367b0c7/data/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/collector.mjs": "3888315f70ba8803378a656acd0499f54417cfb80bcf920024f2b68514dd83aa",
+    ".t03-local/tt-367b0c7/data/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/suite.mjs": "dd43082ad2c4011b82fcdc02e98b89f36060f14d65e3baf7f8c0a1c57b9425ce",
+    ".t03-local/tt-367b0c7/data/extensions/third-party/mnemosyne-t03-storage/packages/storage/tests/scenario.mjs": "4bebb7114dd40edb958de5b6a66539b3e69b6dca64c41097ddd7a9ff5efe0ef0"
+  },
+  "nativeEvidenceSha256": "41d8b545776b0a016ae9a9b0f4676a114242c928650b901b4f14d98dfb6c4d3c"
+}

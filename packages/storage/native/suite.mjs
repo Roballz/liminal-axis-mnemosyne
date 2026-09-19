@@ -5,6 +5,22 @@ import { importIntoEmpty, expected, inspectBundle, prepareTransaction } from '..
 import { scenario } from '../tests/scenario.mjs';
 const assert = (condition, detail) => { if (!condition) throw Error(detail); };
 const errorCode = async fn => { try { await fn(); return null; } catch (e) { return e.code ?? String(e); } };
+const nativeOptions = { dim: 2, syncMode: 'full', autoBuildQuiver: false };
+const openRaw = (api, namespace) => api.open(namespace, nativeOptions);
+async function mutateRaw(api, namespace, physicalId, mutate) {
+  const native = await openRaw(api, namespace), before = await native.get(physicalId);
+  assert(before !== null, `Missing native node ${physicalId}`);
+  const payload = mutate(structuredClone(before.payload));
+  await native.upsert(physicalId, [1, 0], payload); await native.flush();
+  const after = await native.get(physicalId), stats = await native.stats();
+  await native.close();
+  return { before, after, nodeCount: stats.nodeCount };
+}
+async function inspectRaw(api, namespace, physicalId) {
+  const native = await openRaw(api, namespace), node = await native.get(physicalId);
+  const stats = await native.stats(); await native.close();
+  return { node, nodeCount: stats.nodeCount };
+}
 export async function runNative(api, { phase, run }, send) {
   const prefix = `mnemo-t03-${run}`, s = scenario();
   if (phase === 'reopen-check') {
@@ -35,6 +51,58 @@ export async function runNative(api, { phase, run }, send) {
       methods: Object.keys(native), options: native.options, nodeCount: stats.nodeCount,
       complexJson: true, exactId: true, normalReopen: true, paidApiCalls: 0 });
     await native.close(); return;
+  }
+  if (phase === 'g1-repair') {
+    const lifecycleName = prefix + '-lifecycle';
+    const first = await openTestStore(api, lifecycleName), oldHandle = first.handle();
+    await oldHandle.commit(s.requests[0]); await first.close();
+    const replacement = await openTestStore(api, lifecycleName);
+    assert(replacement !== first, 'Close did not release the owner for replacement');
+    const oldRecover = await errorCode(() => first.recover());
+    const oldRead = await errorCode(() => oldHandle.read());
+    const oldIo = await errorCode(() => first.io.get(0));
+    assert(oldRecover === 'OWNER_CLOSED', 'Retired owner recovered after replacement');
+    assert(oldRead === 'STALE_HANDLE', 'Handle from retired owner remained usable');
+    assert(oldIo === 'OWNER_CLOSED', 'Retired owner still reached native IO');
+    await replacement.handle().commit(s.requests[1]); await replacement.close();
+    const lifecycleReopen = await openTestStore(api, lifecycleName);
+    assert(equal(await lifecycleReopen.handle().read(), s.states[1]), 'Lifecycle reopen lost confirmed state');
+    assert(lifecycleReopen.ledger.size === 2, 'Lifecycle reopen lost operation ledger');
+    await lifecycleReopen.close();
+
+    const rootName = prefix + '-malformed-root';
+    const rootOwner = await openTestStore(api, rootName);
+    await rootOwner.handle().commit(s.requests[0]); await rootOwner.close();
+    const malformedRoot = await mutateRaw(api, rootName, 1, root => {
+      delete root.tip; return root;
+    });
+    const rootReject = await errorCode(() => openTestStore(api, rootName));
+    assert(rootReject === 'NEEDS_RESOLUTION', 'Missing root tip was accepted as an empty library');
+    const rootAfterReject = await inspectRaw(api, rootName, 1);
+    assert(rootAfterReject.node?.payload?.tip === undefined, 'Malformed root was silently replaced');
+
+    const payloadName = prefix + '-null-payload';
+    const payloadOwner = await openTestStore(api, payloadName);
+    await payloadOwner.handle().commit(s.requests[0]); await payloadOwner.close();
+    const malformedPayload = await mutateRaw(api, payloadName, 2, () => null);
+    const payloadReject = await errorCode(() => openTestStore(api, payloadName));
+    assert(payloadReject === 'NEEDS_RESOLUTION', 'Existing null payload was accepted as absence');
+    const payloadAfterReject = await inspectRaw(api, payloadName, 2);
+    assert(payloadAfterReject.node?.payload === null, 'Null payload node was silently replaced');
+
+    await send({ type: 'done', phase, validation: 'passed', namespaces: {
+      lifecycle: lifecycleName, malformedRoot: rootName, nullPayload: payloadName,
+    }, lifecycle: {
+      oldRecover, oldRead, oldIo, replacementOwner: true,
+      confirmedStateRetained: true, ledgerCount: 2,
+    }, malformedRoot: {
+      reject: rootReject, physicalNodePreserved: rootAfterReject.node?.payload?.tip === undefined,
+      nodeCountBefore: malformedRoot.nodeCount, nodeCountAfter: rootAfterReject.nodeCount,
+    }, nullPayload: {
+      reject: payloadReject, physicalNodePreserved: payloadAfterReject.node?.payload === null,
+      nodeCountBefore: malformedPayload.nodeCount, nodeCountAfter: payloadAfterReject.nodeCount,
+    }, paidApiCalls: 0 });
+    return;
   }
   if (['before', 'after', 'recover-before', 'recover-after'].includes(phase)) {
     const which = phase.endsWith('before') ? 'before' : 'after';

@@ -1,6 +1,6 @@
 # T-03：可迁移、可恢复的存储地基
 
-状态：in_progress（P0～P2 小原型 implemented_unverified；停在 G1 待 Chat review，非整任务完成）
+状态：in_progress（G1-R1/R2 返修实现与验证完成，待 Chat review；G1 未放行，P3 未执行）
 
 发布：2026-09-19。规划仓库基线：`4dcdaf568ddb596c9060c27ef4c57fb858095509`。
 T-02 已验收实现：`1891043f6fc907236e12bb85d63ea823f43abca8`；规范为 `docs/06-contracts.md` v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。
@@ -239,3 +239,48 @@ B→A 只验迁移材料和 B→空环境的恢复；A 尚未实现时不称真�
 不自动删除上述库/孤儿/隔离副本。回退只停用harness并撤本轮代码，保留测试库/证据；不需要生产格式迁移，不覆盖现用存档。隔离TT因用户要求已重开，数据库handle在验证后关闭，collector已退出。
 
 **请求 Chat 在 G1 审查 B1 原语、发布协议、临时恢复格式、durable intent及外部维护协调缺口，再决定是否放行 P3；不把本回报当成放行。** 下一增量仍是本任务P3，有界清单/command/视图/目录和完整恢复，工作量需按review后的设计重新估计；当前粗估实现600～1000、测试500～900行，非批准/配额。不创建新任务卡，不自行选择B2/A。
+
+## G1-R1/R2 返修检查点（2026-09-20，用户要求更新档案后暂停）
+
+本节是当前状态；上节保留首轮实施记录。基线 `26f41713a6fd178162c2b633f419bbc67f526726` / main，已拉取评审5a47aa0及阶段导读26f4171。已读 `notes/t-03-g1-review.md`、README、S-A、本task、06 v0.3与09 v0.1。Windows / Node v24.19.0；本轮检查时没有TT进程，未启动副本或创建新namespace。原 `.codex/`、旧测试库与旧原生证据未修改。
+
+### 已实施，尚待原生验证与Chat复核
+
+- **R1**：成功close把owner永久终止，旧owner.recover/commit返回OWNER_CLOSED；重复close是无原生副作用的幂等操作。关闭失败进入recovery-required，registry保留同一owner；recover在其原队列内重新open原生namespace，再执行既有恢复流程，覆盖关闭前失败及已关闭但回执丢失两种情况。
+- registry仅在关闭成功且仍属于本次opening时释放；open遇到正在关闭的owner先等待其队列，随后重新核对登记；所有适配层IO校验当前登记归属，旧对象不能关闭或删除替代owner的资源。
+- **R2**：只有native.get明确返回null才解释为记录不存在。节点存在但payload为null、缺失、数组或非法值则NEEDS_RESOLUTION。root要求显式format/kind/staging/tip；tip只能为null或正安全整数，缺字段/非法类型拒绝，owner不进入ready，不清空材料。
+- 合法空库、显式null tip、暂存库及首次发布前遗留孤儿路径保留。持久格式、root发布/两次flush/确认顺序未改；关闭生命周期语义按review要求收紧，不需要生产迁移。
+
+实现改动：protocol +19/-6、adapter +31/-7，共+50/-13；新增定向测试134行，旧测试+5/-2。开工估计实现70～120、测试200～300行，实际修复更小。旧测试两处“同owner关闭后recover”改为先断言OWNER_CLOSED，再新建owner回读原状态与账本；其余旧断言保留，不把丢提交行为改成合法。
+
+### 实际验证与证据
+
+- 改实现前运行首批18项新增定向测试：10通过、8失败，包含旧owner恢复、关闭失败、close/open竞争、缺tip及null/missing payload；原始输出 `evals/t03/g1-repair/before.tap`。随后另补1项失败close重试测试，未把它混计入这批旧版红灯。
+- 修复后执行 `node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`：**150/150通过，0失败/跳过**，即原131+新增19；见 `evals/t03/g1-repair/after.tap`。
+- 新增测试的native mock按namespace查当前打开实例，旧native方法可访问重开后的库，避免用天然失效的mock掩盖R1。两条合法竞争请求只有一条确认，重开保留已确认账本、子线和第二故事；异常读取测试核对底层材料未改变。
+- **本轮小型隔离TT验证、最终逐文件语法/diff检查、最终部署/源码哈希清单尚pending。** 旧131项/原生强杀结果仅作历史记录，不能替代这次返修验证。没有重做强杀矩阵，没有调用付费API。
+
+### 暂停与恢复入口
+
+用户在Node回归完成后要求“更新完档案停一下”，因此到此暂停。代码和文档在未提交工作树；未commit/push。两项仍待验证与Chat复核，不宣布G1通过或T-03完成。
+
+用户恢复后：先检查工作树，再给已有独立副本部署修复代码，仅用新namespace做close→reopen→旧owner拒绝，以及缺tip/null payload拒绝的小型原生验证；补最终语法/diff及独立哈希清单，更新本回报后再次停G1。发布协议无实质变化，不默认重做全部强杀矩阵。不进入P3、不创建新任务卡。
+
+回退只撤本轮三处实现/测试改动和新增定向测试，保留旧库及本轮TAP；撤回修复会重新暴露已知R1/R2，不能称为可用生产版本。本轮无持久数据迁移。无新的产品资料缺失，当前未完成项来自用户暂停要求。
+
+## G1-R1/R2 返修继续验证（2026-09-19）
+
+本节接续上面的暂停记录。用户恢复后继续使用 Windows / Node `v24.19.0`、隔离 TT Canary `dev (367b0c7e9410)`（SHA256 `11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4`），只写入新 namespace；现用 TT、真实 RP、手机和付费 API 未操作。隔离副本完成后已退出，collector 已停止。
+
+### 实际返修与验证
+
+- R1/R2 实现保持上节所述：成功 close 永久终止 owner；失败 close 保留唯一 registry/队列并可在原 owner 内 reopen；旧 owner 的 recover、handle 和 native IO 均受生命周期门禁。恢复只把明确的 native `null` 解释为缺记录，完整校验 root 和既有节点 payload，损坏信息返回 `NEEDS_RESOLUTION`。
+- 新增 `g1-repair` native 阶段，真实运行证据为 `evals/t03/g1-repair/native-20260919g1.json`：`mnemo-t03-20260919g1-lifecycle` 中旧 owner 的 recover/read/IO 分别为 `OWNER_CLOSED`/`STALE_HANDLE`/`OWNER_CLOSED`，替代 owner 重开后保留 2 条确认账本；缺 `tip` 的 root 与现有 `payload:null` 节点均返回 `NEEDS_RESOLUTION`，两类 namespace 的物理节点数均为 20→20，材料未被清空或替换。
+- 最终 Node 命令：`node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`，**150/150 通过，0 失败、0取消、0跳过**；完整输出 `evals/t03/g1-repair/after-final.tap`。23 个 contracts/storage/probe 的 `.mjs/.js` 文件 `node --check` 全通过，结果在 `syntax-final.json`；`git diff --check` 通过。
+- 修复源文件与隔离 harness 的 SHA-256 对照、native 证据哈希见 `evals/t03/g1-repair/repair-hashes.json`。本轮实际新增 native 阶段约 68 行、定向测试 134 行；R1/R2 实现净变更仍为 protocol `+19/-6`、adapter `+31/-7`，旧测试 `+5/-2`。未改持久格式、root 发布顺序或逻辑包 v2。
+
+### 关卡结论与边界
+
+R1/R2 的实现和本轮隔离验证已完成，证据已回写；**G1 仍停在 Chat review，未自行宣布放行**。本轮没有重做整套强杀矩阵，因为发布协议没有实质变化；没有进入 P3，没有创建任务卡，也没有把 T-03 标为完成。B1 仍未获生产选型批准；durable intent/ID 预留、外部维护协调、有界清单与完整流式恢复仍是 Chat 决定后才能进入的后续条件。
+
+本轮新 namespace：`mnemo-t03-20260919g1-lifecycle`、`mnemo-t03-20260919g1-malformed-root`、`mnemo-t03-20260919g1-null-payload`。均保留在隔离 data root，不自动清理。

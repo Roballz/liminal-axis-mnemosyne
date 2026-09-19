@@ -1,0 +1,247 @@
+TAP version 13
+# Subtest: G1-R2 invalid root missing-tip rejects without accepting an empty library
+not ok 1 - G1-R2 invalid root missing-tip rejects without accepting an empty library
+  ---
+  duration_ms: 81.1722
+  type: 'test'
+  location: 'D:\\Mnemosyne\\packages\\storage\\tests\\g1-review.test.mjs:39:4'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    async TestContext.<anonymous> (file:///D:/Mnemosyne/packages/storage/tests/g1-review.test.mjs:43:3)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: G1-R2 invalid root string-tip rejects without accepting an empty library
+ok 2 - G1-R2 invalid root string-tip rejects without accepting an empty library
+  ---
+  duration_ms: 58.5333
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root zero-tip rejects without accepting an empty library
+ok 3 - G1-R2 invalid root zero-tip rejects without accepting an empty library
+  ---
+  duration_ms: 59.2229
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root negative-tip rejects without accepting an empty library
+ok 4 - G1-R2 invalid root negative-tip rejects without accepting an empty library
+  ---
+  duration_ms: 45.883
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root fraction-tip rejects without accepting an empty library
+ok 5 - G1-R2 invalid root fraction-tip rejects without accepting an empty library
+  ---
+  duration_ms: 52.0401
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root missing-staging rejects without accepting an empty library
+ok 6 - G1-R2 invalid root missing-staging rejects without accepting an empty library
+  ---
+  duration_ms: 51.5367
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root wrong-format rejects without accepting an empty library
+ok 7 - G1-R2 invalid root wrong-format rejects without accepting an empty library
+  ---
+  duration_ms: 42.6906
+  type: 'test'
+  ...
+# Subtest: G1-R2 malformed native node null-payload is never mapped to absence
+not ok 8 - G1-R2 malformed native node null-payload is never mapped to absence
+  ---
+  duration_ms: 43.7241
+  type: 'test'
+  location: 'D:\\Mnemosyne\\packages\\storage\\tests\\g1-review.test.mjs:48:3'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    async TestContext.<anonymous> (file:///D:/Mnemosyne/packages/storage/tests/g1-review.test.mjs:52:5)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: G1-R2 malformed native node missing-payload is never mapped to absence
+not ok 9 - G1-R2 malformed native node missing-payload is never mapped to absence
+  ---
+  duration_ms: 42.5629
+  type: 'test'
+  location: 'D:\\Mnemosyne\\packages\\storage\\tests\\g1-review.test.mjs:48:3'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    async TestContext.<anonymous> (file:///D:/Mnemosyne/packages/storage/tests/g1-review.test.mjs:52:5)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: G1-R2 malformed native node array-payload is never mapped to absence
+ok 10 - G1-R2 malformed native node array-payload is never mapped to absence
+  ---
+  duration_ms: 41.6015
+  type: 'test'
+  ...
+# Subtest: G1-R2 malformed native node undefined-node is never mapped to absence
+not ok 11 - G1-R2 malformed native node undefined-node is never mapped to absence
+  ---
+  duration_ms: 42.8583
+  type: 'test'
+  location: 'D:\\Mnemosyne\\packages\\storage\\tests\\g1-review.test.mjs:48:3'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    async TestContext.<anonymous> (file:///D:/Mnemosyne/packages/storage/tests/g1-review.test.mjs:52:5)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: G1-R2 null payload in a non-root slot also rejects
+ok 12 - G1-R2 null payload in a non-root slot also rejects
+  ---
+  duration_ms: 46.6187
+  type: 'test'
+  ...
+# Subtest: G1-R2 true empty, explicit null tip and staging remain legal
+ok 13 - G1-R2 true empty, explicit null tip and staging remain legal
+  ---
+  duration_ms: 0.3396
+  type: 'test'
+  ...
+# Subtest: G1-R2 first publication failure preserves orphans and allows exact retry
+ok 14 - G1-R2 first publication failure preserves orphans and allows exact retry
+  ---
+  duration_ms: 57.4121
+  type: 'test'
+  ...
+# Subtest: G1-R1 successful close permanently retires owner; repeated close cannot affect replacement
+not ok 15 - G1-R1 successful close permanently retires owner; repeated close cannot affect replacement
+  ---
+  duration_ms: 57.7982
+  type: 'test'
+  location: 'D:\\Mnemosyne\\packages\\storage\\tests\\g1-review.test.mjs:92:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    async TestContext.<anonymous> (file:///D:/Mnemosyne/packages/storage/tests/g1-review.test.mjs:97:3)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: G1-R1 failed before close retains one quarantined owner
+not ok 16 - G1-R1 failed before close retains one quarantined owner
+  ---
+  duration_ms: 53.892
+  type: 'test'
+  location: 'D:\\Mnemosyne\\packages\\storage\\tests\\g1-review.test.mjs:103:44'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected "actual" to be reference-equal to "expected":
+    + actual - expected
+    ... Skipped lines
+
+      StoreOwner {
+    +   generation: 2,
+    -   generation: 1,
+        io: {
+          close: [AsyncFunction: close],
+          flush: [Function: flush],
+          get: [AsyncFunction: get],
+          point: undefined,
+    ...
+        },
+    +   status: 'closed',
+    -   status: 'ready',
+        tail: Promise {
+    +     Symbol(async_id_symbol): 5210,
+    +     Symbol(trigger_async_id_symbol): 5209,
+    +     undefined
+    -     Symbol(async_id_symbol): 5232,
+    -     Symbol(trigger_async_id_symbol): 5231,
+    -     {
+    -       commit: [Function: commit],
+    -       export: [Function: export],
+    -       read: [Function: read]
+    -     }
+        },
+        tip: 19
+      }
+
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: G1-R1 failed after close retains one quarantined owner
+not ok 17 - G1-R1 failed after close retains one quarantined owner
+  ---
+  duration_ms: 52.7251
+  type: 'test'
+  location: 'D:\\Mnemosyne\\packages\\storage\\tests\\g1-review.test.mjs:103:44'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected "actual" to be reference-equal to "expected":
+    + actual - expected
+    ... Skipped lines
+
+      StoreOwner {
+    +   generation: 2,
+    -   generation: 1,
+        io: {
+          close: [AsyncFunction: close],
+          flush: [Function: flush],
+          get: [AsyncFunction: get],
+          point: undefined,
+    ...
+        },
+    +   status: 'closed',
+    -   status: 'ready',
+        tail: Promise {
+    +     Symbol(async_id_symbol): 5589,
+    +     Symbol(trigger_async_id_symbol): 5588,
+    +     undefined
+    -     Symbol(async_id_symbol): 5611,
+    -     Symbol(trigger_async_id_symbol): 5610,
+    -     {
+    -       commit: [Function: commit],
+    -       export: [Function: export],
+    -       read: [Function: read]
+    -     }
+        },
+        tip: 19
+      }
+
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: G1-R1 open waits for close; queued recover cannot resurrect or evict replacement
+not ok 18 - G1-R1 open waits for close; queued recover cannot resurrect or evict replacement
+  ---
+  duration_ms: 0.4725
+  type: 'test'
+  location: 'D:\\Mnemosyne\\packages\\storage\\tests\\g1-review.test.mjs:114:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The validation function is expected to return "true". Received false
+
+    Caught error:
+
+    Error: native namespace closed
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    async TestContext.<anonymous> (file:///D:/Mnemosyne/packages/storage/tests/g1-review.test.mjs:122:81)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 10
+# fail 8
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 950.7441

@@ -102,7 +102,9 @@ test('stopping a waiter does not release native ownership; close queues then rev
   await Promise.resolve(); assert.equal(secondDone, false);
   io.point = null; release(); await pending; await second; await closing;
   await rejects(handle.read(), 'STALE_HANDLE');
-  const reopened = await owner.recover(); assert.deepEqual(await reopened.commit(requests[1]), requests[1].result);
+  await rejects(owner.recover(), 'OWNER_CLOSED');
+  const reopened = await new StoreOwner(io).recover();
+  assert.deepEqual(await reopened.commit(requests[1]), requests[1].result);
 });
 test('IO/ENOSPC before and after write never report success or erase previous data', async () => {
   for (const edge of ['before', 'after']) {
@@ -136,7 +138,8 @@ test('small import restores the independent ledger and rejects a nonempty target
   const bundle = await source.handle.export();
   const handle = await importIntoEmpty(target.owner, bundle);
   assert.deepEqual(await handle.read(), s.f.state);
-  await target.owner.close(); const reopened = await target.owner.recover();
+  await target.owner.close(); await rejects(target.owner.recover(), 'OWNER_CLOSED');
+  target.owner = new StoreOwner(target.io); const reopened = await target.owner.recover();
   for (const request of s.requests) assert.deepEqual(await reopened.commit(request), request.result);
   await rejects(importIntoEmpty(target.owner, bundle), 'IMPORT_TARGET_NOT_EMPTY');
   assert.deepEqual(await source.handle.export(), bundle);

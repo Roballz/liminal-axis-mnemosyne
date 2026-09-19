@@ -14,6 +14,8 @@
 
 当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。2026-09-20：P0～P2小原型已交证据，**停在 G1 待 Chat review，P3～P5未执行，整个任务未完成。** 旧 proposal 已 superseded。
 
+当前检查点：G1首轮提出R1/R2；返修代码、150项Node回归和隔离TT小验证已完成，证据见 `evals/t03/g1-repair/`；23个相关源码文件语法检查与diff检查通过。G1仍待Chat review，P3未执行，T-03未完成。评审见 `notes/t-03-g1-review.md`，本次状态见正式task末节。
+
 隔离 TT Canary `367b0c7e9410` 的小样本发布前/后强杀恢复、幂等和空库恢复已实测；Node131项通过。B1生产选型尚未通过G1，完整有界存储、正式剧情导入和手机使用未验收。协议/限制见 `docs/09-storage-provider-and-recovery.md`，原始证据见 `evals/t03/`；不冒充A服务器已经交付。
 
 ## 从哪里开始

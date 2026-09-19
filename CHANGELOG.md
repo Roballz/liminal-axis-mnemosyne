@@ -1,5 +1,18 @@
 # 更新记录
 
+## 2026-09-19 G1-R1/R2返修验证完成（待Chat review）
+
+- 在固定 TT Canary 隔离副本上完成 `20260919g1`：旧 owner 关闭后 recover/read/native IO 分别拒绝为 `OWNER_CLOSED`/`STALE_HANDLE`/`OWNER_CLOSED`，替代 owner 重开保留确认状态和2条账本。
+- 缺 `tip` 的 root 与已存在但 `payload:null` 的节点均报 `NEEDS_RESOLUTION`；物理节点数保持20，未降级为空库。证据、最终150项TAP、23文件语法结果和SHA-256清单见 `evals/t03/g1-repair/`。
+- G1仍停在Chat review；P3未执行，T-03未完成，不创建下一张任务卡。
+
+## 2026-09-20 G1-R1/R2返修检查点（用户要求暂停）
+
+- 成功关闭的owner永久失效，失败关闭保留registry/同一队列；open/close竞争与旧owner原生IO受归属检查。
+- 严格区分缺记录与损坏payload/root，要求显式合法tip/staging；不改变持久格式和发布顺序。
+- 旧版定向18项中8项失败；修复后原131+新增19共150项通过。两处旧关闭测试调整为永久终止后的安全重开，保留状态/账本断言。
+- 小型原生验证及最终语法/diff/哈希清单pending；代码未commit/push。按用户要求更新任务/导读后暂停，G1未放行，P3未执行。
+
 ## 2026-09-20 T-03 P0～P2（G1待review，整任务in_progress）
 
 - 增加有硬上限的B1存储原型：变化记录/独立账本、单点发布、未知结果门禁、共享写队列、精确回读恢复及暂存空库导入。没有P3块树或生产业务入口。
