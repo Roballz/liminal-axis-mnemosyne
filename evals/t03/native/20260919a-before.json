@@ -1,0 +1,11 @@
+{
+  "phase": "before",
+  "run": "20260919a",
+  "events": [
+    {
+      "type": "error",
+      "code": "RECOVERY_REQUIRED",
+      "message": "Write outcome unknown; retain operation/request and recover"
+    }
+  ]
+}

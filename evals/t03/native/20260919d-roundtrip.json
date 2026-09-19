@@ -1,0 +1,27 @@
+{
+  "phase": "roundtrip",
+  "run": "20260919d",
+  "events": [
+    {
+      "type": "done",
+      "phase": "roundtrip",
+      "source": "mnemo-t03-20260919d-roundtrip",
+      "target": "mnemo-t03-20260919d-restored",
+      "stories": 2,
+      "branches": 3,
+      "logicalChecksum": "sha256:logical-export:v1:9873501637229aa4ce815c2cecfb62fb8d63d33ce84d54581e9905ec39c23347",
+      "storageChecksum": "sha256:write-payload:v1:7867f54d36c74113242fb5d08cc6269966f6b0598f9df8699da4c23cfdd9d53a",
+      "restoredIdempotency": true,
+      "conflict": "OPERATION_CONFLICT",
+      "contradiction": "NEEDS_RESOLUTION",
+      "normalReopen": true,
+      "sharedOwner": true,
+      "cancelledWaiterRetainedOwnership": true,
+      "staleWriterRejected": true,
+      "closedHandleRejected": true,
+      "interruptedImportNotActivated": true,
+      "exportSnapshotFixed": true,
+      "validation": "passed"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "phase": "p0",
+  "run": "20260919a",
+  "events": [
+    {
+      "type": "done",
+      "phase": "p0",
+      "namespace": "mnemo-t03-20260919a-capability",
+      "sha256": "7897a11bcd08af71cb2df90908d471c4089b1c7b499308180cc121a8a1df89b4",
+      "uuidValid": true,
+      "methods": [
+        "namespace",
+        "dim",
+        "options",
+        "insert",
+        "batchInsert",
+        "upsert",
+        "get",
+        "updatePayload",
+        "patchPayload",
+        "updateVector",
+        "delete",
+        "link",
+        "unlink",
+        "shortestPath",
+        "subgraph",
+        "indexText",
+        "indexKeyword",
+        "buildTextIndex",
+        "search",
+        "searchBatch",
+        "searchAdvanced",
+        "query",
+        "buildQuiverIndex",
+        "compact",
+        "flush",
+        "close",
+        "stats"
+      ],
+      "options": {
+        "dim": 2,
+        "storageMode": "mmap",
+        "syncMode": "full",
+        "loadTextIndex": true,
+        "autoBuildQuiver": false,
+        "memoryLimitMb": 0
+      },
+      "nodeCount": 1,
+      "complexJson": true,
+      "exactId": true,
+      "normalReopen": true,
+      "paidApiCalls": 0
+    }
+  ]
+}

@@ -1,7 +1,10 @@
 # T-02 Reference Contracts
 
-Status: implemented_unverified. Requires Node.js 24 (tested on 24.19.0).
+Status: T-02 verified at 1891043; T-03 portable runtime change awaits G1 review.
+Tested on Node.js 24.19.0 and the isolated TT 367b0c7 WebView fixture.
 No package installation, server, TT module imports, persistence, or model calls.
+UUID/SHA-256 now use runtime.mjs; JCS and fingerprint envelopes are unchanged.
+Storage lives separately in ../storage and is a bounded P0-P2 prototype.
 
 ```powershell
 node --test packages/contracts/tests/*.test.mjs

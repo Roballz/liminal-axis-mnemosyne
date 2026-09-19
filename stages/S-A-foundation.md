@@ -16,7 +16,7 @@
 | T-01 ✅ | 做最小 TT Adapter 探针 | verified；await、payload、取消与 request gate 边界已验证 |
 | T-02A ✅ | TT 宿主身份与变更事件验证 | verified；stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 边界 |
 | T-02 ✅ | 身份、历史版本与上下文的最小可执行契约 | verified；1891043 最终复核关闭 R1～R5，范围限最小参考模型 |
-| T-03 ▶ | 可迁移、可恢复的存储地基 | planned；正式卡 `tasks/T-03-storage-foundation.md`，首次 P0～P2，G1 review 后才扩大实施 |
+| T-03 ▶ | 可迁移、可恢复的存储地基 | in_progress；P0～P2小原型已交证据，G1待Chat review；P3～P5未执行 |
 
 用户本轮授权 Chat 核对后发布正式卡并高难前置。旧 `tasks/T-03-storage-foundation.proposal.md` 为 superseded 历史入口；Codex 不修改关卡许可、不自动生成 T-04。
 
@@ -53,7 +53,7 @@ T-02 不沿用柏宝书 Leaf 作为正式对象名；普通派生按 User + Assi
 
 **T-02 无剩余验收阻塞；T-03 没有需要用户先凭空决定的产品取舍。** 可安排首次 P0～P2，但实际安装能力和隔离条件仍要在 P0 检查；缺失则只阻塞相应原生实验，不编造API或擅自升级生产环境。
 
-**G1 尚未放行。** P0～P2 完成后提交能力矩阵、实际故障证据和发布/恢复协议，由 Chat 确认 B1 是否适用；不适用时再由 Chat/用户选择 B2/A。此前不进入 P3～P5，不将部分进度升为总任务 verified。
+**G1 尚未放行。** 2026-09-20已提交P0～P2小原型能力矩阵、真实强杀恢复/空库恢复及131项Node测试证据；协议见09，实施回报见正式task。需Chat审查B1、编译请求/ID保留、外部维护协调及空间放大边界。不进入P3～P5，不将部分进度升为总任务完成。
 
 待实验：无 embedding 原文存储、精确ID/完整枚举、真实持久性和取消边界、多handle协调、块/账本放大、稳定导出及资源上限。性能预算尚无用户确认，先探索测量；正确性不得打折，不能测后自设阈值宣布手机达标。
 
@@ -67,4 +67,4 @@ T-02 不沿用柏宝书 Leaf 作为正式对象名；普通派生按 User + Assi
 
 ## 8. 阶段收尾 review
 
-T-00、T-01、T-02A、T-02 已 verified；T-03 刚发布 planned，P0～P5均pending，G1未放行。本轮只修订任务/入口，不执行实现或测试。S-A仍在进行，尚未验收真实持久化、崩溃恢复或手机生产使用。
+T-00、T-01、T-02A、T-02已verified；T-03为in_progress，P0～P2小原型implemented_unverified，G1未放行。隔离桌面已取得有限真实持久化/强杀恢复证据，S-A仍在进行；完整有界存储、性能和手机生产使用未验收。

@@ -1,0 +1,10 @@
+{
+  "display_name": "Mnemosyne T03 isolated storage harness",
+  "loading_order": 99,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "author": "Mnemosyne",
+  "version": "0.1.0",
+  "homePage": ""
+}

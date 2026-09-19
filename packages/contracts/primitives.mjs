@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { sha256, randomUUID } from './runtime.mjs';
 
 export const PREFIXES = Object.freeze({
   story: 'st', branch: 'br', message: 'msg', revision: 'rev', snapshot: 'hs',
@@ -63,7 +63,7 @@ export function fingerprint(purpose, payload) {
   requireThat(['content', 'derived-input', 'prepare-input', 'write-payload', 'logical-export'].includes(purpose),
     'INVALID_SCHEMA', 'Unknown fingerprint purpose');
   const bytes = canonicalize({ purpose, version: 1, payload });
-  return `sha256:${purpose}:v1:${createHash('sha256').update(bytes, 'utf8').digest('hex')}`;
+  return `sha256:${purpose}:v1:${sha256(bytes)}`;
 }
 export function freeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {

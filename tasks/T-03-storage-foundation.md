@@ -1,6 +1,6 @@
 # T-03：可迁移、可恢复的存储地基
 
-状态：planned（正式任务；按下述关卡分增量执行）
+状态：in_progress（P0～P2 小原型 implemented_unverified；停在 G1 待 Chat review，非整任务完成）
 
 发布：2026-09-19。规划仓库基线：`4dcdaf568ddb596c9060c27ef4c57fb858095509`。
 T-02 已验收实现：`1891043f6fc907236e12bb85d63ea823f43abca8`；规范为 `docs/06-contracts.md` v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。
@@ -184,8 +184,58 @@ B→A 只验迁移材料和 B→空环境的恢复；A 尚未实现时不称真�
 
 实际版本若不同，先记录差异并评估协议前提；不为追新功能默默升级生产环境。
 
-## 实测与关卡状态（实施后填写）
+## 实测与关卡状态（2026-09-20 Codex 回报）
 
-- P0：pending；P1：pending；P2：pending。
-- G1：未放行；P3～P5不得执行。
-- 本轮仅发布/修订任务与导读，未编写实现、未运行新测试、未选定生产数据库。
+**本增量交 G1 review。P0 已取得安装/接口/隔离证据，P1 候选协议及 P2 有硬上限的原型为 implemented_unverified；T-03 总状态 in_progress。G1 未放行，P3～P5未执行，不创建下一张任务卡。**
+
+### 基线、环境与范围
+
+- `git pull --ff-only origin main`：从1891043快进到 `852260acd8d3e65d9d756af81cdf72e52c50046b`；实施提交为 `548b575`（`feat(storage): implement T-03 P0-P2 recovery prototype`）；分支 main，原有未跟踪 `.codex/` 未修改。
+- 已读 README、AGENTS、S-A、本卡、T-02最终review、06 v0.3/逻辑包v2、08 Head设计、03单写/存储决策、07数据库边界、baseline、T-02A回报、contracts及三组测试；历史“proposal”状态按正式任务覆盖。
+- Windows 10 Pro x64；Node v24.19.0；Git 2.55.0.windows.3；WebView2 153.0.4234.32。用户更新后的 TT `dev (367b0c7e9410)`，File/ProductVersion仍2.2.0；二进制60186112 bytes，SHA256 `11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4`。旧安装5e33标记只保留为更新前事实。
+- 只复制程序/default/frontend-templates到 `D:\Mnemosyne\.t03-local\tt-367b0c7`，portable.flag选择独立 `data`，WebView profile单独放在 `webview-profile`。源码与实际进程路径/profile均核对；未复制现用聊天、模型配置或令牌。
+- TT单实例插件曾拦截副本；用户正常退出原实例后再启动。实际强杀只针对验证了固定路径/SHA/本次kill-ready事件的副本：发布前PID14208、发布后PID11144。2026-09-20因额度中断恢复，重新启动PID6552；未把用户报告的随Codex关闭当成额外受控崩溃实验。
+- 无新依赖/服务安装或第三方实现代码复制；无真实RP/付费API/生产手机/现用安装改动。测试collector只监听127.0.0.1:19374并在结果后退出，远程调试端口尝试未生效且最终不使用。
+
+### 实际改动与代码量
+
+- 新增 `packages/storage/protocol.mjs`、`tt-adapter.mjs`：共享写队列、变化对象/提交账本、单root发布、未知结果门禁、精确回读恢复、独立ledger/markers/journal小型包、空namespace暂存导入与激活。
+- 新增 `packages/contracts/runtime.mjs`，primitives只替换UUID/SHA运行时；同步指纹/JCS、用途版本和已验收语义不变。Node/WebCrypto/真实TT对照通过。
+- 新增故障fixture、原生harness/collector/隔离进程脚本，以及 `.gitignore` 中只忽略本次 `.t03-local/`。证据在 `evals/t03`；候选协议和限制在 `docs/09-storage-provider-and-recovery.md` v0.1。
+- 新增实现330行（runtime40、protocol262、adapter28）；primitives +2/-2。新增测试/fixture/原生验证harness共478行（含manifest10行）。与开工500～800/450～850估计相比，实现更薄；未建设正式业务入口、有界块树或产品面板。文档和原始TAP/JSON不计入代码量。
+
+### 真实执行、结果与证据
+
+| 项 | 实际结果 |
+| --- | --- |
+| `node --test --test-reporter=tap packages/storage/tests/storage.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js` | **131/131通过**：原契约48+探针18+存储65；0失败/跳过。`evals/t03/node-tests.tap` |
+| contracts/storage 的mjs/js逐文件 `node --check` +原探针 | 21文件通过；PowerShell隔离脚本实际Start/Crash执行成功 |
+| `git diff --check` | 通过；最终代码/证据哈希与部署fixture请求一致性保存在 `evals/t03/verification.json` |
+| P0 `collector.mjs p0 20260919a` | 实际api.db方法、full配置、复杂中文JSON、精确ID、close/reopen与UUID/SHA/JCS对照通过；无embedding调用 |
+| 初始发布失败 | a/b两次失败保留；b明确报物理NodeId0内部保留。修正adapter为逻辑槽n→物理n+1，用新c/d namespace重跑，未覆盖失败库 |
+| `before 20260919c` → Crash before → `recover-before` | 材料flush后、root发布前强杀；重开保留旧view `mv_…014`，同operation重试后为`mv_…023`；原Head/子线不变，ledger=3 |
+| `after 20260919c` → Crash after → `recover-after` | root发布flush后、确认前强杀；重开已是`mv_…023`，重复操作返回原结果，ledger仍3 |
+| `roundtrip 20260919c`及最终修正后`roundtrip 20260919d` | 两故事/三分支、编辑/纠错/绑定、小型逻辑包→新库恢复、幂等、同键异请求/R5拒绝、多handle共享owner、取消等待不释放写权、陈旧竞争拒绝、关闭句柄失效、中断导入不激活均通过 |
+| 最终d额外项 | 导出后继续提交不修改旧包；`exportSnapshotFixed=true`。2026-09-20 `reopen-check 20260919d` 再次打开已有restored库，状态及5条幂等账本通过 |
+
+原生原始结果/进程证明位于 `evals/t03/native/*.json`。固定seed=20260919。Node故障矩阵为4类增量（fork/选择、纠错、正文edit、binding）×12个断点，TAP诊断保存operation、前后Head/view/binding、确认状态和恢复校验；底层已写但返回失败与写前失败分别注入。原生强杀覆盖的是纠错事务的发布两侧，不宣称所有48个断点均在TT强杀。
+
+### 契约、偏差和未验证项
+
+- v2/schema_version=1保持；额外恢复包 `mnemosyne-storage-p2-v1` 独立版本化。恢复同时校验logical、journal、ledger与重建标记；不删除corrections/checkpoint来修复矛盾，不修改领域UUID，不调用LLM重建。
+- 内部编译事务要求保留原请求和生成的ID；重试先查账本后查expected。尚无正式业务命令durable intent/ID预留入口，不能丢失请求后重新生成ID冒充同一重试；外部维护/同步导致native句柄换代尚无自动接线。G1必须审查这些生产化条件。
+- 明确小样本限制：256记录、32消息/快照、16选择/视图、状态/请求各256KiB、64提交。内存仍物化全库，单command.entries/view/expected/markers尚未分块；S05未通过，不把现原型称手机生产存储。P1已说明无损引用方向，P3未实施。
+- S01～S03有本增量原生证据；S04仅小fixture父子/纠错及R5原生回读，完整R1～R5/derived-only组合主要为Node回归，未宣称全量TT组合矩阵完成。S06/S07只小包，完整一致流式备份/文本解析硬化待P3。S08仅owner生命周期门禁，真实索引重建/宿主同步替换未测；S09/手机/性能均pending。S10本增量文档回报已补齐，整任务未验收。
+- 模拟ENOSPC不等于真实磁盘满；未做硬件断电、OS崩溃、真实IO故障或生产迁移。flush/强杀结果仅限本安装版、此故障点/fixture；不承诺断电零损失。
+
+### 测试库、回退与G1待决定事项
+
+独立库目录为上述data root下 `_tauritavern/databases/`。实际namespace完整清单：
+
+- `mnemo-t03-20260919a-capability`、`mnemo-t03-20260919a-crash-before`、`mnemo-t03-20260919b-crash-before`；后两者是失败试验。
+- `mnemo-t03-20260919c-crash-before`、`mnemo-t03-20260919c-crash-after`、`mnemo-t03-20260919c-roundtrip`、`mnemo-t03-20260919c-restored`、`mnemo-t03-20260919c-race`、`mnemo-t03-20260919c-interrupted-import`。
+- `mnemo-t03-20260919d-roundtrip`、`mnemo-t03-20260919d-restored`、`mnemo-t03-20260919d-race`、`mnemo-t03-20260919d-interrupted-import`。
+
+不自动删除上述库/孤儿/隔离副本。回退只停用harness并撤本轮代码，保留测试库/证据；不需要生产格式迁移，不覆盖现用存档。隔离TT因用户要求已重开，数据库handle在验证后关闭，collector已退出。
+
+**请求 Chat 在 G1 审查 B1 原语、发布协议、临时恢复格式、durable intent及外部维护协调缺口，再决定是否放行 P3；不把本回报当成放行。** 下一增量仍是本任务P3，有界清单/command/视图/目录和完整恢复，工作量需按review后的设计重新估计；当前粗估实现600～1000、测试500～900行，非批准/配额。不创建新任务卡，不自行选择B2/A。

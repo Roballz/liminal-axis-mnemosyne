@@ -12,9 +12,9 @@
 
 已验收：**T-02 身份、历史版本与上下文契约，verified**。审核实现为 `1891043`，R1～R5 已关闭；Chat 独立复跑48项契约与11文件语法检查通过，R5同组测试在修复前实际旧版6项失败、修复后通过。Head、固定分叉、逐层失效、幂等和逻辑包校验限Node参考模型范围，不等于已有正式记忆引擎或持久化。证据见 `notes/t-02-final-review.md`。
 
-当前正式任务：**T-03 可迁移、可恢复存储地基，planned**，入口 `tasks/T-03-storage-foundation.md`。高难前置：先核对安全环境，做提交/幂等/恢复协议和极小真实TT故障闭环；**首次仅 P0～P2，在 G1 停下 review，放行后再做 P3～P5。** 旧 proposal 已 superseded。
+当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。2026-09-20：P0～P2小原型已交证据，**停在 G1 待 Chat review，P3～P5未执行，整个任务未完成。** 旧 proposal 已 superseded。
 
-优先评估本机 B1（TT TriviumDB），数据库尚未定型；不适用时 B2/A 交 Chat/用户决定。本轮只发布任务和更新导读，真实持久化、恢复、正式剧情导入和手机生产使用尚未验收。T-03先以隔离桌面地基为完成范围，手机单独安全准入，不能冒充A服务器已经交付。
+隔离 TT Canary `367b0c7e9410` 的小样本发布前/后强杀恢复、幂等和空库恢复已实测；Node131项通过。B1生产选型尚未通过G1，完整有界存储、正式剧情导入和手机使用未验收。协议/限制见 `docs/09-storage-provider-and-recovery.md`，原始证据见 `evals/t03/`；不冒充A服务器已经交付。
 
 ## 从哪里开始
 
@@ -22,7 +22,7 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `tasks/T-03-storage-foundation.md` | 当前 planned：P0～P2 首增量、G1门禁、高难前置与最终验收 |
+| `tasks/T-03-storage-foundation.md` | 当前 in_progress：P0～P2 回报、G1待review与最终验收 |
 | `tasks/T-03-storage-foundation.proposal.md` | superseded，仅保留旧预案历史入口 |
 | `tasks/T-02-identity-version-context.md` | 已 verified：实施证据、原验收范围与最终 Chat review |
 | `notes/t-02-final-review.md` | T-02 最终结论、独立实测、R5关闭与未验证边界 |
@@ -40,6 +40,8 @@
 ## 实现与数据边界
 
 已有实现位于 `apps/tt-adapter-probe/` 与 `packages/contracts/`。后者使用 Node 原生测试，不新增服务或依赖安装。运行 `node --test packages/contracts/tests/*.test.mjs`；当前测试及局限见 T-02 实施回报和最终review。探针18项及Windows合计66项通过为Codex回报，最终review明确区分各自实测范围；本轮发布T-03没有重新执行这些测试。
+
+2026-09-20新增 `packages/storage/` P0～P2小原型；本轮重新运行原66项及新增65项，共131项通过，原始结果在 `evals/t03/node-tests.tap`。历史发布时未测试与此次实施重跑分开记录。
 
 B/A 共用 Mnemosyne 的领域身份、规则与逻辑导出；宿主 stableId、数据库 NodeId 与物理文件格式不能替代正式 ID。用户主要在单手机长期 RP，已接受单权威写入与跨端明确交接，不建设离线多主自动合并。
 

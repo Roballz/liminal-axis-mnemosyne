@@ -6,7 +6,7 @@
 
 ## 1. 身份、对象与字段字典
 
-ID 为 `<prefix>_<lowercase UUIDv4>`。集中前缀：Story=st，Branch=br，SourceMessage=msg，SourceRevision=rev，HistorySnapshot=hs，ManifestBlock=hm，业务操作=op，派生家族=mem，派生版本=mr，记忆视图=mv，HostBinding=hb，Run=run，ContextBlock=cb。生产生成使用 Node crypto.randomUUID；fixture 使用固定值。碰撞不可覆盖。
+ID 为 `<prefix>_<lowercase UUIDv4>`。集中前缀：Story=st，Branch=br，SourceMessage=msg，SourceRevision=rev，HistorySnapshot=hs，ManifestBlock=hm，业务操作=op，派生家族=mem，派生版本=mr，记忆视图=mv，HostBinding=hb，Run=run，ContextBlock=cb。运行时使用安全 crypto.randomUUID；fixture 使用固定值。碰撞不可覆盖。2026-09-20 T-03 将 UUID/SHA 实现抽到跨 Node/TT 的 runtime.mjs，JCS与指纹版本不变；该运行时改动随 G1 待review，不扩大T-02原验收范围。
 
 | 类型 | 必填字段及含义 |
 | --- | --- |

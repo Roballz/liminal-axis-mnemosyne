@@ -1,0 +1,16 @@
+{
+  "phase": "before",
+  "run": "20260919b",
+  "events": [
+    {
+      "type": "error",
+      "code": "RECOVERY_REQUIRED",
+      "message": "Write outcome unknown; retain operation/request and recover",
+      "cause": "Bad request: Database mnemo-t03-20260919b-crash-before: 无效输入 (Invalid input): 节点 ID 0 为内部保留值",
+      "stack": [
+        "Error: Write outcome unknown; retain operation/request and recover",
+        "    at StoreOwner.commit (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/protocol.mjs:145:21)"
+      ]
+    }
+  ]
+}
