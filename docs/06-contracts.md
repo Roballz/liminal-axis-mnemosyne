@@ -1,6 +1,6 @@
 # T-02 最小可执行契约
 
-版本：v0.3 / schema_version=1（逻辑包 format_version=2）；2026-09-19；状态：implemented_unverified，R1～R4已由Chat二次review复核，R5返修待复核。依据见 notes/t-02-chat-review-round2.md。
+版本：v0.3 / schema_version=1（逻辑包 format_version=2）；2026-09-19；状态：verified（限最小契约与 Node 内存参考模型）。1891043 最终复核关闭 R1～R5；证据、边界及 T-03 交接见 `notes/t-02-final-review.md`。
 
 规则依据：03 的 T02-D01～D25 / P01、08 的 accepted Head 设计。实现入口为 `packages/contracts/index.mjs`，机器形状规范为 `schema.mjs` 的显式字段检查器；另有跨对象及转换校验。不是 JSON Schema 标准文件，不用静态类型冒充运行时校验。范围限 Node 内存参考模型，不是生产 Engine/数据库/HTTP SDK。
 
