@@ -15,7 +15,7 @@
 | T-00 ✅ | 固定真实 TT／柏宝书／测试数据与副 API 基线 | verified；不再猜安装版本、存储模式或输入 |
 | T-01 ✅ | 做最小 TT Adapter 探针 | verified；await、payload、取消与 request gate 边界已验证 |
 | T-02A ✅ | TT 宿主身份与变更事件验证 | verified；stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 边界 |
-| T-02 ▶ | 身份、历史版本与上下文的最小可执行契约 | implemented_unverified；原32项+R1～R4新增10项契约测试及18项探针回归通过，待Chat二次review |
+| T-02 ↺ | 身份、历史版本与上下文的最小可执行契约 | implemented_unverified；二次 review 已复核 R1～R4、独立重跑42项契约通过；剩余R5：导入纠错/当前选择一致性 |
 | T-03 ◇ | 可迁移、可恢复的存储地基 | proposal；`tasks/T-03-storage-foundation.proposal.md`，T-02 review 后修订启用 |
 
 T-03 预备卡是用户本轮明确要求由 Chat 提前准备的方案；它存在不等于可施工。Codex 不自动生成下一张卡、不自动把 proposal 改成 planned。
@@ -40,15 +40,17 @@ T-02 不沿用柏宝书 `Leaf` 作为正式对象名；普通派生按 User + As
 
 - **Head 已接受。** 2026-09-19 用户明确采用 `Branch.head_snapshot_id` → `hs_<UUIDv4>` HistorySnapshot → 有序分块共享 HistoryManifest。固定父快照前缀及锚；父线改旧楼不改变既有子线，回滚建新快照，正文与记忆版本分离。具体字段和边界见 `docs/08-history-snapshot-and-rebuild.md`。
 - **正文权威与逐层重建。** 已发生剧情以当前分支正文为准；人物状态等为派生。匹配适用回合复用，受影响大小总结/事件/累计状态按轻量 input_refs/coverage 逐层重建，不建独立状态权威或通用字段依赖引擎。
-- **T-02 返修（待二次review）。** 06升至v0.3，明确固定检查点/current依赖和分支纠错，选择执行图拒绝环；绑定禁止跨故事原地改属，derived-only同线声明前缀不变可续用。保留原32项，加R1～R4组合反例；未实现生产导入器、LLM重建器或数据库。
+- **T-02 二次 review。** `d99e1d5` 的 R1～R4 已复核：固定检查点/current依赖、分支纠错和执行图拒环、跨故事重绑拦截、derived-only同线续用。42项契约测试在Chat隔离Node环境独立通过，10个模块语法检查通过；探针18项与完整diff检查仍注明为Codex回报。本轮额外实测发现R5，详见 `notes/t-02-chat-review-round2.md`。未实现生产导入器、LLM重建器或数据库。
 - **B/A 共用核心。** 宿主标识/Trivium NodeId/TQL 不成为正式领域身份；迁移保留已有原文/版本/正确记忆与来源，不全量重摘。
 - **T-03 预案。** 先核对真实 api.db 能力，再决定 TriviumDB 是否承载正式数据与索引；必须验证无 embedding 原文保存、精确 ID/完整枚举、业务提交、崩溃恢复、逻辑导出和索引重建。物理块参数与性能预算仍未冻结。
 
-文件优先级：用户最新明确确认与本节/决策记录 → 当前指定 task/Chat返修review → 08 具体设计 → 06 契约（T-02 v0.3，待二次review）→ 07 首轮候选 → 早期架构/roadmap 示意。旧建议不能覆盖新确认；冲突需报告，不静默发明产品决定。
+文件优先级：用户最新明确确认与本节/决策记录 → 当前指定 task/最新Chat返修review → 08 具体设计 → 06 契约（T-02 v0.3，待R5复核）→ 07 首轮候选 → 早期架构/roadmap 示意。旧建议不能覆盖新确认；冲突需报告，不静默发明产品决定。
 
 ## 6. 当前阻塞、未决项与收尾门禁
 
-无阻塞 T-02 最小契约施工的新增宿主事实问题。T-01 的 gate 竞态和 T-02A 的 API 路径/成功 Regenerate/Delete 补证已通过 review，不重做无关探针。
+T-02 当前剩余验收阻塞为 **R5：corrections 与 selections 的导入交叉不变量**。刻意构造“旧版本仍被选中、同时已被纠正到新版本”的语义矛盾包，当前 validateState/importLogical 仍接受，最终 canApply 也允许旧摘要。需在原 T-02 内补齐状态/导入一致性校验与最终放行保护；复现步骤、实际输出及有界返修要求见 `notes/t-02-chat-review-round2.md`。这不是普通 selectMemory 自然产生该状态的证据，也不是要求现在实现生产存储恢复。R1～R4 不重写，T-03 不改、不执行。
+
+无新增宿主事实阻塞。T-01 的 gate 竞态和 T-02A 的 API 路径/成功 Regenerate/Delete 补证已通过 review，不重做无关探针。
 
 仍未最终决定：非标准回合（开场白、连续消息、Continue、群聊）自动分组、品牌显示名、旧档模糊对齐阈值、自动清理/保留周期，以及数据库/物理块参数和完整渲染模板。
 
