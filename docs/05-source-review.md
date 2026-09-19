@@ -71,3 +71,18 @@ TT 来源为核验时 main 文档，后续可能变化。T-00 要记录用户实
 ## 5. 复核规则
 
 每次引入重要上游更新，记录日期、提交、相关文件与实际行为；代码注释、FAQ 和执行路径冲突时记录差异。保持旧核验记录，不把 main 链接现在的内容当成过去版本的证据。运行测试要附真实命令与输出，不能仅因文档说支持就标 verified。
+
+
+### T-02A Chat 二次 review（2026-09-19）
+
+T-02A 已通过。返修后的 TT 0.1.4 探针在固定 TT 2.2.0 dev/Canary 上取得以下现场边界：
+
+- stableId、handle metadata integrity 与 context chatMetadata integrity 在稳定 parent / child 样本中一致；parent / child stableId 可区分，rename / reopen 后稳定。
+- handle.summary({ includeMetadata: false }) 可取得聊天 message_count；稳定快照与 contextCount 一致，但事件过程可能短暂滞后，不能当原子实时 head。
+- Deep Edit 的 MESSAGE_EDITED / MESSAGE_UPDATED 可按 index 观测正文指纹变化。
+- MESSAGE_DELETED 的参数语义为删除后的 chat.length；明确 Delete 样本 N5/k3/参数4 及邻接指纹平移验证了这一点。事件本身不能直接给出被删 SourceMessage identity。
+- Swipe 可观测 MESSAGE_SWIPED、swipeId、candidate 数与 active 指纹变化。
+- 成功 Regenerate 可观测同一宿主 assistant 槽位的 active 正文替换；本次 candidate 数 1→1、无 MESSAGE_SWIPED，因此不能据此假定宿主保留旧候选。
+- “删除后一条 assistant 后才成功”仅为无错误响应证据的上游输入格式猜测，不作为宿主或 Mnemosyne 契约。
+
+这些事实只冻结 TT Adapter 的宿主能力边界；正式 Story / Branch / SourceMessage / Revision / head / input hash 仍由 T-02 设计。
