@@ -1,5 +1,12 @@
 # 更新记录
 
+## 2026-09-19 T-02 最终 Chat review（verified）
+
+- 审核实现 `1891043`，R5 导入/选择交叉不变量与最终注入保护通过；R1～R5 在最小可执行契约范围全部关闭，T-02 升为 verified。
+- Chat 在隔离 Linux / Node v22.16.0 校验13个源码/测试/样例blob后独立运行48项契约测试和11文件语法检查，全部通过；同组R5测试在实际旧memory blob上6项失败，在本次实现通过。
+- 探针18项、完整diff检查及Windows合计66项通过仍单独注明为Codex回报，不混称Chat独立66项。完整结论、证据与边界见 `notes/t-02-final-review.md`。
+- 同步任务、阶段导读、06契约、README及AGENTS；当前基线为06 v0.3 / schema_version=1 / 逻辑包v2。未修改实现、未执行持久化或手机联调；T-03卡保持proposal且未修改、未执行。
+
 ## 2026-09-19 T-02 R5 返修（implemented_unverified）
 
 - 基线28b94d4：补齐selections/corrections交叉不变量，拒绝正确checksum但所选根版本已被纠正的矛盾逻辑包；最终注入检查同样拒绝已纠正旧摘要。
@@ -39,7 +46,7 @@
 - 新增阶段 A 导读与 T-00 用户环境基线；记录 TT 2.2.0 dev/Canary、柏宝书 1.2.9 本地模式及当前副 API 模型。
 - 明确 T-02 不沿用柏宝书 `Leaf` 作为 Mnemosyne 正式领域对象名。
 - T-00 首轮现场复核：确认 `E:\TauriTavern\tauritavern.exe` 为 2.2.0；安装目录未发现柏宝书扩展源码或用户聊天数据，补充 T-01 探针任务卡，待扩展入口与安全测试样本。
-- T-00 路径补全：确认柏宝书 1.2.9 实际源码与 commit `32dbb48a0a643804256d496bc35bf7699dea9ebe`，确认测试聊天 JSONL 的实际路径与字段边界；运行时 payload 与取消／切聊天转入 T-01。
+- T-00 路径补全：确认柏宝书 1.2.9 实际源码与 commit `32dbb48a0a643804256d496bc35bf7699dea9ebe`，确认测试聊天 JSONL 的实际路径与字段边界；首轮运行时 payload 与取消／切聊天转入 T-01。
 - 流程修正：正式任务卡由 Chat／用户创建；Codex 默认只交付当前 task 的实施证据与下一步建议，不提前生成后续 task。T-00 中“直接产出 T-01”的旧指令废止。
 - Chat review 修订 T-01：补回独立 HTTPS 接入验证，真实 Memory Engine／正式身份契约留后续。
 - T-01 现场验证：确认 TT 2.2.0 生成前 await、三类最终 payload、探针取消、原生 Stop、失败／超时清槽和运行时 request gate supersede；记录 HTTPS/CORS 限制及生成期间不能切聊天／并发生成。
