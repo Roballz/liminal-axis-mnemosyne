@@ -12,18 +12,21 @@
 
 已验收：**T-02 身份、历史版本与上下文契约，verified**。审核实现为 `1891043`，R1～R5 已关闭；Chat 独立复跑48项契约与11文件语法检查通过，R5同组测试在修复前实际旧版6项失败、修复后通过。Head、固定分叉、逐层失效、幂等和逻辑包校验限Node参考模型范围，不等于已有正式记忆引擎或持久化。证据见 `notes/t-02-final-review.md`。
 
-后续预备：**T-03 可迁移、可恢复存储地基**，目前仅 proposal，待按最终契约核对后明确启用。优先评估依托 TT 的本机 B provider，保留迁往独立服务器 A provider 的能力；数据库尚未定型，实际持久化、恢复、正式剧情导入和手机生产使用未完成。
+当前正式任务：**T-03 可迁移、可恢复存储地基，planned**，入口 `tasks/T-03-storage-foundation.md`。高难前置：先核对安全环境，做提交/幂等/恢复协议和极小真实TT故障闭环；**首次仅 P0～P2，在 G1 停下 review，放行后再做 P3～P5。** 旧 proposal 已 superseded。
+
+优先评估本机 B1（TT TriviumDB），数据库尚未定型；不适用时 B2/A 交 Chat/用户决定。本轮只发布任务和更新导读，真实持久化、恢复、正式剧情导入和手机生产使用尚未验收。T-03先以隔离桌面地基为完成范围，手机单独安全准入，不能冒充A服务器已经交付。
 
 ## 从哪里开始
 
-先读 `AGENTS.md`、`stages/S-A-foundation.md`，再读当前用户指定的任务。不要根据旧 Blueprint 示例自行推断产品决定。
+先读 `AGENTS.md`、`stages/S-A-foundation.md`，再读当前用户指定的任务。不要根据旧 Blueprint 示例自行推断产品决定；历史文档中的任务状态以最新阶段导读为准。
 
 | 文件 | 用途 |
 | --- | --- |
+| `tasks/T-03-storage-foundation.md` | 当前 planned：P0～P2 首增量、G1门禁、高难前置与最终验收 |
+| `tasks/T-03-storage-foundation.proposal.md` | superseded，仅保留旧预案历史入口 |
 | `tasks/T-02-identity-version-context.md` | 已 verified：实施证据、原验收范围与最终 Chat review |
 | `notes/t-02-final-review.md` | T-02 最终结论、独立实测、R5关闭与未验证边界 |
 | `packages/contracts/` | T-02 最小形状/跨引用校验、内存参考逻辑与确定性测试 |
-| `tasks/T-03-storage-foundation.proposal.md` | T-03 预案；按最终契约修订启用，不能自动施工 |
 | `docs/08-history-snapshot-and-rebuild.md` | 已接受的 Head、正文权威、来源重建与分叉边界 |
 | `docs/03-decisions-and-open-questions.md` | 当前决定、未决项与实验门禁 |
 | `docs/06-contracts.md` | v0.3 / schema_version=1、逻辑包v2；已验收最小契约基线 |
@@ -36,10 +39,10 @@
 
 ## 实现与数据边界
 
-实现位于 `apps/tt-adapter-probe/` 与 `packages/contracts/`。后者使用 Node 原生测试，不新增服务或依赖安装。运行 `node --test packages/contracts/tests/*.test.mjs`；当前测试及局限见 T-02 实施回报和最终review。探针18项及Windows合计66项通过为Codex回报，最终review明确区分各自实测范围。
+已有实现位于 `apps/tt-adapter-probe/` 与 `packages/contracts/`。后者使用 Node 原生测试，不新增服务或依赖安装。运行 `node --test packages/contracts/tests/*.test.mjs`；当前测试及局限见 T-02 实施回报和最终review。探针18项及Windows合计66项通过为Codex回报，最终review明确区分各自实测范围；本轮发布T-03没有重新执行这些测试。
 
 B/A 共用 Mnemosyne 的领域身份、规则与逻辑导出；宿主 stableId、数据库 NodeId 与物理文件格式不能替代正式 ID。用户主要在单手机长期 RP，已接受单权威写入与跨端明确交接，不建设离线多主自动合并。
 
-代码和工程文档以本私有 GitHub 仓库为共享基准。真实聊天、模型密钥、数据库备份与生产配置留在独立受控数据存储；即使仓库私有，也不提交这些数据。
+代码和工程文档以本私有 GitHub 仓库为共享基准。真实聊天、模型密钥、数据库备份与生产配置留在独立受控数据存储；即使仓库私有，也不提交这些数据。T-03默认虚构样本、隔离测试库，不授权改生产手机或真实档案。
 
-本仓库未复制柏宝书实现代码，也未导入真实聊天。未来若复用外部代码，先核查许可证与发布条件。任何 task 的 planned/implemented_unverified/verified 状态都与方案 accepted 分开；预备卡不得自动成为施工任务。
+本仓库未复制柏宝书实现代码，也未导入真实聊天。未来若复用外部代码，先核查许可证与发布条件。任何 task 的 planned/implemented_unverified/verified 状态都与方案 accepted 分开；预备卡不得自动成为施工任务，正式卡也不得跳过其内部关卡。
