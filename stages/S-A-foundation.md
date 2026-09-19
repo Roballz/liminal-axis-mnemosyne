@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | T-00 ✅ | 固定真实 TT／柏宝书／测试数据与副 API 基线 | 已验证；后续不再靠猜测安装版本、存储模式或测试输入 |
 | T-01 ✅ | 做最小 TT Adapter 探针 | 已验证：真实 await、三类 payload、取消/清槽、宿主限制与 request gate 防过期响应边界 |
-| T-02A ▶ | TT 宿主身份与变更事件验证 | Branch/Edit/Delete/Swipe/Regenerate/reopen 的真实能力矩阵与脱敏证据 |
+| T-02A ✅ | TT 宿主身份与变更事件验证 | 已验证：stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 的能力边界与降级路径 |
 | T-02 | 定义 Mnemosyne 自己的身份、版本和上下文契约 | T-02A review 后冻结编辑、swipe、分叉、引用和错误语义 |
 | T-03 | 建立最小可恢复后端 | 数据重启仍在，能迁移、导出、备份并在空环境恢复 |
 
@@ -42,7 +42,9 @@ T-02 重新定义 Mnemosyne 领域术语，不沿用柏宝书 `Leaf` 作为正�
 
 无设计级阻塞。T-01 已于 2026-09-18 二次 Chat review 通过并升为 `verified`；request gate 并发竞态已在 `dd3fa38` 修复并由确定性乱序并发测试覆盖。
 
-T-02A 主体验证已完成，但 Chat review 发现两处探针读取路径错误（context `chatMetadata` / handle `summary()`）并缺一条成功 Regenerate 样本。下一步仅返修这三点；Branch、reopen、rename、Deep Edit 不重测，Delete 已确认事件参数是删除后的 `chat.length`，Swipe 事件定位能力可接受。T-02A 复核通过后再冻结正式 T-02 契约；正式 T-02 主任务卡暂不创建。
+T-02A 已于 2026-09-19 二次 Chat review 通过并升为 `verified`。已确认 stableId/integrity 三方一致、Branch 身份变化、Deep Edit、Delete 后索引平移、Swipe 候选变化、成功 Regenerate、reopen/rename，以及 summary 的稳定计数能力；同时明确 Delete 事件参数只给删除后的总长度、Regenerate 不保证保留旧 candidate、事件过程中的 summary 可能短暂滞后。
+
+下一步进入正式 T-02 的方案攻坚与契约冻结；正式 T-02 主任务卡仍由 Chat／用户在讨论完成后创建。
 
 工程流程要求：Codex 只实现当前 task，并在收尾报告下一任务依赖／建议验证点；不得自动创建 T-02。
 
