@@ -154,3 +154,29 @@ T-02A 不设计数据库、不实现正式 Memory Engine、不冻结 Story/Branc
 - **T-03：新增强候选。** 需要把“TT 内嵌 TriviumDB provider”与独立后端方案做对照实验；若验证通过，它可能在 TT-only / 本机模式下同时承担 JSON 真相数据、向量、文本和图查询，从而减少首版外部组件。
 - **跨平台约束不变。** 不能把 TT namespace、NodeId、TQL 或 TriviumDB 文件格式提升为 Mnemosyne 的跨平台正式身份／领域契约；它们最多属于 storage adapter / deployment provider。
 - **中文检索仍需 E-01 实测。** 上游 TriviumDB 当前文档描述 TextIndex 使用 AC + BM25 2-Gram，这对无空格中文很有潜力，但必须在 TT 实际固定版本与我们的中文 RP 测试集上验证，不直接当成方案已冻结。
+
+
+## 9. T-03 渐进式 Storage Provider 路线（2026-09-19）
+
+状态：proposed，待 T-03 实测后冻结。
+
+用户当前只有约百万字真实 RP 样本，历史千万字记录无法从原商业平台导出。由此采用“两类测试集分工”，不等待真实数据自然增长到千万字：
+
+1. **真实百万字集**：用于检索质量、中文 BM25/向量混合召回、事件与角色连续性、误召回/漏召回等语义评测。
+2. **合成放大集（5x/10x 或更高）**：从真实样本的结构、长度分布、元数据与关系密度生成压力数据，用于存储规模、冷启动、RSS/heap、p95/p99 查询延迟、索引构建、flush/compact、备份恢复和迁移演练。合成集不得替代真实集的语义质量结论。
+
+### 渐进式实现候选
+
+若 T-03 A/B 证明 TT 内嵌 TriviumDB 在百万字真实集 + 合成规模集上达到首版门槛，优先交付：
+
+- **Provider B：TT TriviumDB 本机 provider**，让用户尽早在现有 TT 手机/桌面环境实际使用；
+- 同时保持 Mnemosyne Core 的 storage contract、canonical IDs、逻辑导出格式与索引重建规则独立于 TriviumDB；
+- 后续继续实现 **Provider A：独立 Mnemosyne backend**，用于更高规模、跨宿主、服务端部署和更强扩缩容；
+- 当真实剧情增长或 A 成熟时，从 B 迁移到 A；迁移依赖 Mnemosyne 自己的 canonical 数据与可重建索引，不依赖 Trivium NodeId/TQL 作为永久身份。
+
+### 必须守住的迁移边界
+
+- TriviumDB NodeId 只能是 storage-local ID，不得成为 SourceMessage/Revision/Event 等正式身份。
+- 原文、Revision、派生对象及其来源关系必须能逻辑导出；向量/TextIndex/QuIVer 等视为可重建索引。
+- Provider contract 不暴露 TQL 作为 Mnemosyne Core 必需语义，避免未来 A provider 被迫复刻 TriviumDB。
+- B 版验收必须包含“导出 B → 空环境重建/导入”的演练，否则不得视为可迁移。
