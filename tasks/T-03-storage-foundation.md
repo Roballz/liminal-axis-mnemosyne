@@ -1,6 +1,6 @@
 # T-03：可迁移、可恢复的存储地基
 
-状态：in_progress（G1-R1/R2 返修实现与验证完成，待 Chat review；G1 未放行，P3 未执行）
+状态：in_progress（48663c4 已通过 G1；P3 持久请求/合作式维护前置增量 implemented_unverified，自动外部维护隔离受阻；P3 未完成，P4/P5 未执行）
 
 发布：2026-09-19。规划仓库基线：`4dcdaf568ddb596c9060c27ef4c57fb858095509`。
 T-02 已验收实现：`1891043f6fc907236e12bb85d63ea823f43abca8`；规范为 `docs/06-contracts.md` v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。
@@ -284,3 +284,49 @@ B→A 只验迁移材料和 B→空环境的恢复；A 尚未实现时不称真�
 R1/R2 的实现和本轮隔离验证已完成，证据已回写；**G1 仍停在 Chat review，未自行宣布放行**。本轮没有重做整套强杀矩阵，因为发布协议没有实质变化；没有进入 P3，没有创建任务卡，也没有把 T-03 标为完成。B1 仍未获生产选型批准；durable intent/ID 预留、外部维护协调、有界清单与完整流式恢复仍是 Chat 决定后才能进入的后续条件。
 
 本轮新 namespace：`mnemo-t03-20260919g1-lifecycle`、`mnemo-t03-20260919g1-malformed-root`、`mnemo-t03-20260919g1-null-payload`。均保留在隔离 data root，不自动清理。
+
+## P3 前置增量与维护阻塞（2026-09-20 Codex 回报）
+
+**当前状态：G1已通过；P3部分实施，前置诊断增量implemented_unverified，自动外部维护路径受阻。P3有界存储/完整恢复尚未实施，P4/P5未开工，T-03继续in_progress。** 这不是P3完成回报。高难项交接：`notes/t-03-p3-handoff.md`。
+
+### 基线、范围和实际修改
+
+- `git pull --ff-only origin main`：48663c4快进至 `bd1f0e42bb74ee237ca2633e7be8f5da4d873021`；main；原未跟踪`.codex/`保留。当前增量按用户授权提交并推送，供 Chat 线上 review。
+- 已读README、AGENTS、S-A、原task、G1最终review尤其第5节、T-02最终review、06 v0.3、08、03/07相关决策、baseline与T-02A最终回报、contracts/storage及测试。09原版本v0.3随本轮更新v0.4。无缺失产品输入，不索要真实数据。
+- Windows / Node v24.19.0 / Git 2.55.0.windows.3；TT沿用隔离Canary367b0c7e9410，exe SHA256 `11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4`。独立根仍为 `D:\Mnemosyne\.t03-local\tt-367b0c7`，portable data与WebView profile不变。
+- 新增实现332行（intent-prototype274、intent-tt-adapter58）；旧adapter +1/-1只将P3前缀隔离出旧入口。新增测试/原生harness360行（223+66+71），suite分派+1，collector +1/-1。原测试和contracts/protocol零改动；文档/TAP/JSON不计代码量。
+- 原估计实现1200～1800、测试900～1400是完整P3范围。实际因固定宿主维护原语缺口在前置阶段停下，不能把行数下降解释成P3已完成。无新依赖、服务安装、第三方实现复制或技术栈切换。
+
+### 完成的有限前置与协议影响
+
+新增独立版本化 `mnemosyne-storage-intents-v1`，原输入、已编译请求和生成ID先持久准备，再按operation执行；重开枚举prepared/published并精确去重，覆盖历史、记忆选择/纠错及binding。未flush准备不承诺可找回。纯编译过程不执行任何外部副作用；停止等待不会释放写队列。
+
+正常诊断读写经唯一协调入口；合作式suspend排空/换代，resume核对库身份/root/准备链票据。错误不会把同名namespace默认为原库。所有P2硬上限继续保留，仍使用全库参考模型和审计，不能视为有界生产请求入口。
+
+标准v2/schema_version=1不变；异类去重记录不进入历史command表。旧P2测试库不迁移、不覆盖；新格式没有完整导出/导入能力，旧bundle会缺intent材料，禁止用其宣称新库完整备份。新格式及合作式维护方案仅交review，不静默扩大accepted范围。
+
+### 真实命令与结果
+
+| 验证 | 实际结果/证据 |
+| --- | --- |
+| `node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js` | **211/211通过**，原150+新增61；0失败/取消/跳过。`evals/t03/p3-prerequisites/node-tests.tap` |
+| contracts/storage/probe全部`.mjs/.js`逐一`node --check` | **28/28通过**；`syntax.json` |
+| `git diff --check`及新增源码尾随空白检查 | 通过；`verification.json`记录命令、基线、源码/部署哈希与证据哈希 |
+| `node packages/storage/native/collector.mjs p3-intent 20260920p3a` / `... 20260920p3b`，分别启动独立TT副本 | 两次done；最终b使用最终实现。原输入/生成IDclose→reopen恢复、历史/记忆已发布去重、旧handle STALE_HANDLE、身份变化LIBRARY_CHANGED通过；`native-20260920p3a.json`、`native-20260920p3b.json` |
+| 旧原生handle反例 | 同名库close/reopen后旧handle仍可写，两个新合成namespace复现；这是原语缺口证据，不是维护安全通过 |
+
+Node矩阵覆盖三类操作的准备/发布前后IO失败和丢确认；另有记忆纠错、取消等待、合作式维护排空、准备竞争、未知读错误、关闭失败、registry竞争和校验值正确但输入/生成ID/编译记录矛盾。使用fixture(2)的固定业务输入，新增生成ID由实际UUID生成器产生并持久保存；不依赖重试时生成相同随机值。
+
+原生新namespace仅：`mnemo-t03-p3-20260920p3a-intent`、`mnemo-t03-p3-20260920p3a-fence`、`mnemo-t03-p3-20260920p3b-intent`、`mnemo-t03-p3-20260920p3b-fence`。未删除旧或新测试库，未碰现用安装/真实RP/手机/付费API。
+
+原生测试全部关闭数据库句柄后collector退出。副本PID16380正常关闭窗口后进程残留；PID14360的隐藏窗口自动化返回不支持接口。精确核验唯一进程路径、PID、二进制SHA和本轮done证据后结束这两个隔离进程，分别记录`isolated-exit*.json`；**这些退出清理不是发布断点/强杀恢复实验**。没有把旧P2强杀结果充作新intent格式验证。
+
+### 外部维护阻塞、尚缺验收与下一步依赖
+
+固定TT的公开bridge只发送namespace，没有expected generation/跨调用租约；维护锁只覆盖单个后端调用。源码blob及真实旧handle反例见高难交接。JS写前核对库身份与后续upsert之间仍可被维护换代，无法声称排空/隔离所有宿主自动维护下的旧写。
+
+按G1第5节及AGENTS，停止该受影响路径并带证据回审；未编造维护事件、未切换B2/A或修改宿主。自动维护门禁明确HOST_MAINTENANCE_UNSUPPORTED。需Chat/用户决定宿主原生fencing/可等待维护前门禁的最小补充，或明确受限诊断运行边界；建议不是已批准设计。
+
+S05、完整S06/S07和维护S08仍pending：manifest/command.entries/views/corrections/expected/markers/journal/目录有界化、恢复检查点、全量枚举和稳定流式导出/导入、重复JSON key/Unicode/资源限制均未交付。新辅助格式真实进程强杀/断电/磁盘满、真实sync/archive、手机未验证。保留原R1～R5语义和全部回归不等于已做完整生产存储。
+
+回退只停用本轮harness/入口并撤本轮代码，保留全部物理测试库和证据。新库不得直接用旧adapter写；后续需要数据回退时先实现完整辅助格式导出，不丢准备记录。下一步仍在原T-03内；未创建新任务卡，未进入P4/P5，未宣告P3或整个T-03完成。

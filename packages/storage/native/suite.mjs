@@ -22,6 +22,7 @@ async function inspectRaw(api, namespace, physicalId) {
   return { node, nodeCount: stats.nodeCount };
 }
 export async function runNative(api, { phase, run }, send) {
+  if (phase === 'p3-intent') return (await import('./intent-suite.mjs')).runIntentNative(api, { run }, send);
   const prefix = `mnemo-t03-${run}`, s = scenario();
   if (phase === 'reopen-check') {
     const owner = await openTestStore(api, prefix + '-restored'), handle = owner.handle();

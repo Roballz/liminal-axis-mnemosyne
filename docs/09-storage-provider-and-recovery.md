@@ -1,6 +1,8 @@
-# T-03 P0～P2：存储发布与恢复候选协议
+# T-03：存储发布与恢复协议及P3前置边界
 
-版本：v0.3，2026-09-19。状态：G1-R1/R2返修实现与隔离验证完成，待Chat review。**G1未放行，B1尚未选定为生产provider，P3未执行。**
+版本：v0.4，2026-09-20。状态：48663c4已通过G1，B1获准继续P3；P3持久请求/合作式维护前置增量implemented_unverified，自动外部维护隔离受阻，有界存储/完整恢复未实施。**P3与T-03均未完成，B1未获手机/生产准入。**
+
+下文1～7节保留P0～P2协议与当时限制；其中“G1待审/未放行”是历史状态，当前许可按最终回执。P3最新协议与阻塞见第8节及 `../notes/t-03-p3-handoff.md`。
 实施基线 `852260acd8d3e65d9d756af81cdf72e52c50046b`；继承 06 v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。本文没有更改领域语义。
 
 ## 1. 已观察的宿主原语
@@ -93,3 +95,13 @@ G1 若放行，P3 必须将 command.entries 用不可变清单引用无损恢复
 请 Chat 审查：B1 的已观察原语是否值得继续、发布/确认边界是否成立、编译请求保留/ID 预留与外部维护协调如何纳入 P3、上述临时包到 v2 的无损边界是否可接受。B1 生产选型及 P3 放行仍未决定；不自动切 B2/A。
 
 回退只撤本轮源文件/运行时适配并停用隔离 harness；保留 `.t03-local` 的测试库和 `evals/t03` 证据。无需生产迁移，未改现用安装/档案/付费 API；不删除任何测试 namespace，不按前缀批量清理。若未来导入真实数据，必须另行完成迁移、导出和回退方案。
+
+## 8. P3 持久请求与维护前置增量（2026-09-20）
+
+新独立格式 `mnemosyne-storage-intents-v1` 仅在新 `mnemo-t03-p3-*` namespace 上诊断；请求、编译结果、生成ID序列先flush，随后才允许P2的领域发布。正常数据操作只有协调handle的prepare/execute/lookup/pending/read；原始IO/StoreOwner被封装。辅助记录不进入v2 history operations。
+
+逻辑槽8193保存库身份，8194起最多64条准备记录；每条独立checksum和previous校验值。重开核对已提交journal与每条intent，使用持久ID序列重做纯编译审计，不生成随机ID，也不执行模型/业务副作用。输入和compiled指纹可从完整持久JSON原样计算。已持久准备无领域发布；已发布但未收到确认按ledger返回原结果。未flush准备没有持久承诺。
+
+合作式suspend先换代并排空，捕获身份/root/intent边界，关闭后resume检查票据。不相同则LIBRARY_CHANGED。固定TT公开接口没有原生expected generation或扩展事务租约，单次维护读锁不能覆盖JS的身份检查和随后写入；真实原生反例见本轮evals。因此不支持自动宿主维护，相关路径以HOST_MAINTENANCE_UNSUPPORTED阻断。不能把合作式入口当成真实同步/归档事件接线。
+
+仍保留P2全部状态/请求上限、完整oracle审计和串行单pending门禁；这不是S05有界生产路径。完整辅助格式备份/流式导入/文本解析尚未实现，旧P2导出包不能当作新库完整备份；迁移只准后续在新目标显式设计，不覆盖旧库。具体证据、原语缺口与下一步review问题见 `../notes/t-03-p3-handoff.md`。

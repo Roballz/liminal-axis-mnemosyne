@@ -1,8 +1,8 @@
-# T-03 P0～P2 bounded storage prototype
+# T-03 storage diagnostics
 
-状态：本增量 implemented_unverified，T-03 总任务 in_progress；停在 G1。协议与限制见 `../../docs/09-storage-provider-and-recovery.md`，证据见 `../../evals/t03/`。不是手机/生产 provider，不进入 P3。
+状态：P0～P2已通过G1；P3请求/维护前置增量implemented_unverified，自动外部维护隔离受阻，有界存储/完整恢复未实现。T-03仍in_progress。见 `../../notes/t-03-p3-handoff.md`。
 
-当前R1/R2返修代码、150项Node回归和隔离TT `20260919g1` 小验证已完成；G1仍待Chat review。关闭成功后旧owner永久失效，必须经openTestStore取得替代owner；关闭失败保留同一owner，可显式recover或重试close。恢复只把原生null视为缺记录，损坏payload/root报NEEDS_RESOLUTION。证据见 `../../evals/t03/g1-repair/`。
+当前R1/R2返修代码、150项Node回归和隔离TT `20260919g1` 小验证已完成；G1已由最终回执放行；这些为原P0～P2证据。关闭成功后旧owner永久失效，必须经openTestStore取得替代owner；关闭失败保留同一owner，可显式recover或重试close。恢复只把原生null视为缺记录，损坏payload/root报NEEDS_RESOLUTION。证据见 `../../evals/t03/g1-repair/`。
 
 运行自动测试：
 
@@ -30,3 +30,13 @@ collector 仅监听 127.0.0.1:19374，完成/错误/kill-ready 后自行停止�
 原始两个失败 namespace 保留：物理 ID 0 被 TT 拒绝。最终 adapter 把逻辑槽 0 映射为物理 ID 1；不能在旧失败库上直接套新映射。
 
 没有新依赖或复制第三方实现源码；不执行安装、自动 GC 或清理。
+
+## P3 prerequisite diagnostics
+
+新入口：`openIntentTestStore(api.db, 'mnemo-t03-p3-<run>-intent', { create: true })`，仅用于空的隔离库；重开省略create。`handle().prepare({operation_id,kind,payload})`先持久准备，再以`execute(operation_id)`发布；调用方丢失请求后用`pending()/lookup()`找回。失败显式recover后换handle，不能换随机operation盲重试。
+
+`kind`为history（payload是标准command）、binding（完整binding）或memory（archives/action/branch_id/revision_id/old_revision_id/expected_view/mode全部显式字段）；编译仅复用contracts，不调用模型。示例与错误路径见 `tests/intent-prototype.test.mjs`。
+
+`suspend()/resume(ticket)`是合作式维护诊断；不能接管TT自行开始的同步/归档。当前自动维护原语缺口已在固定版本源码和真实旧handle反例确认，见交接。`requireExternalMaintenanceFence()`固定拒绝此未支持路径。当前仍是P2规模小原型，未交付P3块树/完整备份。
+
+原生复现：`node packages/storage/native/collector.mjs p3-intent <new-run>` 后启动独立副本。只使用新namespace；结果记录准备重开、记忆去重、维护身份拒绝以及原生namespace换代反例，**不等于真实sync/archive或进程强杀测试**。

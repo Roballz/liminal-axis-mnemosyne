@@ -1,0 +1,47 @@
+{
+  "phase": "p3-intent",
+  "run": "20260920p3a",
+  "events": [
+    {
+      "type": "done",
+      "phase": "p3-intent",
+      "run": "20260920p3a",
+      "namespaces": [
+        "mnemo-t03-p3-20260920p3a-intent",
+        "mnemo-t03-p3-20260920p3a-fence"
+      ],
+      "preparedRequestRecovered": true,
+      "generatedIdsRecovered": [
+        {
+          "kind": "memoryView",
+          "value": "mv_7f520268-5088-4799-9872-0042a849d1ba"
+        },
+        {
+          "kind": "snapshot",
+          "value": "hs_4b921dc4-2fa7-474c-b1cd-7b0637c2821e"
+        },
+        {
+          "kind": "block",
+          "value": "hm_72ac057b-4b50-4fd6-a544-eb75881aff21"
+        }
+      ],
+      "historyResult": {
+        "snapshot_id": "hs_4b921dc4-2fa7-474c-b1cd-7b0637c2821e"
+      },
+      "memoryResult": {
+        "corrections": {},
+        "selections": {
+          "mem_00000000-0000-4000-8000-00000000000b": "mr_00000000-0000-4000-8000-00000000000c"
+        },
+        "version": "mv_d4310498-7ae4-4fc1-b878-9499e91a85ac"
+      },
+      "oldHandle": "STALE_HANDLE",
+      "replacedIdentity": "LIBRARY_CHANGED",
+      "publishedRequests": 2,
+      "oldNativeHandleWroteAfterReopen": true,
+      "externalMaintenanceGate": "HOST_MAINTENANCE_UNSUPPORTED",
+      "nativeArchiveOrSyncTriggered": false,
+      "processCrashTested": false
+    }
+  ]
+}

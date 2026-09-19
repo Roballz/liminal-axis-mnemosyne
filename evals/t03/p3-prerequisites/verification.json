@@ -1,0 +1,94 @@
+{
+  "baseline": "bd1f0e42bb74ee237ca2633e7be8f5da4d873021",
+  "branch": "main",
+  "at": "2026-09-19T21:07:53.103Z",
+  "node": "v24.19.0",
+  "git": "git version 2.55.0.windows.3",
+  "os": {
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "tests": {
+    "command": "node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js",
+    "passed": 211,
+    "originalPreserved": 150,
+    "added": 61
+  },
+  "syntax": 28,
+  "diffCheck": "passed",
+  "newSourceWhitespace": "passed",
+  "source": [
+    {
+      "path": "packages/storage/intent-prototype.mjs",
+      "sha256": "a1cb027c3428daa6cf29f4f6e590d5e223f5e912bfd39efc6fabbca038369b01",
+      "deployedSha256": "a1cb027c3428daa6cf29f4f6e590d5e223f5e912bfd39efc6fabbca038369b01"
+    },
+    {
+      "path": "packages/storage/intent-tt-adapter.mjs",
+      "sha256": "793387e99bf3c1b959d62c032e81cfb0d028842ee5113a305853f687fffa8315",
+      "deployedSha256": "793387e99bf3c1b959d62c032e81cfb0d028842ee5113a305853f687fffa8315"
+    },
+    {
+      "path": "packages/storage/tt-adapter.mjs",
+      "sha256": "5543d329991f96ee8627c67cde7d9ef394db7f886349b8ee8ab2491c450f077c",
+      "deployedSha256": "5543d329991f96ee8627c67cde7d9ef394db7f886349b8ee8ab2491c450f077c"
+    },
+    {
+      "path": "packages/storage/protocol.mjs",
+      "sha256": "06be81cb311eef00d52fb7a48df22633bae4d798ec44bc9aa002c0b27fc610cb",
+      "deployedSha256": "06be81cb311eef00d52fb7a48df22633bae4d798ec44bc9aa002c0b27fc610cb"
+    },
+    {
+      "path": "packages/storage/native/intent-suite.mjs",
+      "sha256": "b7730235f545b5004b18311522912e9f828a373aa3ac3c5ab0b3338401ebca7d",
+      "deployedSha256": "b7730235f545b5004b18311522912e9f828a373aa3ac3c5ab0b3338401ebca7d"
+    },
+    {
+      "path": "packages/storage/native/suite.mjs",
+      "sha256": "2220e8ba8d26c356a65f53d0ec00e0973aa4071b4890fa6797a08d73d2690702",
+      "deployedSha256": "2220e8ba8d26c356a65f53d0ec00e0973aa4071b4890fa6797a08d73d2690702"
+    },
+    {
+      "path": "packages/storage/native/index.js",
+      "sha256": "ee4892add61baa134df9e7276f5e28894958cdd0e812dd10726323c932e6d2c1",
+      "deployedSha256": "ee4892add61baa134df9e7276f5e28894958cdd0e812dd10726323c932e6d2c1"
+    },
+    {
+      "path": "packages/storage/tests/intent-prototype.test.mjs",
+      "sha256": "ddc19bfda0706c34ebb9ce6b4f97184910643c2fc5f878cc55851545095fc64a",
+      "deployedSha256": "ddc19bfda0706c34ebb9ce6b4f97184910643c2fc5f878cc55851545095fc64a"
+    },
+    {
+      "path": "packages/storage/tests/intent-adapter.test.mjs",
+      "sha256": "86e00dd419c93e49f537375e439c07d8577fabcb28270fd5174bf0a4684f7981",
+      "deployedSha256": "86e00dd419c93e49f537375e439c07d8577fabcb28270fd5174bf0a4684f7981"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "evals/t03/p3-prerequisites/isolated-exit-final.json",
+      "sha256": "ddb886a95d3991e7f5470548e740c3de6eab7782a2243df5273ab330bc527318"
+    },
+    {
+      "path": "evals/t03/p3-prerequisites/isolated-exit.json",
+      "sha256": "11c322ebf8801980eab67344c4af3f80678645edea40ef7eeb7e2f2755289233"
+    },
+    {
+      "path": "evals/t03/p3-prerequisites/native-20260920p3a.json",
+      "sha256": "063d634de68114ab304d33059b0b02e5a2bbfd20b50bcd4b16c9f5b90e1c5e95"
+    },
+    {
+      "path": "evals/t03/p3-prerequisites/native-20260920p3b.json",
+      "sha256": "5265bbf5c18f662ed3b9a214e3d28db90a65ad72133863608cb84d06d76ed1a7"
+    },
+    {
+      "path": "evals/t03/p3-prerequisites/node-tests.tap",
+      "sha256": "06a367a8c1278b8219af81e51b3bedbe62c47599efc4fdc2f36699d6cd633e96"
+    },
+    {
+      "path": "evals/t03/p3-prerequisites/syntax.json",
+      "sha256": "0d52bf6b49241819b0884c7963d8f01c1152931109e668a71237b5c08c5345fb"
+    }
+  ],
+  "scope": "P3 prerequisites only; external maintenance fence blocked; bounded storage/full restore pending"
+}

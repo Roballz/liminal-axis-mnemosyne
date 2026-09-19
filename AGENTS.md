@@ -4,7 +4,7 @@
 
 先读取 README.md、对应 `stages/` 阶段导读、用户指定的当前 task；再按 task 读取架构、决策和契约相关章节。不要每次盲读全部历史聊天；报告使用的 commit 和文档版本。
 
-T-02 已 verified，审核实现1891043，最终证据及未验证边界见 `notes/t-02-final-review.md`。**当前正式任务为 `tasks/T-03-storage-foundation.md`，in_progress；48663c4 已通过 G1，关闭 G1-R1/R2，下一增量为 P3。开工同时读 `notes/t-03-g1-final-review.md` 第5节，先补持久请求/ID恢复入口和外部维护协调，再做有界存储/完整恢复。** 旧 `T-03-storage-foundation.proposal.md` 已 superseded，不是并行施工入口。不自动创建T-04。G1放行的是B1路线的下一增量，不是手机/生产存储最终准入；历史实施回报中的“G1待审”不覆盖最新回执。
+T-02 已 verified，审核实现1891043，最终证据及未验证边界见 `notes/t-02-final-review.md`。**当前正式任务为 `tasks/T-03-storage-foundation.md`，in_progress；48663c4 已通过 G1，关闭 G1-R1/R2，当前P3前置增量与维护阻塞见 `notes/t-03-p3-handoff.md`；P3未完成，不直接进入P4/P5。开工同时读 `notes/t-03-g1-final-review.md` 第5节，先补持久请求/ID恢复入口和外部维护协调，再做有界存储/完整恢复。** 旧 `T-03-storage-foundation.proposal.md` 已 superseded，不是并行施工入口。不自动创建T-04。G1放行的是B1路线的下一增量，不是手机/生产存储最终准入；历史实施回报中的“G1待审”不覆盖最新回执。
 
 用户最新明确确认、当前决策记录及 task 优先于早期建议/示例；`docs/06-contracts.md` v0.3 / 逻辑包v2已在T-02最小参考模型范围验收。发现冲突先报告，不拿旧 Leaf、宿主 generation ID 或服务器先行示意覆盖新确认。
 

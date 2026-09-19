@@ -1,5 +1,12 @@
 # 更新记录
 
+## 2026-09-20 T-03 P3前置增量：持久请求与维护缺口
+
+- 拉取main至bd1f0e4并依G1最终回执进入原T-03 P3；新增独立版本化请求/生成ID准备与重开枚举，历史、记忆选择/纠错、绑定可按原operation恢复去重。仍保留P2上限，完整有界结构/恢复未实施。
+- 新协调入口提供合作式维护排空/失效handle/身份与发布边界检查。固定TT公开API缺少原生代次隔离；两次隔离原生验证均复现旧handle重开后仍可写同名namespace，停止自动维护路径并带证据回审，不切B2/A。
+- 原150项加新增61项共211/211通过，28文件语法通过；原生证据、部署哈希与校验见evals/t03/p3-prerequisites。没有新的真实sync/archive、断点强杀或手机验证。
+- 更新原task、S-A、README、协议v0.4及notes/t-03-p3-handoff.md。P3部分实施/受阻，T-03仍in_progress；不创建新任务、不进入P4/P5。
+
 ## 2026-09-19 G1-R1/R2返修验证完成（待Chat review）
 
 - 在固定 TT Canary 隔离副本上完成 `20260919g1`：旧 owner 关闭后 recover/read/native IO 分别拒绝为 `OWNER_CLOSED`/`STALE_HANDLE`/`OWNER_CLOSED`，替代 owner 重开保留确认状态和2条账本。

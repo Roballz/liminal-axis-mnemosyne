@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const phase = process.argv[2] ?? 'p0';
-if (!['p0', 'before', 'recover-before', 'after', 'recover-after', 'roundtrip', 'reopen-check', 'g1-repair'].includes(phase)) throw Error('Unknown phase');
+if (!['p0', 'before', 'recover-before', 'after', 'recover-after', 'roundtrip', 'reopen-check', 'g1-repair', 'p3-intent'].includes(phase)) throw Error('Unknown phase');
 const run = process.argv[3] ?? '20260919a';
 if (!/^[a-z0-9]+$/.test(run)) throw Error('Invalid run');
 const root = resolve('.t03-local/evidence'); mkdirSync(root, { recursive: true });

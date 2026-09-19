@@ -4,7 +4,7 @@ import { requireThat } from '../contracts/primitives.mjs';
 const registryKey = Symbol.for('mnemosyne.t03.storage.owners.v1');
 // Dedicated synthetic namespaces only. No semantic vector queries are exposed.
 export async function openTestStore(api, namespace, point) {
-  if (!/^mnemo-t03-[a-z0-9-]+$/.test(namespace)) throw new Error('Dedicated T03 test namespace required');
+  if (!/^mnemo-t03-[a-z0-9-]+$/.test(namespace) || namespace.startsWith('mnemo-t03-p3-')) throw new Error('Dedicated T03 test namespace required');
   const registry = globalThis[registryKey] ??= new WeakMap();
   let owners = registry.get(api);
   if (!owners) { owners = new Map(); registry.set(api, owners); }
