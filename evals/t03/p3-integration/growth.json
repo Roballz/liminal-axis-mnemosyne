@@ -1,0 +1,358 @@
+{
+  "status": "passed",
+  "scope": "P3 growing-library correctness; not P4 benchmark or mobile acceptance",
+  "synthetic": true,
+  "operations": 66,
+  "pending": 1,
+  "messages": 132,
+  "characters": 1081344,
+  "backupBytes": 39378227,
+  "backupRecords": 60290,
+  "reopenReads": 84,
+  "sourcePhysicalNodes": 681821,
+  "restoredPhysicalNodes": 148572,
+  "measurements": [
+    {
+      "operation": 1,
+      "reads": 12904,
+      "writes": 2532
+    },
+    {
+      "operation": 2,
+      "reads": 17992,
+      "writes": 3283
+    },
+    {
+      "operation": 3,
+      "reads": 21666,
+      "writes": 3784
+    },
+    {
+      "operation": 4,
+      "reads": 25455,
+      "writes": 4645
+    },
+    {
+      "operation": 5,
+      "reads": 27656,
+      "writes": 5056
+    },
+    {
+      "operation": 6,
+      "reads": 31877,
+      "writes": 5888
+    },
+    {
+      "operation": 7,
+      "reads": 31339,
+      "writes": 5662
+    },
+    {
+      "operation": 8,
+      "reads": 34484,
+      "writes": 6307
+    },
+    {
+      "operation": 9,
+      "reads": 37184,
+      "writes": 6594
+    },
+    {
+      "operation": 10,
+      "reads": 40535,
+      "writes": 7453
+    },
+    {
+      "operation": 11,
+      "reads": 38951,
+      "writes": 7094
+    },
+    {
+      "operation": 12,
+      "reads": 41425,
+      "writes": 7758
+    },
+    {
+      "operation": 13,
+      "reads": 40129,
+      "writes": 7265
+    },
+    {
+      "operation": 14,
+      "reads": 43325,
+      "writes": 8129
+    },
+    {
+      "operation": 15,
+      "reads": 41309,
+      "writes": 7578
+    },
+    {
+      "operation": 16,
+      "reads": 44576,
+      "writes": 8375
+    },
+    {
+      "operation": 17,
+      "reads": 45050,
+      "writes": 8677
+    },
+    {
+      "operation": 18,
+      "reads": 48099,
+      "writes": 9459
+    },
+    {
+      "operation": 19,
+      "reads": 49107,
+      "writes": 8889
+    },
+    {
+      "operation": 20,
+      "reads": 50096,
+      "writes": 9745
+    },
+    {
+      "operation": 21,
+      "reads": 47850,
+      "writes": 9233
+    },
+    {
+      "operation": 22,
+      "reads": 51046,
+      "writes": 9723
+    },
+    {
+      "operation": 23,
+      "reads": 49382,
+      "writes": 9143
+    },
+    {
+      "operation": 24,
+      "reads": 52919,
+      "writes": 9979
+    },
+    {
+      "operation": 25,
+      "reads": 48598,
+      "writes": 9218
+    },
+    {
+      "operation": 26,
+      "reads": 53108,
+      "writes": 10177
+    },
+    {
+      "operation": 27,
+      "reads": 50111,
+      "writes": 9637
+    },
+    {
+      "operation": 28,
+      "reads": 52649,
+      "writes": 10365
+    },
+    {
+      "operation": 29,
+      "reads": 50549,
+      "writes": 9686
+    },
+    {
+      "operation": 30,
+      "reads": 54022,
+      "writes": 10519
+    },
+    {
+      "operation": 31,
+      "reads": 50942,
+      "writes": 9693
+    },
+    {
+      "operation": 32,
+      "reads": 54216,
+      "writes": 10574
+    },
+    {
+      "operation": 33,
+      "reads": 55430,
+      "writes": 10974
+    },
+    {
+      "operation": 34,
+      "reads": 59190,
+      "writes": 11741
+    },
+    {
+      "operation": 35,
+      "reads": 55779,
+      "writes": 10998
+    },
+    {
+      "operation": 36,
+      "reads": 61937,
+      "writes": 11946
+    },
+    {
+      "operation": 37,
+      "reads": 58040,
+      "writes": 11259
+    },
+    {
+      "operation": 38,
+      "reads": 59881,
+      "writes": 11944
+    },
+    {
+      "operation": 39,
+      "reads": 57750,
+      "writes": 11403
+    },
+    {
+      "operation": 40,
+      "reads": 61391,
+      "writes": 12393
+    },
+    {
+      "operation": 41,
+      "reads": 58277,
+      "writes": 11314
+    },
+    {
+      "operation": 42,
+      "reads": 61592,
+      "writes": 12419
+    },
+    {
+      "operation": 43,
+      "reads": 59750,
+      "writes": 11674
+    },
+    {
+      "operation": 44,
+      "reads": 62334,
+      "writes": 12537
+    },
+    {
+      "operation": 45,
+      "reads": 61440,
+      "writes": 11584
+    },
+    {
+      "operation": 46,
+      "reads": 62752,
+      "writes": 12454
+    },
+    {
+      "operation": 47,
+      "reads": 60199,
+      "writes": 11700
+    },
+    {
+      "operation": 48,
+      "reads": 64104,
+      "writes": 12773
+    },
+    {
+      "operation": 49,
+      "reads": 60294,
+      "writes": 11830
+    },
+    {
+      "operation": 50,
+      "reads": 63924,
+      "writes": 12657
+    },
+    {
+      "operation": 51,
+      "reads": 59645,
+      "writes": 11842
+    },
+    {
+      "operation": 52,
+      "reads": 64758,
+      "writes": 12911
+    },
+    {
+      "operation": 53,
+      "reads": 59750,
+      "writes": 12042
+    },
+    {
+      "operation": 54,
+      "reads": 64485,
+      "writes": 12932
+    },
+    {
+      "operation": 55,
+      "reads": 61431,
+      "writes": 12224
+    },
+    {
+      "operation": 56,
+      "reads": 66161,
+      "writes": 13025
+    },
+    {
+      "operation": 57,
+      "reads": 62515,
+      "writes": 12159
+    },
+    {
+      "operation": 58,
+      "reads": 65709,
+      "writes": 13117
+    },
+    {
+      "operation": 59,
+      "reads": 63161,
+      "writes": 12243
+    },
+    {
+      "operation": 60,
+      "reads": 64687,
+      "writes": 13160
+    },
+    {
+      "operation": 61,
+      "reads": 61432,
+      "writes": 12209
+    },
+    {
+      "operation": 62,
+      "reads": 66965,
+      "writes": 13407
+    },
+    {
+      "operation": 63,
+      "reads": 61574,
+      "writes": 12339
+    },
+    {
+      "operation": 64,
+      "reads": 65116,
+      "writes": 13295
+    },
+    {
+      "operation": 65,
+      "reads": 66564,
+      "writes": 13625
+    },
+    {
+      "operation": 66,
+      "reads": 72232,
+      "writes": 14202
+    }
+  ],
+  "memory": {
+    "rss": 1237483520,
+    "heapTotal": 955260928,
+    "heapUsed": 851516064,
+    "external": 4416444,
+    "arrayBuffers": 2174014
+  },
+  "node": "v24.19.0",
+  "maintenanceGate": "HOST_MAINTENANCE_UNSUPPORTED",
+  "allSampledHistoricalLastEntriesPreserved": true,
+  "allConfirmedResultsPreserved": true,
+  "pendingIdsAndResultPreserved": true
+}

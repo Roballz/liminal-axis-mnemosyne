@@ -1,0 +1,1708 @@
+TAP version 13
+# Subtest: snapshot changes when the current chat head changes
+ok 1 - snapshot changes when the current chat head changes
+  ---
+  duration_ms: 6.298
+  type: 'test'
+  ...
+# Subtest: request gate rejects a response after the head changes
+ok 2 - request gate rejects a response after the head changes
+  ---
+  duration_ms: 5.8755
+  type: 'test'
+  ...
+# Subtest: a newer request cancels the older request
+ok 3 - a newer request cancels the older request
+  ---
+  duration_ms: 0.8924
+  type: 'test'
+  ...
+# Subtest: an older concurrent begin cannot reclaim active after snapshot reorder
+ok 4 - an older concurrent begin cannot reclaim active after snapshot reorder
+  ---
+  duration_ms: 0.5572
+  type: 'test'
+  ...
+# Subtest: fake prepare supports delay, failure, timeout, and cancellation
+ok 5 - fake prepare supports delay, failure, timeout, and cancellation
+  ---
+  duration_ms: 18.5439
+  type: 'test'
+  ...
+# Subtest: raw log summary exposes role order without prompt content
+ok 6 - raw log summary exposes role order without prompt content
+  ---
+  duration_ms: 1.9759
+  type: 'test'
+  ...
+# Subtest: message fingerprints retain edit and swipe evidence without message text
+ok 7 - message fingerprints retain edit and swipe evidence without message text
+  ---
+  duration_ms: 0.4294
+  type: 'test'
+  ...
+# Subtest: event index inference keeps numeric candidates separate from redacted args
+ok 8 - event index inference keeps numeric candidates separate from redacted args
+  ---
+  duration_ms: 0.8701
+  type: 'test'
+  ...
+# Subtest: message state reports count and a bounded neighboring fingerprint window
+ok 9 - message state reports count and a bounded neighboring fingerprint window
+  ---
+  duration_ms: 0.515
+  type: 'test'
+  ...
+# Subtest: window info redacts chat display identifiers while retaining hashes
+ok 10 - window info redacts chat display identifiers while retaining hashes
+  ---
+  duration_ms: 0.4741
+  type: 'test'
+  ...
+# Subtest: trace export orders entries by sequence without mutating capture order
+ok 11 - trace export orders entries by sequence without mutating capture order
+  ---
+  duration_ms: 0.3654
+  type: 'test'
+  ...
+# Subtest: metadata uses handle.metadata.get and camelCase context evidence, without exporting metadata
+ok 12 - metadata uses handle.metadata.get and camelCase context evidence, without exporting metadata
+  ---
+  duration_ms: 0.5217
+  type: 'test'
+  ...
+# Subtest: metadata mismatch, missing API and rejected API remain distinct
+ok 13 - metadata mismatch, missing API and rejected API remain distinct
+  ---
+  duration_ms: 0.3959
+  type: 'test'
+  ...
+# Subtest: chat summary is invoked on handle with includeMetadata false and only exports message_count
+ok 14 - chat summary is invoked on handle with includeMetadata false and only exports message_count
+  ---
+  duration_ms: 0.3339
+  type: 'test'
+  ...
+# Subtest: chat summary distinguishes zero count, missing API, empty response and API failure
+ok 15 - chat summary distinguishes zero count, missing API, empty response and API failure
+  ---
+  duration_ms: 2.3284
+  type: 'test'
+  ...
+# Subtest: delete length and generation arguments are not inferred as message indexes
+ok 16 - delete length and generation arguments are not inferred as message indexes
+  ---
+  duration_ms: 0.378
+  type: 'test'
+  ...
+# Subtest: watched delete neighborhood retains shifted fingerprints independently of event arguments
+ok 17 - watched delete neighborhood retains shifted fingerprints independently of event arguments
+  ---
+  duration_ms: 0.3503
+  type: 'test'
+  ...
+# Subtest: panel drag uses pointer capture, clamps to viewport, ends on cancel and reclamps on resize
+ok 18 - panel drag uses pointer capture, clamps to viewport, ends on cancel and reclamps on resize
+  ---
+  duration_ms: 0.7359
+  type: 'test'
+  ...
+# Subtest: A01 empty history, secure UUID format and malformed IDs
+ok 19 - A01 empty history, secure UUID format and malformed IDs
+  ---
+  duration_ms: 19.0803
+  type: 'test'
+  ...
+# Subtest: A01 duplicate identity, wrong-owner revisions, missing refs and manifest cycles are rejected
+ok 20 - A01 duplicate identity, wrong-owner revisions, missing refs and manifest cycles are rejected
+  ---
+  duration_ms: 18.2958
+  type: 'test'
+  ...
+# Subtest: A02 deep edit changes head without changing count/tail; old snapshots and blocks remain immutable
+ok 21 - A02 deep edit changes head without changing count/tail; old snapshots and blocks remain immutable
+  ---
+  duration_ms: 30.1948
+  type: 'test'
+  ...
+# Subtest: A03 fork from empty, User and Assistant prefixes; cutoff and anchor are checked
+ok 22 - A03 fork from empty, User and Assistant prefixes; cutoff and anchor are checked
+  ---
+  duration_ms: 19.7048
+  type: 'test'
+  ...
+# Subtest: A04 parent edit/delete never invalidates child old memory or exposes future parent content
+ok 23 - A04 parent edit/delete never invalidates child old memory or exposes future parent content
+  ---
+  duration_ms: 33.2843
+  type: 'test'
+  ...
+# Subtest: A05 switching back to an old candidate reuses memory; restore makes a new head and rejects old prepare
+ok 24 - A05 switching back to an old candidate reuses memory; restore makes a new head and rejects old prepare
+  ---
+  duration_ms: 70.4215
+  type: 'test'
+  ...
+# Subtest: A06 same text is not identity; reorder preserves IDs; absent host mapping requires resolution
+ok 25 - A06 same text is not identity; reorder preserves IDs; absent host mapping requires resolution
+  ---
+  duration_ms: 47.3148
+  type: 'test'
+  ...
+# Subtest: A07 lost acknowledgement retry returns original result before checking expected head; changed payload conflicts
+ok 26 - A07 lost acknowledgement retry returns original result before checking expected head; changed payload conflicts
+  ---
+  duration_ms: 33.1533
+  type: 'test'
+  ...
+# Subtest: A08 only one stale-head competitor wins; failed validation/collision cannot change input state
+ok 27 - A08 only one stale-head competitor wins; failed validation/collision cannot change input state
+  ---
+  duration_ms: 29.8701
+  type: 'test'
+  ...
+# Subtest: A09 changed turn invalidates summaries/events/cumulative suffix in dependency order; unrelated turns survive
+ok 28 - A09 changed turn invalidates summaries/events/cumulative suffix in dependency order; unrelated turns survive
+  ---
+  duration_ms: 180.4011
+  type: 'test'
+  ...
+# Subtest: A09 actual preceding context input propagates invalidity, even outside owned turn coverage
+ok 29 - A09 actual preceding context input propagates invalidity, even outside owned turn coverage
+  ---
+  duration_ms: 15.0847
+  type: 'test'
+  ...
+# Subtest: A10 interval insertion/deletion/reorder changes coverage; outside prepend/append does not expire local work
+ok 30 - A10 interval insertion/deletion/reorder changes coverage; outside prepend/append does not expire local work
+  ---
+  duration_ms: 61.8144
+  type: 'test'
+  ...
+# Subtest: A11 cutoff never inherits half a turn or final event; noncontinuous events require span review after insertion
+ok 31 - A11 cutoff never inherits half a turn or final event; noncontinuous events require span review after insertion
+  ---
+  duration_ms: 25.4832
+  type: 'test'
+  ...
+# Subtest: A12 correcting a summary advances only the branch memory view; parent summaries/prepare expire, child survives
+ok 32 - A12 correcting a summary advances only the branch memory view; parent summaries/prepare expire, child survives
+  ---
+  duration_ms: 108.6814
+  type: 'test'
+  ...
+# Subtest: A13 explicit derived-only is usable in declared scope, unlike dangling references and private memories
+ok 33 - A13 explicit derived-only is usable in declared scope, unlike dangling references and private memories
+  ---
+  duration_ms: 17.4597
+  type: 'test'
+  ...
+# Subtest: A14 every prepare identity/input component and pending host observation invalidates old response
+ok 34 - A14 every prepare identity/input component and pending host observation invalidates old response
+  ---
+  duration_ms: 16.059
+  type: 'test'
+  ...
+# Subtest: A14 background history work survives outside append but rejects its own changed sources
+ok 35 - A14 background history work survives outside append but rejects its own changed sources
+  ---
+  duration_ms: 43.0715
+  type: 'test'
+  ...
+# Subtest: A15 JCS key order, ECMAScript number encoding and unmodified Unicode/text semantics
+ok 36 - A15 JCS key order, ECMAScript number encoding and unmodified Unicode/text semantics
+  ---
+  duration_ms: 8.5913
+  type: 'test'
+  ...
+# Subtest: A16 regenerate fixture from T-02A: deleted/ended/received and same index do not prove success or identity
+ok 37 - A16 regenerate fixture from T-02A: deleted/ended/received and same index do not prove success or identity
+  ---
+  duration_ms: 11.1249
+  type: 'test'
+  ...
+# Subtest: A17 pending User is normal; greeting/consecutive/unknown roles never invent a pair or lose sources
+ok 38 - A17 pending User is normal; greeting/consecutive/unknown roles never invent a pair or lose sources
+  ---
+  duration_ms: 4.8409
+  type: 'test'
+  ...
+# Subtest: A18 logical export/import preserves IDs, fork, order, memory selections and idempotency results
+ok 39 - A18 logical export/import preserves IDs, fork, order, memory selections and idempotency results
+  ---
+  duration_ms: 188.073
+  type: 'test'
+  ...
+# Subtest: C1 cross-story references and snapshot chain corruption cannot pass shape-only validation
+ok 40 - C1 cross-story references and snapshot chain corruption cannot pass shape-only validation
+  ---
+  duration_ms: 8.4138
+  type: 'test'
+  ...
+# Subtest: C1 binding carryover/rename is explicit and does not advance head; ambiguous mapping is rejected
+ok 41 - C1 binding carryover/rename is explicit and does not advance head; ambiguous mapping is rejected
+  ---
+  duration_ms: 4.273
+  type: 'test'
+  ...
+# Subtest: C1 context blocks respect cutoff, privacy, uncompressed detail, origin and rerank null
+ok 42 - C1 context blocks respect cutoff, privacy, uncompressed detail, origin and rerank null
+  ---
+  duration_ms: 7.3206
+  type: 'test'
+  ...
+# Subtest: C1 immutable ID collision and memory cycle rejection preserve all original inputs
+ok 43 - C1 immutable ID collision and memory cycle rejection preserve all original inputs
+  ---
+  duration_ms: 33.6681
+  type: 'test'
+  ...
+# Subtest: C2 seeded edit/fork/restore sequence preserves every retained snapshot and validates export
+ok 44 - C2 seeded edit/fork/restore sequence preserves every retained snapshot and validates export
+  ---
+  duration_ms: 2093.2529
+  type: 'test'
+  ...
+# Subtest: C3 current JSON examples match deterministic state and real input fingerprints
+ok 45 - C3 current JSON examples match deterministic state and real input fingerprints
+  ---
+  duration_ms: 6.0504
+  type: 'test'
+  ...
+# Subtest: C2 required pending memory cannot be disguised as empty success; unrelated scopes remain writable
+ok 46 - C2 required pending memory cannot be disguised as empty success; unrelated scopes remain writable
+  ---
+  duration_ms: 12.027
+  type: 'test'
+  ...
+# Subtest: C2 a changed nonmember span requires event review; delete/reorder never silently change event membership
+ok 47 - C2 a changed nonmember span requires event review; delete/reorder never silently change event membership
+  ---
+  duration_ms: 16.6616
+  type: 'test'
+  ...
+# Subtest: C1 upper memory cannot claim a basis that excludes actual transitive context
+ok 48 - C1 upper memory cannot claim a basis that excludes actual transitive context
+  ---
+  duration_ms: 9.352
+  type: 'test'
+  ...
+# Subtest: C1 UTF-16 key sorting, integer-looking keys and unknown schema fields are deterministic
+ok 49 - C1 UTF-16 key sorting, integer-looking keys and unknown schema fields are deterministic
+  ---
+  duration_ms: 3.2551
+  type: 'test'
+  ...
+# Subtest: C1 source object key order does not change evidence matching; malformed package envelopes are typed errors
+ok 50 - C1 source object key order does not change evidence matching; malformed package envelopes are typed errors
+  ---
+  duration_ms: 5.6906
+  type: 'test'
+  ...
+# Subtest: R5 contradictory selection/correction rejected before state/export/import acceptance: hops=1
+ok 51 - R5 contradictory selection/correction rejected before state/export/import acceptance: hops=1
+  ---
+  duration_ms: 112.7623
+  type: 'test'
+  ...
+# Subtest: R5 final injection rejects corrected old root even when caller bypasses import: hops=1
+ok 52 - R5 final injection rejects corrected old root even when caller bypasses import: hops=1
+  ---
+  duration_ms: 18.5181
+  type: 'test'
+  ...
+# Subtest: R5 contradictory selection/correction rejected before state/export/import acceptance: hops=2
+ok 53 - R5 contradictory selection/correction rejected before state/export/import acceptance: hops=2
+  ---
+  duration_ms: 113.7786
+  type: 'test'
+  ...
+# Subtest: R5 final injection rejects corrected old root even when caller bypasses import: hops=2
+ok 54 - R5 final injection rejects corrected old root even when caller bypasses import: hops=2
+  ---
+  duration_ms: 14.582
+  type: 'test'
+  ...
+# Subtest: R5 normal correction chain roundtrips and injects only replacement on parent; child keeps old version
+ok 55 - R5 normal correction chain roundtrips and injects only replacement on parent; child keeps old version
+  ---
+  duration_ms: 132.76
+  type: 'test'
+  ...
+# Subtest: R5 unselected uncorrected checkpoint remains valid; historical correction terminal need not be selected
+ok 56 - R5 unselected uncorrected checkpoint remains valid; historical correction terminal need not be selected
+  ---
+  duration_ms: 58.2766
+  type: 'test'
+  ...
+# Subtest: R1 same Record advances twice through fixed checkpoints; early edit invalidates suffix only on parent
+ok 57 - R1 same Record advances twice through fixed checkpoints; early edit invalidates suffix only on parent
+  ---
+  duration_ms: 539.5297
+  type: 'test'
+  ...
+# Subtest: R1 explicit correction of historical checkpoint propagates without selecting it over latest cumulative state
+ok 58 - R1 explicit correction of historical checkpoint propagates without selecting it over latest cumulative state
+  ---
+  duration_ms: 632.1866
+  type: 'test'
+  ...
+# Subtest: R1 checkpoint tagging cannot bypass current-selection checks for arbitrary summaries or equal-scope records
+ok 59 - R1 checkpoint tagging cannot bypass current-selection checks for arbitrary summaries or equal-scope records
+  ---
+  duration_ms: 114.7879
+  type: 'test'
+  ...
+# Subtest: R1 replacement without explicit advancement cannot silently publish a self-invalid checkpoint
+ok 60 - R1 replacement without explicit advancement cannot silently publish a self-invalid checkpoint
+  ---
+  duration_ms: 115.3669
+  type: 'test'
+  ...
+# Subtest: R2 A2 -> B1 -> current A2 cycle rejects selection; planner never fabricates an order for corrupted view
+ok 61 - R2 A2 -> B1 -> current A2 cycle rejects selection; planner never fabricates an order for corrupted view
+  ---
+  duration_ms: 204.5463
+  type: 'test'
+  ...
+# Subtest: R2 legitimate diamond shares dependency without false cycle; replacement still invalidates both parents
+ok 62 - R2 legitimate diamond shares dependency without false cycle; replacement still invalidates both parents
+  ---
+  duration_ms: 548.5265
+  type: 'test'
+  ...
+# Subtest: R3 provenance-bound host cannot change story; rename and same-story carryover remain exportable
+ok 63 - R3 provenance-bound host cannot change story; rename and same-story carryover remain exportable
+  ---
+  duration_ms: 140.5777
+  type: 'test'
+  ...
+# Subtest: R4 derived-only survives append with original scope and declaration intact through logical transfer
+ok 64 - R4 derived-only survives append with original scope and declaration intact through logical transfer
+  ---
+  duration_ms: 110.2233
+  type: 'test'
+  ...
+# Subtest: R4 changed prefix or earlier cutoff needs review; required unavailable/private/foreign memories cannot mean empty
+ok 65 - R4 changed prefix or earlier cutoff needs review; required unavailable/private/foreign memories cannot mean empty
+  ---
+  duration_ms: 475.3115
+  type: 'test'
+  ...
+# Subtest: R1/R2 format 1 import preserves old fingerprints and adds an empty correction view; format 2 preserves new semantics
+ok 66 - R1/R2 format 1 import preserves old fingerprints and adds an empty correction view; format 2 preserves new semantics
+  ---
+  duration_ms: 83.7071
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root missing-tip rejects without accepting an empty library
+ok 67 - G1-R2 invalid root missing-tip rejects without accepting an empty library
+  ---
+  duration_ms: 214.6395
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root string-tip rejects without accepting an empty library
+ok 68 - G1-R2 invalid root string-tip rejects without accepting an empty library
+  ---
+  duration_ms: 140.839
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root zero-tip rejects without accepting an empty library
+ok 69 - G1-R2 invalid root zero-tip rejects without accepting an empty library
+  ---
+  duration_ms: 108.6688
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root negative-tip rejects without accepting an empty library
+ok 70 - G1-R2 invalid root negative-tip rejects without accepting an empty library
+  ---
+  duration_ms: 124.5544
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root fraction-tip rejects without accepting an empty library
+ok 71 - G1-R2 invalid root fraction-tip rejects without accepting an empty library
+  ---
+  duration_ms: 126.7391
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root missing-staging rejects without accepting an empty library
+ok 72 - G1-R2 invalid root missing-staging rejects without accepting an empty library
+  ---
+  duration_ms: 119.2615
+  type: 'test'
+  ...
+# Subtest: G1-R2 invalid root wrong-format rejects without accepting an empty library
+ok 73 - G1-R2 invalid root wrong-format rejects without accepting an empty library
+  ---
+  duration_ms: 168.8764
+  type: 'test'
+  ...
+# Subtest: G1-R2 malformed native node null-payload is never mapped to absence
+ok 74 - G1-R2 malformed native node null-payload is never mapped to absence
+  ---
+  duration_ms: 140.6589
+  type: 'test'
+  ...
+# Subtest: G1-R2 malformed native node missing-payload is never mapped to absence
+ok 75 - G1-R2 malformed native node missing-payload is never mapped to absence
+  ---
+  duration_ms: 133.9284
+  type: 'test'
+  ...
+# Subtest: G1-R2 malformed native node array-payload is never mapped to absence
+ok 76 - G1-R2 malformed native node array-payload is never mapped to absence
+  ---
+  duration_ms: 102.8332
+  type: 'test'
+  ...
+# Subtest: G1-R2 malformed native node undefined-node is never mapped to absence
+ok 77 - G1-R2 malformed native node undefined-node is never mapped to absence
+  ---
+  duration_ms: 152.4876
+  type: 'test'
+  ...
+# Subtest: G1-R2 null payload in a non-root slot also rejects
+ok 78 - G1-R2 null payload in a non-root slot also rejects
+  ---
+  duration_ms: 92.3532
+  type: 'test'
+  ...
+# Subtest: G1-R2 true empty, explicit null tip and staging remain legal
+ok 79 - G1-R2 true empty, explicit null tip and staging remain legal
+  ---
+  duration_ms: 0.6456
+  type: 'test'
+  ...
+# Subtest: G1-R2 first publication failure preserves orphans and allows exact retry
+ok 80 - G1-R2 first publication failure preserves orphans and allows exact retry
+  ---
+  duration_ms: 102.7226
+  type: 'test'
+  ...
+# Subtest: G1-R1 successful close permanently retires owner; repeated close cannot affect replacement
+ok 81 - G1-R1 successful close permanently retires owner; repeated close cannot affect replacement
+  ---
+  duration_ms: 205.5672
+  type: 'test'
+  ...
+# Subtest: G1-R1 failed before close retains one quarantined owner
+ok 82 - G1-R1 failed before close retains one quarantined owner
+  ---
+  duration_ms: 236.3808
+  type: 'test'
+  ...
+# Subtest: G1-R1 failed after close retains one quarantined owner
+ok 83 - G1-R1 failed after close retains one quarantined owner
+  ---
+  duration_ms: 192.8615
+  type: 'test'
+  ...
+# Subtest: G1-R1 open waits for close; queued recover cannot resurrect or evict replacement
+ok 84 - G1-R1 open waits for close; queued recover cannot resurrect or evict replacement
+  ---
+  duration_ms: 0.8675
+  type: 'test'
+  ...
+# Subtest: G1-R1 failed close can retry close without creating a second owner
+ok 85 - G1-R1 failed close can retry close without creating a second owner
+  ---
+  duration_ms: 0.4973
+  type: 'test'
+  ...
+# Subtest: P2 adapter cannot open P3 namespaces, and production maintenance gate stays closed
+ok 86 - P2 adapter cannot open P3 namespaces, and production maintenance gate stays closed
+  ---
+  duration_ms: 2.5876
+  type: 'test'
+  ...
+# Subtest: all diagnostic openers share one coordinator; close/open waits for drain
+ok 87 - all diagnostic openers share one coordinator; close/open waits for drain
+  ---
+  duration_ms: 121.4898
+  type: 'test'
+  ...
+# Subtest: failed native close before retains registration and recovers in place
+ok 88 - failed native close before retains registration and recovers in place
+  ---
+  duration_ms: 51.0161
+  type: 'test'
+  ...
+# Subtest: failed native close after retains registration and recovers in place
+ok 89 - failed native close after retains registration and recovers in place
+  ---
+  duration_ms: 42.3011
+  type: 'test'
+  ...
+# Subtest: namespace-only host counterexample: identity read cannot fence later old-handle write
+ok 90 - namespace-only host counterexample: identity read cannot fence later old-handle write
+  ---
+  duration_ms: 0.4502
+  type: 'test'
+  ...
+# Subtest: durable history: discard caller state, discover prepared IDs and exact result after reopen
+ok 91 - durable history: discard caller state, discover prepared IDs and exact result after reopen
+  ---
+  duration_ms: 271.1815
+  type: 'test'
+  ...
+# Subtest: durable history: preparation failure intent-write/before
+ok 92 - durable history: preparation failure intent-write/before
+  ---
+  duration_ms: 141.8537
+  type: 'test'
+  ...
+# Subtest: durable history: preparation failure intent-write/after
+ok 93 - durable history: preparation failure intent-write/after
+  ---
+  duration_ms: 125.5364
+  type: 'test'
+  ...
+# Subtest: durable history: preparation failure intent-flush/before
+ok 94 - durable history: preparation failure intent-flush/before
+  ---
+  duration_ms: 143.7813
+  type: 'test'
+  ...
+# Subtest: durable history: preparation failure intent-flush/after
+ok 95 - durable history: preparation failure intent-flush/after
+  ---
+  duration_ms: 144.2383
+  type: 'test'
+  ...
+# Subtest: durable history: preparation failure intent-ack/after
+ok 96 - durable history: preparation failure intent-ack/after
+  ---
+  duration_ms: 118.8025
+  type: 'test'
+  ...
+# Subtest: durable history: publication failure object/after
+ok 97 - durable history: publication failure object/after
+  ---
+  duration_ms: 217.9793
+  type: 'test'
+  ...
+# Subtest: durable history: publication failure prepare-flush/after
+ok 98 - durable history: publication failure prepare-flush/after
+  ---
+  duration_ms: 160.9101
+  type: 'test'
+  ...
+# Subtest: durable history: publication failure publish/before
+ok 99 - durable history: publication failure publish/before
+  ---
+  duration_ms: 157.96
+  type: 'test'
+  ...
+# Subtest: durable history: publication failure publish/after
+ok 100 - durable history: publication failure publish/after
+  ---
+  duration_ms: 152.5242
+  type: 'test'
+  ...
+# Subtest: durable history: publication failure publish-flush/after
+ok 101 - durable history: publication failure publish-flush/after
+  ---
+  duration_ms: 149.9049
+  type: 'test'
+  ...
+# Subtest: durable history: publication failure ack/after
+ok 102 - durable history: publication failure ack/after
+  ---
+  duration_ms: 141.4467
+  type: 'test'
+  ...
+# Subtest: durable memory: discard caller state, discover prepared IDs and exact result after reopen
+ok 103 - durable memory: discard caller state, discover prepared IDs and exact result after reopen
+  ---
+  duration_ms: 199.9586
+  type: 'test'
+  ...
+# Subtest: durable memory: preparation failure intent-write/before
+ok 104 - durable memory: preparation failure intent-write/before
+  ---
+  duration_ms: 129.6125
+  type: 'test'
+  ...
+# Subtest: durable memory: preparation failure intent-write/after
+ok 105 - durable memory: preparation failure intent-write/after
+  ---
+  duration_ms: 98.018
+  type: 'test'
+  ...
+# Subtest: durable memory: preparation failure intent-flush/before
+ok 106 - durable memory: preparation failure intent-flush/before
+  ---
+  duration_ms: 90.4427
+  type: 'test'
+  ...
+# Subtest: durable memory: preparation failure intent-flush/after
+ok 107 - durable memory: preparation failure intent-flush/after
+  ---
+  duration_ms: 128.4607
+  type: 'test'
+  ...
+# Subtest: durable memory: preparation failure intent-ack/after
+ok 108 - durable memory: preparation failure intent-ack/after
+  ---
+  duration_ms: 90.1067
+  type: 'test'
+  ...
+# Subtest: durable memory: publication failure object/after
+ok 109 - durable memory: publication failure object/after
+  ---
+  duration_ms: 127.7304
+  type: 'test'
+  ...
+# Subtest: durable memory: publication failure prepare-flush/after
+ok 110 - durable memory: publication failure prepare-flush/after
+  ---
+  duration_ms: 131.7252
+  type: 'test'
+  ...
+# Subtest: durable memory: publication failure publish/before
+ok 111 - durable memory: publication failure publish/before
+  ---
+  duration_ms: 139.3739
+  type: 'test'
+  ...
+# Subtest: durable memory: publication failure publish/after
+ok 112 - durable memory: publication failure publish/after
+  ---
+  duration_ms: 99.9087
+  type: 'test'
+  ...
+# Subtest: durable memory: publication failure publish-flush/after
+ok 113 - durable memory: publication failure publish-flush/after
+  ---
+  duration_ms: 127.6145
+  type: 'test'
+  ...
+# Subtest: durable memory: publication failure ack/after
+ok 114 - durable memory: publication failure ack/after
+  ---
+  duration_ms: 109.2345
+  type: 'test'
+  ...
+# Subtest: durable binding: discard caller state, discover prepared IDs and exact result after reopen
+ok 115 - durable binding: discard caller state, discover prepared IDs and exact result after reopen
+  ---
+  duration_ms: 108.6846
+  type: 'test'
+  ...
+# Subtest: durable binding: preparation failure intent-write/before
+ok 116 - durable binding: preparation failure intent-write/before
+  ---
+  duration_ms: 94.7175
+  type: 'test'
+  ...
+# Subtest: durable binding: preparation failure intent-write/after
+ok 117 - durable binding: preparation failure intent-write/after
+  ---
+  duration_ms: 126.008
+  type: 'test'
+  ...
+# Subtest: durable binding: preparation failure intent-flush/before
+ok 118 - durable binding: preparation failure intent-flush/before
+  ---
+  duration_ms: 77.9553
+  type: 'test'
+  ...
+# Subtest: durable binding: preparation failure intent-flush/after
+ok 119 - durable binding: preparation failure intent-flush/after
+  ---
+  duration_ms: 110.9156
+  type: 'test'
+  ...
+# Subtest: durable binding: preparation failure intent-ack/after
+ok 120 - durable binding: preparation failure intent-ack/after
+  ---
+  duration_ms: 142.7592
+  type: 'test'
+  ...
+# Subtest: durable binding: publication failure object/after
+ok 121 - durable binding: publication failure object/after
+  ---
+  duration_ms: 98.9978
+  type: 'test'
+  ...
+# Subtest: durable binding: publication failure prepare-flush/after
+ok 122 - durable binding: publication failure prepare-flush/after
+  ---
+  duration_ms: 95.591
+  type: 'test'
+  ...
+# Subtest: durable binding: publication failure publish/before
+ok 123 - durable binding: publication failure publish/before
+  ---
+  duration_ms: 85.662
+  type: 'test'
+  ...
+# Subtest: durable binding: publication failure publish/after
+ok 124 - durable binding: publication failure publish/after
+  ---
+  duration_ms: 86.4308
+  type: 'test'
+  ...
+# Subtest: durable binding: publication failure publish-flush/after
+ok 125 - durable binding: publication failure publish-flush/after
+  ---
+  duration_ms: 126.7495
+  type: 'test'
+  ...
+# Subtest: durable binding: publication failure ack/after
+ok 126 - durable binding: publication failure ack/after
+  ---
+  duration_ms: 91.0633
+  type: 'test'
+  ...
+# Subtest: pending request blocks competing preparation; same key changed input rejects before compilation
+ok 127 - pending request blocks competing preparation; same key changed input rejects before compilation
+  ---
+  duration_ms: 71.7302
+  type: 'test'
+  ...
+# Subtest: memory correction persists original generated view; no history command pollution
+ok 128 - memory correction persists original generated view; no history command pollution
+  ---
+  duration_ms: 161.0056
+  type: 'test'
+  ...
+# Subtest: canceling a waiter cannot release the queue or erase prepared work
+ok 129 - canceling a waiter cannot release the queue or erase prepared work
+  ---
+  duration_ms: 87.7644
+  type: 'test'
+  ...
+# Subtest: cooperative maintenance fences queued handles and preserves prepared work
+ok 130 - cooperative maintenance fences queued handles and preserves prepared work
+  ---
+  duration_ms: 150.9732
+  type: 'test'
+  ...
+# Subtest: maintenance identity replacement quarantines instead of adopting same namespace
+ok 131 - maintenance identity replacement quarantines instead of adopting same namespace
+  ---
+  duration_ms: 78.567
+  type: 'test'
+  ...
+# Subtest: maintenance root replacement quarantines instead of adopting same namespace
+ok 132 - maintenance root replacement quarantines instead of adopting same namespace
+  ---
+  duration_ms: 118.88
+  type: 'test'
+  ...
+# Subtest: maintenance intent replacement quarantines instead of adopting same namespace
+ok 133 - maintenance intent replacement quarantines instead of adopting same namespace
+  ---
+  duration_ms: 91.0889
+  type: 'test'
+  ...
+# Subtest: closed coordinator cannot recover or affect a replacement
+ok 134 - closed coordinator cannot recover or affect a replacement
+  ---
+  duration_ms: 55.2542
+  type: 'test'
+  ...
+# Subtest: creation refuses existing protocol or identity data without modifications
+ok 135 - creation refuses existing protocol or identity data without modifications
+  ---
+  duration_ms: 79.091
+  type: 'test'
+  ...
+# Subtest: intent audit rejects checksum-valid input corruption
+ok 136 - intent audit rejects checksum-valid input corruption
+  ---
+  duration_ms: 88.3961
+  type: 'test'
+  ...
+# Subtest: intent audit rejects checksum-valid generated corruption
+ok 137 - intent audit rejects checksum-valid generated corruption
+  ---
+  duration_ms: 94.6791
+  type: 'test'
+  ...
+# Subtest: intent audit rejects checksum-valid compiled corruption
+ok 138 - intent audit rejects checksum-valid compiled corruption
+  ---
+  duration_ms: 86.5544
+  type: 'test'
+  ...
+# Subtest: intent audit rejects checksum-valid missing corruption
+ok 139 - intent audit rejects checksum-valid missing corruption
+  ---
+  duration_ms: 60.9025
+  type: 'test'
+  ...
+# Subtest: intent audit rejects checksum-valid duplicate corruption
+ok 140 - intent audit rejects checksum-valid duplicate corruption
+  ---
+  duration_ms: 89.4316
+  type: 'test'
+  ...
+# Subtest: preparation not flushed (before) is not claimed durable
+ok 141 - preparation not flushed (before) is not claimed durable
+  ---
+  duration_ms: 75.6094
+  type: 'test'
+  ...
+# Subtest: preparation not flushed (after) is not claimed durable
+ok 142 - preparation not flushed (after) is not claimed durable
+  ---
+  duration_ms: 66.3805
+  type: 'test'
+  ...
+# Subtest: maintenance close failure (false) keeps ticket and coordinator fenced
+ok 143 - maintenance close failure (false) keeps ticket and coordinator fenced
+  ---
+  duration_ms: 78.5943
+  type: 'test'
+  ...
+# Subtest: maintenance close failure (true) keeps ticket and coordinator fenced
+ok 144 - maintenance close failure (true) keeps ticket and coordinator fenced
+  ---
+  duration_ms: 84.6181
+  type: 'test'
+  ...
+# Subtest: suspension drains an executing publication before allowing maintenance
+ok 145 - suspension drains an executing publication before allowing maintenance
+  ---
+  duration_ms: 137.1131
+  type: 'test'
+  ...
+# Subtest: unknown identity read outcome quarantines until explicit recovery
+ok 146 - unknown identity read outcome quarantines until explicit recovery
+  ---
+  duration_ms: 67.2437
+  type: 'test'
+  ...
+# Subtest: complete v1 recovery retains old memory/correction, ledger, binding and prepared IDs; retry survives second reopen
+ok 147 - complete v1 recovery retains old memory/correction, ledger, binding and prepared IDs; retry survives second reopen
+  ---
+  duration_ms: 1230.6523
+  type: 'test'
+  ...
+# Subtest: export pins one boundary while source continues publishing
+ok 148 - export pins one boundary while source continues publishing
+  ---
+  duration_ms: 697.3362
+  type: 'test'
+  ...
+# Subtest: UTF-8 stream split in every byte preserves non-BMP text and canonical fingerprints
+ok 149 - UTF-8 stream split in every byte preserves non-BMP text and canonical fingerprints
+  ---
+  duration_ms: 1094.946
+  type: 'test'
+  ...
+# Subtest: invalid truncated backup never writes to target
+ok 150 - invalid truncated backup never writes to target
+  ---
+  duration_ms: 131.1693
+  type: 'test'
+  ...
+# Subtest: invalid trailing backup never writes to target
+ok 151 - invalid trailing backup never writes to target
+  ---
+  duration_ms: 192.5278
+  type: 'test'
+  ...
+# Subtest: invalid reordered backup never writes to target
+ok 152 - invalid reordered backup never writes to target
+  ---
+  duration_ms: 180.7717
+  type: 'test'
+  ...
+# Subtest: invalid unknown backup never writes to target
+ok 153 - invalid unknown backup never writes to target
+  ---
+  duration_ms: 149.5112
+  type: 'test'
+  ...
+# Subtest: invalid duplicate-id backup never writes to target
+ok 154 - invalid duplicate-id backup never writes to target
+  ---
+  duration_ms: 127.4837
+  type: 'test'
+  ...
+# Subtest: invalid bad-utf8 backup never writes to target
+ok 155 - invalid bad-utf8 backup never writes to target
+  ---
+  duration_ms: 108.9796
+  type: 'test'
+  ...
+# Subtest: invalid duplicate-key backup never writes to target
+ok 156 - invalid duplicate-key backup never writes to target
+  ---
+  duration_ms: 119.2053
+  type: 'test'
+  ...
+# Subtest: checksum-valid r5 recovery fails domain/intent audit before activation
+ok 157 - checksum-valid r5 recovery fails domain/intent audit before activation
+  ---
+  duration_ms: 253.8363
+  type: 'test'
+  ...
+# Subtest: checksum-valid generated recovery fails domain/intent audit before activation
+ok 158 - checksum-valid generated recovery fails domain/intent audit before activation
+  ---
+  duration_ms: 384.7601
+  type: 'test'
+  ...
+# Subtest: checksum-valid missing-intent recovery fails domain/intent audit before activation
+ok 159 - checksum-valid missing-intent recovery fails domain/intent audit before activation
+  ---
+  duration_ms: 283.8959
+  type: 'test'
+  ...
+# Subtest: checksum-valid ledger recovery fails domain/intent audit before activation
+ok 160 - checksum-valid ledger recovery fails domain/intent audit before activation
+  ---
+  duration_ms: 308.7558
+  type: 'test'
+  ...
+# Subtest: checksum-valid markers recovery fails domain/intent audit before activation
+ok 161 - checksum-valid markers recovery fails domain/intent audit before activation
+  ---
+  duration_ms: 234.7239
+  type: 'test'
+  ...
+# Subtest: checksum-valid pending-input recovery fails domain/intent audit before activation
+ok 162 - checksum-valid pending-input recovery fails domain/intent audit before activation
+  ---
+  duration_ms: 303.0695
+  type: 'test'
+  ...
+# Subtest: restore failure restore-stage/before: retained staging or exact active state, never partial activation
+ok 163 - restore failure restore-stage/before: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 212.9739
+  type: 'test'
+  ...
+# Subtest: restore failure restore-stage/after: retained staging or exact active state, never partial activation
+ok 164 - restore failure restore-stage/after: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 304.403
+  type: 'test'
+  ...
+# Subtest: restore failure restore-intent/before: retained staging or exact active state, never partial activation
+ok 165 - restore failure restore-intent/before: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 235.3206
+  type: 'test'
+  ...
+# Subtest: restore failure restore-intent/after: retained staging or exact active state, never partial activation
+ok 166 - restore failure restore-intent/after: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 241.4812
+  type: 'test'
+  ...
+# Subtest: restore failure object/before: retained staging or exact active state, never partial activation
+ok 167 - restore failure object/before: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 266.8135
+  type: 'test'
+  ...
+# Subtest: restore failure object/after: retained staging or exact active state, never partial activation
+ok 168 - restore failure object/after: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 314.4118
+  type: 'test'
+  ...
+# Subtest: restore failure publish/before: retained staging or exact active state, never partial activation
+ok 169 - restore failure publish/before: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 307.4886
+  type: 'test'
+  ...
+# Subtest: restore failure publish/after: retained staging or exact active state, never partial activation
+ok 170 - restore failure publish/after: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 336.2882
+  type: 'test'
+  ...
+# Subtest: restore failure import-activate/before: retained staging or exact active state, never partial activation
+ok 171 - restore failure import-activate/before: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 316.9378
+  type: 'test'
+  ...
+# Subtest: restore failure import-activate/after: retained staging or exact active state, never partial activation
+ok 172 - restore failure import-activate/after: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 286.7805
+  type: 'test'
+  ...
+# Subtest: restore failure restore-activate/before: retained staging or exact active state, never partial activation
+ok 173 - restore failure restore-activate/before: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 353.0204
+  type: 'test'
+  ...
+# Subtest: restore failure restore-activate/after: retained staging or exact active state, never partial activation
+ok 174 - restore failure restore-activate/after: retained staging or exact active state, never partial activation
+  ---
+  duration_ms: 360.9762
+  type: 'test'
+  ...
+# Subtest: nonempty target is unchanged; complete source retains its own prepared work
+ok 175 - nonempty target is unchanged; complete source retains its own prepared work
+  ---
+  duration_ms: 156.7725
+  type: 'test'
+  ...
+# Subtest: strict JSON duplicate {"a":1,"a":2}
+ok 176 - strict JSON duplicate {"a":1,"a":2}
+  ---
+  duration_ms: 0.2592
+  type: 'test'
+  ...
+# Subtest: strict JSON duplicate {"a":1,"\\u0061":2}
+ok 177 - strict JSON duplicate {"a":1,"\\u0061":2}
+  ---
+  duration_ms: 0.0845
+  type: 'test'
+  ...
+# Subtest: strict JSON duplicate {"x":{"a":0,"a":0}}
+ok 178 - strict JSON duplicate {"x":{"a":0,"a":0}}
+  ---
+  duration_ms: 0.0743
+  type: 'test'
+  ...
+# Subtest: strict JSON rejects malformed "\\"\\\\ud800\\""
+ok 179 - strict JSON rejects malformed "\\"\\\\ud800\\""
+  ---
+  duration_ms: 0.099
+  type: 'test'
+  ...
+# Subtest: strict JSON rejects malformed "\\"\\\\udc00\\""
+ok 180 - strict JSON rejects malformed "\\"\\\\udc00\\""
+  ---
+  duration_ms: 0.0645
+  type: 'test'
+  ...
+# Subtest: strict JSON rejects malformed "01"
+ok 181 - strict JSON rejects malformed "01"
+  ---
+  duration_ms: 0.1171
+  type: 'test'
+  ...
+# Subtest: strict JSON rejects malformed "1e999"
+ok 182 - strict JSON rejects malformed "1e999"
+  ---
+  duration_ms: 0.1102
+  type: 'test'
+  ...
+# Subtest: strict JSON rejects malformed "[1,]"
+ok 183 - strict JSON rejects malformed "[1,]"
+  ---
+  duration_ms: 0.0941
+  type: 'test'
+  ...
+# Subtest: strict JSON rejects malformed "{\\"a\\":1,}"
+ok 184 - strict JSON rejects malformed "{\\"a\\":1,}"
+  ---
+  duration_ms: 0.0799
+  type: 'test'
+  ...
+# Subtest: strict JSON rejects malformed "true x"
+ok 185 - strict JSON rejects malformed "true x"
+  ---
+  duration_ms: 0.0711
+  type: 'test'
+  ...
+# Subtest: strict JSON rejects malformed "﻿{}"
+ok 186 - strict JSON rejects malformed "﻿{}"
+  ---
+  duration_ms: 0.1041
+  type: 'test'
+  ...
+# Subtest: strict parser accepts safe own __proto__ without changing object prototype
+ok 187 - strict parser accepts safe own __proto__ without changing object prototype
+  ---
+  duration_ms: 0.1194
+  type: 'test'
+  ...
+# Subtest: strict JSON depth resource bound
+ok 188 - strict JSON depth resource bound
+  ---
+  duration_ms: 0.1355
+  type: 'test'
+  ...
+# Subtest: strict JSON values resource bound
+ok 189 - strict JSON values resource bound
+  ---
+  duration_ms: 0.0679
+  type: 'test'
+  ...
+# Subtest: strict JSON lineBytes resource bound
+ok 190 - strict JSON lineBytes resource bound
+  ---
+  duration_ms: 0.0656
+  type: 'test'
+  ...
+# Subtest: stream total byte and record count budgets reject without truncation
+ok 191 - stream total byte and record count budgets reject without truncation
+  ---
+  duration_ms: 0.2186
+  type: 'test'
+  ...
+# Subtest: restored library uses a distinct identity format so the old v1 reader cannot bypass staging
+ok 192 - restored library uses a distinct identity format so the old v1 reader cannot bypass staging
+  ---
+  duration_ms: 372.9207
+  type: 'test'
+  ...
+# Subtest: corruption of persisted import objects is caught on readback before activation
+ok 193 - corruption of persisted import objects is caught on readback before activation
+  ---
+  duration_ms: 231.529
+  type: 'test'
+  ...
+# Subtest: export refuses byte budget before producing a completed footer
+ok 194 - export refuses byte budget before producing a completed footer
+  ---
+  duration_ms: 177.0298
+  type: 'test'
+  ...
+# Subtest: full recovery includes deleted sources, old snapshots, fixed child and a second story
+ok 195 - full recovery includes deleted sources, old snapshots, fixed child and a second story
+  ---
+  duration_ms: 1558.6386
+  type: 'test'
+  ...
+# Subtest: JSON reference pages preserve text, null, empty containers, own special keys and logical fingerprint
+ok 196 - JSON reference pages preserve text, null, empty containers, own special keys and logical fingerprint
+  ---
+  duration_ms: 515.314
+  type: 'test'
+  ...
+# Subtest: nested manifest/view/expected/marker/directory paths share all unchanged subtrees
+ok 197 - nested manifest/view/expected/marker/directory paths share all unchanged subtrees
+  ---
+  duration_ms: 11943.5965
+  type: 'test'
+  ...
+# Subtest: command.entries and fixed fork use shared ropes while preserving exact original command JSON
+ok 198 - command.entries and fixed fork use shared ropes while preserving exact original command JSON
+  ---
+  duration_ms: 226.4287
+  type: 'test'
+  ...
+# Subtest: full materialization has explicit budgets; local scalar access does not traverse unrelated data
+ok 199 - full materialization has explicit budgets; local scalar access does not traverse unrelated data
+  ---
+  duration_ms: 32.2612
+  type: 'test'
+  ...
+# Subtest: persistent exact directory: 2048 UUID-like keys, reboot cursor, immutable old root and bounded local update
+ok 200 - persistent exact directory: 2048 UUID-like keys, reboot cursor, immutable old root and bounded local update
+  ---
+  duration_ms: 15854.1615
+  type: 'test'
+  ...
+# Subtest: counted immutable manifest: append/edit/insert/delete/fork retain old revisions with logarithmic IO
+ok 201 - counted immutable manifest: append/edit/insert/delete/fork retain old revisions with logarithmic IO
+  ---
+  duration_ms: 679.7082
+  type: 'test'
+  ...
+# Subtest: seeded variable sequence splices match an independent flat oracle and AVL/count invariants
+ok 202 - seeded variable sequence splices match an independent flat oracle and AVL/count invariants
+  ---
+  duration_ms: 13567.5066
+  type: 'test'
+  ...
+# Subtest: long append growth keeps depth and per-append writes bounded
+ok 203 - long append growth keeps depth and per-append writes bounded
+  ---
+  duration_ms: 15687.608
+  type: 'test'
+  ...
+# Subtest: physical hash-address collision is rejected before overwriting data
+ok 204 - physical hash-address collision is rejected before overwriting data
+  ---
+  duration_ms: 1.0241
+  type: 'test'
+  ...
+# Subtest: page audit refuses missing
+ok 205 - page audit refuses missing
+  ---
+  duration_ms: 0.3223
+  type: 'test'
+  ...
+# Subtest: page audit refuses checksum
+ok 206 - page audit refuses checksum
+  ---
+  duration_ms: 0.2868
+  type: 'test'
+  ...
+# Subtest: page audit refuses address
+ok 207 - page audit refuses address
+  ---
+  duration_ms: 0.3581
+  type: 'test'
+  ...
+# Subtest: page audit refuses oversize
+ok 208 - page audit refuses oversize
+  ---
+  duration_ms: 0.4685
+  type: 'test'
+  ...
+# Subtest: checksum-valid invalid directory count and map ordering are rejected by explicit structural audit
+ok 209 - checksum-valid invalid directory count and map ordering are rejected by explicit structural audit
+  ---
+  duration_ms: 1.1567
+  type: 'test'
+  ...
+# Subtest: page write failure cannot change any published old root
+ok 210 - page write failure cannot change any published old root
+  ---
+  duration_ms: 0.7865
+  type: 'test'
+  ...
+# Subtest: portable SHA-256 equals Node and WebCrypto at padding/UTF8 boundaries; JCS fingerprints unchanged
+ok 211 - portable SHA-256 equals Node and WebCrypto at padding/UTF8 boundaries; JCS fingerprints unchanged
+  ---
+  duration_ms: 136.8496
+  type: 'test'
+  ...
+# Subtest: two stories/fixed fork/correction/edit/binding replay through exact physical IDs and domain validation
+ok 212 - two stories/fixed fork/correction/edit/binding replay through exact physical IDs and domain validation
+  ---
+  duration_ms: 503.2683
+  type: 'test'
+  ...
+# Subtest: fault seed=20260919 step=1 object/before/1: retain acknowledged state, recover and retry
+ok 213 - fault seed=20260919 step=1 object/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 153.296
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"object","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 object/after/2: retain acknowledged state, recover and retry
+ok 214 - fault seed=20260919 step=1 object/after/2: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 209.2373
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"object","edge":"after","ordinal":2,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 commit-record/before/1: retain acknowledged state, recover and retry
+ok 215 - fault seed=20260919 step=1 commit-record/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 164.8296
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"commit-record","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 commit-record/after/1: retain acknowledged state, recover and retry
+ok 216 - fault seed=20260919 step=1 commit-record/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 147.272
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"commit-record","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 prepare-flush/before/1: retain acknowledged state, recover and retry
+ok 217 - fault seed=20260919 step=1 prepare-flush/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 142.1619
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"prepare-flush","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 prepare-flush/after/1: retain acknowledged state, recover and retry
+ok 218 - fault seed=20260919 step=1 prepare-flush/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 151.788
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"prepare-flush","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 publish/before/1: retain acknowledged state, recover and retry
+ok 219 - fault seed=20260919 step=1 publish/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 121.218
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"publish","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 publish/after/1: retain acknowledged state, recover and retry
+ok 220 - fault seed=20260919 step=1 publish/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 188.9227
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"publish","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 publish-flush/before/1: retain acknowledged state, recover and retry
+ok 221 - fault seed=20260919 step=1 publish-flush/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 143.0165
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"publish-flush","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 publish-flush/after/1: retain acknowledged state, recover and retry
+ok 222 - fault seed=20260919 step=1 publish-flush/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 142.9888
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"publish-flush","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 ack/before/1: retain acknowledged state, recover and retry
+ok 223 - fault seed=20260919 step=1 ack/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 136.6142
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"ack","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=1 ack/after/1: retain acknowledged state, recover and retry
+ok 224 - fault seed=20260919 step=1 ack/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 160.6069
+  type: 'test'
+  ...
+# {"seed":20260919,"step":1,"label":"ack","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000021","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-00000000000c"},"bindings":{}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":2,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 object/before/1: retain acknowledged state, recover and retry
+ok 225 - fault seed=20260919 step=2 object/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 164.9509
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"object","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 object/after/2: retain acknowledged state, recover and retry
+ok 226 - fault seed=20260919 step=2 object/after/2: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 176.4339
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"object","edge":"after","ordinal":2,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 commit-record/before/1: retain acknowledged state, recover and retry
+ok 227 - fault seed=20260919 step=2 commit-record/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 183.2567
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"commit-record","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 commit-record/after/1: retain acknowledged state, recover and retry
+ok 228 - fault seed=20260919 step=2 commit-record/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 157.1616
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"commit-record","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 prepare-flush/before/1: retain acknowledged state, recover and retry
+ok 229 - fault seed=20260919 step=2 prepare-flush/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 174.8469
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"prepare-flush","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 prepare-flush/after/1: retain acknowledged state, recover and retry
+ok 230 - fault seed=20260919 step=2 prepare-flush/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 166.0042
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"prepare-flush","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 publish/before/1: retain acknowledged state, recover and retry
+ok 231 - fault seed=20260919 step=2 publish/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 147.9198
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"publish","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 publish/after/1: retain acknowledged state, recover and retry
+ok 232 - fault seed=20260919 step=2 publish/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 155.3503
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"publish","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 publish-flush/before/1: retain acknowledged state, recover and retry
+ok 233 - fault seed=20260919 step=2 publish-flush/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 128.1912
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"publish-flush","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 publish-flush/after/1: retain acknowledged state, recover and retry
+ok 234 - fault seed=20260919 step=2 publish-flush/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 114.2767
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"publish-flush","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 ack/before/1: retain acknowledged state, recover and retry
+ok 235 - fault seed=20260919 step=2 ack/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 130.9027
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"ack","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=2 ack/after/1: retain acknowledged state, recover and retry
+ok 236 - fault seed=20260919 step=2 ack/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 129.9395
+  type: 'test'
+  ...
+# {"seed":20260919,"step":2,"label":"ack","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-000000000024","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000014","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":3,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 object/before/1: retain acknowledged state, recover and retry
+ok 237 - fault seed=20260919 step=3 object/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 142.4373
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"object","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 object/after/2: retain acknowledged state, recover and retry
+ok 238 - fault seed=20260919 step=3 object/after/2: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 150.7246
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"object","edge":"after","ordinal":2,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 commit-record/before/1: retain acknowledged state, recover and retry
+ok 239 - fault seed=20260919 step=3 commit-record/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 179.8445
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"commit-record","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 commit-record/after/1: retain acknowledged state, recover and retry
+ok 240 - fault seed=20260919 step=3 commit-record/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 166.5545
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"commit-record","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 prepare-flush/before/1: retain acknowledged state, recover and retry
+ok 241 - fault seed=20260919 step=3 prepare-flush/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 171.5012
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"prepare-flush","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 prepare-flush/after/1: retain acknowledged state, recover and retry
+ok 242 - fault seed=20260919 step=3 prepare-flush/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 196.6277
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"prepare-flush","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 publish/before/1: retain acknowledged state, recover and retry
+ok 243 - fault seed=20260919 step=3 publish/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 181.6772
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"publish","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 publish/after/1: retain acknowledged state, recover and retry
+ok 244 - fault seed=20260919 step=3 publish/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 174.9942
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"publish","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 publish-flush/before/1: retain acknowledged state, recover and retry
+ok 245 - fault seed=20260919 step=3 publish-flush/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 147.1939
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"publish-flush","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 publish-flush/after/1: retain acknowledged state, recover and retry
+ok 246 - fault seed=20260919 step=3 publish-flush/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 154.0025
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"publish-flush","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 ack/before/1: retain acknowledged state, recover and retry
+ok 247 - fault seed=20260919 step=3 ack/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 165.8168
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"ack","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=3 ack/after/1: retain acknowledged state, recover and retry
+ok 248 - fault seed=20260919 step=3 ack/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 158.8278
+  type: 'test'
+  ...
+# {"seed":20260919,"step":3,"label":"ack","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002a","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-00000000000d","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"ledgerCount":4,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 object/before/1: retain acknowledged state, recover and retry
+ok 249 - fault seed=20260919 step=4 object/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 155.6177
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"object","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 object/after/2: retain acknowledged state, recover and retry
+ok 250 - fault seed=20260919 step=4 object/after/2: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 168.8
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"object","edge":"after","ordinal":2,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 commit-record/before/1: retain acknowledged state, recover and retry
+ok 251 - fault seed=20260919 step=4 commit-record/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 149.1374
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"commit-record","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 commit-record/after/1: retain acknowledged state, recover and retry
+ok 252 - fault seed=20260919 step=4 commit-record/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 186.3283
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"commit-record","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 prepare-flush/before/1: retain acknowledged state, recover and retry
+ok 253 - fault seed=20260919 step=4 prepare-flush/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 171.2938
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"prepare-flush","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 prepare-flush/after/1: retain acknowledged state, recover and retry
+ok 254 - fault seed=20260919 step=4 prepare-flush/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 177.8071
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"prepare-flush","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 publish/before/1: retain acknowledged state, recover and retry
+ok 255 - fault seed=20260919 step=4 publish/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 181.7138
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"publish","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 publish/after/1: retain acknowledged state, recover and retry
+ok 256 - fault seed=20260919 step=4 publish/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 180.5487
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"publish","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 publish-flush/before/1: retain acknowledged state, recover and retry
+ok 257 - fault seed=20260919 step=4 publish-flush/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 185.4882
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"publish-flush","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 publish-flush/after/1: retain acknowledged state, recover and retry
+ok 258 - fault seed=20260919 step=4 publish-flush/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 166.4635
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"publish-flush","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 ack/before/1: retain acknowledged state, recover and retry
+ok 259 - fault seed=20260919 step=4 ack/before/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 167.1106
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"ack","edge":"before","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: fault seed=20260919 step=4 ack/after/1: retain acknowledged state, recover and retry
+ok 260 - fault seed=20260919 step=4 ack/after/1: retain acknowledged state, recover and retry
+  ---
+  duration_ms: 181.0247
+  type: 'test'
+  ...
+# {"seed":20260919,"step":4,"label":"ack","edge":"after","ordinal":1,"operation":"op_00000000-0000-4000-8000-00000000002b","acknowledged":false,"before":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":0}},"recovered":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"retried":{"heads":{"br_00000000-0000-4000-8000-000000000002":"hs_00000000-0000-4000-8000-000000000027","br_00000000-0000-4000-8000-000000000017":"hs_00000000-0000-4000-8000-00000000001a","br_00000000-0000-4000-8000-00000000001c":"hs_00000000-0000-4000-8000-00000000001f"},"views":{"br_00000000-0000-4000-8000-000000000002":"mv_00000000-0000-4000-8000-000000000023","br_00000000-0000-4000-8000-000000000017":"mv_00000000-0000-4000-8000-000000000019","br_00000000-0000-4000-8000-00000000001c":"mv_00000000-0000-4000-8000-00000000001e"},"bindings":{"hb_00000000-0000-4000-8000-000000000015":1}},"ledgerCount":5,"validation":"passed","provider":"deterministic-fake"}
+# Subtest: same operation different request conflicts before stale checks, including after restart
+ok 261 - same operation different request conflicts before stale checks, including after restart
+  ---
+  duration_ms: 82.1174
+  type: 'test'
+  ...
+# Subtest: two handles share queue; old Head/view/binding writes reject
+ok 262 - two handles share queue; old Head/view/binding writes reject
+  ---
+  duration_ms: 98.9581
+  type: 'test'
+  ...
+# Subtest: stopping a waiter does not release native ownership; close queues then revokes handles
+ok 263 - stopping a waiter does not release native ownership; close queues then revokes handles
+  ---
+  duration_ms: 97.2401
+  type: 'test'
+  ...
+# Subtest: IO/ENOSPC before and after write never report success or erase previous data
+ok 264 - IO/ENOSPC before and after write never report success or erase previous data
+  ---
+  duration_ms: 177.4584
+  type: 'test'
+  ...
+# Subtest: R5 contradiction with valid checksum rejected before publishing; damaged references fail closed
+ok 265 - R5 contradiction with valid checksum rejected before publishing; damaged references fail closed
+  ---
+  duration_ms: 114.2878
+  type: 'test'
+  ...
+# Subtest: small import restores the independent ledger and rejects a nonempty target
+ok 266 - small import restores the independent ledger and rejects a nonempty target
+  ---
+  duration_ms: 375.4705
+  type: 'test'
+  ...
+# Subtest: interrupted staging import object/after: never expose a partial active library
+ok 267 - interrupted staging import object/after: never expose a partial active library
+  ---
+  duration_ms: 189.5721
+  type: 'test'
+  ...
+# Subtest: interrupted staging import publish/after: never expose a partial active library
+ok 268 - interrupted staging import publish/after: never expose a partial active library
+  ---
+  duration_ms: 199.4642
+  type: 'test'
+  ...
+# Subtest: interrupted staging import import-activate/before: never expose a partial active library
+ok 269 - interrupted staging import import-activate/before: never expose a partial active library
+  ---
+  duration_ms: 259.6748
+  type: 'test'
+  ...
+# Subtest: interrupted staging import import-activate/after: never expose a partial active library
+ok 270 - interrupted staging import import-activate/after: never expose a partial active library
+  ---
+  duration_ms: 252.0343
+  type: 'test'
+  ...
+# Subtest: valid outer checksum cannot conceal forged retry ledger or missing replay materials
+ok 271 - valid outer checksum cannot conceal forged retry ledger or missing replay materials
+  ---
+  duration_ms: 70.9696
+  type: 'test'
+  ...
+# Subtest: export snapshot stays fixed while the source continues committing
+ok 272 - export snapshot stays fixed while the source continues committing
+  ---
+  duration_ms: 84.2545
+  type: 'test'
+  ...
+# Subtest: P2 rejects a valid oversized history and oversized compiled request without writes
+ok 273 - P2 rejects a valid oversized history and oversized compiled request without writes
+  ---
+  duration_ms: 104.1689
+  type: 'test'
+  ...
+# Subtest: TT adapter maps publication to physical ID 1 and shares one owner across opens
+ok 274 - TT adapter maps publication to physical ID 1 and shares one owner across opens
+  ---
+  duration_ms: 61.9809
+  type: 'test'
+  ...
+# Subtest: immutable collision and cross-story rebinding rejected; P2 bounds are explicit
+ok 275 - immutable collision and cross-story rebinding rejected; P2 bounds are explicit
+  ---
+  duration_ms: 103.6014
+  type: 'test'
+  ...
+1..275
+# tests 275
+# suites 0
+# pass 275
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 46980.474

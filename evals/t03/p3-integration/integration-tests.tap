@@ -1,0 +1,21 @@
+✔ paged domain integrates delta history, edit, fixed fork, memory graph, correction, and binding (23602.2584ms)
+✔ paged checkpoint selection rejects a non-checkpoint advance and preserves the oracle state (6507.2047ms)
+✔ paged recovery retains operation and IDs at paged-prepare/before (9680.4854ms)
+✔ paged recovery retains operation and IDs at paged-prepare/after (9524.8646ms)
+✔ paged recovery retains operation and IDs at paged-materials/before (9483.9824ms)
+✔ paged recovery retains operation and IDs at paged-materials/after (9370.7649ms)
+✔ paged recovery retains operation and IDs at paged-publish/before (7020.0938ms)
+✔ paged recovery retains operation and IDs at paged-publish/after (7022.93ms)
+✔ paged recovery retains operation and IDs at paged-ack/before (6872.4275ms)
+✔ paged recovery retains operation and IDs at paged-ack/after (6770.1895ms)
+✔ paged recovery reads the checkpoint instead of replaying every durable operation (76329.0625ms)
+✔ paged export remains a checked directory artifact and exact reopen preserves logical state (4075.6315ms)
+✔ mapPrefix returns a balanced immutable prefix for fixed fork pruning (8175.7338ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 184775.381

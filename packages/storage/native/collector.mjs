@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const phase = process.argv[2] ?? 'p0';
-if (!['p0', 'before', 'recover-before', 'after', 'recover-after', 'roundtrip', 'reopen-check', 'g1-repair', 'p3-intent', 'p3-recovery', 'p3-before', 'p3-after', 'recover-p3-before', 'recover-p3-after'].includes(phase)) throw Error('Unknown phase');
+if (!['p0', 'before', 'recover-before', 'after', 'recover-after', 'roundtrip', 'reopen-check', 'g1-repair', 'p3-intent', 'p3-recovery', 'p3-before', 'p3-after', 'recover-p3-before', 'recover-p3-after', 'paged-reopen-check','paged-roundtrip', 'paged-before', 'paged-after', 'recover-paged-before', 'recover-paged-after'].includes(phase)) throw Error('Unknown phase');
 const run = process.argv[3] ?? '20260919a';
 if (!/^[a-z0-9]+$/.test(run)) throw Error('Invalid run');
 const root = resolve('.t03-local/evidence'); mkdirSync(root, { recursive: true });
@@ -16,7 +16,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/phase') {
     res.setHeader('Content-Type', 'application/json');
     let crashEvidence = null;
-    if (['recover-p3-before', 'recover-p3-after'].includes(phase)) {
+    if (['recover-p3-before', 'recover-p3-after', 'recover-paged-before', 'recover-paged-after'].includes(phase)) {
       crashEvidence = JSON.parse(readFileSync(resolve(root, `${run}-${phase.slice(8)}.json`), 'utf8').replace(/^\uFEFF/, '')).events.at(-1);
       if (crashEvidence.type !== 'kill-ready' || crashEvidence.phase !== phase.slice(8)) throw Error('Invalid prior crash evidence');
     }

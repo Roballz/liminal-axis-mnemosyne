@@ -1,0 +1,210 @@
+[
+  {
+    "path": "packages/storage\\tt-adapter.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\storage.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\scenario.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\pages.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\paged-transport.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\paged-recovery.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\paged-native-suite.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\paged-json.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\paged-integration.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\paged-adapter.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\intent-recovery.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\intent-prototype.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\intent-adapter.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\g1-review.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\tests\\fake-io.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\strict-json.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\protocol.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\pages.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-tt-adapter.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-transport.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-recovery.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-memory.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-json.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-history.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-domain.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-directory.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\paged-coordinator.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\native\\suite.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\native\\recovery-suite.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\native\\paged-suite.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\native\\paged-growth.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\native\\paged-growth-reopen.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\native\\intent-suite.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\native\\index.js",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\native\\collector.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\intent-tt-adapter.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\intent-recovery.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage\\intent-prototype.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "apps/tt-adapter-probe\\tests\\probe.test.js",
+    "exitCode": 0
+  },
+  {
+    "path": "apps/tt-adapter-probe\\index.js",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\transfer.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\tests\\review.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\tests\\review-round2.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\tests\\fixture.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\tests\\contracts.test.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\schema.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\runtime.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\primitives.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\memory.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\index.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\history.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/contracts\\context.mjs",
+    "exitCode": 0
+  }
+]

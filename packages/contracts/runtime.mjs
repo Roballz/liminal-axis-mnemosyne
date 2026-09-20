@@ -38,3 +38,36 @@ export function sha256(text) {
   return [...h].map(v => v.toString(16).padStart(8, '0')).join('');
 }
 export const randomUUID = () => globalThis.crypto.randomUUID();
+// Streaming SHA-256 for explicitly scanned logical exports. Same algorithm/envelope
+// as sha256; state size is independent of the input length.
+export class SHA256Stream {
+  constructor() { this.h = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]); this.buffer = new Uint8Array(64); this.used = 0; this.length = 0; }
+  update(text) {
+    const bytes = typeof text === 'string' ? new TextEncoder().encode(text) : text;
+    this.length += bytes.length;
+    for (let offset = 0; offset < bytes.length;) {
+      const n = Math.min(64 - this.used, bytes.length - offset);
+      this.buffer.set(bytes.subarray(offset, offset + n), this.used); this.used += n; offset += n;
+      if (this.used === 64) { this.block(); this.used = 0; }
+    }
+    return this;
+  }
+  block() {
+    const w = new Uint32Array(64), view = new DataView(this.buffer.buffer);
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(i * 4);
+    for (let i = 16; i < 64; i++) { const a = w[i-15], b = w[i-2]; w[i] = w[i-16] + (rotate(a,7)^rotate(a,18)^(a>>>3)) + w[i-7] + (rotate(b,17)^rotate(b,19)^(b>>>10)); }
+    let [a,b,c,d,e,f,g,z] = this.h;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (z+(rotate(e,6)^rotate(e,11)^rotate(e,25))+((e&f)^(~e&g))+K[i]+w[i])>>>0;
+      const t2 = ((rotate(a,2)^rotate(a,13)^rotate(a,22))+((a&b)^(a&c)^(b&c)))>>>0;
+      z=g; g=f; f=e; e=(d+t1)>>>0; d=c; c=b; b=a; a=(t1+t2)>>>0;
+    }
+    [a,b,c,d,e,f,g,z].forEach((v,i) => { this.h[i] += v; });
+  }
+  digest() {
+    const size = this.length, padding = new Uint8Array(this.used < 56 ? 64-this.used : 128-this.used);
+    padding[0] = 128; const view = new DataView(padding.buffer);
+    view.setUint32(padding.length-8, Math.floor(size/0x20000000)); view.setUint32(padding.length-4, size*8);
+    this.update(padding); return [...this.h].map(x=>x.toString(16).padStart(8,'0')).join('');
+  }
+}

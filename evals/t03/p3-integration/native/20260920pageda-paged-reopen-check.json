@@ -1,0 +1,19 @@
+{
+  "phase": "paged-reopen-check",
+  "run": "20260920pageda",
+  "events": [
+    {
+      "type": "done",
+      "phase": "paged-reopen-check",
+      "run": "20260920pageda",
+      "namespaces": [
+        "mnemo-t03-paged-20260920pageda-source",
+        "mnemo-t03-paged-20260920pageda-restored"
+      ],
+      "finalReaderCheckpointValidated": true,
+      "pendingIdsAndConfirmedResultPreserved": true,
+      "nativeArchiveOrSyncTriggered": false,
+      "processCrashTested": false
+    }
+  ]
+}

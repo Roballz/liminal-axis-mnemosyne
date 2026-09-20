@@ -1,0 +1,44 @@
+{
+  "phase": "paged-roundtrip",
+  "run": "20260920pageda",
+  "events": [
+    {
+      "type": "done",
+      "phase": "paged-roundtrip",
+      "run": "20260920pageda",
+      "namespaces": [
+        "mnemo-t03-paged-20260920pageda-source",
+        "mnemo-t03-paged-20260920pageda-restored"
+      ],
+      "initialOperation": "op_00000000-0000-4000-8000-000000000007",
+      "publishedOperations": 5,
+      "pendingGenerated": [
+        {
+          "kind": "snapshot",
+          "value": "hs_9910aac0-a8ed-48c6-a4a5-3662968451f9"
+        },
+        {
+          "kind": "block",
+          "value": "hm_7b8391f5-a17f-4952-b4d2-b1a20b247e01"
+        },
+        {
+          "kind": "block",
+          "value": "hm_a379ccc5-2dea-4d3d-93b8-ec57f17ebe75"
+        },
+        {
+          "kind": "block",
+          "value": "hm_444423b0-325c-42ea-9d06-476ae6a0b2db"
+        }
+      ],
+      "historyDelta": true,
+      "rangeRead": true,
+      "lookupRead": true,
+      "logicalRoundtrip": true,
+      "pendingIdRestore": true,
+      "restoredRetry": true,
+      "externalMaintenanceGate": "HOST_MAINTENANCE_UNSUPPORTED",
+      "nativeArchiveOrSyncTriggered": false,
+      "processCrashTested": false
+    }
+  ]
+}

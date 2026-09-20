@@ -16,7 +16,7 @@
 | T-01 ✅ | 做最小 TT Adapter 探针 | verified；await、payload、取消与 request gate 边界已验证 |
 | T-02A ✅ | TT 宿主身份与变更事件验证 | verified；stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 边界 |
 | T-02 ✅ | 身份、历史版本与上下文的最小可执行契约 | verified；1891043 最终复核关闭 R1～R5，范围限最小参考模型 |
-| T-03 ▶ | 可迁移、可恢复的存储地基 | in_progress；G1已通过；P3有界基元/v1完整恢复增量待review，业务编译仍有界化未完成；自动维护受阻，继续仅限受控隔离 |
+| T-03 ▶ | 可迁移、可恢复的存储地基 | in_progress；G1已通过；P3三项端到端分页受控集成implemented_unverified，待高难项review；自动维护受阻，继续仅限受控隔离 |
 
 用户已授权 Chat 核对后发布正式卡并高难前置。旧 `tasks/T-03-storage-foundation.proposal.md` 为 superseded 历史入口；Codex 不修改关卡许可、不自动生成 T-04。G1 正式回执见 `notes/t-03-g1-final-review.md`；P3 最新专项回审及施工边界见 `notes/t-03-p3-maintenance-review.md`，均为原任务记录，不是新任务卡。
 
@@ -58,15 +58,15 @@ T-02 不沿用柏宝书 Leaf 作为正式对象名；普通派生按 User + Assi
 
 ## 6. 当前阻塞、关卡与未决项
 
-**T-02 无剩余验收阻塞；G1-R1/R2仍已关闭。P3自动外部维护隔离受阻，c90d77d未关闭该缺口。** `notes/t-03-p3-handoff.md`保留原始停工证据。当前P3有界结构基元与v1辅助格式恢复增量为implemented_unverified；普通领域编译仍用P2全库oracle，分页发布/checkpoint与规模化恢复未实现，不把T-03升为verified。
+**T-02 无剩余验收阻塞；G1-R1/R2仍已关闭。P3自动外部维护隔离受阻，c90d77d未关闭该缺口。** `notes/t-03-p3-handoff.md`保留原始停工证据。当前P3普通业务分页编译、单点发布/checkpoint、完整分页恢复三项受控集成已实现并验证，状态implemented_unverified；最新回报见高难交接第7节，不把T-03升为verified。
 
 P3后续工作与许可：
 
-1. 持久请求/生成ID前置诊断已有实现，仍保留P2上限；本轮补齐v1完整辅助材料恢复与新intent格式的隔离进程故障验证；有界基元尚需接入领域编译、发布和恢复checkpoint。具体运行证据见evals/t03/p3-structures-recovery，不能以正常close/reopen代替强杀验证。
+1. 持久请求/生成ID前置诊断已有实现，仍保留P2上限；旧intent入口仍保留P2上限；新分页入口已接通领域编译、发布/checkpoint和完整恢复，并通过新路径发布前/后强杀。具体运行证据见evals/t03/p3-integration，不能以正常close/reopen代替强杀验证。
 2. 自动宿主维护路径继续返回HOST_MAINTENANCE_UNSUPPORTED。推荐与TT作者确认原生打开代次/租约或可等待的维护前排空能力；当前只为提议，不授权修改TT或自动切B2/A。新版维护锁不能代替旧句柄代次隔离，JS写前检查不能代替原子校验。
 3. **可继续其余P3工程工作**：有界manifest/command/view/expected/journal/目录、精确枚举、完整一致备份恢复；只用已确认的独立实例/namespace及合成数据，明确无未经协调的宿主同步/归档/库替换。合作式维护必须先等待suspend再操作。无法确保这个隔离前提的原生测试继续停，可先做纯模型/独立测试。
 
-这不是批准“靠用户记得关同步”的生产模式；自动维护安全、完整T-03及手机准入仍有门禁。不得改开关假称已具备fencing，不以换到c90d77d为由移除门禁。P3完成后先交高难项review，再按原卡安排P4/P5；S05、完整流式恢复、索引恢复、规模和手机均未验收。
+这不是批准“靠用户记得关同步”的生产模式；自动维护安全、完整T-03及手机准入仍有门禁。不得改开关假称已具备fencing，不以换到c90d77d为由移除门禁。P3完成后先交高难项review，再按原卡安排P4/P5；S05及分页完整恢复已有本轮实现/验证，仍待review；索引任务、P4设备/资源与手机未验收。
 
 性能预算尚无用户确认，先探索测量；正确性不得打折，不能测后自设阈值宣布手机达标。产品层仍待后续：非标准回合、品牌名、模糊导入匹配、自动保留/清理、完整模板。不在T-03顺手决定；数据先保留，不自动GC。
 
@@ -78,4 +78,4 @@ P3后续工作与许可：
 
 ## 8. 阶段收尾 review
 
-T-00、T-01、T-02A、T-02已verified；T-03为in_progress，G1通过。P3部分诊断实现未全面验收，自动维护受阻；其余P3仅在明确受控环境继续。隔离桌面的P2原型和原故障边界已复核；完整有界存储、性能和手机生产使用未验收。
+T-00、T-01、T-02A、T-02已verified；T-03为in_progress，G1通过。P3三项端到端受控集成已回报implemented_unverified，自动维护受阻；高难项review前不进入P4/P5。分页新路径314项回归、隔离TT断点和增长包恢复已有证据，性能和手机生产使用未验收。

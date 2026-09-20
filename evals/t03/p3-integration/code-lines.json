@@ -1,0 +1,128 @@
+{
+  "groups": {
+    "implementation": {
+      "added": 1047,
+      "deleted": 0
+    },
+    "tests": {
+      "added": 818,
+      "deleted": 0
+    },
+    "harness": {
+      "added": 287,
+      "deleted": 6
+    }
+  },
+  "files": [
+    {
+      "path": "packages/contracts/runtime.mjs",
+      "added": 33,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/native/collector.mjs",
+      "added": 2,
+      "deleted": 2
+    },
+    {
+      "path": "packages/storage/native/isolated-tt.ps1",
+      "added": 4,
+      "deleted": 2
+    },
+    {
+      "path": "packages/storage/native/stop-isolated-complete.ps1",
+      "added": 2,
+      "deleted": 2
+    },
+    {
+      "path": "packages/storage/native/suite.mjs",
+      "added": 2,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/pages.mjs",
+      "added": 19,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/native/paged-growth-reopen.mjs",
+      "added": 24,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/native/paged-growth.mjs",
+      "added": 57,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/native/paged-suite.mjs",
+      "added": 196,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/paged-coordinator.mjs",
+      "added": 202,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/paged-directory.mjs",
+      "added": 20,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/paged-domain.mjs",
+      "added": 102,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/paged-history.mjs",
+      "added": 163,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/paged-memory.mjs",
+      "added": 157,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/paged-recovery.mjs",
+      "added": 66,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/paged-transport.mjs",
+      "added": 203,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/paged-tt-adapter.mjs",
+      "added": 82,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/tests/paged-adapter.test.mjs",
+      "added": 63,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/tests/paged-integration.test.mjs",
+      "added": 484,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/tests/paged-native-suite.test.mjs",
+      "added": 28,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/tests/paged-recovery.test.mjs",
+      "added": 80,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/tests/paged-transport.test.mjs",
+      "added": 163,
+      "deleted": 0
+    }
+  ]
+}

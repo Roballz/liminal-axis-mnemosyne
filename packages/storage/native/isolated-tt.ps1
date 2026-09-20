@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][ValidateSet('Start','Crash')][string]$Action,
-  [ValidateSet('before','after','p3-before','p3-after')][string]$Phase = 'before',
+  [ValidateSet('before','after','p3-before','p3-after','paged-before','paged-after')][string]$Phase = 'before',
   [ValidatePattern('^[a-z0-9]+$')][string]$Run = '20260919a'
 )
 $ErrorActionPreference = 'Stop'
@@ -23,7 +23,9 @@ if ($Action -eq 'Start') {
   $evidencePath = Join-Path $repoRoot ".t03-local\evidence\$Run-$Phase.json"
   $evidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
   $boundary = $evidence.events[-1]
-  $expectedNamespace = if ($Phase.StartsWith('p3-')) { "mnemo-t03-p3-$Run-crash-$($Phase.Substring(3))" } else { "mnemo-t03-$Run-crash-$Phase" }
+  $expectedNamespace = if ($Phase.StartsWith('p3-')) { "mnemo-t03-p3-$Run-crash-$($Phase.Substring(3))" }
+    elseif ($Phase.StartsWith('paged-')) { "mnemo-t03-paged-$Run-crash-$($Phase.Substring(6))" }
+    else { "mnemo-t03-$Run-crash-$Phase" }
   if ($boundary.type -ne 'kill-ready' -or $boundary.phase -ne $Phase -or
       $boundary.namespace -ne $expectedNamespace) { throw 'No matching armed fault boundary' }
   $testProcess = Get-Process -Id $instances[0].ProcessId

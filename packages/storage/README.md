@@ -43,7 +43,7 @@ collector 仅监听 127.0.0.1:19374，完成/错误/kill-ready 后自行停止�
 
 ## P3 bounded primitives and complete v1 recovery
 
-`Pages`提供精确持久目录/游标、计数序列树及结构审计；`PagedJSON`提供`write/read/at/set/splice`。独立Node测试验证局部路径和旧根共享，原生harness验证精确大整数NodeId与重开。它们尚未接入普通领域编译/发布，不能按已完成P3业务provider使用。
+`Pages`提供精确持久目录/游标、计数序列树及结构审计；`PagedJSON`提供`write/read/at/set/splice`。独立Node测试验证局部路径和旧根共享，原生harness验证精确大整数NodeId与重开。4caa326时它们尚未接入普通领域编译/发布；本轮分页业务入口见末节，旧intent入口仍保留P2上限。
 
 现有intent入口增加：
 
@@ -58,3 +58,32 @@ const prepared = await target.handle().pending();
 最终原生命令：`collector.mjs p3-recovery <run>`；`p3-before`→精确Crash→`recover-p3-before`；`p3-after`→精确Crash→`recover-p3-after`。恢复collector读取同run的kill-ready独立证据，验证原operation/生成ID/结果；缺证据不能当恢复成功。正常完成后的`stop-isolated-complete.ps1 -Phase <phase> -Run <run>`只记录退出清理，不计作故障实验。每次启动仍通过`isolated-tt.ps1 -Action Start`的固定哈希/独立路径/无其他TT实例检查。
 
 所有原生实验仍要求无未经协调的同步/归档/其他调用方替换库。自动维护门禁不变，生产准入未放宽。
+
+## P3 paged end-to-end path
+
+`openPagedTestStore(api.db, 'mnemo-t03-paged-<run>-<case>', {create:true})` 是本轮受控分页入口。历史/记忆/绑定经 `prepare` → `execute`，`pending/lookup` 恢复原请求、生成ID与结果；普通重开读取持久checkpoint，不重放全库。旧intent入口保留为兼容测试路径。
+
+```js
+const store = await openPagedTestStore(api.db, 'mnemo-t03-paged-example-source', { create: true });
+const h = store.handle();
+await h.prepare({ operation_id, kind: 'history-delta', payload: {
+  ...commandWithoutEntries,
+  splice: { start, delete_count, entries: changedSourceRefs },
+} });
+const result = await h.execute(operation_id);
+const entries = await h.range(result.snapshot_id, 0, 16);
+const stream = await h.export();
+const restored = await openPagedTestStore(api.db, 'mnemo-t03-paged-example-restored', { restore: stream });
+```
+
+示例变量须由调用方提供真实已校验的合成命令；范围读取不能超过实际消息数。完整`history`命令、`memory`和`binding`输入形状与intent入口一致。`read(table,id)`读取单个逻辑对象；`enumerate(table,after,limit,checkpoint)`逐页枚举，提供checkpoint时拒绝跨提交混读；`memoryStatus`核对当前分支和cutoff。`logical()`是有显式物化上限的v2互操作输出；完整辅助恢复必须用`export()`分页包。
+
+新文件分工：`paged-history/memory/domain`局部编译与语义，`paged-coordinator`单写/检查点，`paged-directory/transport/recovery`有界目录、文本流和激活前审计。完整恢复先staging，逐页验证引用，再用持久ID重编译对照全部确认结果/候选；成功才active。无原文、旧版本、未选记忆、纠错和pending均不因恢复被丢弃。
+
+验证入口：
+
+- 全量：`node --test packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`
+- P3增长正确性：`node --max-old-space-size=1536 packages/storage/native/paged-growth.mjs`；虚构样本，输出到`evals/t03/p3-integration/`，临时分页包仅在`.t03-local/`。
+- 原生：collector的`paged-roundtrip`、`paged-before`→Crash→`recover-paged-before`、`paged-after`→Crash→`recover-paged-after`；`paged-reopen-check`复核同run已完成往返的库。只通过既有精确隔离脚本启停。
+
+协议见09第10节；测试边界见原task与高难项交接。新格式没有迁移真实档案；自动维护仍`HOST_MAINTENANCE_UNSUPPORTED`，不授权手机或生产使用。P4/P5未进入，T-03未完成。

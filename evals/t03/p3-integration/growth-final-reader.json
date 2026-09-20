@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "sourcePackageSHA256": "19e16314e8b7c3c5860cb29f8933f76e97a379614a6e6a1ed0901c8b891348a0",
+  "coldReads": 99,
+  "confirmedHistoryOperations": 66,
+  "pendingIdsAndResultPreserved": true,
+  "targetPhysicalNodes": 148572,
+  "memory": {
+    "rss": 459739136,
+    "heapTotal": 305655808,
+    "heapUsed": 146505272,
+    "external": 2651486,
+    "arrayBuffers": 325824
+  },
+  "scope": "Final reader + complete restore of the prior synthetic growth package; in-memory fixture IO, not native/mobile"
+}

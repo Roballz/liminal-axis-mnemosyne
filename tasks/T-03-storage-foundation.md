@@ -376,3 +376,51 @@ S05、完整S06/S07和维护S08仍pending：manifest/command.entries/views/corre
 自动维护/真正sync/archive/硬件断电/真实磁盘满/手机未验证；c90d77d未安装实测；不修改TT、不切B2/A、不接受新受限生产模式。本次没有新增产品信息缺失或要求重复授权，剩余隔离工程仍在原许可内。
 
 回退保留旧v1源库、新恢复库、所有测试库与完整包。旧代码拒绝恢复目标，不修改身份绕过；需要读取新库时保留本轮读者。分页实验与业务库分开，未迁移真实档案。已更新高难项交接、阶段导读、README、协议v0.5和CHANGELOG；按用户持久要求提交push供Chat review。状态只到当前增量implemented_unverified，不宣布P3/T-03完成。
+
+## P3 端到端分页受控集成（2026-09-20 Codex 回报）
+
+**本轮完成原交接第5节的三项集成，状态implemented_unverified，供高难项review。** 自动外部维护门禁仍阻塞该路径及生产准入；整个P3未获验收，T-03保持in_progress，P4/P5未开工，无新任务卡。
+
+### 基线、范围、实现量
+
+- `git pull --ff-only origin main`由4caa326快进至`2f11c5b`，main；拉取首次被FETCH_HEAD沙箱权限拦截，按工具升级权限后成功。原`.codex/`保留且不提交。
+- 已读README、AGENTS、S-A、本task、G1第5节、维护专项review、P3交接第5节、06 v0.3、08、03相关决策及全部涉及的原型/契约实现。存储协议由v0.5更新v0.6；逻辑包v2/schema_version=1和指纹算法未更改。
+- 本轮预估实现1500～2300、测试/harness900～1400行；实际实现**+1047/-0**，测试**+818/-0**，harness/控制脚本**+287/-6**。详见`evals/t03/p3-integration/code-lines.json`。不以缩短行数替代验收；无新增依赖、服务或第三方源码。
+- 按用户中途要求收回子代理产出，后续由主代理单线完成修复、扩展反例、完整回归、原生操作和交接；模型策略已写入AGENTS。子代理结论只作已有产出复用，最终结果以本轮实际执行证据为准。
+
+### 三项集成与格式影响
+
+1. 新增paged-domain/history/memory，将历史局部变化、共享manifest/command.entries、记忆selections/corrections、binding及UUID目录接入分页结构。用原schema/derivedFingerprint和oracle作对照；需要检查的依赖按范围遍历，不先复制全state。`history-delta`是独立请求简写；显式逻辑读取仍还原标准command及原v2指纹。
+2. 新增PagedCoordinator与隔离TT adapter：先持久准备原请求/生成ID/结果/候选，后单点发布domain、账本、journal、markers和checkpoint。正常重开不重放旧操作；原请求索引、pending和幂等结果可恢复。owner代次/关闭/合作维护保留，异常结果显式recover。测试发现纯领域拒绝误锁owner，已修复并加入回归；被拒绝候选不改变旧确认状态。
+3. 新增精确页目录和完整NDJSON恢复：固定边界、逐页读取、严格UTF-8/重复key/资源控制，空库staging；先确认持久引用完整，再用原生成ID重编译审计全部journal/domain/结果和pending，成功才激活。正常恢复不重造ID、不覆盖源库。分页格式独立于旧P2/intent，新库拒绝旧读者。
+
+恢复标记为一致Head/view上的`index=behind,rebuild=evaluate`，保留全部计算材料，不伪称模型或索引任务已执行，也不把所有旧记忆全局判失效。单对象/请求预算、图深度、缓存和传输上限均见09第10节；完整v2物化只限显式小包路径。目录中间页和孤儿无自动GC，物理放大另列风险。
+
+### 实际环境、命令与结果
+
+Windows x64 / Node v24.19.0。隔离TT仍为`367b0c7e9410e8fcf394f668302d70073e5a3ce5`，exe SHA256 `11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4`，独立`D:\Mnemosyne\.t03-local\tt-367b0c7\data`及WebView profile。c90d77d未安装实测，不作为句柄隔离修复证据。
+
+| 验证 | 实际结果/证据 |
+| --- | --- |
+| `node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js` | **314/314通过，0失败/取消/跳过**；原275项保留。`node-tests.tap` |
+| 全部contracts/storage/probe `.mjs/.js`逐一`node --check` | **52/52通过**，syntax.json；两份PowerShell控制脚本AST无错误 |
+| 增长正确性 `node --max-old-space-size=1536 packages/storage/native/paged-growth.mjs` | 66确认操作、132消息、1,081,344合成字符及1个pending；39,378,227字节/60,290记录包；全部采样历史/确认结果/pending保留，growth.json |
+| 最终读者复用原增长包 `node --max-old-space-size=1536 packages/storage/native/paged-growth-reopen.mjs` | 通过；最终冷开99次读取，66项确认操作与原pending ID/结果保留；包hash见growth-final-reader.json；不重复生成原66次历史 |
+| `collector.mjs paged-roundtrip 20260920pageda` | 真实TT完整逻辑往返、history-delta、memory、binding及pending ID恢复/重试通过 |
+| `paged-before`→精确Crash→`recover-paged-before`，run20260920pagedb | paged-publish前强杀PID12200；重开prepared，原ID/结果匹配，提交后2条历史operation，无重复 |
+| `paged-after`→精确Crash→`recover-paged-after`，同run | paged-ack前强杀PID4932；重开published，返回原结果，2条历史operation，无重复 |
+| `paged-reopen-check 20260920pageda` | 最终读者重新检查先前真实TT源/恢复库，目录checkpoint、原pending ID和已确认结果通过 |
+
+原生证据及进程证明在`evals/t03/p3-integration/native/`。首次往返之后仅补强普通冷开的目录校验；首次与最终部署哈希分别保存，不混称同一代码运行。最终断点组与reopen-check使用最终读者。PowerShell进程证明可能把ISO时间字符串序列化为等价日期表示，原始请求逐字材料以Node collector原JSON为准。
+
+新增模型反例涵盖local append/edit/insert/delete/reorder/restore、no-op import、固定fork、current依赖环、checkpoint/advance/correct、derived-only及cutoff；准备/发布两侧、丢确认、空目标恢复各激活阶段ENOSPC、缺页和合法checksum的R5/候选矛盾。检查点回读与局部操作读取量实测，不以独立树基元通过代替业务路径。
+
+### 资源、未验证项与回退
+
+增长测试的fixture IO同时持有完整源/目标物理Map，最终RSS约1.24GB；源物理节点681,821、恢复目标148,572，空间放大明显。该数字不是正式provider缓存预算，也不是P4设备性能通过。后续应检查真实TT空间/延迟及无GC增长；本轮没有用自定阈值批准手机。测试范围超出P2的32清单/64提交限制，但不宣称无限规模。
+
+自动外部维护仍`HOST_MAINTENANCE_UNSUPPORTED`；未真实触发sync/archive、未硬件断电/真实磁盘满/手机测试，未修改TT、未切B2/A。所有原生阶段只用既有独立实例和新合成namespace，完成后的退出清理单独记录，不充作故障证据；测试库及本地包全部保留。
+
+回退保留旧库、新分页库、原请求和完整分页包，停用新入口并保留可读版本，不改root格式绕过旧读者拒绝。新namespace为`mnemo-t03-paged-20260920pageda-{source,restored}`及`mnemo-t03-paged-20260920pagedb-crash-{before,after}`，无真实档案迁移。
+
+高难交接第7节、README、阶段导读、包说明、协议和CHANGELOG已同步。下一依赖是Chat对受控集成/格式/正确性证据的review及未解决的宿主维护能力；不擅自进入P4/P5或创建后续卡。按用户持久要求提交push，整个T-03不提前宣告完成。

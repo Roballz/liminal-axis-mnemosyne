@@ -1,8 +1,8 @@
 # T-03：存储发布与恢复协议及P3前置边界
 
-版本：v0.5，2026-09-20。状态：48663c4已通过G1，B1获准在受控隔离环境继续P3；有界结构基元与v1完整辅助恢复增量implemented_unverified，普通领域编译/分页发布及规模化恢复未完成，自动外部维护门禁保留。**P3与T-03均未完成，B1未获手机/生产准入。**
+版本：v0.6，2026-09-20。状态：48663c4已通过G1，B1获准在受控隔离环境继续P3；本轮端到端分页集成及验证见第10节，状态implemented_unverified，自动外部维护门禁保留。**P3与T-03均未完成，B1未获手机/生产准入。**
 
-下文1～7节保留P0～P2协议与当时限制；其中“G1待审/未放行”是历史状态，当前许可按最终回执。第8节保留前置增量，P3最新协议与边界见第9节及 `../notes/t-03-p3-handoff.md`。
+下文1～7节保留P0～P2协议与当时限制；其中“G1待审/未放行”是历史状态，当前许可按最终回执。第8节保留前置增量，P3最新协议与边界见第10节及 `../notes/t-03-p3-handoff.md`。
 实施基线 `852260acd8d3e65d9d756af81cdf72e52c50046b`；继承 06 v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。本文没有更改领域语义。
 
 ## 1. 已观察的宿主原语
@@ -123,3 +123,43 @@ G1 若放行，P3 必须将 command.entries 用不可变清单引用无损恢复
 新增Node故障测试覆盖原文旧版本/删除保留、父子固定快照、第二故事、纠错、binding、pending、非法包及导入各断点；原211回归保留。原生最终组`20260920p3e`验证完整辅助材料往返、分页根重开、新intent发布前/后进程强杀，具体结果及哈希见`evals/t03/p3-structures-recovery/`。
 
 自动外部维护仍固定`HOST_MAINTENANCE_UNSUPPORTED`，未升级c90d77d、未修改TT、未触发真实sync/archive、未验证硬件断电/真实磁盘满/手机。T-03继续in_progress；高难项交接和剩余工程工作见`notes/t-03-p3-handoff.md`。
+
+## 10. P3 端到端分页集成（2026-09-20，待高难项 review）
+
+本轮独立格式为 `mnemosyne-paged-storage-v1`，只进入新 `mnemo-t03-paged-*` 隔离 namespace。旧 P2/intent 入口、格式和回归保留，不就地升级旧库。普通业务入口为 `PagedCoordinator`，经过唯一 owner 队列处理历史、记忆和绑定；实现范围仍为 T-02 已建模对象。
+
+### 10.1 业务编译与逻辑包的关系
+
+历史使用计数序列树、UUID成员索引和有序标签索引。append/edit/insert/delete/fork 共享未变路径，固定 fork 只截取父快照前缀；标签不作为领域 ID。384 位标签的间隙不足明确返回 RESOURCE_LIMIT，不重排全库或更改身份。manifest 的新路径生成正式 hm UUID，旧 snapshot/块保留。完整 command.entries 以共享 JSON 序列引用保存，不在每轮重新生成整个数组。
+
+`history-delta` 是存储请求的显式简写：payload 用 `splice:{start,delete_count,entries}` 替换完整 entries，其余字段仍按 command schema 校验；编译后保留可无损展开的原 v2 command。原 `history` 完整命令入口仍可用，扫描调用者提供的完整清单。不同输入形状的同 operation 请求属于不同原请求，不能静默互换重试。
+
+原 v2 的 `payload_fingerprint` 算法和包校验不变。其 SHA-256 覆盖完整 command，不能声称局部编辑后可常数成本重算。因此分页 operation 保留 command 引用，在显式逻辑读取/导出时流式计算原指纹；普通增量的内部去重对**独立版本化原请求**求指纹，不冒充 v2 command 指纹。小型 `logical()` 继续输出可经原 validateState/importLogical 验证的 v2 包；限制4096对象、8MiB物化总量及单对象预算。规模化备份走下述分页格式。
+
+记忆、coverage、current/checkpoint、纠错与R5使用既有schema/derivedFingerprint及异步分页引用检查，按键更新selections/corrections，不复制全库视图。需要检查的实际依赖图可遍历；算法以小样本oracle对照验证，原contracts仍是语义基准。绑定保持原generation/归属检查，不将记忆和绑定请求混入历史operations。
+
+每个受影响分支保存 `{head,view,index:'behind',rebuild:'evaluate'}`。这是对该一致快照重新计算有效性/重建计划的持久材料，不表示全部旧记忆都失效或已执行重建；所有原文、输入关系、选择和纠错可达。当前阶段不执行模型、embedding或索引任务，不批准旧候选用于召回。
+
+### 10.2 请求、发布与恢复检查点
+
+逻辑槽0是唯一可变root，包含格式、独立library UUID、active/staging、checkpoint与精确页目录引用及checksum。不可变checkpoint包含domain、请求UUID索引、确认账本、journal序列、提交数和至多一个pending operation。expected由原请求和固定base domain引用表达，避免复制所有Head/view/binding。
+
+准备：只编译纯领域变化并保存不可变候选、原输入、生成ID和结果；flush材料，再更新仍指向旧domain的pending检查点并flush，才确认prepare。执行：把候选domain、账本、journal和pending清空写进同一新检查点；flush材料，单点发布root，再flush后确认。丢确认或IO不确定会隔离owner；重开先查同operation，返回原生成ID/结果，不自动换新操作。纯编译拒绝只留下不可达候选，抛弃暂存目录，不锁死旧已确认状态。
+
+正常重开只读root、精确目录路径、checkpoint及至多一个pending原请求，不重放全部历史。读取遇缺失/损坏会明确失败；显式audit和恢复激活前才全面检查所有保存材料。关闭成功永久终止owner；失败关闭保留登记并可recover；合作式suspend排空后持票据恢复。自动外部维护仍固定拒绝，检查root并不是宿主原子fencing。
+
+### 10.3 完整分页恢复与资源边界
+
+传输格式 `mnemosyne-page-directory-v1`：固定目录边界、header/page/footer、连续checksum链。目录逐键精确枚举全部保留的业务页、原请求、生成ID、候选、journal/账本和历史检查点；不使用search/topK，不在内存构造全局visited集合。传输保留相同内容的共享页一次，重新构建物理页目录；目录自身的历次中间节点不属于必须导出的领域材料。既有物理孤儿不自动GC。
+
+导入先证明空目标并持久写staging，再分批解析/写不可变页和暂存目录。先验证每条页引用确实存在于目录及持久材料中，防止后续重编译悄悄补回缺页；然后按journal顺序用原生成ID重编译纯领域操作，对照每个base/after/result、完整domain和精确索引，最后核验pending。合法checksum不能绕过R5、引用、归属或操作结果校验。只有全部通过才发布active并flush；目标获得新library UUID，领域ID、旧历史、纠错、确认结果和prepared材料不变。激活前中断不开放读取，原库不覆盖。
+
+默认上限：页8192 bytes、页缓存128、树/JSON深度64；普通请求1MiB；单对象物化1MiB/200000值；依赖遍历深度128。物理目录缓冲512节点，单次AVL更新暂可再增加有界路径，checkpoint时只落仍可达节点；库增长不扩大该缓冲。传输默认1GiB、1000000页、单行1MiB，超限拒绝，不截断正文。测试provider为测故障/统计保存内存Map，其总内存与正式分页算法的缓存预算分开报告。
+
+完整恢复可以线性枚举并重放历史以审计，但内存不随整个业务库物化。恢复审计仍消耗实际累计操作和物理材料的读取/计算成本；本轮不把它描述为常数时间。普通追加/重开和显式全量导出/审计分别取证。
+
+### 10.4 准入和回退
+
+固定TT仍为367b0c7e9410，c90d77d没有被认定解决句柄代次。原生验证仅使用独立data root、WebView profile与合成namespace，未触发真实sync/archive、未改TT、未切B2/A。完整恢复与增长正确性不等于P4资源/设备验收或手机生产准入。
+
+回退保留所有库及分页包。旧入口拒绝新格式；读取新库须保留分页读者，不能改root格式来伪装降级。小型v2输出是互操作材料，不包含分页辅助账本；只有完整分页包承担此次恢复承诺。T-03仍in_progress，P4/P5未进入，最终验证及未覆盖项见task与高难项交接。

@@ -1,0 +1,88 @@
+{
+  "Action": "Crash",
+  "PID": 4932,
+  "Executable": "D:\\Mnemosyne\\.t03-local\\tt-367b0c7\\tauritavern.exe",
+  "DataRoot": "D:\\Mnemosyne\\.t03-local\\tt-367b0c7\\data",
+  "Phase": "paged-after",
+  "Boundary": {
+    "type": "kill-ready",
+    "phase": "paged-after",
+    "run": "20260920pagedb",
+    "namespace": "mnemo-t03-paged-20260920pagedb-crash-after",
+    "boundary": "paged-ack",
+    "edge": "before",
+    "operation_id": "op_00000000-0000-4000-8000-00000000000d",
+    "input": {
+      "kind": "history-delta",
+      "operation_id": "op_00000000-0000-4000-8000-00000000000d",
+      "payload": {
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "change_kind": "append",
+        "created_at": "2026-09-19T00:00:00Z",
+        "expected_head": "hs_4fe241c9-928b-41c0-8301-3f74fcec6f8e",
+        "fork": null,
+        "messages": [
+          {
+            "message_id": "msg_00000000-0000-4000-8000-00000000000b",
+            "schema_version": 1,
+            "story_id": "st_00000000-0000-4000-8000-000000000001"
+          }
+        ],
+        "operation_id": "op_00000000-0000-4000-8000-00000000000d",
+        "revisions": [
+          {
+            "content": "P3 分页故障边界中的虚构正文 😀",
+            "content_fingerprint": "sha256:content:v1:6326f6640fd8c8fa80a109604c69065f91e3edb45a29265faf0ca9fb79172696",
+            "message_id": "msg_00000000-0000-4000-8000-00000000000b",
+            "provenance": {
+              "binding_id": null,
+              "host_kind": "fixture",
+              "host_scope": "fictional",
+              "import_batch": null,
+              "mutable_ref": null,
+              "observed_index": null,
+              "operation": "test",
+              "stable_id": null
+            },
+            "revision_id": "rev_00000000-0000-4000-8000-00000000000c",
+            "role": "user",
+            "schema_version": 1
+          }
+        ],
+        "splice": {
+          "delete_count": 0,
+          "entries": [
+            {
+              "message_id": "msg_00000000-0000-4000-8000-00000000000b",
+              "revision_id": "rev_00000000-0000-4000-8000-00000000000c"
+            }
+          ],
+          "start": 2
+        },
+        "story_id": "st_00000000-0000-4000-8000-000000000001"
+      }
+    },
+    "generated": [
+      {
+        "kind": "snapshot",
+        "value": "hs_6e2a4172-3651-4d51-9e32-c21869c5b7da"
+      },
+      {
+        "kind": "block",
+        "value": "hm_821e979d-a8ef-4ff4-a11c-9faf53a5b2dd"
+      },
+      {
+        "kind": "block",
+        "value": "hm_8f13ab8b-5afc-4375-a18d-44236a74f389"
+      }
+    ],
+    "result": {
+      "snapshot_id": "hs_6e2a4172-3651-4d51-9e32-c21869c5b7da"
+    },
+    "preparedMaterialsFlushed": false,
+    "publishedRootFlushed": true,
+    "independentBeforeEvidence": true,
+    "isolatedFixture": true
+  },
+  "At": "2026-09-20T13:25:08.8090676Z"
+}

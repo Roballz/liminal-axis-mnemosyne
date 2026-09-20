@@ -1,0 +1,10 @@
+[
+  {
+    "path": "packages/storage/native/isolated-tt.ps1",
+    "errors": 0
+  },
+  {
+    "path": "packages/storage/native/stop-isolated-complete.ps1",
+    "errors": 0
+  }
+]

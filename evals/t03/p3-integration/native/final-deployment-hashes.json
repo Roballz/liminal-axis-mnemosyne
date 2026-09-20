@@ -1,0 +1,198 @@
+[
+  {
+    "Path": "packages\\contracts\\context.mjs",
+    "SHA256": "B510A2AE1AEE9D298A8FD9B4DB1C86D97D2AEB8B49B4909FB323CAF7BDE64EB3"
+  },
+  {
+    "Path": "packages\\contracts\\history.mjs",
+    "SHA256": "4F3A11D99D55174A11EB1ECCF0B38C8A9FD3A7D45CEC00E3D54548ECF81EB15A"
+  },
+  {
+    "Path": "packages\\contracts\\index.mjs",
+    "SHA256": "65B4E3190BB46C96DD152EACCB31E6909F13AC17DA8771534862B5960642022E"
+  },
+  {
+    "Path": "packages\\contracts\\memory.mjs",
+    "SHA256": "816AEA336ED2117A9E59B1993C40434DC0FF4EA803D947DA3BBF49ECCE65395D"
+  },
+  {
+    "Path": "packages\\contracts\\primitives.mjs",
+    "SHA256": "B5E7CE5687EF7D48EB3CA669FD5D154F5DF497FEA87FB36D485956970C77406B"
+  },
+  {
+    "Path": "packages\\contracts\\runtime.mjs",
+    "SHA256": "3DC5538D45D9395BEA4262F2A773F48DB516B2ADE92EA008DBCFB811781F0534"
+  },
+  {
+    "Path": "packages\\contracts\\schema.mjs",
+    "SHA256": "B9BDB69197BC0DF394DC6E167D634067D55AB834AD2F2AEC71E2345D59D83014"
+  },
+  {
+    "Path": "packages\\contracts\\transfer.mjs",
+    "SHA256": "83A1F637920E1B4924AFDBB789027FC543CC4A81EC7B69B9A19B2D87870331CF"
+  },
+  {
+    "Path": "packages\\contracts\\tests\\contracts.test.mjs",
+    "SHA256": "4109AFB1EA116345B5891AD44F8FEFA6F299A74ED822760B4608A4589F1BA9C0"
+  },
+  {
+    "Path": "packages\\contracts\\tests\\fixture.mjs",
+    "SHA256": "6A606986B014B2D5B7FDE0B261E7FDBC34AE96D61948BD827448840424BD8917"
+  },
+  {
+    "Path": "packages\\contracts\\tests\\review-round2.test.mjs",
+    "SHA256": "3A96C070574DDBBB0307CB213FE4E0E19FDA2C6DAC9D3F07C3A6C740D1489528"
+  },
+  {
+    "Path": "packages\\contracts\\tests\\review.test.mjs",
+    "SHA256": "4B98163F1C9D6BAE63C077CE87812AFE646739A10F6C9DFD283070867E5CA69B"
+  },
+  {
+    "Path": "packages\\storage\\intent-prototype.mjs",
+    "SHA256": "14DFC0868117977164A646F489211855F71407105CFB095043038D380BA45627"
+  },
+  {
+    "Path": "packages\\storage\\intent-recovery.mjs",
+    "SHA256": "9901A64F4FE1748F2EE4671296D712503B1344D543C7840694D6ADD3F0830979"
+  },
+  {
+    "Path": "packages\\storage\\intent-tt-adapter.mjs",
+    "SHA256": "15E7954F337C048C2CC9FF0FE386F24A7D83800E55A1DAF2B76CF0D0AEA4C380"
+  },
+  {
+    "Path": "packages\\storage\\paged-coordinator.mjs",
+    "SHA256": "59DCAE319E50AB11F44439C33A1E0F5FADE113F21EFB1FB48E0AC85A5CBBB683"
+  },
+  {
+    "Path": "packages\\storage\\paged-directory.mjs",
+    "SHA256": "DC0CEEE119760BA327FF52736058E50CA724ABF06EFBD89C47A368AF73EC7317"
+  },
+  {
+    "Path": "packages\\storage\\paged-domain.mjs",
+    "SHA256": "AAEDE51233859DD3F958C174E7F3CFC4CE653C4CD107B745F5FBF69FD6508190"
+  },
+  {
+    "Path": "packages\\storage\\paged-history.mjs",
+    "SHA256": "B7C5731C293D7705BB2B30A387869BD5D897F758538D031D19EADFA7A03D9183"
+  },
+  {
+    "Path": "packages\\storage\\paged-json.mjs",
+    "SHA256": "E422B6F1151CDC2517FE4A06AAE1746375244B9B7FDF8008DBA50C7A1727A37C"
+  },
+  {
+    "Path": "packages\\storage\\paged-memory.mjs",
+    "SHA256": "9494C19FF47F119A88469A74E679C77D9E6B03DFB4E6C70690FF99393CDD9BA7"
+  },
+  {
+    "Path": "packages\\storage\\paged-recovery.mjs",
+    "SHA256": "0BF171B8192F32C445280A7FE8F0A09774D43465F4F3FEB3ACD137C62A4C7EA9"
+  },
+  {
+    "Path": "packages\\storage\\paged-transport.mjs",
+    "SHA256": "7EFC0398487C931E36A3A716CCF710B723357EEA1108E6EB56CC2C90F5BF6663"
+  },
+  {
+    "Path": "packages\\storage\\paged-tt-adapter.mjs",
+    "SHA256": "D78B04B3E11DEE777C653CD514A7C29F0D45CDCE62CF32A179403927A4E86106"
+  },
+  {
+    "Path": "packages\\storage\\pages.mjs",
+    "SHA256": "D5EC9A5AFA8EB7BEFC00C9F041567129FF70FD95D174B4326F1CF9F1A0B8E853"
+  },
+  {
+    "Path": "packages\\storage\\protocol.mjs",
+    "SHA256": "06BE81CB311EEF00D52FB7A48DF22633BAE4D798EC44BC9AA002C0B27FC610CB"
+  },
+  {
+    "Path": "packages\\storage\\strict-json.mjs",
+    "SHA256": "9B2440D2E3BCA40F2BCA66BCA8C42B6CF915BC9AD966FCF781831EDC94B77205"
+  },
+  {
+    "Path": "packages\\storage\\tt-adapter.mjs",
+    "SHA256": "5543D329991F96EE8627C67CDE7D9EF394DB7F886349B8EE8AB2491C450F077C"
+  },
+  {
+    "Path": "packages\\storage\\native\\collector.mjs",
+    "SHA256": "2113F9A166FDDDDD224B16B76C40E8E774932EC08FF2560EDB885F7A93EA940D"
+  },
+  {
+    "Path": "packages\\storage\\native\\index.js",
+    "SHA256": "EE4892ADD61BAA134DF9E7276F5E28894958CDD0E812DD10726323C932E6D2C1"
+  },
+  {
+    "Path": "packages\\storage\\native\\intent-suite.mjs",
+    "SHA256": "B7730235F545B5004B18311522912E9F828A373AA3AC3C5AB0B3338401EBCA7D"
+  },
+  {
+    "Path": "packages\\storage\\native\\paged-growth.mjs",
+    "SHA256": "61A43B469D098829C210BC046737842F5B0418E9EA0DD569809A5DCB7AA5B599"
+  },
+  {
+    "Path": "packages\\storage\\native\\paged-suite.mjs",
+    "SHA256": "A0C4F466746EF9501C4E09B557104B70FF6F58D6BC4C242192EE4FE4A83215B4"
+  },
+  {
+    "Path": "packages\\storage\\native\\recovery-suite.mjs",
+    "SHA256": "6CB2E89D9B1F502326BA8C35674736AFB9FF897A3EE63A989698826FB8562246"
+  },
+  {
+    "Path": "packages\\storage\\native\\suite.mjs",
+    "SHA256": "4DFA086E05973EB2F721825E947448FAE8385B5533AABEA0A306BCED0BE0DCB7"
+  },
+  {
+    "Path": "packages\\storage\\tests\\fake-io.mjs",
+    "SHA256": "6957FE2D876728EEC0EC936C4AB6FB0104157A787B754FE378785650EDD38EDC"
+  },
+  {
+    "Path": "packages\\storage\\tests\\g1-review.test.mjs",
+    "SHA256": "291523B1CB5B774D2D20F9B0D2909A2D1CC17457A675E3E0146A89AD8F2BFFC1"
+  },
+  {
+    "Path": "packages\\storage\\tests\\intent-adapter.test.mjs",
+    "SHA256": "86E00DD419C93E49F537375E439C07D8577FABCB28270FD5174BF0A4684F7981"
+  },
+  {
+    "Path": "packages\\storage\\tests\\intent-prototype.test.mjs",
+    "SHA256": "DDC19BFDA0706C34EBB9CE6B4F97184910643C2FC5F878CC55851545095FC64A"
+  },
+  {
+    "Path": "packages\\storage\\tests\\intent-recovery.test.mjs",
+    "SHA256": "396EF5D4FC2AE853B15BB323D9E39453C301FFED1634F07EB1A013B6BBD9F924"
+  },
+  {
+    "Path": "packages\\storage\\tests\\paged-adapter.test.mjs",
+    "SHA256": "8A9EDB0A7ED8EBD917975953949EA53EFFD75E7FA75B4D1D7FCF7565808C1CF4"
+  },
+  {
+    "Path": "packages\\storage\\tests\\paged-integration.test.mjs",
+    "SHA256": "87C429ADCD6ED56FA500B0DF34B061530FD6D115D21E1B55B1A027BE3D8A565C"
+  },
+  {
+    "Path": "packages\\storage\\tests\\paged-json.test.mjs",
+    "SHA256": "3EFEA2138E93ACE96D133535A4BF389F72D5A476502A2D8834767D72F32E3684"
+  },
+  {
+    "Path": "packages\\storage\\tests\\paged-native-suite.test.mjs",
+    "SHA256": "E0420C125414F60F545FADD437E1CD84D7D0DB2ECF27764548A8F4481542389E"
+  },
+  {
+    "Path": "packages\\storage\\tests\\paged-recovery.test.mjs",
+    "SHA256": "954EF2E9E6A7FE3CFF9375E92DD46729BA26B6D9CAC77485F6AD09AFF983A4EE"
+  },
+  {
+    "Path": "packages\\storage\\tests\\paged-transport.test.mjs",
+    "SHA256": "DC96A29E365BFA97850DF752C76B25442CE254412B83D3A93EFC86DCB76435BE"
+  },
+  {
+    "Path": "packages\\storage\\tests\\pages.test.mjs",
+    "SHA256": "45BDB8FB0F3DDB3BA2ACD028030094D241FEF426AA1B508F838C1167B31688E6"
+  },
+  {
+    "Path": "packages\\storage\\tests\\scenario.mjs",
+    "SHA256": "4BEBB7114DD40EDB958DE5B6A66539B3E69B6DCA64C41097DDD7A9FF5EFE0EF0"
+  },
+  {
+    "Path": "packages\\storage\\tests\\storage.test.mjs",
+    "SHA256": "88ED788CE5536CC5339B93FC82044485D6C05456EADA5C3F709CE0A7D6670875"
+  }
+]

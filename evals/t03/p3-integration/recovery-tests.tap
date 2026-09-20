@@ -1,0 +1,20 @@
+✔ streamed canonical hash agrees with the original runtime across padding and UTF-8 boundaries (31.1079ms)
+✔ paged restore paged-restore-stage/before never activates a partial target (207.1913ms)
+✔ paged restore paged-restore-stage/after never activates a partial target (0.3524ms)
+✔ paged restore paged-restore-materials/before never activates a partial target (170.9508ms)
+✔ paged restore paged-restore-materials/after never activates a partial target (168.9615ms)
+✔ paged restore paged-restore-audit/before never activates a partial target (156.2508ms)
+✔ paged restore paged-restore-audit/after never activates a partial target (244.5161ms)
+✔ paged restore paged-restore-activate/before never activates a partial target (261.9844ms)
+✔ paged restore paged-restore-activate/after never activates a partial target (285.8702ms)
+✔ paged restore rejects checksum-valid R5 and compiled-result contradictions, preserves staging (13208.1289ms)
+✔ missing referenced page is rejected before semantic replay can recreate it (148.902ms)
+✔ restore refuses an occupied target and old intent readers reject the new paged identity (274.2798ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15301.8232

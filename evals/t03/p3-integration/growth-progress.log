@@ -1,0 +1,11 @@
+{"phase":"append","operations":1,"pages":2669}
+{"phase":"append","operations":9,"pages":43872}
+{"phase":"append","operations":17,"pages":106185}
+{"phase":"append","operations":25,"pages":181558}
+{"phase":"append","operations":33,"pages":263167}
+{"phase":"append","operations":41,"pages":356149}
+{"phase":"append","operations":49,"pages":453104}
+{"phase":"append","operations":57,"pages":552880}
+{"phase":"append","operations":65,"pages":656259}
+{"phase":"exported","bytes":39378227,"records":60290,"reopenReads":84}
+{"phase":"done","output":"D:\\Mnemosyne\\evals\\t03\\p3-integration\\growth.json"}

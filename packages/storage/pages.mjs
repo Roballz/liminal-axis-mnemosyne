@@ -102,6 +102,25 @@ export class Pages {
     return key < n.key ? this.#balance(n.key, n.value, await this.mapSet(n.left, key, value, depth + 1), n.right)
       : this.#balance(n.key, n.value, n.left, await this.mapSet(n.right, key, value, depth + 1));
   }
+  async #joinMap(key, value, left, right, depth = 0) {
+    check(depth < PAGE_LIMITS.depth, 'RESOURCE_LIMIT', 'Map join depth');
+    if (await this.#height(left) > await this.#height(right) + 1) {
+      const n = await this.#map(left);
+      return this.#balance(n.key,n.value,n.left,await this.#joinMap(key,value,n.right,right,depth+1));
+    }
+    if (await this.#height(right) > await this.#height(left) + 1) {
+      const n = await this.#map(right);
+      return this.#balance(n.key,n.value,await this.#joinMap(key,value,left,n.left,depth+1),n.right);
+    }
+    return this.#node(key,value,left,right);
+  }
+  async mapPrefix(root, ceiling, depth = 0) {
+    if (root === null || ceiling === null) return null;
+    check(depth < PAGE_LIMITS.depth, 'RESOURCE_LIMIT', 'Map prefix depth');
+    const n = await this.#map(root);
+    if (n.key > ceiling) return this.mapPrefix(n.left,ceiling,depth+1);
+    return this.#joinMap(n.key,n.value,n.left,await this.mapPrefix(n.right,ceiling,depth+1));
+  }
   async mapDelete(root, key, depth = 0) {
     check(depth < PAGE_LIMITS.depth, 'NEEDS_RESOLUTION', 'Map depth limit');
     if (root === null) return null;

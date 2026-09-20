@@ -1,0 +1,34 @@
+{
+  "phase": "recover-paged-before",
+  "run": "20260920pagedb",
+  "events": [
+    {
+      "type": "done",
+      "phase": "recover-paged-before",
+      "run": "20260920pagedb",
+      "namespace": "mnemo-t03-paged-20260920pagedb-crash-before",
+      "previousStatus": "prepared",
+      "result": {
+        "snapshot_id": "hs_841ec4ef-08c9-4b22-8e20-b127f42b8beb"
+      },
+      "generated": [
+        {
+          "kind": "snapshot",
+          "value": "hs_841ec4ef-08c9-4b22-8e20-b127f42b8beb"
+        },
+        {
+          "kind": "block",
+          "value": "hm_c63c131b-d543-45bc-878d-6af39f3373e6"
+        },
+        {
+          "kind": "block",
+          "value": "hm_ff0c07e4-0e6d-4409-951e-0bec89995fdf"
+        }
+      ],
+      "publishedOperations": 2,
+      "processCrashTested": true,
+      "materialsEvidenceMatched": true,
+      "nativeArchiveOrSyncTriggered": false
+    }
+  ]
+}

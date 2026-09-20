@@ -1,0 +1,11 @@
+✔ paged current dependencies reject a selection cycle and preserve the last confirmed graph (8670.6877ms)
+✔ paged derived-only retains same-branch prefix semantics after append, cutoff, fork and edit (13492.3205ms)
+✔ paged local insert/delete/reorder/restore and no-op import preserve oracle transitions (13646.7938ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35925.8643

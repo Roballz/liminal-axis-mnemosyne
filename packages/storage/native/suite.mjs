@@ -22,6 +22,8 @@ async function inspectRaw(api, namespace, physicalId) {
   return { node, nodeCount: stats.nodeCount };
 }
 export async function runNative(api, { phase, run, crashEvidence }, send) {
+  if (['paged-reopen-check','paged-roundtrip', 'paged-before', 'paged-after', 'recover-paged-before', 'recover-paged-after'].includes(phase))
+    return (await import('./paged-suite.mjs')).runPagedNative(api, { phase, run, crashEvidence }, send);
   if (['p3-recovery', 'p3-before', 'p3-after', 'recover-p3-before', 'recover-p3-after'].includes(phase))
     return (await import('./recovery-suite.mjs')).runRecoveryNative(api, { phase, run, crashEvidence }, send);
   if (phase === 'p3-intent') return (await import('./intent-suite.mjs')).runIntentNative(api, { run }, send);
