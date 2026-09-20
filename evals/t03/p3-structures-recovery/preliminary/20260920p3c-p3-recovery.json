@@ -1,0 +1,39 @@
+{
+  "phase": "p3-recovery",
+  "run": "20260920p3c",
+  "events": [
+    {
+      "type": "done",
+      "phase": "p3-recovery",
+      "namespaces": [
+        "mnemo-t03-p3-20260920p3c-source",
+        "mnemo-t03-p3-20260920p3c-restored",
+        "mnemo-t03-p3-20260920p3c-pages"
+      ],
+      "sourcePublished": 2,
+      "restoredPublished": 3,
+      "completeAuxiliaryRoundtrip": true,
+      "pendingGenerated": [
+        {
+          "kind": "snapshot",
+          "value": "hs_fdbe8b24-14e5-4ed0-92d6-114456c1f394"
+        },
+        {
+          "kind": "block",
+          "value": "hm_90d1a73c-c4d7-4647-b640-2313877cb7b0"
+        },
+        {
+          "kind": "block",
+          "value": "hm_86563521-882f-4e26-9624-709f3a9fa132"
+        }
+      ],
+      "logicalEquality": true,
+      "pagedReopen": true,
+      "pageNodes": 340,
+      "maximumAddressRange": "48-bit hash prefix + 65536 (exact lookup verified)",
+      "externalMaintenanceGate": "HOST_MAINTENANCE_UNSUPPORTED",
+      "nativeArchiveOrSyncTriggered": false,
+      "processCrashTested": false
+    }
+  ]
+}

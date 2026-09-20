@@ -1,18 +1,20 @@
 // Dedicated P3 prerequisite diagnostics. No automatic host-maintenance support.
-import { IntentCoordinator } from './intent-prototype.mjs';
+import { IntentCoordinator, restoreIntentIntoEmpty } from './intent-prototype.mjs';
 import { requireThat } from '../contracts/primitives.mjs';
 const key = Symbol.for('mnemosyne.t03.intent-test-owners.v1');
 
-export async function openIntentTestStore(api, namespace, { create = false, point } = {}) {
+export async function openIntentTestStore(api, namespace, { create = false, restore = null, point } = {}) {
   requireThat(/^mnemo-t03-p3-[a-z0-9-]+$/.test(namespace), 'INVALID_NAMESPACE', 'New P3 isolated test namespace required');
+  requireThat(!(create && restore), 'INVALID_SCHEMA', 'Choose create or restore');
   const registry = globalThis[key] ??= new WeakMap();
   let owners = registry.get(api);
   if (!owners) { owners = new Map(); registry.set(api, owners); }
   if (owners.has(namespace)) {
     const registered = owners.get(namespace), facade = await registered;
     await facade.settled();
-    if (owners.get(namespace) !== registered) return openIntentTestStore(api, namespace, { create, point });
-    if (facade.status === 'closed') { owners.delete(namespace); return openIntentTestStore(api, namespace, { create, point }); }
+    if (owners.get(namespace) !== registered) return openIntentTestStore(api, namespace, { create, restore, point });
+    if (facade.status === 'closed') { owners.delete(namespace); return openIntentTestStore(api, namespace, { create, restore, point }); }
+    requireThat(!restore, 'IMPORT_TARGET_NOT_EMPTY', 'Cannot restore into an owned namespace');
     return facade;
   }
   const opening = (async () => {
@@ -35,8 +37,8 @@ export async function openIntentTestStore(api, namespace, { create = false, poin
         'IMPORT_TARGET_NOT_EMPTY', 'Creation needs an empty isolated namespace'); },
       point,
     };
-    const coordinator = new IntentCoordinator(io);
-    if (create) await coordinator.create(); else await coordinator.recover();
+    const coordinator = restore ? await restoreIntentIntoEmpty(io, restore) : new IntentCoordinator(io);
+    if (!restore) { if (create) await coordinator.create(); else await coordinator.recover(); }
     return Object.freeze({
       get status() { return coordinator.status; },
       settled: () => coordinator.settled(),

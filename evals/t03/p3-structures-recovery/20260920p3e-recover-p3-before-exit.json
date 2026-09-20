@@ -1,0 +1,11 @@
+{
+  "Action": "Completed-test cleanup, not fault evidence",
+  "PID": 12876,
+  "Executable": "D:\\Mnemosyne\\.t03-local\\tt-367b0c7\\tauritavern.exe",
+  "DataRoot": "D:\\Mnemosyne\\.t03-local\\tt-367b0c7\\data",
+  "Phase": "recover-p3-before",
+  "Namespaces": "mnemo-t03-p3-20260920p3e-crash-before",
+  "NormalCloseRequested": true,
+  "ForceRequired": true,
+  "At": "2026-09-20T05:32:51.3933003Z"
+}

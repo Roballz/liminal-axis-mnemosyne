@@ -1,0 +1,10 @@
+[
+  {
+    "file": "packages/storage/native/isolated-tt.ps1",
+    "status": "passed"
+  },
+  {
+    "file": "packages/storage/native/stop-isolated-complete.ps1",
+    "status": "passed"
+  }
+]

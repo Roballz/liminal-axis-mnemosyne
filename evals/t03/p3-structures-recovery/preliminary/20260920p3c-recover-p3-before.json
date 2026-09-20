@@ -1,0 +1,33 @@
+{
+  "phase": "recover-p3-before",
+  "run": "20260920p3c",
+  "events": [
+    {
+      "type": "done",
+      "phase": "recover-p3-before",
+      "namespace": "mnemo-t03-p3-20260920p3c-crash-before",
+      "previousStatus": "prepared",
+      "result": {
+        "snapshot_id": "hs_04a8d965-6c45-4a91-8eef-2699df1c6bae"
+      },
+      "generated": [
+        {
+          "kind": "snapshot",
+          "value": "hs_04a8d965-6c45-4a91-8eef-2699df1c6bae"
+        },
+        {
+          "kind": "block",
+          "value": "hm_532c5421-7e36-4914-afef-ca24cf29056e"
+        },
+        {
+          "kind": "block",
+          "value": "hm_8fe68531-034f-4985-9555-8a616472381a"
+        }
+      ],
+      "publishedOperations": 2,
+      "processCrashTested": true,
+      "hardwarePowerLossTested": false,
+      "nativeArchiveOrSyncTriggered": false
+    }
+  ]
+}

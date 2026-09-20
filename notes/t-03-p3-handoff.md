@@ -1,64 +1,60 @@
-# T-03 P3 高难项交接：持久请求前置增量与维护阻塞
+# T-03 P3 高难项交接：有界结构基元与请求恢复
 
-日期：2026-09-20。基线：`bd1f0e42bb74ee237ca2633e7be8f5da4d873021` / main。
-依据：G1 最终回执第5节、S-A、原 T-03、06 v0.3 / schema_version=1 / 逻辑包 v2。
+更新：2026-09-20。开工基线：`ea1eca4d81f855f8ef92cf1439ea412b94fdb365` / main。
+依据：`t-03-p3-maintenance-review.md` 第6节、G1最终回执第5节、原T-03；06 v0.3 / schema_version=1 / 逻辑包v2；存储协议本轮升v0.5。
 
-**T-03 仍 in_progress；P3 只完成前置诊断增量，implemented_unverified。P3 未完成，外部维护协调受阻，有界存储/完整恢复未实施，P4/P5 未开工。** 本文件是原任务交接，不是新任务卡。G1 已通过，不重新退回 G1-R1/R2。
+**当前增量 implemented_unverified；P3与T-03仍未完成。** 已补有界物理结构基元、现有intent格式的完整恢复、严格文本入口及新请求格式故障验证。普通业务编译/重开仍调用有P2上限的全库oracle，分页基元尚未接入该提交入口，因此不能将S05、规模化S06/S07标为通过。自动外部维护继续受阻，P4/P5未开工。
 
-## 1. 已实现的有限能力
+## 1. 已实现与实际边界
 
-新增 `packages/storage/intent-prototype.mjs` 和 `intent-tt-adapter.mjs`，复用已验收的领域函数和 P2 发布协议。新入口只用于新的 `mnemo-t03-p3-*` 隔离 namespace。旧 P2 入口拒绝该前缀，避免误绕过请求记录；旧库、旧协议、原150项测试及领域代码均未改。
-
-- `prepare(input)`：接收历史、记忆 archive/select/correct 或绑定业务输入，在队列内执行纯领域编译，记录原输入、完整编译请求、生成的 ID 序列和校验值；flush 后才返回 prepared。没有编译回调、LLM 或任意外部副作用。
-- `pending()/lookup(operation_id)`：重开后只凭持久记录找回未发布请求、原输入/请求指纹及生成 ID。`execute(operation_id)` 使用该精确请求；先返回已发布结果，再考虑 expected。准备不改变 Head/view/binding。
-- 准备或发布 IO/确认不确定时拒绝继续使用入口，显式 recover 后枚举和判定。取消调用方等待不取消原生操作、不释放队列。尚未 flush 的准备没有持久承诺；若随后进程崩溃而记录不存在，不声称能恢复从未落盘的输入。
-- 单一协调对象封装正常读写；内部 StoreOwner/IO 不对外暴露。多个 adapter opener 复用登记、队列；关闭失败保持登记，成功关闭永久失效，旧对象不能关闭替代实例。
-- `suspend()` 即时换代、拦住排队旧调用、等待在途写入和恢复结束，然后产生库身份/root/intent末端检查票据并关闭。`resume(ticket)` 比较同名库身份与发布/准备边界，变化则拒绝采用。它只支持**调用方先等待 suspend 完成，再开始维护**的合作式路径。
-- 恢复不仅校验 checksum，还以持久生成 ID 重新执行纯编译审计，核对原输入、编译请求和已发布状态。此为小样本完整审计，不是普通路径的有界生产实现。
-
-临时辅助格式 `mnemosyne-storage-intents-v1` 与标准 v2 的 history operations 分离。历史 command 保持原格式；选择/纠错/绑定的存储去重信息没有塞入 history command 表。存储库 ID 使用 op 形式 UUID 作为本地格式字段，**不代表领域 operation，不进入 v2 operations**。
-
-本增量仍有 P2 全部上限和全库 oracle：256记录、32条/快照、16选择/视图、状态/编译请求各256KiB、64次提交；最多64条准备记录，每条辅助封装512KiB。逻辑槽8193为身份，8194起为准备链，TT物理槽统一+1，与P2的0～8192保留区分开。真实创建通过 stats.nodeCount=0 证明目标为空；FakeIO按有限地址范围检查，仅适用于该测试模型。未解除S05限制。
-
-## 2. 外部维护缺口：源码与原生事实
-
-固定来源均为 `Darkatse/TauriTavern@367b0c7e9410`，不是“上游最新”。通过 GitHub connector 读取的 blob：
-
-| 文件 | Git blob SHA | 事实 |
+| 路径 | 本轮实现 | 尚未完成的集成 |
 | --- | --- | --- |
-| `src/tauri/main/api/db.js` | `0c21ab0810270b57cb11ae10d7014712eef02a32` | handle操作发送`execute + namespace + operation`，没有打开代次或库身份条件；close也只带namespace |
-| `src/tauri/main/api/db-types.d.ts` | `d4b41e37292f2f565949c221f8931cd1725e3044` | 公开接口没有事务范围租约、expected generation或维护前ack门禁 |
-| `src-tauri/crates/tt-application/src/services/database_service.rs` | `ceb8746bce8054e6ce73c7ec16d0eb90696f4de8` | execute只在单次后端调用期间持维护读锁；prepare_archive持写锁并closeAll/flushAll，不能覆盖扩展多调用事务 |
-| `docs/API/Database.md` | `ca600f3f053b981a829c4efd97953d38a6c6f209` | 归档导入关闭实例、整体替换namespace，之后需重新open；不保证整个归档事务性 |
-| `docs/CurrentState/Sync.md` | `352cd6cd3addae12f81a28ccd7239c8d05b1e584` | sync:job是进度/结果事件，不能将其推定为可await的维护前隔离协议 |
+| `packages/storage/pages.mjs` | 不可变内容寻址页；AVL精确目录与有计数的序列树；局部更新/拼接/固定前缀共享；冷读、游标枚举、完整结构审计 | 分页root的业务发布/checkpoint协议、UUID索引与提交协调器接线 |
+| `packages/storage/paged-json.mjs` | 同一套树表示嵌套JSON、长正文、command.entries、views/corrections、expected、markers和目录；局部set/splice只复制路径 | 现有领域编译器仍产生整份state/command，未迁为局部编译 |
+| `intent-recovery.mjs`、`strict-json.mjs` | 固定导出边界、逐记录UTF-8流、链式checksum/尾记录、重复key/Unicode/深度/字节/数量限制 | 此桥接格式仍在v1小样本上限内做全内存领域审计，不是无限规模恢复 |
+| `intent-prototype.mjs`、`intent-tt-adapter.mjs` | 导出全部logical/ledger/journal/markers/intents，包含最后一个prepared请求与生成ID；空目标暂存、持久回读审计后激活 | 不解除原256记录/32条清单/16选择/64提交等限制 |
 
-原生反例：在新合成namespace中，旧handle读取标记A→close→新handle open并写标记B→旧handle写另一节点→新handle能读到旧写。两次真实执行均观察到 `oldNativeHandleWroteAfterReopen=true`。这验证**旧handle可以访问重开的同名库**，不是实际触发一次归档/同步替换的证明。
+有界结构参数为本轮可测实现值，不是手机预算：页最大8192 UTF-8字节、序列叶最多16引用、目录键最多512规范JSON字节、缓存最多128页、树/JSON深度最多64。内容hash前48位加65536作候选物理槽，完整hash校验；槽已有异内容则`ID_COLLISION`，从不覆盖。NodeId仍不作领域ID。TT原生精确回读验证了实际大整数槽，但这不等于自动维护安全。
 
-由此推论：在JS里先get库ID、再upsert，中间仍可发生维护换代；事后检测无法阻止旧写污染新实例。namespace字符串、JS对象身份及单次原生维护锁均不足以证明跨调用边界。合作式suspend不能自动拦住宿主自行发起的维护；本增量没有虚构事件或自动接线。`requireExternalMaintenanceFence()` 明确返回 `HOST_MAINTENANCE_UNSUPPORTED`，只用于诊断当前缺口，不是已实现的宿主能力接口。
+`PagedJSON.write/read`是显式全量转换/审计，不能称普通有界写入；`set/splice/at`及树范围读取才是局部路径。基元不自行发布业务Head、调用模型、取消维护门禁或批准生产入口。
 
-## 3. 为什么停在这里、需review的最小方向
+## 2. 完整恢复桥接格式与兼容
 
-仓库约束要求：“若实际原语不足以完成维护隔离/恢复或有界性，先给证据回审，不擅自切B2/A或降低标准。”G1第5节同样要求能力不足时停止受影响路径。当前P3无法在固定公开API上证明自动外部维护隔离，因此**未启用生产入口，未把合作式单队列测试当作宿主维护验收**。
+独立传输格式：`mnemosyne-intent-recovery-v1`。标准逻辑包仍为v2；异类记忆/绑定去重不进入历史operations表。逐条携带全部逻辑表对象、journal、ledger、markers、intent，最后校验完整包。导出在协调队列内固定副本，后续源库写入不改变该快照。
 
-交Chat/用户确认的最小方向（均为建议，未实施或accepted）：
+接收上限：单记录1MiB、整包32MiB、4096记录、单记录JSON深度64/值数量200000；UTF-8 fatal解码，保留正文原字节含义，不归一化或截断。生成流超限也不产生完整尾记录。领域层仍执行旧上限与R1～R5、账本和持久生成ID重编译审计。
 
-1. 宿主提供在原生执行同一临界区内校验的库打开代次/租约，旧代次的排队请求在替换后拒绝；或提供覆盖发布协议全过程、由原生维护共同遵守的租约。
-2. 宿主维护开始前提供可等待的扩展排空/冻结协议，结束后失效通知与重新验证；需涵盖失败/取消/关闭后重开，而非仅完成事件。
-3. 如果只允许“先显式停用Mnemosyne，再手动维护”的受限诊断运行，必须将该运行约束交review确认；不能自行把它降格为生产正确性标准。
+恢复只进入`stats.nodeCount=0`证明为空的新namespace。先验证完整输入，再写逻辑槽8259的staging标记；写身份/准备链和P2数据，重新读取持久root/对象/intent并审计，最后将恢复标记置active并flush。激活前中断保持staging，不能读成完整库；激活丢确认通过恢复判定，不重放业务副作用。
 
-未修改TT源码、未升级用户安装、未选择B2/A。完整P3有界结构与恢复仍依原卡安排；继续这些工作的前提/隔离范围由本次review确认。本轮预计实现1200～1800/测试900～1400行是完整P3估计，发现前提缺口后实际只交前置增量，不能解释为缩小后已完成P3。
+**恢复目标身份格式为`mnemosyne-storage-restored-intents-v1`，并生成新的物理library ID。** 所有领域ID、原请求、已生成ID和结果保持。区别身份格式使旧15b8605读者直接拒绝恢复目标，避免它忽略新增staging标记后提前读库。旧v1源库仍可由新入口读取/导出，不就地迁移、覆盖或重编号。新恢复库缺激活标记也拒绝。
 
-## 4. 真实验证与未验证边界
+## 3. 维护门禁与固定宿主事实
 
-- 全量Node **211/211**（原150+新增61）、语法 **28/28** 及哈希证据见 `evals/t03/p3-prerequisites/`；保留原150项，新增请求/维护/适配测试。旧断言未删除或放宽。
-- 确定性FakeIO覆盖准备写入/flush/确认前后，发布材料/发布/确认前后，调用者停止等待、竞争请求、同键异输入、重开后的精确ID/结果、checksum正确但材料矛盾、维护票据、失效handle和关闭失败。
-- 原生harness `p3-intent` 覆盖准备后close/reopen、历史和记忆结果去重、合作式维护、身份替换拒绝及上述旧handle反例；所有数据均为fixture(2)合成。新生成UUID记录在原生证据中。
-- 原生未触发真实sync/archive；未验证新辅助格式的进程强杀、硬件断电、磁盘满或手机。旧P2强杀证据不能转记到新辅助格式。正常关闭后进程残留的退出清理不算故障注入成功证据。
+继续采用隔离TT `367b0c7e9410`，exe SHA256：`11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4`。没有升级或修改TT。
 
-## 5. 完整恢复、迁移与回退仍待实施
+自动外部维护仍返回`HOST_MAINTENANCE_UNSUPPORTED`。`c90d77d`的源码专项回审没有证明句柄代次缺口修复，亦未在本轮运行该新版。旧原生反例和固定blob详见`notes/t-03-p3-maintenance-review.md`、`evals/t03/p3-prerequisites/`；不把它误判为已关闭G1-R1/R2的回归。
 
-此原型**没有**完整辅助封装导出/导入入口；不允许把旧P2 bundle称为新库完整备份，否则会漏准备请求/生成ID。不能直接把新namespace交给旧adapter使用。旧P2库保留原样，新格式无就地迁移。
+本轮只操作既有独立data root/WebView profile和新的合成namespace，无未经协调的sync/archive/其他调用方替换库。合作式维护仍须先等待suspend排空。没有真实同步/归档验证、手机/真实档案准入或受限生产模式决定。
 
-P3剩余：持久请求材料有界化；manifest路径复制/共享；command.entries、views/corrections、expected、重建标记、journal/ledger、目录/ID索引；重开检查点与完整枚举；稳定流式导出、空目标全引用/R1～R5审计、资源限制与安全激活；文本重复key/Unicode/深度/字节限制。全部仍pending，当前完整重放不能成为生产路径。任何损坏的唯一准备尾部被人为删除不承诺凭空找回；物理材料与故障边界需在完整格式中继续审查。
+## 4. 本轮验证与证据
 
-回退：停用本轮隔离harness/新入口，撤回本轮源码；保留新旧测试库和证据。新库不能由旧代码继续写，之后若有新数据需先设计完整导出再回退，不能丢准备记录。本次没有真实数据，不执行删除/GC。未创建新任务卡，P4/P5、手机和A服务器仍未开工。
+证据入口：`evals/t03/p3-structures-recovery/`，最终原生组为`20260920p3e`；c/d组为前期验证，单独保留，不能代替最终组。
+
+- 全量Node回归保留原211项；新增树/分页JSON、完整恢复和严格解析测试。精确最终数量及命令见该目录TAP与verification.json。
+- 2048键目录冷读/局部更新、1024引用清单局部操作、400次固定种子随机splice对照、4096次追加，校验树平衡、计数、旧根不可变与IO上界。这是算法测试，不是1x手机容量或延迟验收。
+- 恢复校验涉及纠错、未选旧记忆、绑定、固定子线、第二故事、删除后的原文、旧快照、全部账本和prepared材料。合法checksum的R5/账本/生成ID矛盾拒绝；中断/超限/重复ID/重复key/非法Unicode拒绝，源库不变。
+- 隔离TT完整往返验证全部辅助材料一致、准备ID保持、恢复后重试；分页旧根/局部编辑根重开后都可精确回读。
+- 新intent格式发布前/发布后强杀使用独立kill-ready中的operation/生成ID/result作重启对照。具体执行结果只以相应原生JSON及进程证明为准，正常完成后的退出清理另行标注，不能冒充故障证据。
+
+## 5. 下一步仍在原P3，当前无需新增产品授权
+
+1. 将领域普通编译与准备/提交路径真正迁入有界结构，避免全库structuredClone、全视图/expected/markers复制，以及重开重放所有旧操作；继续保持R1～R5和所有现有语义。基元通过不代表这项完成。
+2. 在分页业务格式上完成单点发布、持久请求索引、恢复checkpoint、全量可达枚举与账本/目录一致边界；证明正文变化与索引落后标记一起发布。
+3. 分页完整流式恢复需做持久暂存引用/领域审计和故障矩阵。当前v1桥接不能作为该规模路径的替代。
+4. 自动维护缺口仍待宿主原生代次/租约或可等待排空能力；本次隔离开发许可不是降低生产标准的授权。不切B2/A，不自行修改TT。
+
+以上工程工作仍受既有许可覆盖；本交接不是要求重新批准才能继续。S05、规模化S06/S07、完整S08及P4/P5/手机仍pending，不创建新任务卡。
+
+## 6. 回退
+
+保留所有旧库、新隔离库、备份及故障证据，不执行删除/GC。旧v1源库没有迁移；停用本轮harness即可回到原诊断入口。恢复目标使用新身份格式，旧代码应拒绝；需保留本轮读者及完整恢复包，不把新库强改成旧身份来绕过激活保护。分页实验库与intent库独立，没有将尚未集成的页图投入正常业务提交。

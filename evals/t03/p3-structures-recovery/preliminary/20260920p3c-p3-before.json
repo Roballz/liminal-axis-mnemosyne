@@ -1,0 +1,15 @@
+{
+  "phase": "p3-before",
+  "run": "20260920p3c",
+  "events": [
+    {
+      "type": "kill-ready",
+      "phase": "p3-before",
+      "namespace": "mnemo-t03-p3-20260920p3c-crash-before",
+      "boundary": "publish",
+      "preparedIntentFlushed": true,
+      "publishedRootFlushed": false,
+      "isolatedFixture": true
+    }
+  ]
+}

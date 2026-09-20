@@ -1,6 +1,6 @@
 # T-03：可迁移、可恢复的存储地基
 
-状态：in_progress（48663c4 已通过 G1；P3 持久请求/合作式维护前置增量 implemented_unverified，自动外部维护隔离受阻；P3 未完成，P4/P5 未执行）
+状态：in_progress（48663c4 已通过 G1；P3有界基元/v1完整辅助恢复增量 implemented_unverified；普通领域编译/分页发布/checkpoint与规模化恢复尚未完成；自动外部维护门禁保留，P4/P5未执行）
 
 发布：2026-09-19。规划仓库基线：`4dcdaf568ddb596c9060c27ef4c57fb858095509`。
 T-02 已验收实现：`1891043f6fc907236e12bb85d63ea823f43abca8`；规范为 `docs/06-contracts.md` v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。
@@ -330,3 +330,49 @@ Node矩阵覆盖三类操作的准备/发布前后IO失败和丢确认；另有�
 S05、完整S06/S07和维护S08仍pending：manifest/command.entries/views/corrections/expected/markers/journal/目录有界化、恢复检查点、全量枚举和稳定流式导出/导入、重复JSON key/Unicode/资源限制均未交付。新辅助格式真实进程强杀/断电/磁盘满、真实sync/archive、手机未验证。保留原R1～R5语义和全部回归不等于已做完整生产存储。
 
 回退只停用本轮harness/入口并撤本轮代码，保留全部物理测试库和证据。新库不得直接用旧adapter写；后续需要数据回退时先实现完整辅助格式导出，不丢准备记录。下一步仍在原T-03内；未创建新任务卡，未进入P4/P5，未宣告P3或整个T-03完成。
+
+## P3 受控隔离继续增量（2026-09-20 Codex 回报）
+
+**当前增量implemented_unverified；P3与T-03仍未完成。** 有界结构已实现基元，现有intent格式的完整业务恢复材料已有导出/恢复；普通领域编译、分页发布/checkpoint和规模化流式恢复尚未接通，S05不能标为通过。自动外部维护继续`HOST_MAINTENANCE_UNSUPPORTED`；不进入P4/P5，不新建任务卡。
+
+### 基线、开工与范围
+
+- `git pull --ff-only origin main`由15b8605快进到`ea1eca4d81f855f8ef92cf1439ea412b94fdb365`；main；原未跟踪`.codex/`未改动/不提交。首次沙箱不能写FETCH_HEAD，按工具权限升级后完成。
+- 已读用户指定`notes/t-03-p3-maintenance-review.md`、README、AGENTS、S-A、本task、G1第5节、06 v0.3、08、T-02最终回执及相关contracts/storage实现/测试；09从v0.4更新v0.5。最新专项回审允许隔离工程继续，c90d77d不作为句柄修复或已安装证据。
+- 环境：Windows x64 / Node v24.19.0；固定隔离TT `367b0c7e9410e8fcf394f668302d70073e5a3ce5`，exe SHA256 `11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4`。data root仍为`D:\Mnemosyne\.t03-local\tt-367b0c7\data`，独立WebView profile。没有其他TT进程；每次启动/强杀/退出均按精确路径、哈希及本轮证据核对。
+- 开工粗估实现1200～1800、测试/harness900～1400行为完整P3预估。此次可验收增量实际实现**+560/-9**，新增测试**317行**，native harness/控制脚本**+135/-6**；明细见verification.json。差额包含尚未完成的业务编译/分页发布集成，不能解释为全部P3缩小后已完成。原211项测试与contracts/protocol未修改，无新增依赖/服务。
+
+### 实际改动及数据影响
+
+1. `pages.mjs`：不可变8KiB页、精确AVL目录、计数序列树，局部append/edit/insert/delete/fork路径共享、重开按ID/游标读取、全量结构审计；缓存128页。物理候选hash地址碰撞拒绝覆盖，不代替领域UUID。
+2. `paged-json.mjs`：同一基元覆盖正文/manifest/command.entries/views/corrections/expected/markers/目录等JSON形状，局部`at/set/splice`不扫描无关子树。显式`write/read`是全量转换/审计；这些基元未替换现有普通业务编译与P2发布协议。
+3. `strict-json.mjs`、`intent-recovery.mjs`：独立传输格式`mnemosyne-intent-recovery-v1`，固定导出边界，逐记录UTF-8流与完整checksum链；保存标准v2全部逻辑对象及journal/ledger/markers/intents，包括prepared请求和生成ID。拒绝重复key、非法Unicode/UTF-8、截断/尾随、未知格式及资源超限。
+4. 协调入口增加export；adapter增加空目标restore。先全量验证输入/R1～R5/持久ID重编译，staging后写入，重新回读持久材料审计，再单点激活并flush。激活前故障保持不可读，激活丢确认从持久状态判定。没有覆盖源库或自动清理暂存库。
+5. 恢复库使用`mnemosyne-storage-restored-intents-v1`身份格式及新物理library ID；原领域ID/请求/结果保持。物理身份与激活标记为新恢复重建，不声称物理文件逐字克隆。旧15b8605读者实际执行后拒绝新格式，防止其忽略新增staging标记而提前开放库；Node证据见legacy-reader-check.json。旧v1源库兼容新读者，不做就地迁移。
+6. 所有上限仍明确：传输单记录1MiB/总32MiB/4096记录/深度64；v1领域编译保留P2硬上限。流式传输不等于规模化领域审计，当前审计仍会物化小库。未修改06、领域指纹或记忆语义。
+
+### 真实验证
+
+| 命令/验证 | 结果与证据 |
+| --- | --- |
+| `node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js` | **275/275通过**，原211+新增64，0失败/取消/跳过；`evals/t03/p3-structures-recovery/node-tests.tap` |
+| 全部contracts/storage/probe `.mjs/.js`执行`node --check` | **36/36通过**；syntax.json |
+| `git diff --check`、新文件尾随空白、PowerShell脚本语法 | 最终检查与记录见verification.json和powershell-syntax.json |
+| `node packages/storage/native/collector.mjs p3-recovery 20260920p3e` | 完整业务恢复材料往返、prepared ID保持、恢复后重试通过；分页旧根/局部新根原生重开通过。340节点，实测最大物理ID281377777316372；同目录原生JSON |
+| `p3-before`→`isolated-tt.ps1 -Action Crash -Phase p3-before -Run 20260920p3e`→`recover-p3-before` | 请求材料已flush、publish前精确强杀PID13940；重开为prepared，生成ID/result与独立kill-ready一致，发布后共2条历史operation，无重复 |
+| `p3-after`→`isolated-tt.ps1 -Action Crash -Phase p3-after -Run 20260920p3e`→`recover-p3-after` | publish已flush、ack前精确强杀PID4640；重开为published，直接返回原result，共2条历史operation，无重复 |
+| 实际旧15b8605协调器源码在Node FakeIO读取新恢复库 | `NEEDS_RESOLUTION`，目标不变；非旧TT真机运行。旧代码blob `5dbbfa282a6dcd323a143a9d90f039a2a5dd06bc` |
+
+新增结构测试使用2048键、1024引用清单、400次seed=73013随机splice、4096次追加；故障覆盖physical collision、缺页/checksum、合法checksum的计数/排序矛盾、页写丢确认、完整恢复各阶段EIO/ENOSPC模拟。首次随机splice发现叶块合并导致AVL高度失衡，修复后全部通过；不把这些算法断言当作1x容量或手机性能结果。
+
+恢复测试还验证删除后原文、旧快照、父子固定历史、第二故事、未选旧记忆/纠错、binding、全部账本和pending；合法checksum的R5/生成ID/ledger/marker矛盾拒绝。原T-02/G1/前置全部回归保留。真实强杀仅验证此固定TT/新intent格式/小合成数据的两个断点，不证明分页业务发布（尚未实现）或硬件断电。
+
+原生最终namespace：`mnemo-t03-p3-20260920p3e-{source,restored,pages,crash-before,crash-after}`。前期c/d组保留在`preliminary/`与隔离库中；d的crash-before停在已记录发布前状态，未混称最终恢复通过。完成后退出脚本核对done/精确PID后清理残留测试进程，记录为**完成后的退出清理，不是故障证据**；最终无TT进程，collector已结束。所有测试库均保留。
+
+### 剩余工作、回退和交接
+
+本增量没有把有界基元接到普通领域编译/prepare/commit；仍有全库structuredClone、全视图/expected/markers和重开完整重放。分页发布/checkpoint/UUID索引、规模化流式领域审计与完整S05/S06/S07还需在原P3内继续。不能仅凭硬上限或基元测试宣称有界业务存储完成。
+
+自动维护/真正sync/archive/硬件断电/真实磁盘满/手机未验证；c90d77d未安装实测；不修改TT、不切B2/A、不接受新受限生产模式。本次没有新增产品信息缺失或要求重复授权，剩余隔离工程仍在原许可内。
+
+回退保留旧v1源库、新恢复库、所有测试库与完整包。旧代码拒绝恢复目标，不修改身份绕过；需要读取新库时保留本轮读者。分页实验与业务库分开，未迁移真实档案。已更新高难项交接、阶段导读、README、协议v0.5和CHANGELOG；按用户持久要求提交push供Chat review。状态只到当前增量implemented_unverified，不宣布P3/T-03完成。

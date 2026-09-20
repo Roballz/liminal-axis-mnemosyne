@@ -1,0 +1,10 @@
+{
+  "oldCommit": "15b86056c229ec7742639c4cc9f31c0ea79d59fc",
+  "oldBlob": "5dbbfa282a6dcd323a143a9d90f039a2a5dd06bc",
+  "oldModuleExecuted": true,
+  "unchangedCurrentProtocolDependency": true,
+  "targetFormat": "mnemosyne-storage-restored-intents-v1",
+  "errorCode": "NEEDS_RESOLUTION",
+  "targetUnchanged": true,
+  "scope": "Node FakeIO; actual old coordinator source, not native TT"
+}

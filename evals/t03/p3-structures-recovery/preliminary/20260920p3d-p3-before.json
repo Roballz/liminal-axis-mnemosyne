@@ -1,0 +1,33 @@
+{
+  "phase": "p3-before",
+  "run": "20260920p3d",
+  "events": [
+    {
+      "type": "kill-ready",
+      "phase": "p3-before",
+      "namespace": "mnemo-t03-p3-20260920p3d-crash-before",
+      "boundary": "publish",
+      "preparedIntentFlushed": true,
+      "publishedRootFlushed": false,
+      "isolatedFixture": true,
+      "operation_id": "op_00000000-0000-4000-8000-00000000000d",
+      "generated": [
+        {
+          "kind": "snapshot",
+          "value": "hs_a28c6a9e-6b58-49e2-9e86-48d6e70b40c2"
+        },
+        {
+          "kind": "block",
+          "value": "hm_78de57c3-8867-4d48-935e-b3c2a907a028"
+        },
+        {
+          "kind": "block",
+          "value": "hm_3c16164c-8aa1-4a25-bb7f-1e85920e7445"
+        }
+      ],
+      "result": {
+        "snapshot_id": "hs_a28c6a9e-6b58-49e2-9e86-48d6e70b40c2"
+      }
+    }
+  ]
+}

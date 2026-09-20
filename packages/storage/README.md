@@ -1,6 +1,6 @@
 # T-03 storage diagnostics
 
-状态：P0～P2已通过G1；P3请求/维护前置增量implemented_unverified，自动外部维护隔离受阻，有界存储/完整恢复未实现。T-03仍in_progress。见 `../../notes/t-03-p3-handoff.md`。
+状态：P0～P2已通过G1；P3有界结构基元/v1完整辅助恢复增量implemented_unverified；普通领域编译仍用有P2上限的全库oracle，分页发布/checkpoint与规模化恢复未实现。自动外部维护门禁保留。T-03仍in_progress。见 `../../notes/t-03-p3-handoff.md`。
 
 当前R1/R2返修代码、150项Node回归和隔离TT `20260919g1` 小验证已完成；G1已由最终回执放行；这些为原P0～P2证据。关闭成功后旧owner永久失效，必须经openTestStore取得替代owner；关闭失败保留同一owner，可显式recover或重试close。恢复只把原生null视为缺记录，损坏payload/root报NEEDS_RESOLUTION。证据见 `../../evals/t03/g1-repair/`。
 
@@ -37,6 +37,24 @@ collector 仅监听 127.0.0.1:19374，完成/错误/kill-ready 后自行停止�
 
 `kind`为history（payload是标准command）、binding（完整binding）或memory（archives/action/branch_id/revision_id/old_revision_id/expected_view/mode全部显式字段）；编译仅复用contracts，不调用模型。示例与错误路径见 `tests/intent-prototype.test.mjs`。
 
-`suspend()/resume(ticket)`是合作式维护诊断；不能接管TT自行开始的同步/归档。当前自动维护原语缺口已在固定版本源码和真实旧handle反例确认，见交接。`requireExternalMaintenanceFence()`固定拒绝此未支持路径。当前仍是P2规模小原型，未交付P3块树/完整备份。
+`suspend()/resume(ticket)`是合作式维护诊断；不能接管TT自行开始的同步/归档。当前自动维护原语缺口已在固定版本源码和真实旧handle反例确认，见交接。`requireExternalMaintenanceFence()`固定拒绝此未支持路径。业务入口仍是P2规模小原型；新结构基元和完整v1恢复接口见下节，不能据此宣称业务路径S05完成。
 
 原生复现：`node packages/storage/native/collector.mjs p3-intent <new-run>` 后启动独立副本。只使用新namespace；结果记录准备重开、记忆去重、维护身份拒绝以及原生namespace换代反例，**不等于真实sync/archive或进程强杀测试**。
+
+## P3 bounded primitives and complete v1 recovery
+
+`Pages`提供精确持久目录/游标、计数序列树及结构审计；`PagedJSON`提供`write/read/at/set/splice`。独立Node测试验证局部路径和旧根共享，原生harness验证精确大整数NodeId与重开。它们尚未接入普通领域编译/发布，不能按已完成P3业务provider使用。
+
+现有intent入口增加：
+
+```js
+const byteStream = await source.handle().export();
+const target = await openIntentTestStore(api.db, 'mnemo-t03-p3-<new-run>-restored', { restore: byteStream });
+const prepared = await target.handle().pending();
+```
+
+新目标必须为空；传输保存全部已建模逻辑对象与ledger/journal/markers/intents。恢复目标有独立身份格式和激活标记，拒绝旧读者与半成品。流式传输有字节/记录/深度上限，领域校验仍受P2小库上限约束，详见协议v0.5。不要用旧P2 bundle替代此包。
+
+最终原生命令：`collector.mjs p3-recovery <run>`；`p3-before`→精确Crash→`recover-p3-before`；`p3-after`→精确Crash→`recover-p3-after`。恢复collector读取同run的kill-ready独立证据，验证原operation/生成ID/结果；缺证据不能当恢复成功。正常完成后的`stop-isolated-complete.ps1 -Phase <phase> -Run <run>`只记录退出清理，不计作故障实验。每次启动仍通过`isolated-tt.ps1 -Action Start`的固定哈希/独立路径/无其他TT实例检查。
+
+所有原生实验仍要求无未经协调的同步/归档/其他调用方替换库。自动维护门禁不变，生产准入未放宽。

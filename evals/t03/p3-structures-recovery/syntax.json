@@ -1,0 +1,151 @@
+{
+  "node": "v24.19.0",
+  "command": "node --check <each .mjs/.js in storage/contracts/probe>",
+  "count": 36,
+  "results": [
+    {
+      "file": "packages/storage/intent-prototype.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/intent-recovery.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/intent-tt-adapter.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/native/collector.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/native/index.js",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/native/intent-suite.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/native/recovery-suite.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/native/suite.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/paged-json.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/pages.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/protocol.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/strict-json.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/fake-io.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/g1-review.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/intent-adapter.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/intent-prototype.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/intent-recovery.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/paged-json.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/pages.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/scenario.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tests/storage.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/storage/tt-adapter.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/context.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/history.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/index.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/memory.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/primitives.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/runtime.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/schema.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/tests/contracts.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/tests/fixture.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/tests/review-round2.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/tests/review.test.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "packages/contracts/transfer.mjs",
+      "status": "passed"
+    },
+    {
+      "file": "apps/tt-adapter-probe/index.js",
+      "status": "passed"
+    },
+    {
+      "file": "apps/tt-adapter-probe/tests/probe.test.js",
+      "status": "passed"
+    }
+  ]
+}

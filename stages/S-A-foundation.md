@@ -16,7 +16,7 @@
 | T-01 ✅ | 做最小 TT Adapter 探针 | verified；await、payload、取消与 request gate 边界已验证 |
 | T-02A ✅ | TT 宿主身份与变更事件验证 | verified；stableId/integrity、Branch、Edit/Delete/Swipe/Regenerate、reopen/rename 边界 |
 | T-02 ✅ | 身份、历史版本与上下文的最小可执行契约 | verified；1891043 最终复核关闭 R1～R5，范围限最小参考模型 |
-| T-03 ▶ | 可迁移、可恢复的存储地基 | in_progress；G1已通过；15b8605为P3部分诊断增量，自动维护受阻；其余P3只在受控隔离环境继续 |
+| T-03 ▶ | 可迁移、可恢复的存储地基 | in_progress；G1已通过；P3有界基元/v1完整恢复增量待review，业务编译仍有界化未完成；自动维护受阻，继续仅限受控隔离 |
 
 用户已授权 Chat 核对后发布正式卡并高难前置。旧 `tasks/T-03-storage-foundation.proposal.md` 为 superseded 历史入口；Codex 不修改关卡许可、不自动生成 T-04。G1 正式回执见 `notes/t-03-g1-final-review.md`；P3 最新专项回审及施工边界见 `notes/t-03-p3-maintenance-review.md`，均为原任务记录，不是新任务卡。
 
@@ -58,11 +58,11 @@ T-02 不沿用柏宝书 Leaf 作为正式对象名；普通派生按 User + Assi
 
 ## 6. 当前阻塞、关卡与未决项
 
-**T-02 无剩余验收阻塞；G1-R1/R2仍已关闭。P3自动外部维护隔离受阻，c90d77d未关闭该缺口。** `notes/t-03-p3-handoff.md`保留原始停工证据。当前P3前置诊断增量为implemented_unverified，完整有界存储/恢复尚未实现，不把T-03升为verified。
+**T-02 无剩余验收阻塞；G1-R1/R2仍已关闭。P3自动外部维护隔离受阻，c90d77d未关闭该缺口。** `notes/t-03-p3-handoff.md`保留原始停工证据。当前P3有界结构基元与v1辅助格式恢复增量为implemented_unverified；普通领域编译仍用P2全库oracle，分页发布/checkpoint与规模化恢复未实现，不把T-03升为verified。
 
 P3后续工作与许可：
 
-1. 持久请求/生成ID前置诊断已有实现，仍保留P2上限；后续补齐有界化、实际新格式故障恢复及完整辅助材料备份，不能以正常close/reopen代替强杀验证。
+1. 持久请求/生成ID前置诊断已有实现，仍保留P2上限；本轮补齐v1完整辅助材料恢复与新intent格式的隔离进程故障验证；有界基元尚需接入领域编译、发布和恢复checkpoint。具体运行证据见evals/t03/p3-structures-recovery，不能以正常close/reopen代替强杀验证。
 2. 自动宿主维护路径继续返回HOST_MAINTENANCE_UNSUPPORTED。推荐与TT作者确认原生打开代次/租约或可等待的维护前排空能力；当前只为提议，不授权修改TT或自动切B2/A。新版维护锁不能代替旧句柄代次隔离，JS写前检查不能代替原子校验。
 3. **可继续其余P3工程工作**：有界manifest/command/view/expected/journal/目录、精确枚举、完整一致备份恢复；只用已确认的独立实例/namespace及合成数据，明确无未经协调的宿主同步/归档/库替换。合作式维护必须先等待suspend再操作。无法确保这个隔离前提的原生测试继续停，可先做纯模型/独立测试。
 

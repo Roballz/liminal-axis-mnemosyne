@@ -3,9 +3,13 @@
 import { canonicalize, equal, fingerprint, freeze, id, newId, requireThat } from '../contracts/primitives.mjs';
 import { archiveMemory, bindHost, commitHistory, correctMemory, selectMemory } from '../contracts/index.mjs';
 import { emptyState } from '../contracts/history.mjs';
-import { StoreOwner, LIMITS, prepareTransaction } from './protocol.mjs';
+import { StoreOwner, FORMAT, LIMITS, prepareTransaction, inspectBundle, importIntoEmpty } from './protocol.mjs';
+
+import { RESTORE_SLOT, RECOVERY_FORMAT, encodeIntentRecovery, decodeIntentRecovery } from './intent-recovery.mjs';
 
 export const INTENT_FORMAT = 'mnemosyne-storage-intents-v1';
+export const RESTORED_INTENT_FORMAT = 'mnemosyne-storage-restored-intents-v1';
+const libraryFormats = [INTENT_FORMAT, RESTORED_INTENT_FORMAT];
 export const IDENTITY_SLOT = 8193;
 const FIRST_INTENT = IDENTITY_SLOT + 1;
 const hash = value => fingerprint('write-payload', value);
@@ -92,7 +96,7 @@ export class IntentCoordinator {
   #alive() { check(!this.#closed, 'OWNER_CLOSED', 'Coordinator permanently closed'); }
   async #identityCheck() {
     const record = await this.#io.get(IDENTITY_SLOT);
-    check(record && record.format === INTENT_FORMAT && record.kind === 'identity' &&
+    check(record && libraryFormats.includes(record.format) && record.kind === 'identity' &&
       equal(Object.keys(record).sort(), ['format', 'kind', 'library_id']) &&
       typeof record.library_id === 'string', 'NEEDS_RESOLUTION', 'Missing/foreign library identity');
     id('operation', record.library_id); // Storage-local UUID, never a domain operation entry.
@@ -102,7 +106,14 @@ export class IntentCoordinator {
   async #recover() {
     this.#alive(); this.#status = 'recovery-required'; this.#epoch++;
     await this.#io.reopen?.();
+    const restoration = await this.#io.get(RESTORE_SLOT);
+    check(restoration === null || restoration && equal(Object.keys(restoration).sort(),
+      ['format', 'source_checksum', 'source_library_id', 'status']) &&
+      restoration.format === RECOVERY_FORMAT && restoration.status === 'active',
+      'STAGING_IMPORT', 'Incomplete/unknown restore cannot become active');
     await this.#identityCheck();
+    check(this.#identity.format !== RESTORED_INTENT_FORMAT || restoration !== null,
+      'STAGING_IMPORT', 'Restored library requires its activation record');
     if (this.#ticket) {
       check(equal(await this.#io.get(0), this.#ticket.root), 'LIBRARY_CHANGED', 'Published root changed during maintenance');
       const count = this.#ticket.intent_count;
@@ -146,7 +157,7 @@ export class IntentCoordinator {
       this.#alive(); check(this.#identity === null, 'INVALID_TRANSITION', 'Already initialized');
       await this.#io.reopen?.();
       if (this.#io.assertEmpty) await this.#io.assertEmpty();
-      else for (let i = 0; i <= FIRST_INTENT + LIMITS.commits; i++) {
+      else for (let i = 0; i <= RESTORE_SLOT; i++) {
         check(await this.#io.get(i) === null, 'IMPORT_TARGET_NOT_EMPTY', 'New isolated namespace required');
       }
       this.#identity = clone({ format: INTENT_FORMAT, kind: 'identity', library_id: newId('operation') });
@@ -187,6 +198,8 @@ export class IntentCoordinator {
       pending: () => run(() => clone(this.#records.filter(r => !this.#owner.ledger.has(r.input.operation_id))
         .map(r => this.#lookup(r.input.operation_id)))),
       read: () => run(() => this.#owner.handle().read()),
+      export: () => run(() => encodeIntentRecovery(clone({ identity: this.#identity,
+        bundle: this.#owner.bundle(), intents: this.#records }))),
     });
   }
   #lookup(operation) {
@@ -271,4 +284,61 @@ export class IntentCoordinator {
       await this.#io.close(); this.#closed = true; this.#status = 'closed';
     });
   }
+}
+// Explicit bounded audit: the v1 domain compiler still has the original P2 caps.
+// This bridge restores ALL v1 auxiliary material; it is not the scalable P3 compiler.
+export function inspectIntentRecovery(snapshot) {
+  fields(snapshot, ['identity', 'bundle', 'intents']);
+  fields(snapshot.identity, ['format', 'kind', 'library_id']);
+  check(libraryFormats.includes(snapshot.identity.format) && snapshot.identity.kind === 'identity',
+    'INVALID_SCHEMA', 'Unknown library identity'); id('operation', snapshot.identity.library_id);
+  const bundle = inspectBundle(snapshot.bundle);
+  check(Array.isArray(snapshot.intents) && snapshot.intents.length <= LIMITS.commits,
+    'RESOURCE_LIMIT', 'Intent count limit');
+  let state = emptyState(), previous = null; const seen = new Set();
+  for (const [index, record] of snapshot.intents.entries()) {
+    validateIntent(record);
+    check(record.sequence === index && record.previous === previous && !seen.has(record.input.operation_id),
+      'NEEDS_RESOLUTION', 'Recovery intent chain/identity conflict');
+    previous = record.checksum; seen.add(record.input.operation_id);
+    const compiled = compile(state, record.input, record.generated);
+    check(equal(compiled.request, record.compiled), 'NEEDS_RESOLUTION', 'Recovery intent compilation mismatch');
+    if (index < bundle.journal.length) {
+      check(equal(bundle.journal[index], record.compiled), 'NEEDS_RESOLUTION', 'Recovery journal/intent disagreement');
+      state = compiled.state;
+    } else check(index === bundle.journal.length && index === snapshot.intents.length - 1,
+      'NEEDS_RESOLUTION', 'Only one final prepared request permitted');
+  }
+  check(bundle.journal.length <= snapshot.intents.length && equal(state, bundle.logical.state),
+    'NEEDS_RESOLUTION', 'Recovery intents do not explain the published state');
+  return clone(snapshot);
+}
+export const readIntentRecovery = chunks => decodeIntentRecovery(chunks, {
+  emptyState, storageFormat: FORMAT, intentFormat: libraryFormats, inspect: inspectIntentRecovery,
+});
+export async function restoreIntentIntoEmpty(io, chunks) {
+  // No target writes until transport, domain R1-R5, journal and generated IDs pass.
+  const snapshot = await readIntentRecovery(chunks);
+  await io.reopen?.();
+  check(typeof io.assertEmpty === 'function', 'UNSUPPORTED', 'Exact empty-target proof required');
+  await io.assertEmpty();
+  const point = async (label, fn) => {
+    await io.point?.(label, 'before'); const value = await fn(); await io.point?.(label, 'after'); return value;
+  };
+  const marker = { format: RECOVERY_FORMAT, status: 'staging', source_library_id: snapshot.identity.library_id,
+    source_checksum: snapshot.bundle.checksum };
+  await point('restore-stage', async () => { await io.put(RESTORE_SLOT, marker); await io.flush(); });
+  // Restored domain IDs remain identical. The new physical library gets a new identity.
+  await io.put(IDENTITY_SLOT, { ...snapshot.identity, format: RESTORED_INTENT_FORMAT, library_id: newId('operation') });
+  for (const record of snapshot.intents) await point('restore-intent', () => io.put(FIRST_INTENT + record.sequence, record));
+  await io.flush();
+  const owner = new StoreOwner(io); await owner.recover();
+  await importIntoEmpty(owner, snapshot.bundle);
+  await owner.recover(); // Audit persisted objects/root, not only the replayed in-memory state.
+  // Read back every auxiliary record before activation, not just the source package.
+  const intents = [];
+  for (let n = 0; n < snapshot.intents.length; n++) intents.push(await io.get(FIRST_INTENT + n));
+  inspectIntentRecovery({ identity: await io.get(IDENTITY_SLOT), bundle: owner.bundle(), intents });
+  await point('restore-activate', async () => { await io.put(RESTORE_SLOT, { ...marker, status: 'active' }); await io.flush(); });
+  const coordinator = new IntentCoordinator(io); await coordinator.recover(); return coordinator;
 }

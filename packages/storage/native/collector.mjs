@@ -1,9 +1,9 @@
 // Local-only synthetic evidence endpoint; no chat data, arbitrary evaluation or uploads.
 import { createServer } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const phase = process.argv[2] ?? 'p0';
-if (!['p0', 'before', 'recover-before', 'after', 'recover-after', 'roundtrip', 'reopen-check', 'g1-repair', 'p3-intent'].includes(phase)) throw Error('Unknown phase');
+if (!['p0', 'before', 'recover-before', 'after', 'recover-after', 'roundtrip', 'reopen-check', 'g1-repair', 'p3-intent', 'p3-recovery', 'p3-before', 'p3-after', 'recover-p3-before', 'recover-p3-after'].includes(phase)) throw Error('Unknown phase');
 const run = process.argv[3] ?? '20260919a';
 if (!/^[a-z0-9]+$/.test(run)) throw Error('Invalid run');
 const root = resolve('.t03-local/evidence'); mkdirSync(root, { recursive: true });
@@ -15,7 +15,12 @@ const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204).end(); return; }
   if (req.method === 'GET' && req.url === '/phase') {
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ fixture: 'mnemosyne-t03-isolated-367b0c7', phase, run })); return;
+    let crashEvidence = null;
+    if (['recover-p3-before', 'recover-p3-after'].includes(phase)) {
+      crashEvidence = JSON.parse(readFileSync(resolve(root, `${run}-${phase.slice(8)}.json`), 'utf8').replace(/^\uFEFF/, '')).events.at(-1);
+      if (crashEvidence.type !== 'kill-ready' || crashEvidence.phase !== phase.slice(8)) throw Error('Invalid prior crash evidence');
+    }
+    res.end(JSON.stringify({ fixture: 'mnemosyne-t03-isolated-367b0c7', phase, run, crashEvidence })); return;
   }
   if (req.method !== 'POST' || req.url !== '/result') { res.writeHead(404).end(); return; }
   let body = '';

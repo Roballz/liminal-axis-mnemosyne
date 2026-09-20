@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][ValidateSet('Start','Crash')][string]$Action,
-  [ValidateSet('before','after')][string]$Phase = 'before',
+  [ValidateSet('before','after','p3-before','p3-after')][string]$Phase = 'before',
   [ValidatePattern('^[a-z0-9]+$')][string]$Run = '20260919a'
 )
 $ErrorActionPreference = 'Stop'
@@ -23,8 +23,9 @@ if ($Action -eq 'Start') {
   $evidencePath = Join-Path $repoRoot ".t03-local\evidence\$Run-$Phase.json"
   $evidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
   $boundary = $evidence.events[-1]
+  $expectedNamespace = if ($Phase.StartsWith('p3-')) { "mnemo-t03-p3-$Run-crash-$($Phase.Substring(3))" } else { "mnemo-t03-$Run-crash-$Phase" }
   if ($boundary.type -ne 'kill-ready' -or $boundary.phase -ne $Phase -or
-      $boundary.namespace -ne "mnemo-t03-$Run-crash-$Phase") { throw 'No matching armed fault boundary' }
+      $boundary.namespace -ne $expectedNamespace) { throw 'No matching armed fault boundary' }
   $testProcess = Get-Process -Id $instances[0].ProcessId
   if ((Get-Item -LiteralPath $evidencePath).LastWriteTime -lt $testProcess.StartTime) { throw 'Stale fault evidence' }
   $proof = [pscustomobject]@{Action='Crash';PID=$testProcess.Id;Executable=$exe;DataRoot=(Join-Path $testRoot 'data');Phase=$Phase;Boundary=$boundary;At=[DateTime]::UtcNow.ToString('o')}
