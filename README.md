@@ -14,7 +14,7 @@
 
 当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。**48663c4 已通过 G1，G1-R1/R2关闭，允许继续B1路线的P3；P3～P5尚未验收，整个任务未完成。** 旧 proposal 已 superseded。
 
-**P3 当前交接（2026-09-20）：** 原交接第5节三项端到端受控集成已实现：普通业务分页编译、持久请求/发布checkpoint及完整分页恢复；314/314回归与分页新路径隔离TT发布前/后强杀通过，状态implemented_unverified，详见 `notes/t-03-p3-handoff.md` 第7节。自动外部维护门禁仍保留，P4/P5未进入，T-03未完成。
+**P3 当前交接（2026-09-21）：** 75abeea集成review提出P3-R1/R2；精确成员与共享依赖遍历已返修，待再次review，详见 `notes/t-03-p3-handoff.md` 第8节及 `notes/t-03-p3-integration-review.md`。原314项及原生证据保留，本轮验证见`evals/t03/p3-review-repair/`。状态implemented_unverified，自动外部维护门禁仍保留，P4/P5未进入，T-03未完成。
 
 当前关卡回执：`notes/t-03-g1-final-review.md`。Chat对齐15个文件blob后独立复跑84项存储测试及15文件语法，全部通过；同一最终19项定向测试在实际旧实现上10通过/9失败。完整150项Node回归、23文件语法/diff和隔离TT小验证为Codex提交的证据，本轮明确区分独立执行与证据审阅。
 

@@ -91,10 +91,10 @@ export async function compileHistory(d,input,makeId) {
   }
   if(change_kind==='reorder') {
     check(remove===insert.length&&remove>0,'INVALID_TRANSITION','Reorder size/no-op');
-    // Membership equality checked against the original persistent UUID index.
+    // Fork indexes may retain parent suffixes whose labels have been reused.
     for(const entry of insert) {
-      const old=await p.mapGet(members,entry.message_id);
-      check(old&&equal((await p.get(old)).entry,entry)&&await p.mapGet(order,(await p.get(old)).label),'INVALID_TRANSITION','Reorder source changed');
+      const old=await d.indexMember({members,order},entry.message_id);
+      check(old&&equal(old.entry,entry),'INVALID_TRANSITION','Reorder source changed');
     }
   }
   const left=start?(await p.get((await p.range(sequence,start-1,1).next()).value)).label:null;
@@ -105,8 +105,7 @@ export async function compileHistory(d,input,makeId) {
   check(gap>0n&&low+gap*BigInt(insert.length)<high,'RESOURCE_LIMIT','Order label space exhausted');
   for(const entry of insert) {
     check((await d.get('messages',entry.message_id)).story_id===story_id&&(await d.get('revisions',entry.revision_id)).message_id===entry.message_id,'NEEDS_RESOLUTION','Source owner');
-    const existing=await p.mapGet(members,entry.message_id);
-    check(!existing||await p.mapGet(order,(await p.get(existing)).label)===null,'NEEDS_RESOLUTION','Duplicate source');
+    check(await d.indexMember({members,order},entry.message_id)===null,'NEEDS_RESOLUTION','Duplicate source');
     low+=gap; const ref=await p.put({kind:'history-entry',label:label(low),entry});
     members=await p.mapSet(members,entry.message_id,ref); order=await p.mapSet(order,label(low),ref);
     inserted=await p.concat(inserted,await p.sequence([ref]));

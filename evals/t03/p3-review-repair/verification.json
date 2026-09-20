@@ -1,0 +1,86 @@
+{
+  "status": "implemented_unverified",
+  "baselineCommit": "d3726c98b800f46732142faae6b5b8835e4650c0",
+  "beforeImplementation": "75abeeab496b7b129083f795e3935a54367e47e5",
+  "tests": {
+    "beforeExpectedFailures": 2,
+    "afterPassed": 319,
+    "afterFailed": 0,
+    "originalPreserved": 314
+  },
+  "limits": {
+    "states": 8192,
+    "steps": 131072,
+    "depth": 128
+  },
+  "sourceFiles": [
+    {
+      "path": "packages/storage/paged-domain.mjs",
+      "sha256": "d3f4d9ac11737715a4544625601355eb4093bfdb9720f4c33e96dbca7ad72623"
+    },
+    {
+      "path": "packages/storage/paged-history.mjs",
+      "sha256": "81f02dceed5d03da90870ff235868d934743ea3b6a764170bf6a0305d7103f75"
+    },
+    {
+      "path": "packages/storage/paged-memory.mjs",
+      "sha256": "1eb01cdf0523d5c20e746c46da73f312bb96370ed25455457b9ffacbf1951583"
+    },
+    {
+      "path": "packages/storage/memory-work.mjs",
+      "sha256": "66e5f4db14d5daa48a07c70932a068fcabd5c9baff5b7584e08df5ad8e568d6e"
+    },
+    {
+      "path": "packages/storage/tests/p3-review.test.mjs",
+      "sha256": "58c0c07f950723b109549803d75e655be0e4c85d6bcadf8d3add526354171905"
+    }
+  ],
+  "lineCounts": [
+    {
+      "path": "packages/storage/paged-domain.mjs",
+      "added": 4,
+      "deleted": 1
+    },
+    {
+      "path": "packages/storage/paged-history.mjs",
+      "added": 4,
+      "deleted": 5
+    },
+    {
+      "path": "packages/storage/paged-memory.mjs",
+      "added": 61,
+      "deleted": 39
+    },
+    {
+      "path": "packages/storage/memory-work.mjs",
+      "added": 35,
+      "deleted": 0
+    },
+    {
+      "path": "packages/storage/tests/p3-review.test.mjs",
+      "added": 186,
+      "deleted": 0
+    }
+  ],
+  "evidence": [
+    {
+      "path": "before.tap",
+      "sha256": "bbcdb382f065cacd4fb40b58d0701082a0b346b0a104c2669770df5b47f76b31"
+    },
+    {
+      "path": "after.tap",
+      "sha256": "b6baf3d49ed11a42ea3e59cb73478a34b02cfd9c33fd82a4367b8b5faf33c630"
+    },
+    {
+      "path": "syntax.json",
+      "sha256": "202ba061b3bade0ce2d8a1d9486b30da24ba27a6eb6c613c392fff2cab3cfe5d"
+    }
+  ],
+  "nativeRerun": false,
+  "automaticMaintenance": "HOST_MAINTENANCE_UNSUPPORTED",
+  "p4p5Started": false,
+  "beforeOutputNormalization": {
+    "rawSHA256": "13ae9bcb7a485ba31c4e7ca427271b67a428193e4d774b7a6d7fe14227885356",
+    "description": "Removed trailing horizontal whitespace only for git diff --check"
+  }
+}

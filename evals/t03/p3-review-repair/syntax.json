@@ -1,0 +1,22 @@
+[
+  {
+    "path": "packages/storage/paged-domain.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage/paged-history.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage/paged-memory.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage/memory-work.mjs",
+    "exitCode": 0
+  },
+  {
+    "path": "packages/storage/tests/p3-review.test.mjs",
+    "exitCode": 0
+  }
+]

@@ -1,13 +1,15 @@
 import { equal, requireThat as check } from '../contracts/primitives.mjs';
 import { validate } from '../contracts/schema.mjs';
 import { derivedFingerprint } from '../contracts/memory.mjs';
-const DEPTH=128;
-async function span(d,snapshot,coverage) {
+import { MemoryWork } from './memory-work.mjs';
+async function span(d,snapshot,coverage,work) {
+  work.step();
   if(!coverage.boundary) return [];
   const start=await d.member(snapshot,coverage.boundary.start), end=await d.member(snapshot,coverage.boundary.end);
   if(!start||!end||start.label>end.label) return null;
   const {order}=await d.get('historyIndex',snapshot), actual=[start.entry];
   if(start.label!==end.label) for await(const [key,ref] of d.pages.mapEntries(order,start.label)) {
+    work.step();
     if(key>end.label) break;
     actual.push((await d.pages.get(ref)).entry);
     // A mismatch can be rejected without retaining an unbounded span.
@@ -15,30 +17,36 @@ async function span(d,snapshot,coverage) {
   }
   return actual;
 }
-async function fits(d,m,snapshot,path=[]) {
-  check(path.length<DEPTH&&!path.includes(m.memory_revision_id),'NEEDS_RESOLUTION','Memory dependency depth/cycle');
+async function fits(d,m,snapshot,work) {
+  return work.run('fits',snapshot+':'+m.memory_revision_id,async()=>{
   const basis=await d.get('snapshots',snapshot);
   if(m.origin==='derived_only') {
     const old=await d.get('snapshots',m.basis_snapshot_id);
-    return m.scope_branch_id===basis.branch_id&&old.message_count<=basis.message_count&&await d.samePrefix(old.snapshot_id,snapshot,old.message_count);
+    if(m.scope_branch_id!==basis.branch_id||old.message_count>basis.message_count) return false;
+    work.step(old.message_count);
+    return d.samePrefix(old.snapshot_id,snapshot,old.message_count);
   }
-  if(!equal(await span(d,snapshot,m.coverage),m.coverage.observed_span)) return false;
+  if(!equal(await span(d,snapshot,m.coverage,work),m.coverage.observed_span)) return false;
   for(const ref of m.input_refs) {
+    work.step();
     if(ref.type==='source') { const item=await d.member(snapshot,ref.message_id); if(!item||item.entry.revision_id!==ref.revision_id) return false; }
-    else if(!await fits(d,await d.get('memories',ref.memory_revision_id),snapshot,[...path,m.memory_revision_id])) return false;
+    else if(!await fits(d,await d.get('memories',ref.memory_revision_id),snapshot,work)) return false;
   }
   return true;
+  });
 }
-export async function checkPagedMemory(d,m,path=[]) {
-  validate('memory',m); check(path.length<DEPTH&&!path.includes(m.memory_revision_id),'NEEDS_RESOLUTION','Memory dependency cycle/depth');
+export async function checkPagedMemory(d,m,work=new MemoryWork()) {
+  return work.run('validate',m.memory_revision_id,async()=>{
+  validate('memory',m);
   const basis=await d.get('snapshots',m.basis_snapshot_id), coverage=m.coverage;
   check(basis.story_id===m.story_id&&m.input_fingerprint===derivedFingerprint(m),'NEEDS_RESOLUTION','Memory basis/fingerprint');
   let previous=null;
   for(const source of coverage.members) {
+    work.step();
     const item=await d.member(basis.snapshot_id,source.message_id);
     check(item&&equal(item.entry,source)&&(previous===null||item.label>previous),'NEEDS_RESOLUTION','Coverage source/order'); previous=item.label;
   }
-  check(equal(coverage.boundary,coverage.members.length?{start:coverage.members[0].message_id,end:coverage.members.at(-1).message_id}:null)&&equal(await span(d,basis.snapshot_id,coverage),coverage.observed_span)&&
+  check(equal(coverage.boundary,coverage.members.length?{start:coverage.members[0].message_id,end:coverage.members.at(-1).message_id}:null)&&equal(await span(d,basis.snapshot_id,coverage,work),coverage.observed_span)&&
     (coverage.mode!=='interval'||equal(coverage.members,coverage.observed_span)),'NEEDS_RESOLUTION','Coverage does not match basis');
   if(m.origin==='derived_only') {
     check(m.input_refs.length===0&&coverage.members.length===0&&m.source_declaration!==null&&m.scope_branch_id===basis.branch_id,'NEEDS_RESOLUTION','Derived-only declaration/scope'); return;
@@ -46,74 +54,88 @@ export async function checkPagedMemory(d,m,path=[]) {
   check(m.input_refs.length>0&&coverage.members.length>0&&m.source_declaration===null&&m.scope_branch_id===null,'NEEDS_RESOLUTION','Source-derived inputs');
   const evidence=new Set();
   for(const ref of m.input_refs) {
+    work.step();
     if(ref.type==='source') {
       const item=await d.member(basis.snapshot_id,ref.message_id);
       check(item&&item.entry.revision_id===ref.revision_id,'NEEDS_RESOLUTION','Input outside basis'); evidence.add(ref.message_id+ref.revision_id);
     } else {
       const child=await d.get('memories',ref.memory_revision_id);
       check(child.story_id===m.story_id&&child.memory_id===ref.memory_id,'NEEDS_RESOLUTION','Memory input owner');
-      await checkPagedMemory(d,child,[...path,m.memory_revision_id]);
+      await checkPagedMemory(d,child,work);
       if(ref.dependency_mode==='checkpoint') check(m.kind==='Record'&&child.memory_id===m.memory_id&&child.origin==='source_derived'&&child.coverage.members.length<coverage.members.length&&equal(child.coverage.members,coverage.members.slice(0,child.coverage.members.length)),'INVALID_TRANSITION','Checkpoint prefix');
-      check(await fits(d,child,basis.snapshot_id),'NEEDS_RESOLUTION','Dependency not applicable to basis');
+      check(await fits(d,child,basis.snapshot_id,work),'NEEDS_RESOLUTION','Dependency not applicable to basis');
+      work.step(child.coverage.members.length);
       child.coverage.members.forEach(s=>evidence.add(s.message_id+s.revision_id));
     }
   }
   check(coverage.members.every(s=>evidence.has(s.message_id+s.revision_id)),'NEEDS_RESOLUTION','Unread coverage');
   if(m.kind==='TurnMemory') check(coverage.mode==='interval'&&coverage.members.length===2&&
     (await d.get('revisions',coverage.members[0].revision_id)).role==='user'&&(await d.get('revisions',coverage.members[1].revision_id)).role==='assistant','UNSUPPORTED','Explicit adjacent user/assistant pair required');
+  });
 }
-export async function target(d,branch,ref) {
-  let key=ref.dependency_mode==='checkpoint'?ref.memory_revision_id:await d.viewValue(branch,'selections',ref.memory_id);
-  const seen=new Set();
-  while(key) {
-    check(seen.size<DEPTH&&!seen.has(key),'NEEDS_RESOLUTION','Correction cycle/depth'); seen.add(key);
-    const next=await d.viewValue(branch,'corrections',key); if(!next) return key; key=next;
+export async function target(d,branch,ref,work=new MemoryWork()) {
+  work.step();
+  const key=ref.dependency_mode==='checkpoint'?ref.memory_revision_id:await d.viewValue(branch,'selections',ref.memory_id);
+  async function resolve(key) {
+    if(!key) return key;
+    return work.run('corrections',branch+':'+key,async()=>{
+      const next=await d.viewValue(branch,'corrections',key);return next?resolve(next):key;
+    });
   }
-  return key;
+  return resolve(key);
 }
-export async function checkPagedGraph(d,branch) {
-  async function visit(key,path) {
-    check(path.length<DEPTH&&!path.includes(key),'NEEDS_RESOLUTION','Selected graph cycle/depth');
-    const m=await d.get('memories',key);
-    for(const ref of m.input_refs) if(ref.type==='memory') { const next=await target(d,branch,ref); if(next) await visit(next,[...path,key]); }
+export async function checkPagedGraph(d,branch,work=new MemoryWork()) {
+  async function visit(key) {
+    return work.run('graph',branch+':'+key,async()=>{
+      const m=await d.get('memories',key);
+      for(const ref of m.input_refs) { work.step();if(ref.type==='memory') { const next=await target(d,branch,ref,work); if(next) await visit(next); } }
+    });
   }
   for await(const [,key] of d.viewEntries(branch,'selections')) {
-    check(await target(d,branch,{dependency_mode:'checkpoint',memory_revision_id:key})===key,'NEEDS_RESOLUTION','Selected root redirected (R5)');
-    await visit(key,[]);
+    work.step();
+    check(await target(d,branch,{dependency_mode:'checkpoint',memory_revision_id:key},work)===key,'NEEDS_RESOLUTION','Selected root redirected (R5)');
+    await visit(key);
   }
 }
-export async function pagedMemoryStatus(d,key,branchId,cutoffLength=null,path=[]) {
-  const m=await d.get('memories',key,false); if(!m||path.includes(key)||path.length>=DEPTH) return 'needs-resolution';
+export async function pagedMemoryStatus(d,key,branchId,cutoffLength=null,work=new MemoryWork()) {
   const branch=await d.get('branches',branchId), snapshot=branch.head_snapshot_id;
   const size=(await d.get('snapshots',snapshot)).message_count, cutoff=cutoffLength??size;
   check(Number.isSafeInteger(cutoff)&&cutoff>=0&&cutoff<=size,'INVALID_SCHEMA','Invalid recall cutoff');
   const sequence=await d.sequence(snapshot);
   const ceiling=cutoff?(await d.pages.get((await d.pages.range(sequence,cutoff-1,1).next()).value)).label:null;
   const within=async message=>{const item=await d.member(snapshot,message); return item&&ceiling!==null&&item.label<=ceiling?item:null;};
+  async function visit(key) {
+  return work.run('status',branchId+':'+cutoff+':'+key,async()=>{
+  const m=await d.get('memories',key,false);if(!m) return 'needs-resolution';
   if(m.story_id!==branch.story_id) return 'out-of-scope';
-  try { await checkPagedMemory(d,m); if(await target(d,branchId,{dependency_mode:'checkpoint',memory_revision_id:key})!==key) return 'needs-rebuild'; }
-  catch { return 'needs-resolution'; }
+  try { await checkPagedMemory(d,m,work); if(await target(d,branchId,{dependency_mode:'checkpoint',memory_revision_id:key},work)!==key) return 'needs-rebuild'; }
+  catch(error) { if(error.code==='RESOURCE_LIMIT') throw error;return 'needs-resolution'; }
   if(!m.recall_enabled||m.visibility==='private') return 'excluded';
   if(m.origin==='derived_only') {
     if(m.scope_branch_id!==branchId) return 'out-of-scope';
-    return (await d.get('snapshots',m.basis_snapshot_id)).message_count<=cutoff&&await fits(d,m,snapshot)?'valid':'needs-review';
+    return (await d.get('snapshots',m.basis_snapshot_id)).message_count<=cutoff&&await fits(d,m,snapshot,work)?'valid':'needs-review';
   }
   for(const ref of m.input_refs) {
+    work.step();
     if(ref.type==='source') { const item=await within(ref.message_id); if(!item||item.entry.revision_id!==ref.revision_id) return 'needs-rebuild'; }
     else {
-      if(await target(d,branchId,ref)!==ref.memory_revision_id) return 'needs-rebuild';
-      const status=await pagedMemoryStatus(d,ref.memory_revision_id,branchId,cutoff,[...path,key]); if(status!=='valid') return status==='needs-resolution'?status:'needs-rebuild';
+      if(await target(d,branchId,ref,work)!==ref.memory_revision_id) return 'needs-rebuild';
+      const status=await visit(ref.memory_revision_id); if(status!=='valid') return status==='needs-resolution'?status:'needs-rebuild';
     }
   }
-  for(const ref of m.coverage.members) { const item=await within(ref.message_id); if(!item||!equal(item.entry,ref)) return 'needs-rebuild'; }
-  if(!equal(await span(d,snapshot,m.coverage),m.coverage.observed_span)) return m.coverage.mode==='members'?'needs-review':'needs-rebuild';
+  for(const ref of m.coverage.members) { work.step();const item=await within(ref.message_id); if(!item||!equal(item.entry,ref)) return 'needs-rebuild'; }
+  if(!equal(await span(d,snapshot,m.coverage,work),m.coverage.observed_span)) return m.coverage.mode==='members'?'needs-review':'needs-rebuild';
   return 'valid';
+  });
+  }
+  try { return await visit(key); }
+  catch(error) { if(error.code==='NEEDS_RESOLUTION') return 'needs-resolution';throw error; }
 }
 export async function compileMemory(d,input,makeId) {
-  const p=input.payload;
+  const p=input.payload,work=new MemoryWork();
   check(p&&equal(Object.keys(p).sort(),['action','archives','branch_id','expected_view','mode','old_revision_id','revision_id'])&&Array.isArray(p.archives)&&['archive','select','correct'].includes(p.action),'INVALID_SCHEMA','Memory request shape');
   for(const m of p.archives) {
-    await d.put('memories',m.memory_revision_id,m,true); await checkPagedMemory(d,m);
+    await d.put('memories',m.memory_revision_id,m,true); await checkPagedMemory(d,m,work);
     const family=await d.get('families',m.memory_id,false), value={story_id:m.story_id,kind:m.kind};
     check(family===null||equal(family,value),'NEEDS_RESOLUTION','Memory family owner/kind'); if(!family) await d.put('families',m.memory_id,value,true);
   }
@@ -141,8 +163,8 @@ export async function compileMemory(d,input,makeId) {
   }
   const next=await d.allocate('memoryView',makeId);
   await d.patch('views',p.branch_id,['version'],await d.json.write(next)); await d.delete('viewIds',version); await d.put('viewIds',next,p.branch_id,true);
-  await checkPagedGraph(d,p.branch_id);
-  if(p.mode==='advance') check(await pagedMemoryStatus(d,p.revision_id,p.branch_id)==='valid','NOT_READY','Cannot advance invalid checkpoint');
+  await checkPagedGraph(d,p.branch_id,work);
+  if(p.mode==='advance') check(await pagedMemoryStatus(d,p.revision_id,p.branch_id,null,work)==='valid','NOT_READY','Cannot advance invalid checkpoint');
   await d.put('markers',p.branch_id,{head:branch.head_snapshot_id,view:next,index:'behind',rebuild:'evaluate'});
   return {branch_id:p.branch_id,version:next};
 }

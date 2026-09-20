@@ -1,5 +1,11 @@
 # 更新记录
 
+## 2026-09-21 T-03 P3-R1/R2返修
+
+- 按main@d3726c9上的集成review，统一fork标签复用下的精确成员判定，保留结构共享与合法显式导入。
+- 记忆校验、basis适用性、执行图、状态及纠错解析采用有界active/done工作集，保留拒环、current/checkpoint和R5；超限明确RESOURCE_LIMIT。
+- 新增修复前失败对照、共享DAG逻辑访问计数、coordinator拒绝不变性及重开/完整恢复回归。原314项保留；协议v0.7、task和高难交接同步，状态implemented_unverified，自动维护门禁及P4/P5边界不变。
+
 ## 2026-09-20 T-03 P3三项端到端分页集成
 
 - 从main@2f11c5b继续原P3；普通历史增量、记忆/纠错、绑定接入共享分页结构，单点发布、持久请求/结果索引及恢复checkpoint接通。v2逻辑指纹与语义保留，独立history-delta简写和分页格式边界写入09 v0.6。

@@ -1,6 +1,6 @@
 # T-03：存储发布与恢复协议及P3前置边界
 
-版本：v0.6，2026-09-20。状态：48663c4已通过G1，B1获准在受控隔离环境继续P3；本轮端到端分页集成及验证见第10节，状态implemented_unverified，自动外部维护门禁保留。**P3与T-03均未完成，B1未获手机/生产准入。**
+版本：v0.7，2026-09-21。状态：48663c4已通过G1，B1获准在受控隔离环境继续P3；端到端分页集成及P3-R1/R2返修见第10节，状态implemented_unverified，自动外部维护门禁保留。**P3与T-03均未完成，B1未获手机/生产准入。**
 
 下文1～7节保留P0～P2协议与当时限制；其中“G1待审/未放行”是历史状态，当前许可按最终回执。第8节保留前置增量，P3最新协议与边界见第10节及 `../notes/t-03-p3-handoff.md`。
 实施基线 `852260acd8d3e65d9d756af81cdf72e52c50046b`；继承 06 v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。本文没有更改领域语义。
@@ -132,6 +132,8 @@ G1 若放行，P3 必须将 command.entries 用不可变清单引用无损恢复
 
 历史使用计数序列树、UUID成员索引和有序标签索引。append/edit/insert/delete/fork 共享未变路径，固定 fork 只截取父快照前缀；标签不作为领域 ID。384 位标签的间隙不足明确返回 RESOURCE_LIMIT，不重排全库或更改身份。manifest 的新路径生成正式 hm UUID，旧 snapshot/块保留。完整 command.entries 以共享 JSON 序列引用保存，不在每轮重新生成整个数组。
 
+P3-R1：fork的members可共享父线完整索引；成员查询、reorder及插入去重统一通过`indexMember`确认当前order中该label指向同一不可变ref。标签被子线复用不会使父线后缀成为子线成员。reorder只能重排当前成员；显式合法import仍可引用已归档的旧原文，不复制或静默裁剪父members。
+
 `history-delta` 是存储请求的显式简写：payload 用 `splice:{start,delete_count,entries}` 替换完整 entries，其余字段仍按 command schema 校验；编译后保留可无损展开的原 v2 command。原 `history` 完整命令入口仍可用，扫描调用者提供的完整清单。不同输入形状的同 operation 请求属于不同原请求，不能静默互换重试。
 
 原 v2 的 `payload_fingerprint` 算法和包校验不变。其 SHA-256 覆盖完整 command，不能声称局部编辑后可常数成本重算。因此分页 operation 保留 command 引用，在显式逻辑读取/导出时流式计算原指纹；普通增量的内部去重对**独立版本化原请求**求指纹，不冒充 v2 command 指纹。小型 `logical()` 继续输出可经原 validateState/importLogical 验证的 v2 包；限制4096对象、8MiB物化总量及单对象预算。规模化备份走下述分页格式。
@@ -155,6 +157,12 @@ G1 若放行，P3 必须将 command.entries 用不可变清单引用无损恢复
 导入先证明空目标并持久写staging，再分批解析/写不可变页和暂存目录。先验证每条页引用确实存在于目录及持久材料中，防止后续重编译悄悄补回缺页；然后按journal顺序用原生成ID重编译纯领域操作，对照每个base/after/result、完整domain和精确索引，最后核验pending。合法checksum不能绕过R5、引用、归属或操作结果校验。只有全部通过才发布active并flush；目标获得新library UUID，领域ID、旧历史、纠错、确认结果和prepared材料不变。激活前中断不开放读取，原库不覆盖。
 
 默认上限：页8192 bytes、页缓存128、树/JSON深度64；普通请求1MiB；单对象物化1MiB/200000值；依赖遍历深度128。物理目录缓冲512节点，单次AVL更新暂可再增加有界路径，checkpoint时只落仍可达节点；库增长不扩大该缓冲。传输默认1GiB、1000000页、单行1MiB，超限拒绝，不截断正文。测试provider为测故障/统计保存内存Map，其总内存与正式分页算法的缓存预算分开报告。
+
+P3-R2：每次记忆编译或状态查询新建`MemoryWork`，本次archives、执行图及advance状态检查共享预算，调用结束释放。校验、basis适用性、执行图、状态和纠错解析分别区分active/done；缓存只保留ID、标量结果及子图高度，不保存全库对象。fits以snapshot+revision为键，执行图/纠错以branch+revision为键，状态再包含cutoff；只在本次固定视图内复用，不跨提交或分支视图变化复用。命中done仍检查当前深度+缓存高度，不能因根枚举顺序绕过128层限制。
+
+工作集最多8192个累计遍历状态，最多131072个工作单位（函数访问、引用/coverage成员、范围元素、纠错及根处理；derived-only前缀比较按元素预扣）。各类状态合计计数，全部档案/依赖不能绕过总预算。超过任一预算抛出RESOURCE_LIMIT，prepare不发布候选，状态查询也不会吞掉此错误而返回valid；环和深度违规仍为NEEDS_RESOLUTION/needs-resolution。数字是显式可拒绝的工程资源上限，不是产品容量、延迟或手机准入阈值。
+
+同一固定视图的执行图按不同节点/边展开，不按路径指数展开；跨不同basis的适用性仍需分别检查，成本按实际(snapshot,revision)状态及边计数，受同一预算约束。活动递归体仍会持有深度上限内的单对象、coverage和证据集合，受单对象及工作预算共同限制，不能将memo条目数描述成总内存字节。完整恢复逐条请求使用相同编译预算；超过新预算或包含旧非法重排的材料会拒绝审计并保留staging，不自动修改历史以求恢复成功。
 
 完整恢复可以线性枚举并重放历史以审计，但内存不随整个业务库物化。恢复审计仍消耗实际累计操作和物理材料的读取/计算成本；本轮不把它描述为常数时间。普通追加/重开和显式全量导出/审计分别取证。
 

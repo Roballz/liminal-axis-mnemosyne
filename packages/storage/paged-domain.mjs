@@ -53,7 +53,10 @@ export class PagedDomain {
   }
   async entry(snapshot,index) { for await (const item of this.entries(snapshot,index,1)) return item; }
   async member(snapshot, message) {
-    const index = await this.get('historyIndex',snapshot), ref = await this.pages.mapGet(index.members,message);
+    return this.indexMember(await this.get('historyIndex',snapshot),message);
+  }
+  async indexMember(index, message) {
+    const ref = await this.pages.mapGet(index.members,message);
     if (!ref) return null;
     const item = await this.pages.get(ref);
     if (!equal(await this.pages.mapGet(index.order,item.label),ref)) return null;

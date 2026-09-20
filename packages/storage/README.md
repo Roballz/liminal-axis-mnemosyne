@@ -1,6 +1,6 @@
 # T-03 storage diagnostics
 
-状态：P0～P2已通过G1；P3有界结构基元/v1完整辅助恢复增量implemented_unverified；普通领域编译仍用有P2上限的全库oracle，分页发布/checkpoint与规模化恢复未实现。自动外部维护门禁保留。T-03仍in_progress。见 `../../notes/t-03-p3-handoff.md`。
+状态：P0～P2已通过G1；P3分页业务、发布checkpoint与完整恢复已接通，P3-R1/R2返修待review，implemented_unverified。旧P2/intent入口保留原上限。自动外部维护门禁保留，P4/P5未开工，T-03仍in_progress。见 `../../notes/t-03-p3-handoff.md`。
 
 当前R1/R2返修代码、150项Node回归和隔离TT `20260919g1` 小验证已完成；G1已由最终回执放行；这些为原P0～P2证据。关闭成功后旧owner永久失效，必须经openTestStore取得替代owner；关闭失败保留同一owner，可显式recover或重试close。恢复只把原生null视为缺记录，损坏payload/root报NEEDS_RESOLUTION。证据见 `../../evals/t03/g1-repair/`。
 
@@ -83,6 +83,7 @@ const restored = await openPagedTestStore(api.db, 'mnemo-t03-paged-example-resto
 验证入口：
 
 - 全量：`node --test packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`
+- P3-R1/R2定向：`node --test packages/storage/tests/p3-review.test.mjs`；覆盖精确成员、共享DAG、预算、循环、checkpoint、重开/完整恢复。单次工作预算为8192状态/131072工作单位，超限RESOURCE_LIMIT，详见09 v0.7。
 - P3增长正确性：`node --max-old-space-size=1536 packages/storage/native/paged-growth.mjs`；虚构样本，输出到`evals/t03/p3-integration/`，临时分页包仅在`.t03-local/`。
 - 原生：collector的`paged-roundtrip`、`paged-before`→Crash→`recover-paged-before`、`paged-after`→Crash→`recover-paged-after`；`paged-reopen-check`复核同run已完成往返的库。只通过既有精确隔离脚本启停。
 

@@ -424,3 +424,35 @@ Windows x64 / Node v24.19.0。隔离TT仍为`367b0c7e9410e8fcf394f668302d70073e5
 回退保留旧库、新分页库、原请求和完整分页包，停用新入口并保留可读版本，不改root格式绕过旧读者拒绝。新namespace为`mnemo-t03-paged-20260920pageda-{source,restored}`及`mnemo-t03-paged-20260920pagedb-crash-{before,after}`，无真实档案迁移。
 
 高难交接第7节、README、阶段导读、包说明、协议和CHANGELOG已同步。下一依赖是Chat对受控集成/格式/正确性证据的review及未解决的宿主维护能力；不擅自进入P4/P5或创建后续卡。按用户持久要求提交push，整个T-03不提前宣告完成。
+
+## P3-R1/R2返修回报（2026-09-21 Codex）
+
+依据`notes/t-03-p3-integration-review.md`继续原P3，main从75abeea快进到d3726c9。已读README、S-A、task、最新review、G1第5节、维护边界及相关契约/源码。仅`.codex/`为原有未跟踪目录，排除提交。没有缺失产品输入，无新任务卡、子代理、TT修改或P4/P5施工。
+
+范围及代码量：统一`paged-domain/history`成员校验，修复`paged-memory`四处遍历及纠错解析，新增`memory-work`；新增一个独立回归文件。预估实现180～280、测试250～400行；实际实现+104/-45，测试+186/-0。原有测试文件无修改，协议09由v0.6更新v0.7；物理格式、逻辑包v2/schema_version=1、UUID和指纹不变。
+
+### 实现与语义
+
+- **R1**：当前members命中还须与order中同label的ref精确相等，查询/reorder/重复成员统一复用。惰性父索引保留，子线标签复用不恢复父线后缀成员资格。测试用oracle实际拒绝非法重排，并检查prepare拒绝后root、Head/view、账本、原确认结果不变；合法重排、显式采用父线旧原文、重复插入、普通重开与完整导出恢复覆盖。
+- **R2**：每次编译/查询独立的active/done工作集，缓存标量结果及子图高度，覆盖checkPagedGraph/checkPagedMemory/fits/pagedMemoryStatus/target。档案验证与不同snapshot下的适用性分开计键；current/checkpoint、纠错传播、执行拒环、R5、分支和cutoff不变。缓存命中仍核对路径深度+子图高度。
+- 总预算8192状态/131072工作单位，深度仍128；超限RESOURCE_LIMIT，不返回部分valid，prepare保留旧确认状态。无全库对象缓存，活动体持有的单对象/coverage仍受既有对象预算约束。上限是工程拒绝边界，不是自批设备性能。详见09第10.3节。
+
+### 实际验证
+
+Windows x64 / Node v24.19.0。证据目录`evals/t03/p3-review-repair/`：
+
+| 命令/范围 | 结果 |
+| --- | --- |
+| 固定75abeea三份旧实现 + 当前定向测试，`node --test --test-reporter=tap --test-name-pattern="P3-R1\|selected shared DAG" .t03-local/p3-review-baseline/packages/storage/tests/p3-review.test.mjs` | 2/2按预期失败；非法重排未拒绝，4层图52次而非8次，before.tap |
+| `node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js` | **319/319通过**，0失败/取消/跳过，241398.8ms，after.tap；本轮仅最终完整跑一次 |
+| 5个新增/修改代码文件逐一`node --check`及`git diff --check` | 通过，syntax.json |
+
+确定性计数：4/8/12/16层图分别8/16/24/32个不同节点、12/28/44/60条边，graph记忆读取8/16/24/32次。真实PagedDomain 32节点/60边：graph32、验证+fits114、status145次逻辑memory读取；未将这些数字报作物理IO或原生延迟。新增5项包含实际coordinator提交与完整恢复，覆盖共享DAG、原始依赖环、current执行环、纠错链环、checkpoint重定向执行环、合法历史checkpoint、分支/截止点/basis隔离和状态/工作/缓存深度预算。
+
+### 限制、回退与下一依赖
+
+本轮不重跑66操作增长或TT强杀：发布/持久格式/适配和故障断点未改，领域修复已由完整分页业务/恢复和原314回归检验；旧原生记录保留但不计为本轮执行。没有操作现有TT测试库、真实档案或手机，也没有自动GC。
+
+旧库不就地改写。既存旧非法reorder或超过新增预算的请求会在完整恢复重编译审计时拒绝，源与staging材料保留，不修剪历史强行通过。普通checkpoint重开不追溯审计全部历史；回退保留原库/包和读者，不能把有已知漏洞的75abeea写入行为描述为安全替代。
+
+自动维护仍HOST_MAINTENANCE_UNSUPPORTED，c90d77d不作已修复证据，不改TT、不切B2/A。此前空间放大、设备资源和手机边界仍未关闭。本轮状态implemented_unverified，高难交接第8节已更新，R1/R2是否关闭及P3是否放行待Chat再次review；T-03继续in_progress，P4/P5未进入。按要求commit/push供线上审查。

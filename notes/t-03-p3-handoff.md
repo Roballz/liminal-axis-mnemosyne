@@ -3,7 +3,7 @@
 更新：2026-09-20。开工基线：`ea1eca4d81f855f8ef92cf1439ea412b94fdb365` / main。
 依据：`t-03-p3-maintenance-review.md` 第6节、G1最终回执第5节、原T-03；06 v0.3 / schema_version=1 / 逻辑包v2；存储协议本轮升v0.5。
 
-**最新：原P3第5节的三项端到端受控集成已实现，状态implemented_unverified；实施与验证见第7节。** 自动外部维护继续受阻，P3尚未经高难项review、T-03未完成，P4/P5未开工。第1～4节保留4caa326检查点的历史范围，不覆盖第7节最新结果。
+**最新：75abeea集成review要求修复P3-R1/R2，本轮返修见第8节，仍为implemented_unverified、待再次review。** 自动外部维护继续受阻，T-03未完成，P4/P5未开工。第1～4节保留4caa326检查点的历史范围，第7节保留首次集成证据。
 
 ## 1. 4caa326检查点的已实现与当时边界
 
@@ -91,3 +91,18 @@ S05、规模化S06/S07、完整S08及P4/P5/手机仍pending。P3高难项review�
 新格式使用新的namespace和library身份，旧P2/intent库未迁移。回退停用分页入口，保留读者和完整分页包；不能更改格式字段让旧读者误认，也不能仅用小型v2包声称辅助账本已备份。
 
 需Chat审核本轮存储格式、局部语义对照、checkpoint信任边界、恢复审计及实际放大。自动维护仍需要原生代次/租约或可等待排空能力，既有专项回审未改变；Codex没有改TT、切B2/A、升级c90d77d或接受新的受限生产模式。P4/P5只有按原卡后续安排才能启动，T-03继续in_progress。
+
+## 8. P3-R1/R2返修（2026-09-21，待再次review）
+
+基线main@d3726c9，依据`t-03-p3-integration-review.md`。单线完成，不启用子代理；原314项不删除、不放宽断言。最新验证与计数见`evals/t03/p3-review-repair/`及原T-03返修回报。
+
+本轮最终完整回归319/319通过，0失败/取消/跳过；5个改动代码文件语法和diff检查通过。实际实现+104/-45，测试+186/-0，未修改原有测试文件。
+
+- R1：member/reorder/插入去重共用精确ref校验，保留父members共享。实际coordinator测试覆盖父A/B/C/D→子A/B→追加E/F，完整history与delta的非法重排均拒绝，root、Head/view、账本和已确认重试结果不变；合法重排、显式import、重复成员、重开及完整恢复继续验证。
+- R2：checkPagedGraph、checkPagedMemory、fits、pagedMemoryStatus及纠错解析均复用已完成子图；保留active拒环、current/checkpoint、R5、分支/cutoff/basis区别。累计8192状态/131072工作单位，超限RESOURCE_LIMIT；memo保存高度防止重用绕过128层。协议09 v0.7说明预算口径及保留对象边界。
+- 固定旧版75abeea的同组定向测试实际2失败：非法重排未拒绝；4层图读52次而非8次。修复后4/8/12/16层执行图分别读8/16/24/32次。真实PagedDomain的32节点/60边图：graph32次、校验+fits114次、完整status145次逻辑memory读取。这些不是原生IO或手机延迟。
+- 新增真实分页反例：共享DAG、归档依赖环、current执行环、纠错链环及checkpoint重定向形成的执行环；合法advance、分支隔离、cutoff、不同basis、资源超限、缓存深度、完整恢复。使用oracle成员集合及小图规则作独立语义对照。
+
+本轮不改分页物理格式、UUID或指纹，不修改已存索引/历史，不迁移已有库。旧材料若含非法重排或超出新增工程预算，完整审计会拒绝并保留源/目标staging；正常重开仍是既有checkpoint读取，不能将其称为追溯审计了所有历史。回退保留旧库/分页包/读者；旧75abeea仍有已知漏洞，不推荐恢复其写入口。
+
+发布协议、TT适配与强杀断点没有变化，本轮以纯逻辑、实际分页coordinator/完整恢复及保留回归验收，未重新运行TT强杀或66操作增长样本，不把旧原生证据报作本轮执行。自动维护保持HOST_MAINTENANCE_UNSUPPORTED，不改TT、不切B2/A、不进入P4/P5。此前空间放大观察保留；P3-R1/R2关闭与P3放行仍由Chat决定。
