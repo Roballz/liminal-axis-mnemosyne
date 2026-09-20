@@ -1,0 +1,39 @@
+{
+  "reviewDate": "2026-09-21",
+  "implementation": "4a76c142bc58466fea2728020f5856c3f63e8cb3",
+  "environment": {"os": "isolated Linux", "node": "v22.16.0"},
+  "sourceAcquisition": "GitHub connector contents materialized locally, verified by Git blob hashes; direct container download was unavailable",
+  "verifiedSourceFiles": 22,
+  "syntaxChecksPassed": 22,
+  "command": "node --test --test-reporter=tap packages/storage/tests/p3-review.test.mjs",
+  "exitCode": 0,
+  "tests": {"total": 5, "passed": 5, "failed": 0, "cancelled": 0, "skipped": 0},
+  "durationMs": 121734.582485,
+  "scope": "Original repository targeted tests using the actual paged compiler/coordinator/export/restore and FakeIO; not native TT or phone IO",
+  "sourceBlobs": {
+    "packages/storage/paged-domain.mjs": "9d875b703b539c298f6a64be20ee0a3b3966f22d",
+    "packages/storage/paged-history.mjs": "5062654e65ca67efcf0ed593ee2d824c53e87c09",
+    "packages/storage/paged-memory.mjs": "c924448b9dc6af1ff1ea40bb480de8f86ccd472b",
+    "packages/storage/memory-work.mjs": "64798f5116cd9b3bca1bdf87857274b6ec3f33a1",
+    "packages/storage/tests/p3-review.test.mjs": "1d0503bc722ea3ef6ce1a31f6e867ef2b81b497e"
+  },
+  "sharedGraphLogicalReads": [
+    {"nodes": 8, "edges": 12, "reads": 8},
+    {"nodes": 16, "edges": 28, "reads": 16},
+    {"nodes": 24, "edges": 44, "reads": 24},
+    {"nodes": 32, "edges": 60, "reads": 32}
+  ],
+  "pagedDomainLogicalReadsFor32Nodes60Edges": {"graph": 32, "validationAndFits": 114, "status": 145},
+  "notes": [
+    "Logical object reads are not physical reads, native IPC counts or phone latency.",
+    "The four graph sizes are assertions within one of the five tests, not four additional repository tests.",
+    "The complete 319-test suite was not independently rerun by Chat; its submitted TAP summary was inspected.",
+    "The two pre-repair failures are Codex evidence inspected by Chat, not an independent old-implementation run in this review.",
+    "Neither Chat nor this repair's Codex report claims a new native TT run. Previous native evidence retains its original implementation scope."
+  ],
+  "fullLocalEvidence": {
+    "name": "t03-4a76c14-p3-review-evidence.txt",
+    "sha256": "97a215043943030c463cc4ca47f4f1188aba03b3680566facd6affb04d8c4ea1",
+    "description": "Downloadable review artifact contains all 22 source hashes, syntax receipts and actual five-test TAP output; this JSON is its repository summary."
+  }
+}
