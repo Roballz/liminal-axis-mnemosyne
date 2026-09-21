@@ -1,6 +1,6 @@
 (async () => {
   try {
-    const { start } = await import('./runtime-0.1.0/packages/demo/entry.mjs');
+    const { start } = await import('./runtime-0.1.1/packages/demo/entry.mjs');
     await start();
   } catch (error) {
     // No chat text or error object in console output.

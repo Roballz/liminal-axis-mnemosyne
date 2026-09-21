@@ -61,13 +61,20 @@ export function projectLegacy(api, messages, categories = [], identity = null) {
     'VERSION_CONFLICT', 'Legacy snapshot/history mismatch');
   if (identity !== null) check(snapshot.chat.id === identity, 'VERSION_CONFLICT', 'Legacy chat differs');
   const assets = [];
+  const counts={floors:messages.length,assistant:0,stored:0,l0:0,omitted:0,invalid:0,missing:0,hiddenL0:0,higherSelected:0};
+  report.summaryCounts=counts;
   const add = (category, source_id, data, anchor) => assets.push({category, source_id, data, anchor});
   for (const m of messages) {
-    if (m.role !== 'assistant') continue;
+    // is_system is also ST's hidden flag. Ask the public source for semantic role.
     const f = api.getFloor(m.floor);
     check(f.revision === snapshot.revision && equal(f.chat, snapshot.chat) && f.floor === m.floor,
       'VERSION_CONFLICT', 'Legacy floor read changed');
+    if ((f.role??m.role)!=='assistant')continue;
+    counts.assistant++;if(f.memory?.stored)counts.stored++;
+    if(f.omitted)counts.omitted++;
+    else if(!f.memory?.valid){if(f.memory?.stored)counts.invalid++;else counts.missing++;}
     if (!f.omitted && f.memory?.valid && typeof f.memory.summary === 'string' && f.memory.summary.length) {
+      counts.l0++;if(m.role==='system')counts.hiddenL0++;
       add('summary', `floor:${m.floor}:${f.memory.id ?? 'unknown'}`, {
         text: f.memory.summary, old_id: f.memory.id ?? null, floor: m.floor,
         ordinary_pair: ordinaryPair(messages, m.floor), validity: 'legacy-asserted',
@@ -75,6 +82,7 @@ export function projectLegacy(api, messages, categories = [], identity = null) {
     }
   }
   for (const n of history.nodes ?? []) if (n.kind === 'comp') {
+    counts.higherSelected++;
     add('higher', `higher:${n.id}`, pick(n, ['id','kind','level','text','timeStart','timeEnd','timeLabel','createdAt','floorStart','floorEnd']), null);
   }
   for (const category of categories) for (const item of snapshot[category] ?? []) {

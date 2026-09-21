@@ -1,0 +1,84 @@
+{
+  "kind": "node-map-not-native",
+  "messages": 27,
+  "characters": 8927,
+  "milliseconds": 21986,
+  "physicalNodes": 31248,
+  "metrics": {
+    "page.logical_put": {
+      "count": 19334,
+      "bytes": 0,
+      "ms": 0
+    },
+    "io.get": {
+      "count": 80315,
+      "bytes": 0,
+      "ms": 757.4639999998162
+    },
+    "page.new": {
+      "count": 7681,
+      "bytes": 2449529,
+      "ms": 0
+    },
+    "io.put": {
+      "count": 31258,
+      "bytes": 0,
+      "ms": 333.88839999972953
+    },
+    "page.put_cache_hit": {
+      "count": 5232,
+      "bytes": 0,
+      "ms": 0
+    },
+    "publish.directory": {
+      "count": 11,
+      "bytes": 0,
+      "ms": 4025.961100000004
+    },
+    "directory.page.logical_put": {
+      "count": 31692,
+      "bytes": 0,
+      "ms": 0
+    },
+    "directory.page.new": {
+      "count": 29909,
+      "bytes": 11844195,
+      "ms": 0
+    },
+    "directory.candidate": {
+      "count": 29909,
+      "bytes": 0,
+      "ms": 0
+    },
+    "directory.persisted": {
+      "count": 23566,
+      "bytes": 0,
+      "ms": 0
+    },
+    "io.flush": {
+      "count": 22,
+      "bytes": 0,
+      "ms": 0.07520000000093319
+    },
+    "prepare.compile": {
+      "count": 5,
+      "bytes": 0,
+      "ms": 14566.246500000005
+    },
+    "page.existing": {
+      "count": 6421,
+      "bytes": 1702160,
+      "ms": 0
+    },
+    "directory.page.put_cache_hit": {
+      "count": 1028,
+      "bytes": 0,
+      "ms": 0
+    },
+    "directory.page.existing": {
+      "count": 755,
+      "bytes": 208216,
+      "ms": 0
+    }
+  }
+}

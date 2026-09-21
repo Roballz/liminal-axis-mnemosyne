@@ -3,7 +3,7 @@ import { openPagedTestStore } from '../storage/paged-tt-adapter.mjs';
 import { Demo } from './controller.mjs';
 import { mountPanel } from './panel.mjs';
 
-export const VERSION='0.1.0';
+export const VERSION='0.1.1';
 export const NAMESPACE='mnemo-t03-paged-manual-demo-v1';
 export async function start(host=globalThis) {
   await host.__TAURITAVERN__?.ready;
