@@ -28,7 +28,7 @@ T-03 最终回执为 `notes/t-03-capability-final-review.md`，审核基线 de67
 
 | 文件 | 用途 |
 | --- | --- |
-| `tasks/T-05-manual-search-and-workbench.md` | planned，当前正式卡：手动搜索、固定版本分页、旧摘要/来源查看与最小工作台 |
+| `tasks/T-05-manual-search-and-workbench.md` | verified（受控范围）：手动搜索、固定版本分页、旧摘要/来源查看与最小工作台 |
 | `stages/S-B-archive-and-search.md` | 当前阶段目标、已确认事项、权限与测试预算 |
 | `notes/t-04-final-review.md` | T-04受控验收及真实原会话内容核验，覆盖旧待审状态 |
 | `tasks/T-04-readonly-import-and-sync.md` | verified（受控范围）：只读导入、精确映射、暂停/确认与恢复的实施证据 |
@@ -55,4 +55,4 @@ B/A共用Mnemosyne领域身份、规则和逻辑材料，宿主stableId与数据
 
 本私有仓库保存代码和工程文档，不保存真实聊天、模型密钥、生产日志/配置或数据库备份。默认合成与明确获准的脱敏样本。未来复用外部实现需核查许可；读取公开DTO不等于可以写回原插件。
 
-accepted表示方案确认，planned表示任务发布，implemented_unverified表示待Chat验收；verified也必须带上对应范围，不能冒充手机生产可用。T-05通过后S-B才可在受控范围收口；本次不创建或启动T-06。
+accepted表示方案确认，planned表示任务发布，implemented_unverified表示待Chat验收；verified也必须带上对应范围，不能冒充手机生产可用。Stage-B现已按受控范围收口；本次不创建或启动T-06。
