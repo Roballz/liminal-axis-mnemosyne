@@ -2,11 +2,11 @@
 
 回复简明、突出结果和真实阻塞。默认单线执行，不开子代理并发；是否切换强推理模型由用户决定，不把模型档位当作任务范围授权。收尾提交并 push，供 Chat 线上 review。
 
-## 当前入口（2026-09-21）
+## 当前入口（2026-09-22）
 
-**S-A/T-03 已在受控能力范围 verified。当前阶段是 S-B，正式卡为 `tasks/T-04-readonly-import-and-sync.md`，状态 implemented_unverified，待Chat review。** 本轮Node 339/339及受控原生恢复核对已记录；不自动进入T-05。先读 `stages/S-B-archive-and-search.md`、本卡、`docs/11-stage-b-import-policy.md`；按需读06/08/09/10相关章节，不反复读取全部历史评审。
+**S-A/T-03及S-B/T-04均已在受控能力范围verified。T-04最终审核提交为5fe2706，回执是 `notes/t-04-final-review.md`。** 原会话25/25正文、2/2摘要已逐项核验、pending为空、关闭成功；不再重复原生演示或全量回归。S-B继续in_progress，下一步由Chat／用户规划T-05，任务卡尚未发布，不自动开工。先读 `stages/S-B-archive-and-search.md`、最终回执和用户指定任务；按需读相关契约，不反复读取全部历史评审。
 
-T-03 收口以 `notes/t-03-capability-final-review.md` 为准，覆盖旧 README/roadmap/task 内的 P3/P4待审、先重测旧机性能等临时状态。旧 `T-03-storage-foundation.proposal.md` 不是施工入口。不重开已关闭的地基问题，不自动生成或执行 T-05/T-06；T-04 不是自动记忆/服务器开发。
+T-03 收口以 `notes/t-03-capability-final-review.md` 为准，覆盖旧 README/roadmap/task 内的 P3/P4待审、先重测旧机性能等临时状态。旧 `T-03-storage-foundation.proposal.md` 不是施工入口。T-04收口以 `notes/t-04-final-review.md` 为准，覆盖旧待审/真实落盘pending状态；保留原始失败和执行记录。不重开已关闭的地基问题，不自动生成或执行 T-05/T-06；T-04 不是自动记忆/服务器开发。
 
 T-02 的最终契约见06 v0.3、逻辑包v2和08；T-03提供的是受控存储/恢复能力，不是手机生产容量、自动维护共存或 A 服务交付。当前 `HOST_MAINTENANCE_UNSUPPORTED`、真实数据/生产手机权限门禁仍有效。
 
