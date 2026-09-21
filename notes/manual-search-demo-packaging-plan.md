@@ -1,6 +1,6 @@
 # 日常手动搜索 Demo 封装规划
 
-日期：2026-09-22。状态：方案已确认，尚未创建正式任务卡或授权施工。
+日期：2026-09-22。状态：用户已授权日常 demo 施工；本轮封装 implemented_unverified，待 Chat review。
 
 ## 定位
 
@@ -29,3 +29,25 @@
 用小型合成聊天覆盖：首次无库 → 从当前聊天+旧摘要初始化 → 进入工作台 → 搜正文与旧摘要 → 关闭/重开后复用 → 必要时人工切库 → 历史/当前切换 → 导出。只做一组受影响 Node/UI 回归和一次短 TT 日常入口 smoke；不重跑 T-04/T-05 全量、旧原生演示、1x/5x 或强杀矩阵。
 
 当前主要工程风险不是搜索或存储，而是**库选择/owner生命周期**和**正式扩展更新后的 ESM 缓存一致性**。
+
+## 2026-09-22 实现交接
+
+- 起点 main / 5c12eee，开工工作树仅未跟踪 .codex/。用户后续明确接受保留旧正文/恢复材料，按简单路线增加当前正文 + Swipe 范围，不建历史索引；界面不提供历史快照管理。
+- apps/manual-search 提供普通 TT 扩展和可复现构建；packages/demo 提供命名建库/绑定、预览确认、手动同步、独立浮窗、主题下拉、拖拽缩放、详情和完整备份。固定 namespace 中的命名库为逻辑隔离档案，不是多个物理库。
+- 只向 records 增加可恢复 v1 demoArchive 元数据，适配器增加精确空库创建入口，Workbench 增加当前摘要选择和候选范围。未改变底层分页格式、自动维护门禁，不创建 T06。稳定语义见 docs/manual-search-demo.md。
+- 原估算实现800～1100行、测试180～260行；实际更小，约400行新增/修改实现、149行新增测试（最终精确统计见提交 diff）。
+
+### 有限验证事实
+
+1. 统一运行 node --test packages/demo/tests/demo.test.mjs packages/workbench/tests/workbench.test.mjs packages/bridge/tests/bridge.test.mjs packages/bridge/tests/review.test.mjs packages/storage/tests/paged-adapter.test.mjs。共34项，首轮27通过/7失败；原有受影响26项全通过。失败集中在新元数据的指纹前缀正则及新 UI 测试引用，已修正，未删减原测试语义。
+2. 只重跑 demo 8项，7通过/1失败；余项为恢复夹具误传字符串而非UTF-8字节。修正后仅重跑 manual create, exact binding 用例，1/1通过，包含真实分页恢复重放。最终新增8项均通过；没有再次重跑既有26项。
+3. 用户新增主题下拉要求后，仅回归 actual panel buttons / panel sync button，2/2通过，含菜单键盘选择、范围切换清理及迟到详情保护。浏览器合成预览实页检查发现 focusout 使弹层提前关闭，改为外部 pointerdown/Escape关闭后，用最终构建页面实际打开菜单并核对浅色、深色效果。
+4. 构建36个运行模块，SHA256逐文件核对；入口语法检查、git diff --check。ZIP排除测试/collector/真实数据；本地测试日志在被忽略目录。未运行仓库全量、旧原生demo、性能矩阵或强杀。
+5. 所有自动用例仅为 Node/fake；浏览器为明确合成 UI，不连接 TT。真实 TT 普通扩展加载、拖拽缩放、停用刷新和本机导入/重开 smoke 仍 pending，由用户按 README 短步骤检查；不将浏览器结果写成原生通过。
+
+### 交付与回退
+
+- 本地 dist/mnemosyne-manual-search-0.1.0.zip 可解压安装；运行 node apps/manual-search/build.mjs 可重建目录。源码与安装说明提交推送供 Chat review，dist 与 .codex 不提交。
+- 默认搜索只看最新观察到的正文/摘要；完整备份包含旧正文及恢复材料。恢复需本次或兼容更新的记录校验器。回退先备份、停用扩展并刷新，不删目标数据库。
+- 不支持分支/人工重绑/清理；超大对象和备份沿用限额。没有宿主写入、LLM调用、自动同步或生产聊天取证。
+- 状态保持 implemented_unverified；T04/T05 verified 不重开，Chat 决定本 demo 后续验收。

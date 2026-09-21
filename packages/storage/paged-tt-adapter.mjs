@@ -6,10 +6,10 @@ import { requireThat } from '../contracts/primitives.mjs';
 const key = Symbol.for('mnemosyne.t03.paged-test-owners.v1');
 const options = { dim: 2, syncMode: 'full', autoBuildQuiver: false };
 
-export async function openPagedTestStore(api, namespace, { create = false, restore = null, point, meter } = {}) {
+export async function openPagedTestStore(api, namespace, { create = false, createIfEmpty = false, restore = null, point, meter } = {}) {
   requireThat(/^mnemo-t03-paged-[a-z0-9-]+$/.test(namespace),
     'INVALID_NAMESPACE', 'New P3 paged namespace required');
-  requireThat(!(create && restore), 'INVALID_SCHEMA', 'Choose create or restore');
+  requireThat(!((create || createIfEmpty) && restore), 'INVALID_SCHEMA', 'Choose create or restore');
   const registry = globalThis[key] ??= new WeakMap();
   let owners = registry.get(api);
   if (!owners) { owners = new Map(); registry.set(api, owners); }
@@ -17,11 +17,11 @@ export async function openPagedTestStore(api, namespace, { create = false, resto
     const registered = owners.get(namespace), facade = await registered;
     await facade.settled();
     if (owners.get(namespace) !== registered) {
-      return openPagedTestStore(api, namespace, { create, restore, point });
+      return openPagedTestStore(api, namespace, { create, createIfEmpty, restore, point, meter });
     }
     if (facade.status === 'closed') {
       owners.delete(namespace);
-      return openPagedTestStore(api, namespace, { create, restore, point });
+      return openPagedTestStore(api, namespace, { create, createIfEmpty, restore, point, meter });
     }
     requireThat(!restore, 'IMPORT_TARGET_NOT_EMPTY', 'Cannot restore into an owned namespace');
     return facade;
@@ -56,6 +56,12 @@ export async function openPagedTestStore(api, namespace, { create = false, resto
       },
       point,
     };
+    // Probe only under the registered owner; a nonempty/corrupt namespace is never recreated.
+    if (createIfEmpty) {
+      await io.reopen();
+      try { create = (await io.stats()).nodeCount === 0; }
+      finally { await io.close(); }
+    }
     const measured = meter ? meter.io(io) : io;
     const coordinator = restore
       ? await restorePagedIntoEmpty(measured, restore)

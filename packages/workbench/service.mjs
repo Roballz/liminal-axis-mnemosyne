@@ -61,7 +61,7 @@ export class Workbench {
     return v?{branch:v.target.branch_id,story:v.target.story_id,bindingSource:source,
       label:'打开工作台时已确认的当前绑定 · '+v.target.branch_id.slice(-8)}:null;
   }
-  async select({branch,snapshot=null,bindingSource=null,allowLast=false}) {
+  async select({branch,snapshot=null,bindingSource=null,allowLast=false,demo=false}) {
     this.cancel();const generation=this.generation,b=this.budget(10000);
     const state=await this.read({kind:'state',branch},b,generation);
     check(state.branch?.head_snapshot_id,'NOT_READY','此分支没有已发布档案');
@@ -81,6 +81,13 @@ export class Workbench {
     }
     check(allowLast||!state.pending&&(!binding||binding.status==='complete'),'LAST_ARCHIVE_REQUIRED',
       '导入 pending/partial/paused：请明确选择最后确认的已发布档案；阅读不会解除暂停');
+    if(demo) {
+      check(binding?.status==='complete'&&!state.pending&&!s.historical,'NOT_READY','先完成手动同步');
+      const archive=await this.record('manifests',recordKey('demoArchive',bindingSource),b,s);
+      check(archive.branch===branch&&archive.head===s.snapshot&&archive.session===binding.session,
+        'VERSION_CONFLICT','档案目录未完成更新，请在原聊天手动同步');
+      s.observedAssets=archive.assets;s.offset=binding.offset;
+    }
     await this.fence(s);this.session=s;
     return {...s,stamp:structuredClone(s.stamp),notice:s.historical?'历史档案，不是当前剧情':
       state.pending||binding&&binding.status!=='complete'?'最后确认的已发布档案，尚未完整同步':'已发布档案；不保证宿主此刻同步'};
@@ -89,7 +96,7 @@ export class Workbench {
     const s=this.session;check(s,'NOT_READY','先选择档案');await this.fence(s);
     return s.previous;
   }
-  async search(query,{mode='tolerant',legacy=false,legacyHistory=false,browse=false}={}) {
+  async search(query,{mode='tolerant',legacy=false,legacyHistory=false,browse=false,swipes=false}={}) {
     check(!this.busy,'BUSY','上一读取仍在排空');
     check(this.session,'NOT_READY','先选择档案');
     check(typeof query==='string'&&size(query)<=this.limits.queryBytes,'QUERY_LIMIT','查询过长（上限4096 UTF-8字节）');
@@ -97,8 +104,8 @@ export class Workbench {
     if(!browse&&!projection.length){this.cursor=null;return {status:'empty-query',items:[],scanned:0};}
     const base=this.session;
     this.generation++;this.hits=new WeakMap();
-    const s={...base,generation:this.generation,query:projection,mode,legacy,legacyHistory,browse,normalization:NORMALIZATION};
-    this.session=s;this.cursor={session:s,index:0,assetAfter:null,phase:'body',scanned:0};
+    const s={...base,generation:this.generation,query:projection,mode,legacy,legacyHistory,browse,swipes,normalization:NORMALIZATION};
+    this.session=s;this.cursor={session:s,index:0,assetAfter:null,assetIndex:0,phase:'body',scanned:0};
     return this.next(this.cursor);
   }
   async next(cursor=this.cursor) {
@@ -126,16 +133,34 @@ export class Workbench {
               match:s.mode==='tolerant'?'规范化命中（不映射高亮）':'原样精确',historical:s.historical};
             this.hits.set(item,{s,index:c.index,ref});items.push(item);
           }
+          if(s.swipes&&! (s.browse||projected.includes(s.query))) {
+            check(s.observedAssets,'INVALID_SCOPE','Swipe 搜索仅支持完整同步的当前档案');
+            const map=await this.record('manifests',recordKey('map',s.bindingSource+'/'+(c.index-s.offset)),b,s);
+            check(equal(map.ref,ref),'NEEDS_RESOLUTION','Swipe 当前正文映射不一致');
+            const matches=[];
+            for(let slot=0;slot<map.candidates.values.length;slot++) {
+              const text=map.candidates.values[slot];if(text===null||text===r.content)continue;
+              const projected=normalize(text,s.mode),bytes=Math.max(size(text),size(projected));
+              check(bytes<=b.text,'READ_LIMIT','Swipe 候选超过本批文本预算');b.text-=bytes;
+              if(s.browse||projected.includes(s.query))matches.push(slot);
+            }
+            if(matches.length) {
+              const item={kind:'swipe',...ref,index:c.index,role:r.role,slots:matches,
+                snippet:short(map.candidates.values[matches[0]]),historical:true};
+              this.hits.set(item,{s,index:c.index,ref,candidates:matches});items.push(item);
+            }
+          }
           c.index++;c.scanned++;count++;
         } else {
-          const page=await this.read({kind:'list',table:'manifests',prefix:'bridge-v1:asset:',
+          const page=s.observedAssets ? {keys:s.observedAssets.slice(c.assetIndex,c.assetIndex+1),
+            done:c.assetIndex+1>=s.observedAssets.length} : await this.read({kind:'list',table:'manifests',prefix:'bridge-v1:asset:',
             after:c.assetAfter,limit:1,stamp:s.stamp},b,s.generation);
           if(!page.keys.length){c.phase='done';break;}
           const key=page.keys[0],a=await this.record('manifests',key,b,s);
           const scopeMatches=a.scope?.story_id===s.story&&a.scope?.branch_id===s.branch;
           const pointer=scopeMatches?await this.record('manifests',recordKey('assetMap',digest({source:a.source,id:a.source_id})),b,s):null;
           const current=scopeMatches&&a.scope.snapshot_id===s.snapshot&&pointer.asset===key.slice('bridge-v1:asset:'.length);
-          if(['summary','higher'].includes(a.category)&&scopeMatches&&(current||s.legacyHistory)) {
+          if(['summary','higher'].includes(a.category)&&scopeMatches&&(current||s.legacyHistory||s.observedAssets&&pointer?.asset===key.slice('bridge-v1:asset:'.length))) {
             const text=a.data.text??'',bytes=size(text),projected=normalize(text,s.mode);
             if(Math.max(bytes,size(projected))>b.text){limitReason='text';break;}
             b.text-=Math.max(bytes,size(projected));
@@ -145,7 +170,7 @@ export class Workbench {
               this.hits.set(item,{s,key});items.push(item);
             }
           }
-          c.assetAfter=key;count++;if(page.done)c.phase='done';
+          c.assetAfter=key;c.assetIndex++;count++;if(page.done)c.phase='done';
         }
       }
       if(c.phase==='body'&&c.index===s.count&&!s.legacy)c.phase='done';
@@ -165,7 +190,16 @@ export class Workbench {
     const hit=this.hits.get(item);check(hit&&hit.s===this.session,'STALE_READ','结果不属于当前查询');
     const s=hit.s,b=this.budget(10000);await this.fence(s);
     let output;
-    if(hit.ref) output=await this.context(s,hit.index,hit.ref,b);
+    if(hit.ref) {
+      output=await this.context(s,hit.index,hit.ref,b);
+      if(hit.candidates) {
+        const map=await this.record('manifests',recordKey('map',s.bindingSource+'/'+(hit.index-s.offset)),b,s);
+        check(equal(map.ref,hit.ref),'NEEDS_RESOLUTION','Swipe 映射变化');
+        output.candidates=hit.candidates.map(slot=>({slot,content:map.candidates.values[slot]}));
+        check(output.candidates.reduce((n,c)=>n+size(c.content),0)<=b.text,'READ_LIMIT','候选详情过大');
+        output.notice='已保存的 Swipe 候选，不是当前正文；下面附当前正文上下文';
+      }
+    }
     else {
       const asset=await this.record('manifests',hit.key,b,s);
       check(asset.scope.story_id===s.story&&asset.scope.branch_id===s.branch,'NEEDS_RESOLUTION','摘要作用域损坏');
