@@ -8,48 +8,49 @@
 
 ## 当前状态
 
-2026-09-20：T-00 环境基线、T-01 TT 接入探针、T-02A 身份/事件验证及 T-02 最小可执行契约均已通过 review。仓库包含隔离 TT 探针、契约参考模型和有硬上限的存储原型，**不是已完成的记忆产品**。
+2026-09-21：**S-A（T-00～T-03，含T-02A）已在受控能力范围收口；进入 S-B。T-04 正式卡已发布为 planned，尚未实施。**
 
-已验收：**T-02 身份、历史版本与上下文契约，verified**。审核实现为 `1891043`，R1～R5 已关闭；Chat 独立复跑48项契约与11文件语法检查通过，R5同组测试在修复前实际旧版6项失败、修复后通过。Head、固定分叉、逐层失效、幂等和逻辑包校验限Node参考模型范围，不等于已有正式记忆引擎。证据见 `notes/t-02-final-review.md`。
+当前入口是 `tasks/T-04-readonly-import-and-sync.md`：只读迁入 TT 原文和柏宝书旧摘要，可选薄接物品/地点/生活档案，精确映射与可恢复影子同步，删除/复杂变化人工确认。此阶段不照搬旧插件实体 schema，不生成新摘要、不注入、不建设 A 服务器。
 
-当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。G1和受控P3高难项review已通过；本轮按fc3264b回执修复候选/备份快照一致性及有界目录发布，333项回归保留原322项。最新资源与返修边界见 `notes/t-03-p4-repair-handoff.md`。旧 proposal 已 superseded。
+T-05 后续提供用户手动原文搜索与最小工作台；向量/BM25自动召回及新摘要生成分别在 T-06/T-07。不要把任务卡发布视为功能已经可用。
 
-**P4/P5 当前交接（2026-09-21）：** 最新审核为 `notes/t-03-p4-p5-chat-review.md`；施工返修及最终批次验证见 `notes/t-03-p4-repair-handoff.md`、`evals/t03/p4-repair/`。候选返回前复核版本，备份固定同一导出快照，目录采用1024引用批次和16MiB临时硬上限；双向旧包恢复与固定TT新路径故障验证已执行。实现仍为implemented_unverified，自动维护门禁与手机pending保留。
+## 已验收的地基及限制
 
-当前关卡回执：`notes/t-03-g1-final-review.md`。Chat对齐15个文件blob后独立复跑84项存储测试及15文件语法，全部通过；同一最终19项定向测试在实际旧实现上10通过/9失败。完整150项Node回归、23文件语法/diff和隔离TT小验证为Codex提交的证据，本轮明确区分独立执行与证据审阅。
+T-02 以 `1891043` 为最终审查实现，冻结身份、固定历史快照/分叉、版本来源、检查点、纠错传播与逻辑包校验；仅是最小契约/参考模型，不代表全部业务已实现。
 
-隔离 TT Canary `367b0c7e9410` 的小样本发布前/后强杀恢复、幂等和空库恢复，以及本次owner生命周期/异常root读取已有有限现场证据。B1获准作为下一增量实施路线，**不是手机生产provider最终准入**；持久请求已有小规模前置诊断实现；自动外部维护隔离受阻；有界结构已实现基元，现有intent格式已有完整恢复桥接，本轮已补普通业务分页路径和增长包完整恢复，但高难项review、自动维护及手机准入仍未完成。协议/限制见 `docs/09-storage-provider-and-recovery.md`，原始证据见 `evals/t03/`，返修证据见 `evals/t03/g1-repair/`；不冒充A服务器已经交付。
+T-03 最终回执为 `notes/t-03-capability-final-review.md`，审核基线 de67c55（实现父提交 c1fce16）。受控 TT 接口、已验证正确性、分页提交/故障恢复和有限工作集已验收；旧机30分钟原生1x未完成不再阻塞后续接口开发，但未执行部分、5x/10x、手机容量/延迟与真实B→A迁移仍未验证。
+
+自动外部维护继续 `HOST_MAINTENANCE_UNSUPPORTED`，合作式维护必须排空。只读导入源不消除目标库维护风险；当前不授权生产手机、长期真实档案、共享TT、新的破坏性测试或自动GC。B本机路线可在已有隔离条件推进，不等于生产准入或A服务已交付。
 
 ## 从哪里开始
 
-先读 `AGENTS.md`、`stages/S-A-foundation.md`，再读当前用户指定的任务。不要根据旧 Blueprint 示例自行推断产品决定；历史文档中的任务状态以最新阶段导读及最终关卡回执为准。
+先读 `AGENTS.md` → `stages/S-B-archive-and-search.md` → 用户指定的任务。旧roadmap/task中的历史状态不能覆盖最新阶段政策与最终回执。
 
 | 文件 | 用途 |
 | --- | --- |
-| `tasks/T-03-storage-foundation.md` | 当前 in_progress：原任务范围、P0～P2实施证据及P3～P5要求 |
-| `notes/t-03-p4-resource-review.md` | 当前P4资源阻塞、固定TT证据、停止边界及待审问题 |
-| `notes/t-03-g1-final-review.md` | G1通过、R1/R2关闭、独立测试边界与P3高难前置要求 |
-| `tasks/T-03-storage-foundation.proposal.md` | superseded，仅保留旧预案历史入口 |
-| `tasks/T-02-identity-version-context.md` | 已 verified：实施证据、原验收范围与最终 Chat review |
-| `notes/t-02-final-review.md` | T-02 最终结论、独立实测、R5关闭与未验证边界 |
-| `packages/contracts/` | T-02 最小形状/跨引用校验、内存参考逻辑与确定性测试 |
-| `docs/08-history-snapshot-and-rebuild.md` | 已接受的 Head、正文权威、来源重建与分叉边界 |
-| `docs/10-t03-storage-operations.md` | P5隔离诊断、合成备份恢复、故障复现和只读回退 |
-| `docs/03-decisions-and-open-questions.md` | 当前决定、未决项与实验门禁 |
-| `docs/06-contracts.md` | v0.3 / schema_version=1、逻辑包v2；已验收最小契约基线 |
-| `docs/07-t02-contract-proposal.md` | 首轮候选讨论；新确认以 03/08 为准 |
-| `docs/01-architecture.md`、`docs/02-roadmap.md` | 总体架构与后续路线；当前进度以阶段导读和 task 为准 |
-| `docs/04-working-with-chatgpt-codex.md` | 协作与交接流程 |
-| `docs/05-source-review.md` | 宿主/外部来源核验及真机边界 |
-| `evals/acceptance.md`、`examples/` | 验收场景与人工样例，不是真实 RP 数据 |
-| `CHANGELOG.md` | 变更记录 |
+| `stages/S-B-archive-and-search.md` | 当前阶段目标、已确认事项、权限与测试预算 |
+| `tasks/T-04-readonly-import-and-sync.md` | planned：只读导入、精确映射、暂停/确认与恢复的实施范围 |
+| `docs/11-stage-b-import-policy.md` | 本轮导入白名单、两主入口、删除人工处理、配对及手动搜索边界 |
+| `stages/S-A-foundation.md` | 已收口地基及未验证项 |
+| `notes/t-03-capability-final-review.md` | T-03最终能力验收，覆盖旧P3/P4/P5待审状态 |
+| `notes/t-02-final-review.md`、`docs/06-contracts.md` | T-02最终契约、逻辑包v2与正确性边界 |
+| `docs/08-history-snapshot-and-rebuild.md` | Head、正文权威、来源重建与分叉设计 |
+| `docs/09-storage-provider-and-recovery.md` | 存储provider、分页/发布/恢复与维护限制 |
+| `docs/10-t03-storage-operations.md` | 隔离诊断与备份回退，不是手机生产运维承诺 |
+| `docs/03-decisions-and-open-questions.md` | 历史决策；Stage-B新确认由11文档细化 |
+| `docs/01-architecture.md`、`docs/02-roadmap.md` | 总体路线；旧服务器/Leaf示意不覆盖当前B路线与契约 |
+| `docs/04-working-with-chatgpt-codex.md`、`docs/05-source-review.md` | 协作规则及固定外部来源/宿主证据 |
+| `tasks/T-03-storage-foundation.md`、`evals/t03/` | T-03完整历史实施记录与原始实验材料 |
+| `CHANGELOG.md`、`examples/`、`evals/acceptance.md` | 变更历史与人工/合成示例，不是真实RP数据 |
 
-## 实现与数据边界
+## 实现、测试和数据边界
 
-实现位于 `apps/tt-adapter-probe/`、`packages/contracts/` 和 `packages/storage/`。Node回归命令为 `node --test packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`。最新Codex完整回归322/322及P4资源证据见 `evals/t03/p4-p5/`；其中原319项全部保留。P3分页原生证据仍见 `evals/t03/p3-integration/`，不混称本轮重跑或P4原生通过。
+已有实现位于 `apps/tt-adapter-probe/`、`packages/contracts/`、`packages/storage/`。既有 Node 回归入口：`node --test packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`。T-03最近完整333项为Codex记录，见 `evals/t03/p4-repair/`；不把历史通过数当作T-04已运行。
 
-B/A 共用 Mnemosyne 的领域身份、规则与逻辑导出；宿主 stableId、数据库 NodeId 与物理文件格式不能替代正式 ID。用户主要在单手机长期 RP，已接受单权威写入与跨端明确交接，不建设离线多主自动合并。
+测试按风险清单执行：短反例/相关回归先行，最终候选稳定后一次全量；文档变更不自动重跑。T-04不跑旧机1x/5x/10x；长原生循环/新强杀/设备变更需单独许可。无新阻塞可在已授权任务内持续推进，检查点提交不是新审批关卡。
 
-代码和工程文档以本私有 GitHub 仓库为共享基准。真实聊天、模型密钥、数据库备份与生产配置留在独立受控数据存储；即使仓库私有，也不提交这些数据。T-03默认虚构样本、隔离测试库，不授权改生产手机或真实档案。
+B/A共用Mnemosyne领域身份、规则和逻辑材料，宿主stableId与数据库NodeId不是正式主键。用户主要单手机长期RP，采用单权威写入和明确设备交接，不建设离线多主自动合并。
 
-本仓库未复制柏宝书实现代码，也未导入真实聊天。未来若复用外部代码，先核查许可证与发布条件。任何 task 的 planned/implemented_unverified/verified 状态都与方案 accepted 分开；预备卡不得自动成为施工任务，正式卡也不得跳过其内部关卡。
+本私有仓库保存代码和工程文档，不保存真实聊天、模型密钥、生产日志/配置或数据库备份。默认合成与明确获准的脱敏样本。未来复用外部实现需核查许可；读取公开DTO不等于可以写回原插件。
+
+accepted表示方案确认，planned表示任务发布，implemented_unverified表示待Chat验收；任何一种都不能冒充手机生产可用。T-04完成后review，T-05尚未发布，不自动顺延施工。
