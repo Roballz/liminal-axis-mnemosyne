@@ -1,6 +1,6 @@
 # S-B：先把剧情档案拿在自己手里
 
-更新：2026-09-22。状态：in_progress。范围：T-04～T-05。T-04已通过受控能力验收；**T-05首轮Chat review暂不通过，保持implemented_unverified：`tasks/T-05-manual-search-and-workbench.md`**。最新回执为 `notes/t-05-chat-review.md`，审核实现e12d270。本轮355/355 Node及S08真实TT证据保留；仅补T05-R1页面快照切换的旧结果/详情清理，不重开地基、不进入T-06/T-07。
+更新：2026-09-22。状态：in_progress。范围：T-04～T-05。T-04已通过受控能力验收；**T-05首轮Chat review暂不通过，保持implemented_unverified：`tasks/T-05-manual-search-and-workbench.md`**。最新回执为 `notes/t-05-chat-review.md`，审核实现e12d270。本轮355/355 Node及S08真实TT证据保留；T05-R1页面清理已局部返修，新增按钮反例1/1及受影响工作台10/10通过，待Chat回审；本轮未重跑全量/原生，不重开地基、不进入T-06/T-07。
 
 **前置验收：`5fe2706` 通过，T-04为verified（受控只读桥接范围）。** 最终回执见 `notes/t-04-final-review.md`，覆盖前轮回审及本阶段历史段落的待审/未完成临时结论。R1/R2/R3和真实原库落盘补证缺口已关闭；原始失败证据与现场过程保留在任务卡和evals。
 

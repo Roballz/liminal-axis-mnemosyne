@@ -144,3 +144,54 @@ test('S06/S07 product page handlers render untrusted text, paginate, detail, fal
   assert.deepEqual((await f.h.diagnostics()).checkpoint,before.checkpoint);
   await panel.perform('关闭工作台');assert.equal(f.owner.status,'ready');await commit(f.bridge,input('fixture',[...rows,{mes:'仍可导入',is_user:false}]));
 });
+
+test('T05-R1 product buttons clear historical results/details/cursor before current selection and reject late UI results',async()=>{
+  const f=await fixture(),changed=rows.map(x=>({...x}));changed[0].mes='当前快照的新原文';
+  const current=await commit(f.bridge,input('fixture',changed));
+  const before=await f.h.diagnostics();
+  const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};};
+  const selecting=deferred(),selectGate=deferred();let holdSelection=false;
+  const h={...f.h,readView:async request=>{
+    if(holdSelection&&request.kind==='state'&&request.branch){selecting.resolve();await selectGate.promise;}
+    return f.h.readView(request);
+  }};
+  const panel=mountWorkbench({getHandle:async()=>h,document:documentFixture(),limits:{...options,messages:2}});
+  const click=async label=>{const r=await panel.perform(label);assert.equal(r.ok,true,panel.status.textContent);return r.value;};
+  try {
+    await click('读取目录');panel.controls['档案分支'].value='0';
+    assert.equal((await click('选择档案/当前快照')).snapshot,current.target.head);
+    const historical=await click('更早的历史快照');assert.equal(historical.snapshot,f.bound.target.head);
+    panel.controls.query.value='ＨＥＬＬＯ';
+    const found=await click('查找');assert.equal(found.items[0].snapshot_id,f.bound.target.head);
+    assert.equal(found.status,'partial');assert.ok(found.cursor);
+    const oldCursor=found.cursor,row=panel.results.children[0];
+    assert.equal((await row.actions.show.onclick()).ok,true);assert.match(panel.detail.textContent,/ＨＥＬＬＯ/);
+    // Delay a real, already completed detail response at the UI boundary. Service
+    // cancellation alone cannot protect against this successful late response.
+    const detailReady=deferred(),detailGate=deferred(),originalDetail=panel.service.detail.bind(panel.service);
+    panel.service.detail=async item=>{const value=await originalDetail(item);detailReady.resolve();await detailGate.promise;return value;};
+    const late=row.actions.show.onclick();await detailReady.promise;
+    holdSelection=true;const switching=panel.perform('选择档案/当前快照');
+    assert.equal(panel.results.children.length,0,'clear before any selection await');
+    assert.equal(panel.detail.textContent,'');assert.equal(panel.page,null);
+    await selecting.promise;detailGate.resolve();assert.equal((await late).ok,true);
+    assert.equal(panel.detail.textContent,'','late successful detail cannot repaint during selection');
+    holdSelection=false;selectGate.resolve();const selected=await switching;
+    assert.equal(selected.ok,true,panel.status.textContent);assert.equal(selected.value.snapshot,current.target.head);
+    assert.equal(selected.value.historical,false);assert.match(panel.status.textContent,new RegExp(current.target.head));
+    assert.equal(panel.results.children.length,0);assert.equal(panel.detail.textContent,'');assert.equal(panel.page,null);
+    await assert.rejects(panel.service.next(oldCursor),{code:'INVALID_CURSOR'});
+    assert.equal((await panel.perform('继续查找')).code,'INVALID_CURSOR');
+    panel.service.detail=originalDetail;
+    assert.equal((await click('查找')).items.length,0,'old phrase is absent from H2');
+    panel.controls.query.value='当前快照';const fresh=await click('查找');
+    assert.equal(fresh.items.length,1);assert.equal(fresh.items[0].snapshot_id,current.target.head);
+    assert.equal((await panel.results.children[0].actions.show.onclick()).ok,true);
+    assert.match(panel.detail.textContent,/当前快照的新原文/);
+    // A rejected re-selection must also leave no old display or continuation state.
+    panel.controls['档案分支'].value='';const failed=panel.perform('选择档案/当前快照');
+    assert.equal(panel.results.children.length,0);assert.equal(panel.detail.textContent,'');assert.equal(panel.page,null);
+    assert.equal((await failed).ok,false);
+    assert.deepEqual((await f.h.diagnostics()).checkpoint,before.checkpoint,'Head/business state unchanged');
+  } finally { selectGate.resolve();panel.close();await f.owner.close(); }
+});

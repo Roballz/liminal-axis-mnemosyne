@@ -179,3 +179,19 @@ S08用既有隔离实例中的小型合成档案（例如4～8条消息、1份�
 状态保持implemented_unverified，交Chat审阅T-05及S-B；不创建/执行T-06。关闭工作台或禁用临时入口为UI回退，保留合成库和其他档案。页面脚本禁用不等于取消在途原生调用；最终回执已确认排空关闭。
 
 收尾实际总量：产品新增408行/删除4行未变；Node测试/fixture178行，含历史失败入口及修正版的原生辅助共305行（测试+演示合计483行），Unicode数据/许可证/生成映射另计。现场辅助入口做了对应node --check；产品未改，不追加业务测试或第二次全量。
+
+
+## 9. T05-R1 局部返修（2026-09-22，待Chat回审）
+
+开工main@4d53a51，已读notes/t-05-chat-review.md；仅修显式重选/切换快照后旧页面内容遗留。预计实现12～20行、测试55～75行；实际panel.mjs新增12/删除5行，页面回归新增51行，无范围扩大。
+
+复用clearPage清空results、detail和lastPage；当前及历史快照按钮在异步选择前清理显示并取消旧service会话。历史按钮先保留已选快照的previous身份，不依赖已取消会话；失败路径同样不留下旧显示或服务续页状态。保留既有UI generation检查，并向choose显式传递原按钮代次，迟到成功详情不能重绘。
+
+新增回归通过真实mountWorkbench按钮处理函数及现有PagedCoordinator/Importer/FakeIO：H2修改H1旧句→按钮选择H1→搜索旧句/打开原文→挂起真实已完成详情响应→点击返回H2并挂起选择→立即确认旧行/详情/页状态清空→释放旧详情确认不重绘→H2选择成功→旧游标拒绝→H2新搜索/详情正确→选择失败仍清空；checkpoint/Head不变。
+
+本轮仅执行：
+- node --test --test-reporter=tap --test-name-pattern=T05-R1 packages/workbench/tests/workbench.test.mjs：1/1通过，8.217秒；evals/t05/r1-regression.tap。
+- 随后补齐历史按钮同一取消路径，运行node --test --test-reporter=tap packages/workbench/tests/*.test.mjs：10/10通过（含新增反例），101.868秒；evals/t05/r1-workbench-tests.tap。
+- git diff --check通过。无第二次工作台集合、全量、原生演示或部署；旧355项及S08仅引用前轮证据，不称本轮重跑。
+
+数据影响：仅页面内存状态，无存储/导入/规范化改动或业务持久写入。回退可还原panel.mjs本次差异，档案无需恢复。Node小DOM宿主的实际按钮回归不等于本轮浏览器/TT/手机实测。状态保持implemented_unverified，T05-R1交Chat回审；S-B仍in_progress，不创建/执行T-06。

@@ -22,7 +22,8 @@ export function mountWorkbench({getHandle,document=globalThis.document,download=
   for(const e of [status,detail])e.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere';
   let prefer=preferredSource,service,opening,closed=false,generation=0,catalogAfter=null,catalogStamp=null,choices=[],snapshot=null,selected=null,lastPage=null;
   const get=async()=>service??await (opening??=getHandle().then(h=>service=new Workbench(h,limits)).catch(e=>{opening=null;throw e;}));
-  const invalidate=()=>{generation++;service?.cancel();selected=null;lastPage=null;results.replaceChildren();detail.textContent='';status.textContent='条件已改变，请手动重新查找。';};
+  const clearPage=()=>{lastPage=null;results.replaceChildren();detail.textContent='';};
+  const invalidate=()=>{generation++;service?.cancel();selected=null;clearPage();status.textContent='条件已改变，请手动重新查找。';};
   const showState=s=>{status.textContent=JSON.stringify({说明:s.notice,状态:s.status,原因:s.reason,进度:s.progress,
     snapshot:s.snapshot,待处理操作:!!s.pending},null,2);};
   async function choose(token=generation) {
@@ -68,11 +69,17 @@ export function mountWorkbench({getHandle,document=globalThis.document,download=
     catalogAfter=page.done?null:page.after;catalogStamp=page.done?null:page.stamp;
     status.textContent=page.done?'目录本轮已穷尽；再次读取从头开始':'目录未完；再次读取下一页（每页最多4项）';return page;
   });
-  button('选择档案/当前快照',async token=>{snapshot=null;const s=await choose();if(token===generation)showState(s);return s;});
+  button('选择档案/当前快照',async token=>{
+    // Invalidate rendered history before the first await, including failed selections.
+    clearPage();service?.cancel();selected=null;snapshot=null;status.textContent='正在选择当前档案…';
+    const s=await choose(token);if(token===generation)showState(s);return s;
+  });
   button('更早的历史快照',async token=>{
-    if(!selected)await choose();const previous=await service.previous();
-    if(!previous)throw Error('没有更早的本分支快照');snapshot=previous;
-    const s=await choose();if(token===generation){results.replaceChildren();detail.textContent='';showState(s);}return s;
+    let previous=selected?.previous;
+    clearPage();service?.cancel();selected=null;status.textContent='正在选择历史档案…';
+    if(previous===undefined)previous=(await choose(token)).previous;
+    if(!previous){service?.cancel();selected=null;throw Error('没有更早的本分支快照');}snapshot=previous;
+    const s=await choose(token);if(token===generation)showState(s);return s;
   });
   const start=async(token,browse)=>{
     // A new search invalidates every earlier UI request before any asynchronous read.

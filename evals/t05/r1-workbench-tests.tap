@@ -1,0 +1,70 @@
+TAP version 13
+# Subtest: S02 full default fold, explicit whitespace, exact mode and length changes preserve literal boundaries
+ok 1 - S02 full default fold, explicit whitespace, exact mode and length changes preserve literal boundaries
+  ---
+  duration_ms: 1.5948
+  type: 'test'
+  ...
+# Subtest: S01/S03 scoped snapshot members, stable pagination, roles, old swipe and explicit history
+ok 2 - S01/S03 scoped snapshot members, stable pagination, roles, old swipe and explicit history
+  ---
+  duration_ms: 27917.7352
+  type: 'test'
+  ...
+# Subtest: S03 partial zero is not exhausted, opaque cursor, empty/long queries and oversized text stay unchecked
+ok 3 - S03 partial zero is not exhausted, opaque cursor, empty/long queries and oversized text stay unchecked
+  ---
+  duration_ms: 3977.1345
+  type: 'test'
+  ...
+# Subtest: S04 append BETWEEN entry and revision read fences scan; stable control and cancel reject late return
+ok 4 - S04 append BETWEEN entry and revision read fences scan; stable control and cancel reject late return
+  ---
+  duration_ms: 7786.1128
+  type: 'test'
+  ...
+# Subtest: S04 binding-only changes and details fence stale results, without changing business state
+ok 5 - S04 binding-only changes and details fence stale results, without changing business state
+  ---
+  duration_ms: 4660.4928
+  type: 'test'
+  ...
+# Subtest: S05/S06 summary scopes and exact anchors; older summary versions remain visibly historical
+ok 6 - S05/S06 summary scopes and exact anchors; older summary versions remain visibly historical
+  ---
+  duration_ms: 17194.8498
+  type: 'test'
+  ...
+# Subtest: S05 missing formal anchor reference is data error, unproven higher summary is retained
+ok 7 - S05 missing formal anchor reference is data error, unproven higher summary is retained
+  ---
+  duration_ms: 6950.6366
+  type: 'test'
+  ...
+# Subtest: S07 complete export through workbench restores raw/candidates/assets/receipts at fixed checkpoint during append
+ok 8 - S07 complete export through workbench restores raw/candidates/assets/receipts at fixed checkpoint during append
+  ---
+  duration_ms: 16780.5243
+  type: 'test'
+  ...
+# Subtest: S06/S07 product page handlers render untrusted text, paginate, detail, fallback, export and preserve shared owner
+ok 9 - S06/S07 product page handlers render untrusted text, paginate, detail, fallback, export and preserve shared owner
+  ---
+  duration_ms: 8518.1621
+  type: 'test'
+  ...
+# Subtest: T05-R1 product buttons clear historical results/details/cursor before current selection and reject late UI results
+ok 10 - T05-R1 product buttons clear historical results/details/cursor before current selection and reject late UI results
+  ---
+  duration_ms: 7923.8501
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 101868.4708
