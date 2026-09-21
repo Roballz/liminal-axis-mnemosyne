@@ -1,6 +1,6 @@
 {
-  "version": "0.1.1",
-  "sourceCommit": "2d03b45a47e34be50df0888a2bf071f94596c2f8",
+  "version": "0.1.2",
+  "sourceCommit": "5890332c7ce230024e211712b3fe98dad766ef63",
   "branch": "codex/manual-search-demo",
   "status": "implemented_unverified",
   "importPerformance": "unresolved"

@@ -1,10 +1,10 @@
 import { styles } from './styles.mjs';
 
 export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
-  const doc=host.document,root=doc.createElement('div');root.id='mnemosyne-daily';
+  const doc=host.document,root=doc.createElement('mnemosyne-archive-panel');root.id='mnemosyne-daily';
   // The light-DOM host must never become a flex item in TT's drawer layout.
   root.style.cssText='position:fixed!important;inset:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;pointer-events:none;z-index:2147483000';
-  const shadow=root.attachShadow({mode:'open'});doc.body.append(root);
+  const shadow=root.attachShadow({mode:'open'});
   const el=(tag,text='',cls='')=>{const n=doc.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;};
   const button=(text,cls='action')=>{const n=el('button',text,cls);n.type='button';return n;};
   const dropdowns=[];
@@ -37,7 +37,6 @@ export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
   const outside=e=>dropdowns.forEach(d=>{if(!e.composedPath().includes(d.wrap))d.close();});
   host.addEventListener('pointerdown',outside);
   const style=el('style',styles);shadow.append(style);
-  const bubble=button('M','bubble');bubble.setAttribute('aria-label','打开 Mnemosyne 档案');
   const panel=el('section','','panel');panel.hidden=true;panel.setAttribute('aria-label','Mnemosyne 手动搜索');
   const header=el('header'),brand=el('div','Mnemosyne 档案','brand');brand.append(el('small','LOCAL ARCHIVE · MANUAL SEARCH'));
   const theme=button('◐','icon'),close=button('×','icon');theme.title='切换浅色 / 深色';close.title='收起窗口';
@@ -63,7 +62,7 @@ export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
   pager.style.marginTop='14px';pager.append(next,backup,repair);
   const hint=el('div','Swipe 仅含最近同步保存的候选，不是全部历史。备份含旧正文与恢复材料（上限16 MiB）。','muted');
   main.append(archiveLabel,row,createRow,preview,status,searchRow,filters,results,detail,pager,hint);
-  panel.append(header,main,footer,grip);shadow.append(bubble,panel);
+  panel.append(header,main,footer,grip);shadow.append(panel);
   let demo=null,epoch=0,locked=false,disposed=false,after=null,items=[],count=0;
   const controls=[archives,current,moreArchives,name,create,sync,confirm,cancel,query,search,scope,summaries,next,backup,repair];
   const say=(text,error=false)=>{status.textContent=text;status.className='notice'+(error?' error':'');};
@@ -113,9 +112,9 @@ export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
     say(page.status==='empty-query'?'请输入关键词。':`已显示 ${count} 条结果 · 已检查 ${page.scanned??0}/${page.total??0} 条正文\n${page.status==='exhausted'?'本次搜索完成。':'尚未检查完，可点“继续查找”。'}${page.limitReason?' 本批达到读取预算；若持续停在同一位置，当前对象超过 demo 预算。':''}`);
     if(!count&&page.status==='exhausted')results.append(el('div','没有找到匹配内容。试试更短的关键词，或检查搜索范围。','empty'));
   };
-  let bubbleMoved=false;
-  bubble.onclick=()=>{if(bubbleMoved){bubbleMoved=false;return;}panel.hidden=!panel.hidden;if(!panel.hidden)run(async()=>{await ready();clear();await catalog();await followCurrent();});};
-  close.onclick=()=>{clear();demo?.invalidate();preview.hidden=true;panel.hidden=true;};
+  const open=()=>{if(!root.isConnected)(doc.documentElement??doc.body).append(root);panel.hidden=false;
+    return run(async()=>{await ready();clear();await catalog();await followCurrent();});};
+  close.onclick=()=>{clear();demo?.invalidate();preview.hidden=true;panel.hidden=true;root.remove();};
   current.onclick=()=>run(async()=>{await ready();await followCurrent();});
   moreArchives.onclick=()=>run(()=>catalog(false));
   archives.onchange=()=>run(()=>choose(items.find(a=>a.source===archives.value)));
@@ -155,15 +154,8 @@ export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
     node.onpointerup=node.onpointercancel=node.onlostpointercapture=()=>{origin=null;};
   };drag(header,false);drag(grip,true);
   grip.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();const r=panel.getBoundingClientRect();fit(r.x,r.y,r.width+(e.key==='ArrowRight'?20:e.key==='ArrowLeft'?-20:0),r.height+(e.key==='ArrowDown'?20:e.key==='ArrowUp'?-20:0));};
-  let bubbleDrag=null;
-  const placeBubble=(x,y)=>Object.assign(bubble.style,{left:Math.max(4,Math.min(x,host.innerWidth-48))+'px',top:Math.max(4,Math.min(y,host.innerHeight-48))+'px',right:'auto',bottom:'auto'});
-  bubble.onpointerdown=e=>{if(e.button!==0)return;const r=bubble.getBoundingClientRect();bubbleMoved=false;
-    bubbleDrag={x:e.clientX,y:e.clientY,left:r.x,top:r.y};bubble.setPointerCapture(e.pointerId);};
-  bubble.onpointermove=e=>{if(!bubbleDrag)return;const dx=e.clientX-bubbleDrag.x,dy=e.clientY-bubbleDrag.y;
-    if(Math.hypot(dx,dy)>5)bubbleMoved=true;if(bubbleMoved)placeBubble(bubbleDrag.left+dx,bubbleDrag.top+dy);};
-  bubble.onpointerup=bubble.onpointercancel=bubble.onlostpointercapture=()=>{bubbleDrag=null;};
-  const resize=()=>{const b=bubble.getBoundingClientRect();placeBubble(b.x,b.y);if(!panel.hidden){const r=panel.getBoundingClientRect();fit(r.x,r.y,r.width,r.height);}};host.addEventListener('resize',resize);
-  return {root,controls:{bubble,panel,archives,current,create,sync,name,confirm,query,search,searchRow,scope,scopeDropdown,archiveDropdown,summaries,next,results,detail,status,preview,close},
+  const resize=()=>{if(!panel.hidden){const r=panel.getBoundingClientRect();fit(r.x,r.y,r.width,r.height);}};host.addEventListener('resize',resize);
+  return {root,open,controls:{panel,archives,current,create,sync,name,confirm,query,search,searchRow,scope,scopeDropdown,archiveDropdown,summaries,next,results,detail,status,preview,close},
     invalidate(){clear();preview.hidden=true;if(!panel.hidden)say('聊天或摘要已变化。旧结果已清除；请点击“当前聊天”重新选择，按需手动同步。');},
     dispose(){disposed=true;clear();host.removeEventListener('resize',resize);host.removeEventListener('pointerdown',outside);root.remove();}};
 }

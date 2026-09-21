@@ -2,8 +2,9 @@ import { TTSource } from '../bridge/source.mjs';
 import { openPagedTestStore } from '../storage/paged-tt-adapter.mjs';
 import { Demo } from './controller.mjs';
 import { mountPanel } from './panel.mjs';
+import { mountMenu } from './menu.mjs';
 
-export const VERSION='0.1.1';
+export const VERSION='0.1.2';
 export const NAMESPACE='mnemo-t03-paged-manual-demo-v1';
 export async function start(host=globalThis) {
   await host.__TAURITAVERN__?.ready;
@@ -24,9 +25,10 @@ export async function start(host=globalThis) {
     await demo.recoverPending();return demo;
   };
   const panel=mountPanel({host,connect,recover,version:VERSION});
+  const menu=mountMenu(host,()=>panel.open());
   const unsubscribe=source.subscribe(()=>{demo?.invalidate();panel.invalidate();});
   const dispose=async()=>{
-    if(disposed)return;disposed=true;unsubscribe();demo?.close();panel.dispose();
+    if(disposed)return;disposed=true;unsubscribe();demo?.close();menu.dispose();panel.dispose();
     host.removeEventListener('pagehide',dispose);host.removeEventListener('unload',dispose);
     if(owner){await owner.settled();await owner.close();}
   };

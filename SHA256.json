@@ -1,148 +1,152 @@
 {
-  "version": "0.1.1",
+  "version": "0.1.2",
   "files": [
     {
-      "path": "runtime-0.1.1/packages/bridge/importer.mjs",
+      "path": "runtime-0.1.2/packages/bridge/importer.mjs",
       "sha256": "83cf4b7336c03f792bda254a4fc5feac38597399f330c783828953e1c4163b4b"
     },
     {
-      "path": "runtime-0.1.1/packages/bridge/records.mjs",
+      "path": "runtime-0.1.2/packages/bridge/records.mjs",
       "sha256": "2a6a4bbced42b895a2ee020b69e2ad9723009663cdb2d7581bb4f17e2c479da8"
     },
     {
-      "path": "runtime-0.1.1/packages/bridge/source.mjs",
+      "path": "runtime-0.1.2/packages/bridge/source.mjs",
       "sha256": "a00ffee3dcfeabc2b9a3e64c7155bc7e3f1025a8863b06a3188df3babef985d6"
     },
     {
-      "path": "runtime-0.1.1/packages/contracts/context.mjs",
+      "path": "runtime-0.1.2/packages/contracts/context.mjs",
       "sha256": "b510a2ae1aee9d298a8fd9b4db1c86d97d2aeb8b49b4909fb323caf7bde64eb3"
     },
     {
-      "path": "runtime-0.1.1/packages/contracts/history.mjs",
+      "path": "runtime-0.1.2/packages/contracts/history.mjs",
       "sha256": "4f3a11d99d55174a11eb1eccf0b38c8a9fd3a7d45cec00e3d54548ecf81eb15a"
     },
     {
-      "path": "runtime-0.1.1/packages/contracts/index.mjs",
+      "path": "runtime-0.1.2/packages/contracts/index.mjs",
       "sha256": "65b4e3190bb46c96dd152eaccb31e6909f13ac17da8771534862b5960642022e"
     },
     {
-      "path": "runtime-0.1.1/packages/contracts/memory.mjs",
+      "path": "runtime-0.1.2/packages/contracts/memory.mjs",
       "sha256": "816aea336ed2117a9e59b1993c40434dc0ff4ea803d947da3bbf49ecce65395d"
     },
     {
-      "path": "runtime-0.1.1/packages/contracts/primitives.mjs",
+      "path": "runtime-0.1.2/packages/contracts/primitives.mjs",
       "sha256": "b5e7ce5687ef7d48eb3ca669fd5d154f5df497fea87fb36d485956970c77406b"
     },
     {
-      "path": "runtime-0.1.1/packages/contracts/runtime.mjs",
+      "path": "runtime-0.1.2/packages/contracts/runtime.mjs",
       "sha256": "f3bce19dad5d28dfa35264e861ee06b9e44369dc9c0929f5e85b6969277e77db"
     },
     {
-      "path": "runtime-0.1.1/packages/contracts/schema.mjs",
+      "path": "runtime-0.1.2/packages/contracts/schema.mjs",
       "sha256": "b9bdb69197bc0df394dc6e167d634067d55ab834ad2f2aec71e2345d59d83014"
     },
     {
-      "path": "runtime-0.1.1/packages/contracts/transfer.mjs",
+      "path": "runtime-0.1.2/packages/contracts/transfer.mjs",
       "sha256": "83a1f637920e1b4924afdbb789027fc543cc4a81ec7b69b9a19b2d87870331cf"
     },
     {
-      "path": "runtime-0.1.1/packages/demo/controller.mjs",
+      "path": "runtime-0.1.2/packages/demo/controller.mjs",
       "sha256": "762ff9a295583fefab76c86734f7ee96e48e34e9c4d4506c5343a2e6152928c3"
     },
     {
-      "path": "runtime-0.1.1/packages/demo/entry.mjs",
-      "sha256": "9de4d6987eaeef715bd8fc9bfa3bfc59c43ebbb38567df7246a1e4819617920a"
+      "path": "runtime-0.1.2/packages/demo/entry.mjs",
+      "sha256": "e78360e26ef058fdd474624068b04c66b1c35ac4d5b6290294432d800dbbd957"
     },
     {
-      "path": "runtime-0.1.1/packages/demo/panel.mjs",
-      "sha256": "abec34f3d246aa5ba2e3b9dd55caec5294e7367a2526bc9476fca2753fbc8b1b"
+      "path": "runtime-0.1.2/packages/demo/menu.mjs",
+      "sha256": "c281a328d1626aa17aacf464ad54e894cd837f464d64b713cf1cfe8cc6e750b7"
     },
     {
-      "path": "runtime-0.1.1/packages/demo/styles.mjs",
-      "sha256": "2cc4f0eaffc1e49281dba5003590d5f02e57d7e9676bd57d575e9835a3d8ebce"
+      "path": "runtime-0.1.2/packages/demo/panel.mjs",
+      "sha256": "11bdee8b98e5fdb15350a87ac750d135047a06d3543ef9f32c4f3013412c7042"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/intent-prototype.mjs",
+      "path": "runtime-0.1.2/packages/demo/styles.mjs",
+      "sha256": "5e396cc8b12477b6c2ee41ddf81f2b803161b82b2e8db2650ce8d02b9a5541bf"
+    },
+    {
+      "path": "runtime-0.1.2/packages/storage/intent-prototype.mjs",
       "sha256": "14dfc0868117977164a646f489211855f71407105cfb095043038d380ba45627"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/intent-recovery.mjs",
+      "path": "runtime-0.1.2/packages/storage/intent-recovery.mjs",
       "sha256": "9901a64f4fe1748f2ee4671296d712503b1344d543c7840694d6add3f0830979"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/intent-tt-adapter.mjs",
+      "path": "runtime-0.1.2/packages/storage/intent-tt-adapter.mjs",
       "sha256": "15e7954f337c048c2cc9ff0fe386f24a7d83800e55a1daf2b76cf0d0aea4c380"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/memory-work.mjs",
+      "path": "runtime-0.1.2/packages/storage/memory-work.mjs",
       "sha256": "66e5f4db14d5daa48a07c70932a068fcabd5c9baff5b7584e08df5ad8e568d6e"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-bridge.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-bridge.mjs",
       "sha256": "807ce0c59e123c8dd02f4a8c1f85babd7ac9f9ee529fe57f3481b4d319542356"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-coordinator.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-coordinator.mjs",
       "sha256": "47c2b4d7ce22411086562e51755126700f545543d7b231b14f82689742d79835"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-directory.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-directory.mjs",
       "sha256": "b3adc40fe4a70a772012b46255ccb96bb42bfa144abcd91c52594b25db83e30d"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-domain.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-domain.mjs",
       "sha256": "d3f4d9ac11737715a4544625601355eb4093bfdb9720f4c33e96dbca7ad72623"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-history.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-history.mjs",
       "sha256": "81f02dceed5d03da90870ff235868d934743ea3b6a764170bf6a0305d7103f75"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-json.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-json.mjs",
       "sha256": "e422b6f1151cdc2517fe4a06aae1746375244b9b7fdf8008dba50c7a1727a37c"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-memory.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-memory.mjs",
       "sha256": "1eb01cdf0523d5c20e746c46da73f312bb96370ed25455457b9ffacbf1951583"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-reader.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-reader.mjs",
       "sha256": "da134623ceace647a87369a86aaf68dce42f222b45975427cf76c2d3097bdd5d"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-recovery.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-recovery.mjs",
       "sha256": "9619c6e736f8f60283b5b5c81716d22d65f4aafbd36612025a939efc4c7f8273"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-transport.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-transport.mjs",
       "sha256": "0119b1b44dc27f1288133b20caab6bdedd61408c0597a6b0ec9ef674318bdc48"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/paged-tt-adapter.mjs",
+      "path": "runtime-0.1.2/packages/storage/paged-tt-adapter.mjs",
       "sha256": "94678c8cd993691ae1e351cb49963876967510eb71d16a8b39255afe6f7106e9"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/pages.mjs",
+      "path": "runtime-0.1.2/packages/storage/pages.mjs",
       "sha256": "e30c586924fbfa4e053d5fe009e3821a904b694b500ea286431be3b6818e0556"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/protocol.mjs",
+      "path": "runtime-0.1.2/packages/storage/protocol.mjs",
       "sha256": "06be81cb311eef00d52fb7a48df22633bae4d798ec44bc9aa002c0b27fc610cb"
     },
     {
-      "path": "runtime-0.1.1/packages/storage/strict-json.mjs",
+      "path": "runtime-0.1.2/packages/storage/strict-json.mjs",
       "sha256": "9b2440d2e3bca40f2bca66bca8c42b6cf915bc9ad966fcf781831edc94b77205"
     },
     {
-      "path": "runtime-0.1.1/packages/workbench/normalize.mjs",
+      "path": "runtime-0.1.2/packages/workbench/normalize.mjs",
       "sha256": "fd7dabbbf1d4e114bd7349a8e9a6e31933cc0bdae0915a0d64c468ba04c4390f"
     },
     {
-      "path": "runtime-0.1.1/packages/workbench/service.mjs",
+      "path": "runtime-0.1.2/packages/workbench/service.mjs",
       "sha256": "f79f07dbd05f1556686c0a29c069c23483b693eda97f04ac7709890e0efeb6b4"
     },
     {
-      "path": "runtime-0.1.1/packages/workbench/unicode/fold-map.mjs",
+      "path": "runtime-0.1.2/packages/workbench/unicode/fold-map.mjs",
       "sha256": "e4442fb2cd452a982cb078cec30b3464ddb08c39faed4c39120a1d2fa0334d4f"
     }
   ]
