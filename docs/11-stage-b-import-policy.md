@@ -101,3 +101,7 @@ T-03 的 `HOST_MAINTENANCE_UNSUPPORTED`、生产手机 pending、未经授权真
 搜索工程依据：Unicode UAX #15（https://www.unicode.org/reports/tr15/）、Unicode 17 第5.18.4节（https://unicode.org/versions/Unicode17.0.0/core-spec/chapter-5/）、UTS #18 White_Space（https://www.unicode.org/reports/tr18/）。仅用其规范化/匹配机制；不把搜索折叠用于修改原文或判断消息身份。
 
 当前无必须再次由用户选择的产品阻塞。实际插件版本、合成样本中可获得的摘要/次要字段、受控读取方法由开工先做小型只读核对；只有无法从既有资料/环境解决的缺口才询问。群聊专用规则、复杂回合聚合、自动匹配、最终实体 schema 和摘要模板细节在对应后续任务处理，不塞入 T-04。
+
+## 10. T-04桥接实现说明（待review）
+
+公开API不能证明旧摘要完整生成输入，因此保存为legacy-inputs-unproven的作用域桥接资产，不捏造TurnMemory。桥接资产和进度进入完整分页包；含桥接资料的库拒绝v2小包导出。接口、兼容和回退见 ../packages/bridge/README.md。本项是实施选择，不改变06来源契约，尚待Chat review。

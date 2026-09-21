@@ -211,3 +211,9 @@ P5已补齐版本化只读诊断快照、结构化错误、空目标备份/恢�
 物理库存目录每1024个不同引用做增量AVL合并，复用未变子树；临时工作集硬限16,384候选页/16MiB，已登记引用缓存限512条且随恢复重建。只落盘当前批次根可达临时目录页，不删除已落盘页，不原地覆盖目录。业务put首次物理碰撞检查不跳过；业务页、control、generated IDs及账本格式不变。
 
 最后目录批次完成后仍执行材料flush、单root发布、发布flush、ack。新的directory-write前后故障点纳入失败不变性验证，固定TT发布前/后强杀及丢确认恢复须以本轮代码重跑。旧/新分页包双向小样本恢复已验证，物理目录形状变化不改变领域或control内容身份。
+
+## 13. T-04桥接记录与导出边界（待review）
+
+新增version=1的bridge请求，将局部history-delta和桥接记录CAS一起编译，继续使用原prepared/published持久请求协议。manifests内bridge-v1保留前缀保存分页session/binding/map/asset/assetMap，不新增第二权威或改变root发布次序；HostBinding保留正式身份，逐楼映射不反复复制到整份message_map。
+
+完整分页包携带上述记录及请求，空目标恢复重放同一编译器。无bridge旧包保持原语义；包含bridge的新包需要新读者，旧读者未知请求应拒绝，不去掉记录冒充降级。含bridge的库拒绝logical v2小包导出，避免漏掉新桥接材料，拒绝本身不进入recovery-required。接口和回退详见../packages/bridge/README.md。自动外部维护门禁未改变。

@@ -3,6 +3,7 @@ import { BufferedDirectory } from './paged-directory.mjs';
 import { PagedJSON } from './paged-json.mjs';
 import { PagedDomain, DOMAIN_TABLES } from './paged-domain.mjs';
 import { compileHistory } from './paged-history.mjs';
+import { compileBridge } from './paged-bridge.mjs';
 import { compileMemory, compileBinding, pagedMemoryStatus } from './paged-memory.mjs';
 import { canonicalize, equal, fingerprint, newId, id, requireThat as check } from '../contracts/primitives.mjs';
 import { exportLogical } from '../contracts/transfer.mjs';
@@ -53,6 +54,7 @@ export async function compilePaged(pages,root,input,replay=null) {
   if(['history','history-delta'].includes(input.kind)) result=await compileHistory(d,input,makeId);
   else if(input.kind==='memory') result=await compileMemory(d,input,makeId);
   else if(input.kind==='binding') result=await compileBinding(d,input);
+  else if(input.kind==='bridge') result=await compileBridge(d,input,makeId);
   else check(false,'INVALID_SCHEMA','Unknown operation kind');
   check(replay===null||equal(replay,generated),'NEEDS_RESOLUTION','Unused generated IDs');
   return {domain:d.root,result,generated};
@@ -190,6 +192,10 @@ export class PagedCoordinator {
       memoryStatus:(key,branch,cutoff=null)=>run(()=>pagedMemoryStatus(new PagedDomain(this.#pages,this.#control.domain),key,branch,cutoff)),
       diagnostics:(branch=null)=>run(()=>this.#diagnostics(branch)),
       read:(table,key)=>run(()=>new PagedDomain(this.#pages,this.#control.domain).logical(table,key)),
+      bridgeRead:key=>run(async()=>{
+        check(typeof key==='string'&&key.startsWith('bridge-v1:'),'INVALID_SCHEMA','Bridge key required');
+        return new PagedDomain(this.#pages,this.#control.domain).get('manifests',key,false);
+      }),
       range:(snapshot,start=0,count=16)=>run(async()=>{check(Number.isSafeInteger(count)&&count>=0&&count<=1024,'RESOURCE_LIMIT','Read page limit');const output=[]; for await(const ref of new PagedDomain(this.#pages,this.#control.domain).entries(snapshot,start,count)) output.push(ref); return output;}),
       export:()=>run(()=>exportPageDirectory(this.#pages.catalog,this.#root.directory,{format:PAGED_FORMAT,library_id:this.#root.library_id,control:this.#root.control})),
       exportSnapshot:(branch=null)=>run(async()=>({
@@ -217,6 +223,7 @@ export class PagedCoordinator {
   }
   async #logical() {
     const d=new PagedDomain(this.#pages,this.#control.domain), state={schema_version:1}; let objects=0,bytes=0;
+    if(await d.get('manifests','bridge-v1:format',false)) throw Object.assign(new Error('Bridge materials require complete paged export; v2 would omit receipts'),{code:'UNSUPPORTED',pureRejection:true});
     for(const table of DOMAIN_TABLES) {
       state[table]={}; for await(const [key] of d.records(table)) {
         check(++objects<=4096,'RESOURCE_LIMIT','Explicit v2 materialization count'); const value=await d.logical(table,key); bytes+=new TextEncoder().encode(canonicalize(value)).length;

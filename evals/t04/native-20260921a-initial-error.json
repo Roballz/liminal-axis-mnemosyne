@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "run": "20260921a",
+  "code": "IMPORT_TARGET_NOT_EMPTY",
+  "message": "Paged creation needs an empty isolated namespace"
+}

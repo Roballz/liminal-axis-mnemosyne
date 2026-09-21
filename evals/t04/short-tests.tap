@@ -1,0 +1,13 @@
+✔ B01/B02/B07 raw header, strict pairing, public whitelist, no source writes (5202.8811ms)
+✔ B03 duplicate, cancel/reopen, lost confirmation and complete empty-target recovery (41406.5368ms)
+✔ B04 distinct same-text stories, stale preview, continuation and fixed fork cutoff (9898.5922ms)
+✔ B05 local edit/swipe/regenerate preserve ID; repeated notices and late results rejected (5514.7585ms)
+✔ B06 deletion persists pause, ignore does not release, confirmation retains child and old versions (8377.3704ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70735.2233

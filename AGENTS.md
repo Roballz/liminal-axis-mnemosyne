@@ -4,7 +4,7 @@
 
 ## 当前入口（2026-09-21）
 
-**S-A/T-03 已在受控能力范围 verified。当前阶段是 S-B，正式卡为 `tasks/T-04-readonly-import-and-sync.md`，状态 planned。** 用户指定本卡施工后才进入 in_progress。先读 `stages/S-B-archive-and-search.md`、本卡、`docs/11-stage-b-import-policy.md`；按需读06/08/09/10相关章节，不反复读取全部历史评审。
+**S-A/T-03 已在受控能力范围 verified。当前阶段是 S-B，正式卡为 `tasks/T-04-readonly-import-and-sync.md`，状态 implemented_unverified，待Chat review。** 本轮Node 339/339及受控原生恢复核对已记录；不自动进入T-05。先读 `stages/S-B-archive-and-search.md`、本卡、`docs/11-stage-b-import-policy.md`；按需读06/08/09/10相关章节，不反复读取全部历史评审。
 
 T-03 收口以 `notes/t-03-capability-final-review.md` 为准，覆盖旧 README/roadmap/task 内的 P3/P4待审、先重测旧机性能等临时状态。旧 `T-03-storage-foundation.proposal.md` 不是施工入口。不重开已关闭的地基问题，不自动生成或执行 T-05/T-06；T-04 不是自动记忆/服务器开发。
 

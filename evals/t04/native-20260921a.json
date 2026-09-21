@@ -1,0 +1,65 @@
+{
+  "type": "done",
+  "run": "20260921a",
+  "sourceNamespace": "mnemo-t03-paged-t04-20260921a-source",
+  "targetNamespace": "mnemo-t03-paged-t04-20260921a-restored",
+  "capability": {
+    "apiVersion": 1,
+    "pluginVersion": "1.2.9",
+    "getFloor": true,
+    "getSnapshot": true,
+    "getHistory": true,
+    "subscribe": true
+  },
+  "report": {
+    "originals": 2,
+    "summaries": 1,
+    "optional": 0,
+    "reused": 2,
+    "changed": 0,
+    "removed": 0,
+    "source_unproven": 1,
+    "sourceReport": {
+      "available": true,
+      "pluginVersion": "synthetic-v1",
+      "coverage": {
+        "complete": true,
+        "missingAiFloors": []
+      },
+      "unprovided": [
+        "items",
+        "scenes",
+        "lifeDetails"
+      ],
+      "excluded": [
+        "state",
+        "protagonist",
+        "npcs",
+        "vars",
+        "plans",
+        "vectors",
+        "credentials",
+        "injection"
+      ],
+      "limitations": [
+        "Only selected higher nodes are exposed; not every stored level.",
+        "Legacy generation inputs are unproven; retained as scoped bridge material, not source-derived TurnMemory."
+      ],
+      "unpaired": []
+    },
+    "needs_confirmation": false,
+    "paused": false,
+    "same": true
+  },
+  "sourceReadOnly": true,
+  "sourceHash": "sha256:write-payload:v1:ea6c5393899c2d841679e4f4815db48ab2705f59214daf60d67596fb8eb7f33a",
+  "originals": 2,
+  "summaries": 1,
+  "reopened": true,
+  "restored": true,
+  "resumedExistingSource": true,
+  "resumedExistingTarget": true,
+  "modelRequests": 0,
+  "injections": 0,
+  "sourceWrites": 0
+}

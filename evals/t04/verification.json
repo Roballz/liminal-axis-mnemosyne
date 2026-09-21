@@ -1,0 +1,44 @@
+{
+  "baseline": "9cb33a5",
+  "status": "implemented_unverified",
+  "node": "v24.19.0",
+  "short": {
+    "passed": 5,
+    "seconds": 70.735
+  },
+  "integration": {
+    "passed": 6,
+    "seconds": 79.823
+  },
+  "full": {
+    "failed": 0,
+    "runs": 1,
+    "seconds": 117.808,
+    "passed": 339
+  },
+  "implementationAddedLines": 745,
+  "testLines": 145,
+  "native": "native-20260921a.json",
+  "nativeInitialError": "native-20260921a-initial-error.json",
+  "nativeScope": "Synthetic source and real isolated TT DB; original source/restored namespaces recovered and audited. Actual BaiBai API capability checked; no real chat migration.",
+  "postFullChange": "Native demonstration only: inspect existing namespace and resume original session; validated by actual TT receipt and syntax check.",
+  "notRun": [
+    "old-machine 1x/5x/10x",
+    "new crash matrix",
+    "production phone",
+    "real chat migration",
+    "new summaries or injection"
+  ],
+  "runtimeSHA256": {
+    "packages/bridge/native-entry.js": "0ef2745e776cebff1f955d57d4618d3d1d17101fe4c560c6e18e9464aadc15d5",
+    "packages/bridge/records.mjs": "f841e998b888455f166cbaf5ae256a1578162f3e9339447a92a0a8154bff3775",
+    "packages/bridge/native-demo.mjs": "950c0995dda97eb7e418a317e83228c3a4ee686fd2edcee688a7451ccc4414ce",
+    "packages/bridge/importer.mjs": "e59c296555e90daf469b432120e35032910ff1a2d92bc1d75146c62bbed80b88",
+    "packages/storage/paged-coordinator.mjs": "23ad330032f78ebb290807123179bd7103cc17fe97ba481eb6d809ebcd954329",
+    "packages/bridge/source.mjs": "d4a5ed6dc4687cae40ba4a232785d14b64d338c18511da659cc4291cd232bd82",
+    "packages/bridge/native-collector.mjs": "9d21b64d511853317abbfac30bd1605565d65713c7e47b0a0318ab1326fb12e1",
+    "apps/tt-import/index.js": "a333377c740935fd4d2b23ea1836e36028c9c76a1e7bd3dc642d5b83d6ff5898",
+    "packages/bridge/panel.mjs": "eab57dabb4d97135a65c2aa67001253ca7b2261705f8ac3f2076706bc904b315",
+    "packages/storage/paged-bridge.mjs": "59b751c5ee8b497a537046723c3017cbadfdc05fbb920ba7f6811f0d39f714a5"
+  }
+}

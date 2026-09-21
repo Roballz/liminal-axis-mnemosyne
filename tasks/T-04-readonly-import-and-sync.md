@@ -1,6 +1,6 @@
 # T-04：正文与旧摘要的只读迁入、映射和局部同步
 
-状态：planned。日期：2026-09-21。阶段：S-B；依赖 T-01/T-02A、T-02、T-03 受控能力验收。任务卡发布不等于已实现；用户指定本卡施工后才进入 in_progress。
+状态：implemented_unverified。日期：2026-09-21。阶段：S-B；依赖 T-01/T-02A、T-02、T-03 受控能力验收。用户已授权施工；代码、Node回归和受控原生恢复核对完成，交Chat review，不将实现等同于verified。
 
 ## 1. 用户目标与完成线
 
@@ -100,16 +100,37 @@ items/scenes/lifeDetails（仅实际确认匹配的部分）可选以原样旧�
 
 停桥接/取消订阅/禁用扩展应不影响 TT 或柏宝书；保留已确认目标批次和原始副本。暂存未提交材料不自动清理；回退不删除正式旧版本、不逆向写回源端。若用户已继续目标分支，不能简单回滚整批抹去后来的历史，需提示保全后单独处理。
 
-## 8. 开工记录（由 Codex 填，不重新创造任务）
+## 8. 开工记录（2026-09-21）
 
-- 实际main/分支/工作树、已读当前文件：
-- TT/柏宝书实际版本、可用隔离样本及字段：
-- 预计实现文件/行数、预计测试文件/行数、桥接持久记录落点：
-- 对应B01～B08的短测试清单、原生演示步骤和停止条件：
-- 不能从仓库/环境自行解决的真实缺失项：
+- main 从 de67c55 fast-forward 到 9cb33a5；初始仅 `.codex/` 未跟踪，不提交该目录。已读 README、AGENTS、S-B、本卡、11政策、T-03最终回执；按接口查看06 schema/来源、08、09分页发布、10隔离流程及现有源码。
+- 独立TT：`.t03-local/tt-367b0c7`，固定 exe SHA256 11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4。开工没有运行进程，用户要求打开后自行安装柏宝书并导入聊天。安装 manifest 1.2.9，git HEAD 精确为 32dbb48a0a643804256d496bc35bf7699dea9ebe；不是猜测其版本。
+- 已核对 PUBLIC_API、public/types 和 memory/types：getFloor.memory.summary；getHistory 的 comp 选中节点；items/scenes/lifeDetails 的逐字段白名单。未获取真实正文/摘要写入仓库；原生演示独立构造两条虚构正文、一份摘要。
+- 开工预计实现 1200～1800 行、测试300～500行；实际运行时代码新增745行（含演示入口、协调器7行接线），测试145行；采用更薄模块。持久点为 `manifests` 保留 `bridge-v1:` 前缀，逐条分页记录；新增 `bridge` 持久请求编译正文和 CAS 回执，同一次已有发布协议提交。
+- B01～B07合并短fixture，随后相关集成；最终候选一次339项全量。B08只安排虚构源→真实隔离DB→冷开→完整分页导出→空目标恢复，不强杀、不执行1x/5x/10x。
+- 安装资料和固定API可自行核对，不需真实带摘要档案。前端新扩展需要用户手动刷新；自动调试端点连接被拒绝后未反复尝试。首轮收集器5分钟未收到终态，不能由此证明原生零执行。后续刷新收到IMPORT_TARGET_NOT_EMPTY，说明同一虚构namespace已有材料；保留错误证据，演示入口改为检查精确namespace并恢复原会话，不删除或换ID盲重试。
 
-## 9. 实施回报（当前全部未执行）
+## 9. 实施回报（implemented_unverified）
 
-实际改动/代码量；实际命令与执行边界；白名单/来源覆盖；任务内偏差；身份/格式/存储影响；回退；未验证与新阻塞。没有新阻塞时可分批提交并继续到本卡完成线，不每个模块都等待新批准。遇到需要改既定语义/底层发布/权限的真实阻塞再回审。
+实现为 `packages/bridge/`（源读取、导入/对账、记录约束、最小面板及虚构原生演示）、`apps/tt-import/`、`packages/storage/paged-bridge.mjs` 和协调器7行加法接线。原存储发布/恢复协议、maintenance gate未改；没有创建下一张任务卡。
+
+可恢复会话保存固定输入指纹、来源、类别、目标Head/view、游标、报告、状态；原持久请求保存每批ID/结果。取消和丢确认先恢复原操作；已提交批次保留。未知来源同文不会跨Story合并；续聊空文件保留原Head及前缀偏移；fork固定截止并剔除截止外摘要。手动重核对允许全输入；事件路线最多16条和相邻证据，重复同文不推进Head。删除/复杂变化持久暂停，人工确认后才发布，其他Story和旧/子线版本保留。
+
+旧资料来源没有足够生成输入证据，均以 `legacy-inputs-unproven` 的快照作用域桥接资产保存，明确不是已证明来源的TurnMemory。ordinary_pair仅说明当前正文配对，不把valid/楼层号转成强引用。高层只承诺公开接口实际选中节点；可选资料缺范围时不自动跨分支继承；旧资产版本不可覆盖。更新链接用桥接previous版本链，未把未知来源对象塞入正式memory selections/corrections。
+
+完整分页包涵盖桥接记录及请求，恢复时重放领域与回执CAS；原root格式不变。含bridge请求需要新读者，旧读者应拒绝；`logical()` v2小包明确拒绝含桥接记录的库，避免静默漏档。无bridge的已有包兼容性由既有回归覆盖。接口/回退说明见 `packages/bridge/README.md`。
+
+实际测试（Node v24.19.0 / Windows，fake不是原生）：
+
+| 集合 | 命令/证据 | 结果 |
+| --- | --- | --- |
+| 短风险反例 | `node --test packages/bridge/tests/bridge.test.mjs`；evals/t04/short-tests.tap | 5组通过，约70.7s |
+| 相关集成 | `node --test --test-reporter=tap packages/bridge/tests/bridge.test.mjs`；evals/t04/integration-tests.tap | 6组通过，约79.8s；新增测试有一次括号语法错误，修复后运行，没有反复全量 |
+| 最终候选全量 | `node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js packages/bridge/tests/*.test.mjs`；evals/t04/final-regression.tap | 339/339，约117.8s；本轮只一次全量 |
+| 新桥接模块语法 | Node --check | 通过；不把语法检查计作功能测试 |
+| B08 原生短演示 | native-demo / run 20260921a，隔离扩展逐文件hash核对 | 通过；见evals/t04/native-20260921a.json，首次错误另存native-20260921a-initial-error.json |
+
+回退：停止监听并排空关闭目标，保留全部库/分页包及本版读者，不删除已提交批次、不让旧writer写新包、不逆向改TT。真实聊天仅由用户自行导入TT，本轮自动演示不迁移这些数据。手机、生产准入、自动维护、全层级柏宝书恢复和LLM/检索/注入均未验证或不在本卡。
+
+原生终态为done：同一虚构源库与恢复库均已存在，恢复/审计并核对2条原文、1份摘要、幂等结果和正式Head；sourceReadOnly=true，无模型/注入/源写入。运行时柏宝书apiVersion=1、pluginVersion=1.2.9，四个公开读取/订阅方法存在。首轮没有收到终态，不伪称零执行；后续空库门禁报错后保留库并恢复同一会话，没有删除/强杀或换库重复实验。最终回执是既有目标恢复核对，不冒称本次重跑了新的空目标恢复路径。用户确认面板右下角出现；没有用其真实聊天测试迁移或落仓。原生演示harness在全量后仅修复重入检查，该路径由实际TT回执验证，未重跑全量。现交Chat review，不升verified；T-05不启动。
 
 不自动生成 T-05，下一任务只报告依赖。

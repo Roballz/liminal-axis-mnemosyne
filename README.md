@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-2026-09-21：**S-A（T-00～T-03，含T-02A）已在受控能力范围收口；进入 S-B。T-04 正式卡已发布为 planned，尚未实施。**
+2026-09-21：**S-A（T-00～T-03，含T-02A）已在受控能力范围收口；进入 S-B。T-04只读桥接代码与339项Node回归完成，受控原生恢复核对通过，尚待Chat review。**
 
 当前入口是 `tasks/T-04-readonly-import-and-sync.md`：只读迁入 TT 原文和柏宝书旧摘要，可选薄接物品/地点/生活档案，精确映射与可恢复影子同步，删除/复杂变化人工确认。此阶段不照搬旧插件实体 schema，不生成新摘要、不注入、不建设 A 服务器。
 
@@ -29,7 +29,7 @@ T-03 最终回执为 `notes/t-03-capability-final-review.md`，审核基线 de67
 | 文件 | 用途 |
 | --- | --- |
 | `stages/S-B-archive-and-search.md` | 当前阶段目标、已确认事项、权限与测试预算 |
-| `tasks/T-04-readonly-import-and-sync.md` | planned：只读导入、精确映射、暂停/确认与恢复的实施范围 |
+| `tasks/T-04-readonly-import-and-sync.md` | implemented_unverified：只读导入、精确映射、暂停/确认与恢复的实施证据 |
 | `docs/11-stage-b-import-policy.md` | 本轮导入白名单、两主入口、删除人工处理、配对及手动搜索边界 |
 | `stages/S-A-foundation.md` | 已收口地基及未验证项 |
 | `notes/t-03-capability-final-review.md` | T-03最终能力验收，覆盖旧P3/P4/P5待审状态 |
