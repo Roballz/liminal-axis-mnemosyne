@@ -1,6 +1,6 @@
 # T-05 手动搜索工作台
 
-实现状态：implemented_unverified；Chat 决定验收。入口为现有隔离 `apps/tt-import` 面板的“打开手动搜索工作台”。已有库取消“创建空库”，填写原 namespace 后打开工作台；查询路径不调用导入预览、prepare/execute/recoverPending/resume。
+实现状态：verified（受控手动档案/搜索范围）；最终回执见 `notes/t-05-final-review.md`。入口为现有隔离 `apps/tt-import` 面板的“打开手动搜索工作台”。已有库取消“创建空库”，填写原 namespace 后打开工作台；查询路径不调用导入预览、prepare/execute/recoverPending/resume。
 
 ## 使用
 
