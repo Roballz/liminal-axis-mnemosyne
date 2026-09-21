@@ -1,0 +1,83 @@
+{
+  "type": "done",
+  "run": "20260922resume",
+  "namespace": "mnemo-t03-paged-t04-live-20260921r1live",
+  "stages": [
+    {
+      "phase": "prior-owner",
+      "ms": 0
+    },
+    {
+      "phase": "open-original",
+      "ms": 104
+    },
+    {
+      "phase": "fixed-source",
+      "ms": 1245
+    },
+    {
+      "phase": "resume-original",
+      "ms": 1264
+    },
+    {
+      "phase": "asset-prepare",
+      "ms": 2592
+    },
+    {
+      "phase": "asset-execute",
+      "ms": 38666
+    },
+    {
+      "phase": "batch-returned",
+      "ms": 40821
+    },
+    {
+      "phase": "verify-originals",
+      "ms": 41052
+    },
+    {
+      "phase": "verify-summaries",
+      "ms": 42871
+    },
+    {
+      "phase": "verify-final",
+      "ms": 42998
+    },
+    {
+      "phase": "close",
+      "ms": 43012
+    }
+  ],
+  "prepareCalls": 1,
+  "executeCalls": 1,
+  "close": {
+    "attempted": true,
+    "confirmed": true
+  },
+  "phase": "close",
+  "before": {
+    "body": 25,
+    "assets": 0,
+    "assetTotal": 2,
+    "status": "partial",
+    "pending": 0
+  },
+  "after": {
+    "body": 25,
+    "bodyTotal": 25,
+    "assets": 2,
+    "assetTotal": 2,
+    "status": "complete"
+  },
+  "originalHeadUnchanged": true,
+  "originalContentEqual": true,
+  "candidateSlotsEqual": true,
+  "summaryContentEqual": true,
+  "sourceUnchanged": true,
+  "pendingAfter": 0,
+  "operationDelta": 1,
+  "sourceWrites": 0,
+  "modelRequests": 0,
+  "injections": 0,
+  "elapsedMs": 43343
+}

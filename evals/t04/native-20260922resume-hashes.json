@@ -1,0 +1,10 @@
+{
+  "packages/bridge/native-resume-button.json": "07a1793d98f1ee6a94aaa2b84eb1cc4f38c13be094f4c88739296e71417db19c",
+  "packages/storage/paged-coordinator.mjs": "23ad330032f78ebb290807123179bd7103cc17fe97ba481eb6d809ebcd954329",
+  "packages/bridge/native-resume-launch.mjs": "577fc50d9067801af963cc52a49f2dc8e3a6f2a99ec5310094f681eaf51efed1",
+  "packages/storage/paged-tt-adapter.mjs": "bacadc0062254e4022628f345d450993b12d0751d4e0317c3b5a2e039d7ba723",
+  "packages/bridge/importer.mjs": "83cf4b7336c03f792bda254a4fc5feac38597399f330c783828953e1c4163b4b",
+  "packages/bridge/source.mjs": "0eda76975e64c928e1bf02e0a914933e0af35dde4fe370ccf4714e2180da41ec",
+  "packages/bridge/native-resume.mjs": "cc5a5ab599846874ba50ebe2df62d3c6b2568fe94542dc2ef436611b8045bfbb",
+  "packages/bridge/native-inspect-collector.mjs": "3b857c8ad23fceaad6fd9ac05f498adfd04c244deea74342579f91ee42917c55"
+}

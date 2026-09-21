@@ -13,7 +13,7 @@
     "seconds": 125.7151732,
     "baselineTestsRetained": 339
   },
-  "nativeActualRead": "Actual panel preview: 25 originals / 2 valid summaries. Budget expired; user paused; terminal VERSION_CONFLICT received. Import/content equality not verified.",
+  "nativeActualRead": "Original session resumed with one remaining asset batch: 25 originals and 2 summaries complete; original/candidate/summary content equal; source and Head unchanged; no pending; close confirmed.",
   "deployedHashes": "repair-deployed-hashes.json",
   "scope": "R1 inheritance, R3 actual subscription controller, R2 scoped identity and durable v1 alias",
   "notRun": [
@@ -60,5 +60,21 @@
     "inspectionCloseConfirmed": true,
     "bodyCommitted": 25,
     "assetsTotal": 2
+  },
+  "nativeFinalResume": {
+    "sourceUnchanged": true,
+    "pending": 0,
+    "status": "complete",
+    "fullRepeated": false,
+    "seconds": 43.343,
+    "assetsCommitted": 2,
+    "contentEqualityVerified": true,
+    "prepareCalls": 1,
+    "executeCalls": 1,
+    "bodyCommitted": 25,
+    "operationDelta": 1,
+    "closeConfirmed": true,
+    "evidence": "native-20260922resume.json",
+    "headUnchanged": true
   }
 }

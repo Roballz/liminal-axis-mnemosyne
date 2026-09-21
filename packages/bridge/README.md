@@ -46,6 +46,8 @@ assetMap 是该来源最后观察版本的索引，不是“可直接注入的�
 `native-entry.js` 仅用于隔离演示部署，普通扩展入口不包含收集器。
 测试实际状态及未验证边界见任务卡；不跑旧机1x/5x/强杀矩阵。
 
-返修反例见 `tests/review.test.mjs`，经过实际读取适配、Importer和面板共用事件控制器。`native-live-entry.js` 仅在用户点击后运行真实公开接口与面板确认，限1–32条已有摘要的小样本，4分钟停止新操作；只保存脱敏计数/相等断言，不保存正文或摘要。该演示未收到成功回执前均为 pending，不能拿旧 synthetic 演示替代。
+返修反例见 `tests/review.test.mjs`，经过实际读取适配、Importer和面板共用事件控制器。`native-live-entry.js` 仅在用户点击后运行真实公开接口与面板确认，限1–32条已有摘要的小样本，旧harness仅在整段调用边界检查4分钟预算，并不能自动中断Importer批次；只保存脱敏计数/相等断言，不保存正文或摘要。该演示未收到成功回执前均为 pending，不能拿旧 synthetic 演示替代。
 
 实际TT导入档案可包含null候选槽；rawMessage原样保留null及swipe索引，当前mes仍为正文权威，不补造候选文本。未知对象/数字/undefined候选仍拒绝。完整分页包保留这些空位，见native-null-swipe-short.tap。
+
+原会话后续工具：native-inspect只查询原库、要求旧owner已关闭，未调用prepare/execute；native-resume仅在明确授权后继续固定会话的一个剩余摘要批次，prepare前检查预算、已准备请求按原ID排空，并逐项核对正文/候选槽/摘要及明确close结果。源码、脱敏阶段回执与hash见evals/t04/native-20260922*；真实核验现已完成，仍待Chat复审。临时酒馆助手全局脚本不属于普通产品入口，结束可禁用。

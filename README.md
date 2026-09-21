@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-2026-09-21：**S-A已在受控能力范围收口；当前S-B/T-04。首轮Chat review未通过，R1/R3/R2返修候选已通过345项Node回归，原会话已确认正文25/25提交、摘要0/2，会话partial且pending为空；旧owner及本次关闭已确认，仍待续传授权及内容核验；状态implemented_unverified，T-05不启动。**
+2026-09-21：**S-A已在受控能力范围收口；当前S-B/T-04。首轮Chat review未通过，R1/R3/R2返修候选已通过345项Node回归，原会话现已正文25/25、摘要2/2全部提交，内容逐项相等、源及Head不变、pending为空且关闭成功；返修证据齐备待Chat复审；状态implemented_unverified，T-05不启动。**
 
 当前入口是 `tasks/T-04-readonly-import-and-sync.md`：只读迁入 TT 原文和柏宝书旧摘要，可选薄接物品/地点/生活档案，精确映射与可恢复影子同步，删除/复杂变化人工确认。此阶段不照搬旧插件实体 schema，不生成新摘要、不注入、不建设 A 服务器。
 

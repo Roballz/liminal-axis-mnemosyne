@@ -1,0 +1,17 @@
+{
+  "info": "只沿已核对的原会话补完2份摘要并核对内容；不重导正文，不刷新TT。",
+  "button": {
+    "buttons": [],
+    "enabled": false
+  },
+  "content": "const host=window.parent;\nconst doc=host.document;\nif(!doc.getElementById('mnemosyne-resume-box')) {\n  const box=doc.createElement('div');box.id='mnemosyne-resume-box';\n  box.style.cssText='position:fixed;bottom:12px;right:12px;z-index:10000;background:#20242d;color:#eee;padding:12px;max-width:480px;max-height:70vh;overflow:auto';\n  const button=doc.createElement('button');button.textContent='补完2份摘要并核验';\n  const status=doc.createElement('pre');status.id='mnemosyne-resume-status';status.style.whiteSpace='pre-wrap';\n  status.textContent='入口已就绪。请先回复Codex，等收集器启动后再点击。';\n  box.append(button,status);doc.body.append(box);\n  button.onclick=()=>{\n    button.disabled=true;status.textContent='正在核对原会话并补完摘要；请勿刷新、生成或重复点击。';\n    const script=doc.createElement('script');script.type='module';\n    script.src='http://127.0.0.1:19375/packages/bridge/native-resume-launch.mjs';\n    script.onerror=()=>{status.textContent='检查入口未加载，请返回Codex；不要重复点击。';};\n    doc.body.append(script);\n  };\n  window.addEventListener('pagehide',()=>box.remove(),{once:true});\n}",
+  "type": "script",
+  "export_with": {
+    "button": false,
+    "data": false
+  },
+  "data": {},
+  "id": "mnemosyne-original-session-resume",
+  "name": "Mnemosyne 补完原会话摘要",
+  "enabled": false
+}
