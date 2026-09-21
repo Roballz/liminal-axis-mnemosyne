@@ -1,6 +1,7 @@
 {
   "baseline": "fc3264b",
-  "status": "implemented_unverified-native-1x-incomplete",
+  "status": "implemented_unverified",
+  "latest_user_scope": "Interface capability and correctness; this old desktop latency is not a feasibility blocker. Full native 1x unexecuted phases remain unverified.",
   "native_1x": "elapsed-time safety stop; desktop interaction reported; not an uncontaminated performance baseline",
   "batch_references": 1024,
   "candidate_limits": {
