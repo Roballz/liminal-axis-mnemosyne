@@ -1,0 +1,36 @@
+{
+  "review_date": "2026-09-21",
+  "reviewed_commit": "de67c55fd3d8bd4e2ae506df649fa0de610ada9c",
+  "implementation_commit": "c1fce16a20fd357b1124a85623a456421e45d63f",
+  "environment": {"platform": "isolated Linux", "node": "v22.16.0"},
+  "command": "node --test --test-reporter=tap /mnt/data/de67c55-review/review.test.mjs",
+  "execution": {"tests": 7, "pass": 7, "fail": 0, "cancelled": 0, "skipped": 0, "exit_code": 0},
+  "scope": "Method-level tests using copied filterRecallCandidates, readOnlyPagedHandle, diagnosticFailure and verifyPagedBackupRestore function bodies. Handle, memory fingerprint, equality helper and restore callbacks are review doubles. Not a full original-module, coordinator, database or native execution. No local full-module blob match is claimed.",
+  "cases": [
+    "stable filter returns two valid results",
+    "interleaved source change returns behind with no old results",
+    "stable backup accepts a different target library with equal checkpoint",
+    "source advancement during restore does not invalidate the captured export",
+    "wrong target checkpoint is rejected",
+    "target checkpoint changing during audit is rejected",
+    "target close error does not replace the primary verification error"
+  ],
+  "codex_evidence_reviewed": [
+    "evals/t03/p4-repair/verification.json",
+    "notes/t-03-p4-repair-handoff.md",
+    "evals/t03/p4-repair/compat.json",
+    "evals/t03/p4-repair/20260921r3-recover-paged-before.json",
+    "evals/t03/p4-repair/20260921r3-recover-paged-after.json"
+  ],
+  "not_independently_executed": [
+    "333 full regression tests", "bulk AVL suite", "Node 1x workload",
+    "TT native 1x", "TT native crash tests", "mobile tests"
+  ],
+  "access_failures": [
+    "One direct raw download failed DNS; not retried",
+    "One regression.tap excerpt read failed RemoteProtocolError; 333/333 is cited from verification.json and handoff, not independently revalidated against the complete TAP"
+  ],
+  "native_1x_status": "Incomplete; desktop interactions unquantified. No new performance retry requested by this review.",
+  "repository_implementation_modified_by_chat": false,
+  "review": "notes/t-03-capability-final-review.md"
+}
