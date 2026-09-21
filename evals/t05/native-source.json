@@ -1,0 +1,216 @@
+{
+  "candidate": "8650107",
+  "run": "20260922t05",
+  "transport": "loopback HTTP module host; not a permanent TT extension deployment",
+  "ttExecutable": "D:/Mnemosyne/.t03-local/tt-367b0c7/tauritavern.exe",
+  "files": [
+    {
+      "path": "packages/contracts/context.mjs",
+      "sha256": "b510a2ae1aee9d298a8fd9b4db1c86d97d2aeb8b49b4909fb323caf7bde64eb3"
+    },
+    {
+      "path": "packages/contracts/history.mjs",
+      "sha256": "4f3a11d99d55174a11eb1eccf0b38c8a9fd3a7d45cec00e3d54548ecf81eb15a"
+    },
+    {
+      "path": "packages/contracts/index.mjs",
+      "sha256": "65b4e3190bb46c96dd152eaccb31e6909f13ac17da8771534862b5960642022e"
+    },
+    {
+      "path": "packages/contracts/memory.mjs",
+      "sha256": "816aea336ed2117a9e59b1993c40434dc0ff4ea803d947da3bbf49ecce65395d"
+    },
+    {
+      "path": "packages/contracts/primitives.mjs",
+      "sha256": "b5e7ce5687ef7d48eb3ca669fd5d154f5df497fea87fb36d485956970c77406b"
+    },
+    {
+      "path": "packages/contracts/runtime.mjs",
+      "sha256": "f3bce19dad5d28dfa35264e861ee06b9e44369dc9c0929f5e85b6969277e77db"
+    },
+    {
+      "path": "packages/contracts/schema.mjs",
+      "sha256": "b9bdb69197bc0df394dc6e167d634067d55ab834ad2f2aec71e2345d59d83014"
+    },
+    {
+      "path": "packages/contracts/transfer.mjs",
+      "sha256": "83a1f637920e1b4924afdbb789027fc543cc4a81ec7b69b9a19b2d87870331cf"
+    },
+    {
+      "path": "packages/storage/intent-prototype.mjs",
+      "sha256": "14dfc0868117977164a646f489211855f71407105cfb095043038d380ba45627"
+    },
+    {
+      "path": "packages/storage/intent-recovery.mjs",
+      "sha256": "9901a64f4fe1748f2ee4671296d712503b1344d543c7840694d6add3f0830979"
+    },
+    {
+      "path": "packages/storage/intent-tt-adapter.mjs",
+      "sha256": "15e7954f337c048c2cc9ff0fe386f24a7d83800e55a1daf2b76cf0d0aea4c380"
+    },
+    {
+      "path": "packages/storage/memory-work.mjs",
+      "sha256": "66e5f4db14d5daa48a07c70932a068fcabd5c9baff5b7584e08df5ad8e568d6e"
+    },
+    {
+      "path": "packages/storage/p4-workload.mjs",
+      "sha256": "5303412a270de068bd429a6e1909e262d1275bc3bd86c917cbf20676f689fdc7"
+    },
+    {
+      "path": "packages/storage/paged-bridge.mjs",
+      "sha256": "807ce0c59e123c8dd02f4a8c1f85babd7ac9f9ee529fe57f3481b4d319542356"
+    },
+    {
+      "path": "packages/storage/paged-coordinator.mjs",
+      "sha256": "47c2b4d7ce22411086562e51755126700f545543d7b231b14f82689742d79835"
+    },
+    {
+      "path": "packages/storage/paged-diagnostics.mjs",
+      "sha256": "e8a0b8aedabbd408e3c608a7e04dc03471064f59a6c33f874ac49008753bbf92"
+    },
+    {
+      "path": "packages/storage/paged-directory.mjs",
+      "sha256": "b3adc40fe4a70a772012b46255ccb96bb42bfa144abcd91c52594b25db83e30d"
+    },
+    {
+      "path": "packages/storage/paged-domain.mjs",
+      "sha256": "d3f4d9ac11737715a4544625601355eb4093bfdb9720f4c33e96dbca7ad72623"
+    },
+    {
+      "path": "packages/storage/paged-history.mjs",
+      "sha256": "81f02dceed5d03da90870ff235868d934743ea3b6a764170bf6a0305d7103f75"
+    },
+    {
+      "path": "packages/storage/paged-json.mjs",
+      "sha256": "e422b6f1151cdc2517fe4a06aae1746375244b9b7fdf8008dba50c7a1727a37c"
+    },
+    {
+      "path": "packages/storage/paged-memory.mjs",
+      "sha256": "1eb01cdf0523d5c20e746c46da73f312bb96370ed25455457b9ffacbf1951583"
+    },
+    {
+      "path": "packages/storage/paged-reader.mjs",
+      "sha256": "da134623ceace647a87369a86aaf68dce42f222b45975427cf76c2d3097bdd5d"
+    },
+    {
+      "path": "packages/storage/paged-recovery.mjs",
+      "sha256": "9619c6e736f8f60283b5b5c81716d22d65f4aafbd36612025a939efc4c7f8273"
+    },
+    {
+      "path": "packages/storage/paged-transport.mjs",
+      "sha256": "0119b1b44dc27f1288133b20caab6bdedd61408c0597a6b0ec9ef674318bdc48"
+    },
+    {
+      "path": "packages/storage/paged-tt-adapter.mjs",
+      "sha256": "bacadc0062254e4022628f345d450993b12d0751d4e0317c3b5a2e039d7ba723"
+    },
+    {
+      "path": "packages/storage/pages.mjs",
+      "sha256": "61facf7a555d95e4df38de15598be20a953a744af65b7a1cab2bd417f55b1ba5"
+    },
+    {
+      "path": "packages/storage/protocol.mjs",
+      "sha256": "06be81cb311eef00d52fb7a48df22633bae4d798ec44bc9aa002c0b27fc610cb"
+    },
+    {
+      "path": "packages/storage/recall-index.mjs",
+      "sha256": "a25dd5bfd4f028c043fc5109fc97f5758f68159131331b1b03ade459e6c05fde"
+    },
+    {
+      "path": "packages/storage/resource-meter.mjs",
+      "sha256": "2c7fb46545d1cfc3ccb41bfaca6dd4d28107628f4a9706181c94f3860121d176"
+    },
+    {
+      "path": "packages/storage/strict-json.mjs",
+      "sha256": "9b2440d2e3bca40f2bca66bca8c42b6cf915bc9ad966fcf781831edc94b77205"
+    },
+    {
+      "path": "packages/storage/tt-adapter.mjs",
+      "sha256": "5543d329991f96ee8627c67cde7d9ef394db7f886349b8ee8ab2491c450f077c"
+    },
+    {
+      "path": "packages/bridge/events.mjs",
+      "sha256": "9681277435578f3bb87a2f5fef52e92c51ad65f4ef22a715f7eb52cbdf064806"
+    },
+    {
+      "path": "packages/bridge/importer.mjs",
+      "sha256": "83cf4b7336c03f792bda254a4fc5feac38597399f330c783828953e1c4163b4b"
+    },
+    {
+      "path": "packages/bridge/native-collector.mjs",
+      "sha256": "35c09db3615c553a5fac4a83501a22f753d30458c974489429b4855549d6e866"
+    },
+    {
+      "path": "packages/bridge/native-demo.mjs",
+      "sha256": "950c0995dda97eb7e418a317e83228c3a4ee686fd2edcee688a7451ccc4414ce"
+    },
+    {
+      "path": "packages/bridge/native-inspect-collector.mjs",
+      "sha256": "3b857c8ad23fceaad6fd9ac05f498adfd04c244deea74342579f91ee42917c55"
+    },
+    {
+      "path": "packages/bridge/native-inspect-launch.mjs",
+      "sha256": "0edd41392342508f28346019dab19af98be64f517af4e52d2cf5e7e2354e108e"
+    },
+    {
+      "path": "packages/bridge/native-inspect.mjs",
+      "sha256": "66775a7f8a1e3c4f86c18ae19f5173b70da1dcffc8851b14578e6a42f7df4747"
+    },
+    {
+      "path": "packages/bridge/native-live.mjs",
+      "sha256": "8cfc6ad91c8442b853ad822317c25104650ba528c652aef6244103628eecee2f"
+    },
+    {
+      "path": "packages/bridge/native-resume-launch.mjs",
+      "sha256": "577fc50d9067801af963cc52a49f2dc8e3a6f2a99ec5310094f681eaf51efed1"
+    },
+    {
+      "path": "packages/bridge/native-resume.mjs",
+      "sha256": "cc5a5ab599846874ba50ebe2df62d3c6b2568fe94542dc2ef436611b8045bfbb"
+    },
+    {
+      "path": "packages/bridge/panel.mjs",
+      "sha256": "8ef65041219834678fe56af46a967551edaca1f40a0fbc1f5d168ede99ba5fff"
+    },
+    {
+      "path": "packages/bridge/records.mjs",
+      "sha256": "d985cadc1731022975955ed8d45520235c502cfd8b954f8620c423cc40ada1bc"
+    },
+    {
+      "path": "packages/bridge/source.mjs",
+      "sha256": "0eda76975e64c928e1bf02e0a914933e0af35dde4fe370ccf4714e2180da41ec"
+    },
+    {
+      "path": "packages/workbench/native-collector.mjs",
+      "sha256": "7a90a0105f56d1fe5baf252cda383ecaefa7c1b06d6bb69af4c73718700cc463"
+    },
+    {
+      "path": "packages/workbench/native-demo.mjs",
+      "sha256": "7d48745438fca091b61347d2baeb05c78e491572e7c0be385f3f9cd6a9da3eae"
+    },
+    {
+      "path": "packages/workbench/native-launch.mjs",
+      "sha256": "5099458865b19c8d7f22fbab40db5caf0f889bd14d2018b23b558dee9f6e89a3"
+    },
+    {
+      "path": "packages/workbench/normalize.mjs",
+      "sha256": "fd7dabbbf1d4e114bd7349a8e9a6e31933cc0bdae0915a0d64c468ba04c4390f"
+    },
+    {
+      "path": "packages/workbench/panel.mjs",
+      "sha256": "6368687297171fe16ab7799e2639d9f24fc06b6411311817757d2c065bcecdf9"
+    },
+    {
+      "path": "packages/workbench/service.mjs",
+      "sha256": "58378f33be821d8d53b848735645beacd0f154f4a3abc5cfda3e1fdfbad48438"
+    },
+    {
+      "path": "packages/workbench/unicode/fold-map.mjs",
+      "sha256": "e4442fb2cd452a982cb078cec30b3464ddb08c39faed4c39120a1d2fa0334d4f"
+    },
+    {
+      "path": "packages/workbench/unicode/generate.mjs",
+      "sha256": "58c6e6176eba547e343884047c42abb6153228bc9c2a3d6420415d2fa48703cd"
+    }
+  ]
+}

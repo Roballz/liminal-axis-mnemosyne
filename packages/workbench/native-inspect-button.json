@@ -1,0 +1,17 @@
+{
+  "info": "沿刚才4条合成库只读查目录错误，不重新导入。 历史入口，仅保留失败取证；本轮后续使用native-read-button.json。",
+  "button": {
+    "buttons": [],
+    "enabled": false
+  },
+  "content": "const host=window.parent,doc=host.document;\nif(!doc.getElementById('mnemosyne-t05-inspect')){\n const box=doc.createElement('div');box.id='mnemosyne-t05-inspect';\n box.style.cssText='position:fixed;bottom:12px;right:12px;z-index:10003;background:#20242d;color:white;padding:12px';\n const button=doc.createElement('button');button.textContent='T-05 只读诊断（点一次）';\n box.append(button);doc.body.append(box);\n window.addEventListener(\"pagehide\",()=>box.remove(),{once:true});\n window.addEventListener(\"unload\",()=>box.remove(),{once:true});\n button.onclick=()=>{button.disabled=true;button.textContent='验收运行中，请勿刷新/重复点击';\n  const script=doc.createElement('script');script.type='module';script.src='http://127.0.0.1:19375/packages/workbench/native-inspect.mjs';\n  script.onerror=()=>{button.textContent='入口加载失败，请通知Codex，不要重复点击';};doc.body.append(script);};\n}",
+  "type": "script",
+  "export_with": {
+    "button": false,
+    "data": false
+  },
+  "data": {},
+  "id": "mnemosyne-t05-synthetic-workbench-inspect",
+  "name": "Mnemosyne T05 只读诊断",
+  "enabled": false
+}

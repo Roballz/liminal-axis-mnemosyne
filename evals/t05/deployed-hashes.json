@@ -1,0 +1,55 @@
+{
+  "productCandidate": "8650107",
+  "directory": ".t03-local/tt-367b0c7/data/extensions/third-party/mnemosyne-t04-import",
+  "note": "Normal product modules copied to existing isolated extension; no refresh/restart. S08 used separately versioned loopback module URLs.",
+  "files": [
+    {
+      "path": "packages/storage/paged-reader.mjs",
+      "source": "da134623ceace647a87369a86aaf68dce42f222b45975427cf76c2d3097bdd5d",
+      "deployed": "da134623ceace647a87369a86aaf68dce42f222b45975427cf76c2d3097bdd5d",
+      "equal": true
+    },
+    {
+      "path": "packages/storage/paged-coordinator.mjs",
+      "source": "47c2b4d7ce22411086562e51755126700f545543d7b231b14f82689742d79835",
+      "deployed": "47c2b4d7ce22411086562e51755126700f545543d7b231b14f82689742d79835",
+      "equal": true
+    },
+    {
+      "path": "packages/bridge/panel.mjs",
+      "source": "8ef65041219834678fe56af46a967551edaca1f40a0fbc1f5d168ede99ba5fff",
+      "deployed": "8ef65041219834678fe56af46a967551edaca1f40a0fbc1f5d168ede99ba5fff",
+      "equal": true
+    },
+    {
+      "path": "packages/workbench/service.mjs",
+      "source": "58378f33be821d8d53b848735645beacd0f154f4a3abc5cfda3e1fdfbad48438",
+      "deployed": "58378f33be821d8d53b848735645beacd0f154f4a3abc5cfda3e1fdfbad48438",
+      "equal": true
+    },
+    {
+      "path": "packages/workbench/panel.mjs",
+      "source": "6368687297171fe16ab7799e2639d9f24fc06b6411311817757d2c065bcecdf9",
+      "deployed": "6368687297171fe16ab7799e2639d9f24fc06b6411311817757d2c065bcecdf9",
+      "equal": true
+    },
+    {
+      "path": "packages/workbench/normalize.mjs",
+      "source": "fd7dabbbf1d4e114bd7349a8e9a6e31933cc0bdae0915a0d64c468ba04c4390f",
+      "deployed": "fd7dabbbf1d4e114bd7349a8e9a6e31933cc0bdae0915a0d64c468ba04c4390f",
+      "equal": true
+    },
+    {
+      "path": "packages/workbench/unicode/fold-map.mjs",
+      "source": "e4442fb2cd452a982cb078cec30b3464ddb08c39faed4c39120a1d2fa0334d4f",
+      "deployed": "e4442fb2cd452a982cb078cec30b3464ddb08c39faed4c39120a1d2fa0334d4f",
+      "equal": true
+    },
+    {
+      "path": "packages/workbench/unicode/LICENSE.txt",
+      "source": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+      "deployed": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+      "equal": true
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # S-B：先把剧情档案拿在自己手里
 
-更新：2026-09-22。状态：in_progress。范围：T-04～T-05。T-04已通过受控能力验收；**T-05实现候选为implemented_unverified（待现场验证及Chat review）：`tasks/T-05-manual-search-and-workbench.md`**。任务发布不等于已实现；Codex按用户交付的开工指令执行，不自动进入T-06/T-07。
+更新：2026-09-22。状态：in_progress。范围：T-04～T-05。T-04已通过受控能力验收；**T-05实现候选为implemented_unverified（S01～S08已完成，待Chat review）：`tasks/T-05-manual-search-and-workbench.md`**。本轮355/355 Node验证通过，S08真实TT只读演示亦通过；完成后交Chat review，不自动进入T-06/T-07。
 
 **前置验收：`5fe2706` 通过，T-04为verified（受控只读桥接范围）。** 最终回执见 `notes/t-04-final-review.md`，覆盖前轮回审及本阶段历史段落的待审/未完成临时结论。R1/R2/R3和真实原库落盘补证缺口已关闭；原始失败证据与现场过程保留在任务卡和evals。
 
@@ -64,4 +64,4 @@ T-04已按导入身份/幂等与恢复→精确对账和暂停/确认→旧资�
 
 本次发布T-05只核对仓库与写文档，未执行代码、Node测试或TT。完成新卡后交T-05/S-B review；不自动创建下一张卡、不进入T-06/T-07、不把受控能力变成生产准入。
 
-T-05本轮实现与S01～S08证据见本卡第8节及packages/workbench/README.md；S-B不因实现候选自动收口。
+T-05本轮实现与S01～S08证据见T-05任务卡第8节及packages/workbench/README.md；S-B不因实现候选自动收口。

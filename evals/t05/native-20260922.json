@@ -1,0 +1,42 @@
+{
+  "run": "20260922t05",
+  "type": "error",
+  "namespace": "mnemo-t03-paged-t05-20260922a",
+  "stages": [
+    {
+      "name": "create-once",
+      "ms": 0
+    },
+    {
+      "name": "import-preview",
+      "ms": 2046
+    },
+    {
+      "name": "import-confirm",
+      "ms": 2050
+    },
+    {
+      "name": "shared-owner",
+      "ms": 97790
+    },
+    {
+      "name": "读取目录",
+      "ms": 97794
+    }
+  ],
+  "close": {
+    "attempted": true,
+    "confirmed": true
+  },
+  "source": "synthetic-only",
+  "businessWritesDuringReads": null,
+  "fixture": {
+    "messages": 4,
+    "assets": 1,
+    "status": "complete"
+  },
+  "code": "PAGE_ACTION_FAILED",
+  "phase": "读取目录",
+  "elapsedMs": 97921,
+  "stoppedBeforeNextAction": false
+}

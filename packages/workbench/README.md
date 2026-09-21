@@ -28,4 +28,4 @@ S01～S07：`node --test --test-reporter=tap packages/workbench/tests/workbench.
 
 S08：`native-button.json` 是酒馆助手一次性合成验收入口，非普通产品入口；`node packages/workbench/native-collector.mjs` 启动仅回环模块服务。用户导入并启用脚本，在收集器就绪后只点击一次。固定 namespace `mnemo-t03-paged-t05-20260922a`；仅4条合成正文+1份摘要，空库断言，不清除/替换/重试。4分钟工作预算，下一动作/读取前检查，最后排空并单独报告 close，整轮预期不超5分钟。出现原生失败保留库并报告，不换 namespace。回执仅含范围、计数和断言，无原文/摘要。
 
-当前 S08 尚待用户手动点击；不能把 Node 断言称为 TT/手机验证。关闭临时入口或工作台即可回退；不删除档案，不影响既有 T-04 同步。后续只交 T-05/S-B review，不开启 T-06。
+S08已由用户手动点击完成，真实TT只读演示通过（evals/t05/native-read-20260922.json）。原生初次入口因旧ESM缓存失败，回执保留；修正入口为native-read-button.json + native-read-collector.mjs，只读原合成库，整棵模块使用独立版本路径。不要重复点击创建入口。Node与TT证据分开；手机未验证。关闭临时入口或工作台即可回退；不删除档案，不影响既有 T-04 同步。后续只交 T-05/S-B review，不开启 T-06。

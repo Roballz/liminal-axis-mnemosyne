@@ -1,6 +1,6 @@
 # T-05：手动正文搜索、来源对照与最小工作台
 
-状态：implemented_unverified（实现候选；S08待现场验证）。发布：2026-09-22。阶段：S-B；依赖 T-04 verified（受控只读桥接范围）及 T-02/T-03 已验收能力。发布基线 main=`233b16458d6035b7e20219d8faaf2ee1f9e56f8e`，T-04审核实现=`5fe2706`。开工重新记录实际commit，不将基线简称当作main永远不变。
+状态：implemented_unverified（S01～S08已完成，待Chat review）。发布：2026-09-22。阶段：S-B；依赖 T-04 verified（受控只读桥接范围）及 T-02/T-03 已验收能力。发布基线 main=`233b16458d6035b7e20219d8faaf2ee1f9e56f8e`，T-04审核实现=`5fe2706`。开工重新记录实际commit，不将基线简称当作main永远不变。
 
 本卡按用户已确认的11文档及“无新未决项即可写卡”请求发布；没有必须重新询问的产品阻塞。本轮只发布文档，未实现或测试。Codex按用户交付本卡的开工指令执行，先报告范围及实现/测试分别预计行数；任务内部检查点不是新审批关卡。
 
@@ -158,8 +158,24 @@ S08用既有隔离实例中的小型合成档案（例如4～8条消息、1份�
 | S05 | 同scope当前/旧asset版本、其他scope排除、无原文高层资料、正式坏引用拒绝；Assistant锚仍为unproven |
 | S06 | 原快照邻接、续聊offset、HTML只显示文本、宿主不可定位明确回退；宿主改名仍依T-04既有映射，未新增跳转能力 |
 | S07 | 工作台完整包导出期间真实append；包恢复到空FakeIO后查询、候选空位、摘要、绑定/会话保持；查询checkpoint不变 |
-| S08 | 已准备4正文/1摘要的一次性真实页面处理函数演示。TT调试端口未开，截图接口两次失败；用户已提出手动操作，待页面执行。未重导原25条私人样本 |
+| S08 | 真实TT产品页面处理函数通过：沿4正文/1摘要合成库，搜索2页/3命中、原文与摘要相等、明确档案回退、完整包1290989字节、读取业务写入0、共享owner保留且最终close确认。用户手动点击；未重导私人样本 |
 
-首轮新集合7/9通过，两失败分别是冻结fixture注入与简化DOM默认select值；未削弱断言，修正夹具/显式默认值后仅受影响2/2通过。原始记录保留evals/t05/workbench-tests.tap和affected-tests.tap。最终一次全量与原生结果待本节补记；旧346项不冒充本轮执行。
+首轮新集合7/9通过，两失败分别是冻结fixture注入与简化DOM默认select值；未削弱断言，修正夹具/显式默认值后仅受影响2/2通过。原始记录保留evals/t05/workbench-tests.tap和affected-tests.tap。最终候选8650107一次全量355/355通过（195.558秒），命令：node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/*.test.js packages/bridge/tests/*.test.mjs packages/workbench/tests/*.test.mjs；日志evals/t05/full-tests.tap。原346项本次确实执行，加新9组；原生结果另记。三个native辅助mjs各一次node --check通过，git diff --check通过。
+
+实际代码量（8650107）：产品实现新增408行/删除4行；Node测试及fixture178行；原生演示/收集器/临时脚本120行；Unicode官方数据/许可证1721行、生成器8行及生成映射2行另计，不把TAP计作实现代码。相比预计实现1000～1400行、测试演示400～550行更少，未减少S01～S07既定风险集合。
 
 数据影响：无格式/持久字段/发布协议变更，无内容编辑、LLM、远程查询或生产库操作；仅测试fixture建库/恢复有业务写入。回退关闭工作台及其临时入口即可，保留档案与同步owner。S-B保持in_progress；T-05保持implemented_unverified，由Chat验收，手机/规模和真实宿主定位未验证。
+
+
+### S08实际现场与收口
+
+- 首次候选入口在既有TT页面运行，4条合成正文+1摘要已complete；读取目录失败，owner已关闭，耗时97.921秒。原失败回执evals/t05/native-20260922.json保留。evals/t05/native-source.json只是当时源码清单，不能证明浏览器实际加载了全部新模块。
+- 查明同一页面ESM模块表仍缓存T-04旧URL的协调器（oldURLReadView=false）；换**整棵模块路径**/t05-8650107后versionedURLReadView=true。只给入口加query或HTTP no-store不足以更新已导入的相对依赖。
+- 临时入口原有重叠/无进度/禁用后残留问题，修正版统一位置、清除本次旧入口、显示阶段/结果、注册pagehide/unload移除UI。一次短诊断监听未收到执行结果，未冒称诊断成功；最终用户点击修正版，沿同一已complete合成库只读验证，无prepare/execute或换库重导。
+- 最终真实TT回执evals/t05/native-read-20260922.json：type=done，11.940秒，importCalls=0，businessWritesDuringReads=0，detailEqual/summaryEqual/archiveFallback/sharedOwnerSurvives均true，close.confirmed=true，导出固定checkpoint，实际Blob1290989字节并发起本地下载。未把此耗时当容量/性能成绩；原生未另做恢复，完整包空FakeIO恢复在S07证明。
+- 旧机矩阵/强杀/手机/长期档案均未运行。没有已核验公开宿主定位接口，因此验收的是明确档案回退；手机和真实跳转仍未验证。浏览器小视口亦未额外实测。
+- 产品源码未因现场修正改变：仍为8650107通过355项的产品模块；仅迭代演示入口/模块装载及记录，没有第二次全量。已复制8个产品/Unicode文件到现有隔离导入扩展，source/deployed hash逐项相等（evals/t05/deployed-hashes.json）；未刷新或重启TT，正常入口下次页面加载生效。S08实际使用有版本的回环模块，不冒称安装目录已热更新。
+
+状态保持implemented_unverified，交Chat审阅T-05及S-B；不创建/执行T-06。关闭工作台或禁用临时入口为UI回退，保留合成库和其他档案。页面脚本禁用不等于取消在途原生调用；最终回执已确认排空关闭。
+
+收尾实际总量：产品新增408行/删除4行未变；Node测试/fixture178行，含历史失败入口及修正版的原生辅助共305行（测试+演示合计483行），Unicode数据/许可证/生成映射另计。现场辅助入口做了对应node --check；产品未改，不追加业务测试或第二次全量。

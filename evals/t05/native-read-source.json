@@ -1,0 +1,55 @@
+{
+  "productCandidate": "8650107",
+  "run": "20260922t05read",
+  "prefix": "/t05-8650107",
+  "files": [
+    {
+      "path": "packages/workbench/native-read-existing.mjs",
+      "sha256": "659ab473f20f6b5ead586ee763c48122502a2d9b6a0f9d605ee8d9de59c6f260"
+    },
+    {
+      "path": "packages/workbench/native-read-launch.mjs",
+      "sha256": "b8544ece25bf66fcf911746512fde8bb61521b5a2cd857ac11e40fcae1272c5f"
+    },
+    {
+      "path": "packages/workbench/native-read-collector.mjs",
+      "sha256": "8676b0bb317bf5e9e4b1423a0349909fcb41bce5d9b6999a9339a1d3614dc63e"
+    },
+    {
+      "path": "packages/workbench/native-read-button.json",
+      "sha256": "28534653dd4aa109746642ca028d40de0ddfb47dc9530dc1cfaeae201a5e588b"
+    },
+    {
+      "path": "packages/storage/paged-reader.mjs",
+      "sha256": "da134623ceace647a87369a86aaf68dce42f222b45975427cf76c2d3097bdd5d"
+    },
+    {
+      "path": "packages/storage/paged-coordinator.mjs",
+      "sha256": "47c2b4d7ce22411086562e51755126700f545543d7b231b14f82689742d79835"
+    },
+    {
+      "path": "packages/bridge/panel.mjs",
+      "sha256": "8ef65041219834678fe56af46a967551edaca1f40a0fbc1f5d168ede99ba5fff"
+    },
+    {
+      "path": "packages/workbench/service.mjs",
+      "sha256": "58378f33be821d8d53b848735645beacd0f154f4a3abc5cfda3e1fdfbad48438"
+    },
+    {
+      "path": "packages/workbench/panel.mjs",
+      "sha256": "6368687297171fe16ab7799e2639d9f24fc06b6411311817757d2c065bcecdf9"
+    },
+    {
+      "path": "packages/workbench/normalize.mjs",
+      "sha256": "fd7dabbbf1d4e114bd7349a8e9a6e31933cc0bdae0915a0d64c468ba04c4390f"
+    },
+    {
+      "path": "packages/workbench/unicode/fold-map.mjs",
+      "sha256": "e4442fb2cd452a982cb078cec30b3464ddb08c39faed4c39120a1d2fa0334d4f"
+    },
+    {
+      "path": "packages/workbench/unicode/LICENSE.txt",
+      "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "info": "修正重叠和进度反馈；独立模块路径；只读既有合成库。",
+  "button": {
+    "buttons": [],
+    "enabled": false
+  },
+  "content": "const host=window.parent,doc=host.document;\nfor(const id of ['mnemosyne-t05-launch','mnemosyne-t05-inspect','mnemosyne-t05-read-control'])doc.getElementById(id)?.remove();\nconst box=doc.createElement('section');box.id='mnemosyne-t05-read-control';\nbox.style.cssText='position:fixed;top:12px;right:12px;z-index:10003;background:#20242d;color:white;padding:12px;max-width:90vw;max-height:60vh;overflow:auto;border:1px solid #899';\nconst button=doc.createElement('button');button.textContent='T-05：只读完成工作台验收（点一次）';\nconst status=doc.createElement('pre');status.id='mnemosyne-t05-read-status';status.textContent='等待点击。仅使用刚才已导入的4条合成正文，不重导。';status.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere';\nconst close=doc.createElement('button');close.textContent='收起入口';close.onclick=()=>box.remove();\nbox.append(button,status,close);doc.body.append(box);\nbutton.onclick=()=>{button.disabled=true;status.textContent='加载独立版本模块中…';\nconst script=doc.createElement('script');script.type='module';script.src='http://127.0.0.1:19375/t05-8650107/packages/workbench/native-read-launch.mjs';\nscript.onerror=()=>{status.textContent='模块加载失败；请通知Codex，不要重试或刷新。';};doc.body.append(script);};\nconst cleanup=()=>box.remove();\nwindow.addEventListener(\"pagehide\",cleanup,{once:true});\nwindow.addEventListener(\"unload\",cleanup,{once:true});\n",
+  "type": "script",
+  "export_with": {
+    "button": false,
+    "data": false
+  },
+  "data": {},
+  "id": "mnemosyne-t05-read-existing",
+  "name": "Mnemosyne T05 工作台只读验收（修正入口）",
+  "enabled": false
+}
