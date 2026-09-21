@@ -14,9 +14,13 @@
       await fetch(endpoint+'/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result)});
     }catch(e){
       // Error codes and fixed generic hints only; never send source text/locators.
+      const safe=new Set(['Non-JSON or cyclic value','Non-JSON object','Sparse or extended array','Invalid Unicode',
+        'Raw swipe text required','Unexpected public DTO field','Source message order/role','Bridge record fields']);
       if(config)await fetch(endpoint+'/result',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({type:'error',run:config.run,code:e.code??'ERROR',message:'Actual interface demonstration stopped; preserve source and target.'})}).catch(()=>{});
-      button.textContent=`验证未完成：${e.code??'ERROR'}。需要1–16条且已有摘要的隔离聊天。`;
+        body:JSON.stringify({type:'error',run:config.run,code:e.code??'ERROR',
+          phase:['读取来源并预览','确认当前预览'].includes(e.phase)?e.phase:'other',detail:safe.has(e.message)?e.message:'unlisted-error',
+          message:'Actual interface demonstration stopped; preserve source and target.'})}).catch(()=>{});
+      button.textContent=`验证未完成：${e.code??'ERROR'}。需要1–32条且已有摘要的隔离聊天。`;
       button.disabled=false;
     }
   };

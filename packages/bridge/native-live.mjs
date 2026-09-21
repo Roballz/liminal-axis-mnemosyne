@@ -6,7 +6,7 @@ import { requireThat as check } from '../contracts/primitives.mjs';
 export async function runLiveRead(panel,host,run) {
   check(/^[a-z0-9]+$/.test(run),'INVALID_SCHEMA','Run ID');
   const rows=host.SillyTavern?.getContext?.().chat,api=host.STBaiBaiBook;
-  check(Array.isArray(rows)&&rows.length>0&&rows.length<=16,'SAMPLE_REQUIRED','Open a small isolated chat (1–16 messages) with an existing BaiBai summary');
+  check(Array.isArray(rows)&&rows.length>0&&rows.length<=32,'SAMPLE_REQUIRED','Open a small isolated chat (1–32 messages) with an existing BaiBai summary');
   check(api?.apiVersion===1,'SAMPLE_REQUIRED','Actual BaiBai API v1 required');
   const sourceHash=digest(rows.map(m=>({mes:m.mes,is_user:m.is_user??null,is_system:m.is_system??null})));
   const namespace=`mnemo-t03-paged-t04-live-${run}`,deadline=Date.now()+240000;
@@ -14,7 +14,9 @@ export async function runLiveRead(panel,host,run) {
   const native=await host.__TAURITAVERN__.api.db.open(namespace,{dim:2,syncMode:'full',autoBuildQuiver:false});
   let nodes;try{await native.flush();nodes=(await native.stats()).nodeCount;}finally{await native.close();}
   panel.controls.namespace.value=namespace;panel.controls.create.checked=nodes===0;
-  const perform=async label=>{budget();const result=await panel.perform(label);check(result.ok,result.code??'ERROR',result.message??'Panel action failed');return result.value;};
+  const perform=async label=>{budget();const result=await panel.perform(label);
+    if(!result.ok)throw Object.assign(Error(result.message??'Panel action failed'),{code:result.code??'ERROR',phase:label});
+    return result.value;};
   try {
     const plan=await perform('读取来源并预览');
     const summaries=plan.input.assets.filter(a=>a.category==='summary');

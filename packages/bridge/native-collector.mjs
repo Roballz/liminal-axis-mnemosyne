@@ -6,7 +6,10 @@ const server=createServer(async(req,res)=>{
   res.setHeader('Access-Control-Allow-Origin','http://tauri.localhost');
   res.setHeader('Access-Control-Allow-Headers','Content-Type');
   if(req.method==='OPTIONS'){res.writeHead(204).end();return;}
-  if(req.url==='/phase'&&req.method==='GET'){res.end(JSON.stringify({fixture:'mnemosyne-t04-synthetic',run}));return;}
+  if(req.url==='/phase'&&req.method==='GET'){
+    if(process.argv.includes('--drain')){res.writeHead(410).end('Drain only; do not start work');return;}
+    res.end(JSON.stringify({fixture:'mnemosyne-t04-synthetic',run}));return;
+  }
   if(req.url!=='/result'||req.method!=='POST'){res.writeHead(404).end();return;}
   let text='';for await(const c of req){text+=c;if(text.length>16000){res.writeHead(413).end();return;}}
   const result=JSON.parse(text);

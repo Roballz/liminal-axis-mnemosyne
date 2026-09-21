@@ -21,7 +21,8 @@ export function rawMessage(message, floor) {
   check(message && typeof message.mes === 'string', 'INVALID_SCHEMA', 'Raw TT message text required');
   const role = message.is_system ? 'system' : message.is_user === true ? 'user' : message.is_user === false ? 'assistant' : 'other';
   const candidates = Array.isArray(message.swipes) ? message.swipes.map(text => {
-    check(typeof text === 'string', 'INVALID_SCHEMA', 'Raw swipe text required'); return text;
+    // TT imports can retain null candidate slots; keep their indices and never invent text.
+    check(text === null || typeof text === 'string', 'INVALID_SCHEMA', 'Raw swipe text required'); return text;
   }) : [];
   const selected = Number.isSafeInteger(message.swipe_id) ? message.swipe_id : null;
   // The currently displayed raw mes is authoritative; absent candidates are not invented.

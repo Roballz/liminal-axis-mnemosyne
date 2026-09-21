@@ -1,10 +1,46 @@
 {
   "baseline": "90e5c9d",
   "status": "implemented_unverified",
-  "short": {"R1": 2, "R3": 2, "R2": 2},
-  "full": {"runs": 1, "passed": 345, "failed": 0, "seconds": 125.7151732, "baselineTestsRetained": 339},
-  "nativeActualRead": "pending frontend cooperation; deployed temporary user-click entry",
+  "short": {
+    "R1": 2,
+    "R3": 2,
+    "R2": 2
+  },
+  "full": {
+    "runs": 1,
+    "passed": 345,
+    "failed": 0,
+    "seconds": 125.7151732,
+    "baselineTestsRetained": 339
+  },
+  "nativeActualRead": "Actual panel preview: 25 originals / 2 valid summaries; collector timed out, user paused; import/content equality not yet verified",
   "deployedHashes": "repair-deployed-hashes.json",
   "scope": "R1 inheritance, R3 actual subscription controller, R2 scoped identity and durable v1 alias",
-  "notRun": ["scale benchmarks", "crash matrix", "phone", "long real archive migration", "model calls", "T-05"]
+  "notRun": [
+    "scale benchmarks",
+    "crash matrix",
+    "phone",
+    "long real archive migration",
+    "model calls",
+    "T-05"
+  ],
+  "postFullRepair": {
+    "seconds": 8.9019223,
+    "runtimeDeleted": 1,
+    "runtimeAdded": 2,
+    "reason": "Actual TT null swipe slots rejected; preserve null and indices without inventing text",
+    "testAdded": 18,
+    "fullRepeated": false,
+    "testFile": "native-null-swipe-short.tap",
+    "passed": 1
+  },
+  "nativeDiagnostics": [
+    "native-20260921r1live-initial-error.json",
+    "native-20260921r1diag.json",
+    "native-20260921r1shape.json"
+  ],
+  "nativeObservation": "native-20260921r1live-observation.json",
+  "normalEntryRestoredOnDisk": true,
+  "normalEntrySHA256": "a333377c740935fd4d2b23ea1836e36028c9c76a1e7bd3dc642d5b83d6ff5898",
+  "currentPageReloaded": false
 }

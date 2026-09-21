@@ -16,6 +16,24 @@ async function bodies(h,b){const s=await h.read('snapshots',b.target.head),refs=
   return Promise.all(refs.map(async r=>(await h.read('revisions',r.revision_id)).content));}
 const save=async(b,s,c)=>b.confirm(await b.preview(s,c));
 
+test('native null swipe slots survive actual source, import and complete restore without inventing text',async()=>{
+  const{bridge,h}=await setup(),f=liveFixture(),source=new TTSource(f.host);
+  f.chat[1].swipes=[null,'B alternative',null];f.chat[1].swipe_id=2;
+  const captured=await source.capture();
+  assert.deepEqual(captured.messages[1].candidates,[null,'B alternative',null]);
+  assert.equal(captured.messages[1].content,'B');assert.equal(captured.messages[1].selected,2);
+  bridge.sourceGuard=x=>source.guard(x);const bound=await save(bridge,captured);
+  assert.deepEqual(await bodies(h,bound),['A','B']);
+  const mapping=await bridge.record('map',bound.source,1);
+  assert.deepEqual(mapping.candidates,{values:[null,'B alternative',null],selected:2});
+  assert.equal((await save(bridge,await source.capture())).target.head,bound.target.head);
+  const restored=await restorePagedIntoEmpty(new IO(),await h.export());
+  const reopened=new Importer(restored.handle());
+  assert.deepEqual((await reopened.record('map',bound.source,1)).candidates,mapping.candidates);
+  assert.deepEqual(await bodies(restored.handle(),await reopened.record('binding',bound.source)),['A','B']);
+  for(const invalid of [42,{},[],undefined])assert.throws(()=>rawMessage({mes:'B',swipes:[invalid]},0),e=>e.code==='INVALID_SCHEMA');
+});
+
 test('R1 actual importer: nonempty continuation preserves prefix; copy/overlap require explicit ranges',async()=>{
   const{h,bridge}=await setup();const parent=await save(bridge,input('parent',['A','B','C','D']));
   const branch_id=parent.target.branch_id;

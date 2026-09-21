@@ -1,0 +1,14 @@
+{
+  "type": "error",
+  "run": "20260921r1shape",
+  "diagnostic": true,
+  "stage": "raw-messages",
+  "code": "INVALID_SCHEMA",
+  "detail": "Raw swipe text required",
+  "candidateTypes": {
+    "string": 13,
+    "null": 20
+  },
+  "sourceWrites": 0,
+  "targetWrites": 0
+}
