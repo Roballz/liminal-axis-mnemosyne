@@ -1,0 +1,15 @@
+{
+  "baseline": "fc3264b",
+  "scope": "First four new tests executed before repair; tool-output summary, not a TAP transcript",
+  "tests": 4,
+  "pass": 0,
+  "fail": 4,
+  "duration_ms": 37482.5984,
+  "failures": [
+    "candidate filtering: ready instead of behind",
+    "index rebuild: ready instead of behind",
+    "source advances during restore: Restored audit mismatch",
+    "wrong target checkpoint: Missing expected rejection"
+  ],
+  "first_repair_pass": { "tests": 4, "pass": 4, "duration_ms": 34329.9007 }
+}

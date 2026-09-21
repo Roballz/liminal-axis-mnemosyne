@@ -1,6 +1,6 @@
 # T-03：存储发布与恢复协议及P3前置边界
 
-版本：v0.8，2026-09-21。状态：G1和受控P3高难项review已通过；P5只读诊断/合成恢复命令完成到implemented_unverified，P4索引与资源边界见第11节。固定TT百万字符1x触发30分钟资源停止器，待算法回审。自动外部维护门禁保留。**P4与T-03未完成，B1未获手机/生产准入。**
+版本：v0.9，2026-09-21。状态：按fc3264b回执返修P4-R1/R2与P5-R1，快照一致性和有界目录合并已实现；本轮证据见 `../notes/t-03-p4-repair-handoff.md`。第11节保留旧资源结果，第12节为本轮协议补充。自动维护门禁保留；T-03尚待review，B1未获手机/生产准入。
 
 下文1～7节保留P0～P2协议与当时限制；其中“G1待审/未放行”是历史状态，当前许可按最终回执。第8节保留前置增量，P3最新协议与边界见第10节及 `../notes/t-03-p3-handoff.md`。
 实施基线 `852260acd8d3e65d9d756af81cdf72e52c50046b`；继承 06 v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。本文没有更改领域语义。
@@ -201,3 +201,13 @@ Node计量provider的固定1x场景完整通过：32轮增长、4次深层编辑
 当前需review普通发布的目录构建、重复持久写和prepare成本，确定保持旧快照、checkpoint、幂等与完整恢复语义的最小算法修复范围。不得静默提高时间/节点限制、缩小1x、关闭`syncMode=full`、删除历史、自动GC、改TT或切B2/A。是否引入目录批量构建、写合并、离线维护或宿主批量原语属于待审设计，不由本节批准。
 
 P5已补齐版本化只读诊断快照、结构化错误、空目标备份/恢复验证命令，并在固定TT只读冷开资源停止后的库；状态为implemented_unverified。安装/启停、故障复现和只读回退见`10-t03-storage-operations.md`。P4完成线仍未过，不能宣称T-03完成。自动维护继续`HOST_MAINTENANCE_UNSUPPORTED`，手机pending；完整证据见原task、`../notes/t-03-p4-resource-review.md`及`../evals/t03/p4-p5/`。
+
+## 12. P4/P5快照边界与目录增量返修
+
+`filterRecallCandidates`默认返回`{status, results, source}`，前后复核同一library/checkpoint/Story/Branch/Head/view；漂移为behind且无旧结果，search传递状态。原领域校验保留，rebuild完成前检查source，结果仅对返回的版本依据有效；未来注入仍须最终复核。
+
+`exportSnapshot(branch)`在一次队列边界捕获诊断和固定目录导出流，不在队列中等待同队列handle。验证器对照该checkpoint及诊断，审计目标并复核目标checkpoint；源后续提交不参与比较，新目标library_id合法。finally关闭失败不掩盖主核验错误。
+
+物理库存目录每1024个不同引用做增量AVL合并，复用未变子树；临时工作集硬限16,384候选页/16MiB，已登记引用缓存限512条且随恢复重建。只落盘当前批次根可达临时目录页，不删除已落盘页，不原地覆盖目录。业务put首次物理碰撞检查不跳过；业务页、control、generated IDs及账本格式不变。
+
+最后目录批次完成后仍执行材料flush、单root发布、发布flush、ack。新的directory-write前后故障点纳入失败不变性验证，固定TT发布前/后强杀及丢确认恢复须以本轮代码重跑。旧/新分页包双向小样本恢复已验证，物理目录形状变化不改变领域或control内容身份。

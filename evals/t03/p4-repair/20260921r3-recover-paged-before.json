@@ -1,0 +1,34 @@
+{
+  "phase": "recover-paged-before",
+  "run": "20260921r3",
+  "events": [
+    {
+      "type": "done",
+      "phase": "recover-paged-before",
+      "run": "20260921r3",
+      "namespace": "mnemo-t03-paged-20260921r3-crash-before",
+      "previousStatus": "prepared",
+      "result": {
+        "snapshot_id": "hs_8bcc73c0-3f03-49df-8e5b-a53dc88552e5"
+      },
+      "generated": [
+        {
+          "kind": "snapshot",
+          "value": "hs_8bcc73c0-3f03-49df-8e5b-a53dc88552e5"
+        },
+        {
+          "kind": "block",
+          "value": "hm_cfe09da7-642f-471b-a079-cef91aa9b394"
+        },
+        {
+          "kind": "block",
+          "value": "hm_78a0629a-f00a-4155-acc0-fc12508321a1"
+        }
+      ],
+      "publishedOperations": 2,
+      "processCrashTested": true,
+      "materialsEvidenceMatched": true,
+      "nativeArchiveOrSyncTriggered": false
+    }
+  ]
+}

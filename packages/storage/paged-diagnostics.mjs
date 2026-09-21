@@ -13,6 +13,7 @@ export function readOnlyPagedHandle(handle) {
   const result = {};
   for (const name of names) check(typeof handle[name] === 'function', 'INVALID_SCHEMA', 'Missing read method ' + name);
   for (const name of names) result[name] = (...args) => handle[name](...args);
+  if (typeof handle.exportSnapshot === 'function') result.exportSnapshot = (...args) => handle.exportSnapshot(...args);
   return Object.freeze(result);
 }
 
@@ -40,26 +41,36 @@ export async function collectPagedDiagnostic(handle, { branchId = null, index = 
 
 export async function verifyPagedBackupRestore(sourceHandle, openTarget, { branchId = null } = {}) {
   check(typeof openTarget === 'function', 'INVALID_SCHEMA', 'Restore target opener required');
-  const source = readOnlyPagedHandle(sourceHandle), sourceStatus = await source.diagnostics(branchId);
+  const source = readOnlyPagedHandle(sourceHandle);
+  check(typeof source.exportSnapshot === 'function', 'UNSUPPORTED', 'Atomic export snapshot required');
+  const { diagnostic: sourceStatus, stream } = await source.exportSnapshot(branchId);
   let bytes = 0, records = 0;
   async function* countedExport() {
-    for await (const chunk of await source.export()) {
+    for await (const chunk of stream) {
       check(chunk && Number.isSafeInteger(chunk.byteLength), 'INVALID_SCHEMA', 'Backup chunk required');
       bytes += chunk.byteLength; records++; yield chunk;
     }
   }
   const targetOwner = await openTarget(countedExport());
+  let primaryError;
   try {
     const targetHandle = typeof targetOwner.handle === 'function' ? targetOwner.handle() : targetOwner;
     const target = readOnlyPagedHandle(targetHandle), targetStatus = await target.diagnostics(branchId);
+    check(equal(sourceStatus.checkpoint, targetStatus.checkpoint),
+      'NEEDS_RESOLUTION', 'Restored checkpoint mismatch');
     check(sourceStatus.operation_count === targetStatus.operation_count,
       'NEEDS_RESOLUTION', 'Restored operation count mismatch');
     check(equal(sourceStatus.branch, targetStatus.branch), 'NEEDS_RESOLUTION', 'Restored branch status mismatch');
-    check(equal(await source.audit(), await target.audit()), 'NEEDS_RESOLUTION', 'Restored audit mismatch');
+    await target.audit();
+    check(equal(targetStatus.checkpoint, (await target.diagnostics(branchId)).checkpoint),
+      'NEEDS_RESOLUTION', 'Restore target changed during verification');
     return { status: 'passed', bytes, records, source_checkpoint: sourceStatus.checkpoint,
       target_checkpoint: targetStatus.checkpoint, branch: targetStatus.branch };
+  } catch (error) {
+    primaryError = error; throw error;
   } finally {
-    if (typeof targetOwner.close === 'function') await targetOwner.close();
+    try { if (typeof targetOwner.close === 'function') await targetOwner.close(); }
+    catch (error) { if (!primaryError) throw error; primaryError.close_error = diagnosticFailure(error); }
   }
 }
 

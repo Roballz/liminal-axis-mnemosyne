@@ -1,0 +1,804 @@
+{
+  "status": "passed",
+  "date": "2026-09-21",
+  "scale": 1,
+  "synthetic": true,
+  "scope": "Windows desktop P4 resource exploration with metered in-memory provider; not native TT/mobile acceptance",
+  "device": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v24.19.0",
+    "os_release": "10.0.19045",
+    "cpu": "Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz",
+    "logical_cpus": 8,
+    "total_memory_bytes": 17010008064
+  },
+  "scenario": {
+    "scale": 1,
+    "story_id": "st_00000000-0000-4000-8000-000000000001",
+    "branch_id": "br_00000000-0000-4000-8000-000000000002",
+    "child_branch_id": "br_00000000-0000-4000-8000-0000000000b0",
+    "head_snapshot_id": "hs_a7b5cfaf-f11a-4233-886d-c776b68bad8a",
+    "child_head_snapshot_id": "hs_203da8c4-dcc2-4e66-8215-c9784294085d",
+    "operations": [
+      "op_00000000-0000-4000-8000-00000000000b",
+      "op_00000000-0000-4000-8000-000000000010",
+      "op_00000000-0000-4000-8000-000000000015",
+      "op_00000000-0000-4000-8000-00000000001a",
+      "op_00000000-0000-4000-8000-00000000001f",
+      "op_00000000-0000-4000-8000-000000000024",
+      "op_00000000-0000-4000-8000-000000000029",
+      "op_00000000-0000-4000-8000-00000000002e",
+      "op_00000000-0000-4000-8000-000000000033",
+      "op_00000000-0000-4000-8000-000000000038",
+      "op_00000000-0000-4000-8000-00000000003d",
+      "op_00000000-0000-4000-8000-000000000042",
+      "op_00000000-0000-4000-8000-000000000047",
+      "op_00000000-0000-4000-8000-00000000004c",
+      "op_00000000-0000-4000-8000-000000000051",
+      "op_00000000-0000-4000-8000-000000000056",
+      "op_00000000-0000-4000-8000-00000000005b",
+      "op_00000000-0000-4000-8000-000000000060",
+      "op_00000000-0000-4000-8000-000000000065",
+      "op_00000000-0000-4000-8000-00000000006a",
+      "op_00000000-0000-4000-8000-00000000006f",
+      "op_00000000-0000-4000-8000-000000000074",
+      "op_00000000-0000-4000-8000-000000000079",
+      "op_00000000-0000-4000-8000-00000000007e",
+      "op_00000000-0000-4000-8000-000000000083",
+      "op_00000000-0000-4000-8000-000000000088",
+      "op_00000000-0000-4000-8000-00000000008d",
+      "op_00000000-0000-4000-8000-000000000092",
+      "op_00000000-0000-4000-8000-000000000097",
+      "op_00000000-0000-4000-8000-00000000009c",
+      "op_00000000-0000-4000-8000-0000000000a1",
+      "op_00000000-0000-4000-8000-0000000000a6",
+      "op_00000000-0000-4000-8000-0000000000a8",
+      "op_00000000-0000-4000-8000-0000000000aa",
+      "op_00000000-0000-4000-8000-0000000000ac",
+      "op_00000000-0000-4000-8000-0000000000ae",
+      "op_00000000-0000-4000-8000-0000000000af",
+      "op_00000000-0000-4000-8000-0000000000b1",
+      "op_00000000-0000-4000-8000-0000000000b4",
+      "op_00000000-0000-4000-8000-0000000000b7"
+    ],
+    "ranges": [
+      {
+        "snapshot_id": "hs_a7b5cfaf-f11a-4233-886d-c776b68bad8a",
+        "start": 0,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_a7b5cfaf-f11a-4233-886d-c776b68bad8a",
+        "start": 27,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_a7b5cfaf-f11a-4233-886d-c776b68bad8a",
+        "start": 55,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_203da8c4-dcc2-4e66-8215-c9784294085d",
+        "start": 27,
+        "count": 5
+      }
+    ],
+    "memory": {
+      "schema_version": 1,
+      "memory_id": "mem_00000000-0000-4000-8000-0000000000b5",
+      "memory_revision_id": "mr_00000000-0000-4000-8000-0000000000b6",
+      "story_id": "st_00000000-0000-4000-8000-000000000001",
+      "basis_snapshot_id": "hs_a7b5cfaf-f11a-4233-886d-c776b68bad8a",
+      "kind": "Record",
+      "origin": "source_derived",
+      "input_refs": [
+        {
+          "type": "source",
+          "message_id": "msg_00000000-0000-4000-8000-000000000007",
+          "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+        },
+        {
+          "type": "source",
+          "message_id": "msg_00000000-0000-4000-8000-000000000009",
+          "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+        }
+      ],
+      "coverage": {
+        "mode": "interval",
+        "members": [
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000007",
+            "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+          },
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000009",
+            "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+          }
+        ],
+        "boundary": {
+          "start": "msg_00000000-0000-4000-8000-000000000007",
+          "end": "msg_00000000-0000-4000-8000-000000000009"
+        },
+        "observed_span": [
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000007",
+            "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+          },
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000009",
+            "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      "recipe_id": "p4-synthetic-v1",
+      "model_profile": "artificial-vector-v1",
+      "input_fingerprint": "sha256:derived-input:v1:e56f728d21866a01a6fb13c1670d2f7a27d571197aa684d04bdb70107f980e48",
+      "content": "青石门 月台 角色约定 P4 synthetic marker",
+      "visibility": "normal",
+      "recall_enabled": true,
+      "source_declaration": null,
+      "scope_branch_id": null
+    },
+    "messages": 63,
+    "current_characters": 976500,
+    "archived_revision_characters": 1069500,
+    "growth_rounds": 32,
+    "edits": 4,
+    "deletes": 1,
+    "forks": 1
+  },
+  "timings": {
+    "workload_ms": 97266.122,
+    "cold_reopen": {
+      "elapsed_ms": 44.64299999999639,
+      "provider_reads": 20
+    },
+    "export_ms": 8078.443499999994,
+    "restore_ms": 138765.87720000002,
+    "operation_ms": [
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000000b",
+        "kind": "history-delta",
+        "prepare_ms": 692.6679,
+        "execute_ms": 36.557000000000016,
+        "total_ms": 729.2249
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000010",
+        "kind": "history-delta",
+        "prepare_ms": 943.8337999999999,
+        "execute_ms": 34.325199999999995,
+        "total_ms": 978.1589999999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000015",
+        "kind": "history-delta",
+        "prepare_ms": 1087.8082000000002,
+        "execute_ms": 37.38849999999957,
+        "total_ms": 1125.1966999999997
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000001a",
+        "kind": "history-delta",
+        "prepare_ms": 1281.1856000000002,
+        "execute_ms": 46.80040000000008,
+        "total_ms": 1327.9860000000003
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000001f",
+        "kind": "history-delta",
+        "prepare_ms": 1378.804,
+        "execute_ms": 38.63920000000053,
+        "total_ms": 1417.4432000000006
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000024",
+        "kind": "history-delta",
+        "prepare_ms": 1565.8899000000001,
+        "execute_ms": 58.807300000000396,
+        "total_ms": 1624.6972000000005
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000029",
+        "kind": "history-delta",
+        "prepare_ms": 1565.9868000000006,
+        "execute_ms": 50.8145999999997,
+        "total_ms": 1616.8014000000003
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000002e",
+        "kind": "history-delta",
+        "prepare_ms": 1721.2587999999996,
+        "execute_ms": 58.76579999999922,
+        "total_ms": 1780.0245999999988
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000033",
+        "kind": "history-delta",
+        "prepare_ms": 1815.2677999999996,
+        "execute_ms": 56.58849999999984,
+        "total_ms": 1871.8562999999995
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000038",
+        "kind": "history-delta",
+        "prepare_ms": 1963.512999999999,
+        "execute_ms": 66.72830000000067,
+        "total_ms": 2030.2412999999997
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000003d",
+        "kind": "history-delta",
+        "prepare_ms": 2007.0067999999992,
+        "execute_ms": 71.06170000000202,
+        "total_ms": 2078.068500000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000042",
+        "kind": "history-delta",
+        "prepare_ms": 2108.0699999999997,
+        "execute_ms": 61.45800000000236,
+        "total_ms": 2169.528000000002
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000047",
+        "kind": "history-delta",
+        "prepare_ms": 2085.6862,
+        "execute_ms": 66.85819999999876,
+        "total_ms": 2152.544399999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000004c",
+        "kind": "history-delta",
+        "prepare_ms": 2412.4710000000014,
+        "execute_ms": 65.16989999999714,
+        "total_ms": 2477.6408999999985
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000051",
+        "kind": "history-delta",
+        "prepare_ms": 2413.0592000000033,
+        "execute_ms": 66.875,
+        "total_ms": 2479.9342000000033
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000056",
+        "kind": "history-delta",
+        "prepare_ms": 2560.8443000000007,
+        "execute_ms": 74.87449999999808,
+        "total_ms": 2635.7187999999987
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000005b",
+        "kind": "history-delta",
+        "prepare_ms": 2503.954700000002,
+        "execute_ms": 71.33779999999751,
+        "total_ms": 2575.2924999999996
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000060",
+        "kind": "history-delta",
+        "prepare_ms": 2646.946499999998,
+        "execute_ms": 76.08160000000498,
+        "total_ms": 2723.028100000003
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000065",
+        "kind": "history-delta",
+        "prepare_ms": 2536.121500000001,
+        "execute_ms": 78.56680000000051,
+        "total_ms": 2614.6883000000016
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000006a",
+        "kind": "history-delta",
+        "prepare_ms": 2768.8566999999966,
+        "execute_ms": 76.54039999999804,
+        "total_ms": 2845.3970999999947
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000006f",
+        "kind": "history-delta",
+        "prepare_ms": 2659.131999999998,
+        "execute_ms": 77.95599999999831,
+        "total_ms": 2737.087999999996
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000074",
+        "kind": "history-delta",
+        "prepare_ms": 2860.6817999999985,
+        "execute_ms": 77.89760000000388,
+        "total_ms": 2938.5794000000024
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000079",
+        "kind": "history-delta",
+        "prepare_ms": 2719.036,
+        "execute_ms": 78.65840000000026,
+        "total_ms": 2797.6944000000003
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000007e",
+        "kind": "history-delta",
+        "prepare_ms": 3008.893299999996,
+        "execute_ms": 75.03900000000431,
+        "total_ms": 3083.9323000000004
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000083",
+        "kind": "history-delta",
+        "prepare_ms": 2835.4266999999963,
+        "execute_ms": 74.70780000000377,
+        "total_ms": 2910.1345
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000088",
+        "kind": "history-delta",
+        "prepare_ms": 3103.1926999999996,
+        "execute_ms": 82.43729999999778,
+        "total_ms": 3185.6299999999974
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000008d",
+        "kind": "history-delta",
+        "prepare_ms": 2831.8542000000016,
+        "execute_ms": 81.76200000000244,
+        "total_ms": 2913.616200000004
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000092",
+        "kind": "history-delta",
+        "prepare_ms": 3169.3035999999993,
+        "execute_ms": 78.45029999999679,
+        "total_ms": 3247.753899999996
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000097",
+        "kind": "history-delta",
+        "prepare_ms": 2986.870999999999,
+        "execute_ms": 77.54869999999937,
+        "total_ms": 3064.4196999999986
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000009c",
+        "kind": "history-delta",
+        "prepare_ms": 3207.4223000000056,
+        "execute_ms": 77.50010000000475,
+        "total_ms": 3284.9224000000104
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a1",
+        "kind": "history-delta",
+        "prepare_ms": 2922.554400000008,
+        "execute_ms": 82.08520000000135,
+        "total_ms": 3004.6396000000095
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a6",
+        "kind": "history-delta",
+        "prepare_ms": 3178.3533000000025,
+        "execute_ms": 79.53840000000491,
+        "total_ms": 3257.8917000000074
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a8",
+        "kind": "history-delta",
+        "prepare_ms": 3130.5790000000125,
+        "execute_ms": 69.23439999998664,
+        "total_ms": 3199.813399999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000aa",
+        "kind": "history-delta",
+        "prepare_ms": 3827.4927999999927,
+        "execute_ms": 75.4658000000054,
+        "total_ms": 3902.958599999998
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000ac",
+        "kind": "history-delta",
+        "prepare_ms": 3339.323700000008,
+        "execute_ms": 87.27090000000317,
+        "total_ms": 3426.5946000000113
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000ae",
+        "kind": "history-delta",
+        "prepare_ms": 3412.377899999992,
+        "execute_ms": 70.2954000000027,
+        "total_ms": 3482.673299999995
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000af",
+        "kind": "history-delta",
+        "prepare_ms": 1968.0529999999999,
+        "execute_ms": 62.584399999992456,
+        "total_ms": 2030.6373999999923
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b1",
+        "kind": "history",
+        "prepare_ms": 1780.0676999999996,
+        "execute_ms": 79.20239999999467,
+        "total_ms": 1859.2700999999943
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b4",
+        "kind": "history-delta",
+        "prepare_ms": 2462.6275000000023,
+        "execute_ms": 69.06730000000971,
+        "total_ms": 2531.694800000012
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b7",
+        "kind": "memory",
+        "prepare_ms": 1025.499100000001,
+        "execute_ms": 67.68959999999788,
+        "total_ms": 1093.1886999999988
+      }
+    ],
+    "event_loop_delay_max_ms": 287.047679
+  },
+  "provider": {
+    "source": {
+      "reads": 144889,
+      "writes": 187896,
+      "flushes": 164,
+      "counters": {
+        "page.logical_put": {
+          "count": 96699,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 611349,
+          "bytes": 0,
+          "ms": 4526.221600001278
+        },
+        "page.new": {
+          "count": 32341,
+          "bytes": 10346584,
+          "ms": 0
+        },
+        "io.put": {
+          "count": 187896,
+          "bytes": 0,
+          "ms": 1227.4337999977856
+        },
+        "page.existing": {
+          "count": 64358,
+          "bytes": 17982917,
+          "ms": 0
+        },
+        "publish.directory": {
+          "count": 81,
+          "bytes": 0,
+          "ms": 46265.254099999984
+        },
+        "directory.page.logical_put": {
+          "count": 201845,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 189815,
+          "bytes": 77532107,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 189815,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 155474,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.flush": {
+          "count": 163,
+          "bytes": 0,
+          "ms": 65.92980000001815
+        },
+        "operation.prepare": {
+          "count": 40,
+          "bytes": 0,
+          "ms": 94487.78590000002
+        },
+        "prepare.compile": {
+          "count": 40,
+          "bytes": 0,
+          "ms": 18961.157799999994
+        },
+        "directory.page.existing": {
+          "count": 12030,
+          "bytes": 3365353,
+          "ms": 0
+        },
+        "operation.execute": {
+          "count": 40,
+          "bytes": 0,
+          "ms": 2718.451999999974
+        }
+      },
+      "physical_payload_bytes": 74710091,
+      "inventory": {
+        "physical_nodes": 187816,
+        "cataloged_business_pages": 32341,
+        "active_checkpoint_reachable_pages": 14590,
+        "cataloged_unreachable_pages": 17751,
+        "active_directory_pages": 32341,
+        "stale_directory_or_intermediate_pages": 123133,
+        "root_nodes": 1
+      }
+    },
+    "restored": {
+      "reads": 1031925,
+      "writes": 64820,
+      "flushes": 4,
+      "counters": {
+        "io.put": {
+          "count": 64820,
+          "bytes": 0,
+          "ms": 502.2267000016145
+        },
+        "io.flush": {
+          "count": 4,
+          "bytes": 0,
+          "ms": 8.978799999997136
+        },
+        "page.logical_put": {
+          "count": 104290,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 952652,
+          "bytes": 0,
+          "ms": 9038.827000008474
+        },
+        "page.new": {
+          "count": 32341,
+          "bytes": 10346584,
+          "ms": 0
+        },
+        "directory.page.logical_put": {
+          "count": 35280,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 35002,
+          "bytes": 12913234,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 35002,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 32477,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.existing": {
+          "count": 278,
+          "bytes": 120908,
+          "ms": 0
+        },
+        "page.existing": {
+          "count": 71949,
+          "bytes": 21312558,
+          "ms": 0
+        }
+      },
+      "physical_payload_bytes": 22123273,
+      "inventory": {
+        "physical_nodes": 64819,
+        "cataloged_business_pages": 32341,
+        "active_checkpoint_reachable_pages": 14590,
+        "cataloged_unreachable_pages": 17751,
+        "active_directory_pages": 32341,
+        "stale_directory_or_intermediate_pages": 136,
+        "root_nodes": 1
+      }
+    }
+  },
+  "backup": {
+    "path": "D:\\Mnemosyne\\.t03-local\\p4\\p4-repair-1x.ndjson",
+    "bytes": 20909960,
+    "records": 32343
+  },
+  "resources": {
+    "peaks": {
+      "rss": 617533440,
+      "heap_used": 340851056
+    },
+    "samples": [
+      {
+        "label": "growth-4",
+        "elapsed_ms": 4215.2663,
+        "rss": 131489792,
+        "heap_used": 24630496,
+        "physical_nodes": 7636,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "growth-8",
+        "elapsed_ms": 10658.123899999999,
+        "rss": 227397632,
+        "heap_used": 77026448,
+        "physical_nodes": 20159,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "growth-12",
+        "elapsed_ms": 18811.6884,
+        "rss": 247951360,
+        "heap_used": 108209672,
+        "physical_nodes": 36059,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "growth-16",
+        "elapsed_ms": 28561.2906,
+        "rss": 276832256,
+        "heap_used": 76978200,
+        "physical_nodes": 53888,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "growth-20",
+        "elapsed_ms": 39323.7048,
+        "rss": 316895232,
+        "heap_used": 68897704,
+        "physical_nodes": 74619,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "growth-24",
+        "elapsed_ms": 50884.797300000006,
+        "rss": 319553536,
+        "heap_used": 150571032,
+        "physical_nodes": 97002,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "growth-28",
+        "elapsed_ms": 63145.7336,
+        "rss": 365309952,
+        "heap_used": 171390328,
+        "physical_nodes": 120429,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "growth-32",
+        "elapsed_ms": 75763.08899999999,
+        "rss": 396349440,
+        "heap_used": 263037984,
+        "physical_nodes": 144805,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "edit-36",
+        "elapsed_ms": 89777.3581,
+        "rss": 408907776,
+        "heap_used": 236485344,
+        "physical_nodes": 172718,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "workload-complete",
+        "elapsed_ms": 97313.09,
+        "rss": 430829568,
+        "heap_used": 273637256,
+        "physical_nodes": 187816,
+        "free_disk_bytes": 365757894656
+      },
+      {
+        "label": "export-10000",
+        "elapsed_ms": 106560.7954,
+        "rss": 437256192,
+        "heap_used": 201676664,
+        "physical_nodes": 187816,
+        "free_disk_bytes": 365772365824
+      },
+      {
+        "label": "export-20000",
+        "elapsed_ms": 109108.121,
+        "rss": 436977664,
+        "heap_used": 175632424,
+        "physical_nodes": 187816,
+        "free_disk_bytes": 365765877760
+      },
+      {
+        "label": "export-30000",
+        "elapsed_ms": 111525.91189999999,
+        "rss": 436994048,
+        "heap_used": 192539360,
+        "physical_nodes": 187816,
+        "free_disk_bytes": 365759455232
+      },
+      {
+        "label": "restore-complete",
+        "elapsed_ms": 257469.916,
+        "rss": 617533440,
+        "heap_used": 340851056,
+        "physical_nodes": 64819,
+        "free_disk_bytes": 365757943808
+      }
+    ],
+    "limits": {
+      "rss_bytes": 1468006400,
+      "package_bytes": 536870912,
+      "physical_nodes": 1000000,
+      "elapsed_ms": 1800000,
+      "minimum_free_disk_bytes": 21474836480
+    },
+    "stop_triggered": false
+  },
+  "diagnostic": {
+    "storage": {
+      "format": "mnemosyne-paged-storage-v1",
+      "library_id": "op_4eac49d4-a184-40e2-983e-5b4186b7c500",
+      "status": "ready",
+      "checkpoint": {
+        "hash": "278e03f6d3466a35a8f4d4b40433ed788af522f30ee498bc686ef73862c885bd",
+        "slot": 43490905412422
+      },
+      "operation_count": 40,
+      "pending_operation_id": null,
+      "physical_nodes": 187816,
+      "error": null,
+      "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+      "branch": {
+        "story_id": "st_00000000-0000-4000-8000-000000000001",
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "head_snapshot_id": "hs_a7b5cfaf-f11a-4233-886d-c776b68bad8a",
+        "view_version": "mv_902376e7-a591-4ea3-9e5b-e791182490d3",
+        "marker": {
+          "head": "hs_a7b5cfaf-f11a-4233-886d-c776b68bad8a",
+          "index": "behind",
+          "rebuild": "evaluate",
+          "view": "mv_902376e7-a591-4ea3-9e5b-e791182490d3"
+        }
+      }
+    },
+    "index": {
+      "format": "mnemosyne-recall-index-v1",
+      "status": "ready",
+      "source": {
+        "library_id": "op_4eac49d4-a184-40e2-983e-5b4186b7c500",
+        "checkpoint": {
+          "hash": "278e03f6d3466a35a8f4d4b40433ed788af522f30ee498bc686ef73862c885bd",
+          "slot": 43490905412422
+        },
+        "story_id": "st_00000000-0000-4000-8000-000000000001",
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "head_snapshot_id": "hs_a7b5cfaf-f11a-4233-886d-c776b68bad8a",
+        "view_version": "mv_902376e7-a591-4ea3-9e5b-e791182490d3"
+      },
+      "progress": {
+        "scanned": 1,
+        "indexed": 1
+      },
+      "error": null,
+      "entry_count": 1
+    },
+    "errors": [],
+    "maintenance": {
+      "automatic_external": "HOST_MAINTENANCE_UNSUPPORTED",
+      "cooperative": "suspend-required"
+    }
+  },
+  "correctness": {
+    "ranges": true,
+    "confirmed_results": true,
+    "selected_memory": true,
+    "complete_restore": true
+  },
+  "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+  "mobile": "pending"
+}

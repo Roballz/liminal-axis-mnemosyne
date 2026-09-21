@@ -127,6 +127,12 @@ export async function importPageDirectory(pages, chunks, options = {}) {
   ensurePages(directoryPages);
   const limits = limitsFor(options);
   let directory = options.directory ?? null;
+  const batch = new Map();
+  const finishBatch = async () => {
+    if (!batch.size) return;
+    directory = await directoryPages.mapSetMany(directory, [...batch]);
+    await directoryPages.finish?.(directory); batch.clear();
+  };
   check(directory === null || (reference(directory), true), 'INVALID_SCHEMA', 'Invalid staging directory root');
 
   let header = null;
@@ -151,7 +157,7 @@ export async function importPageDirectory(pages, chunks, options = {}) {
       const { ref, body } = checked.body;
       reference(ref);
       check(++records <= limits.maxPages, 'RESOURCE_LIMIT', 'Page graph count limit');
-      const existing = await directoryPages.mapGet(directory, ref.hash);
+      const existing = batch.get(ref.hash) ?? await directoryPages.mapGet(directory, ref.hash);
       if (existing !== null) {
         check(equal(existing, ref), 'ID_COLLISION', 'Duplicate page reference differs');
         check(equal(await pages.get(existing), body), 'ID_COLLISION', 'Duplicate page body differs');
@@ -159,8 +165,12 @@ export async function importPageDirectory(pages, chunks, options = {}) {
       } else {
         const actual = await pages.put(body);
         check(equal(actual, ref), 'NEEDS_RESOLUTION', 'Imported page reference differs');
-        directory = await directoryPages.mapSet(directory, ref.hash, actual);
-        await directoryPages.checkpoint?.(directory);
+        if (typeof directoryPages.mapSetMany === 'function') {
+          batch.set(ref.hash, actual); if (batch.size === 1024) await finishBatch();
+        } else {
+          directory = await directoryPages.mapSet(directory, ref.hash, actual);
+          await directoryPages.checkpoint?.(directory);
+        }
         count++;
       }
       previous = checked.checksum;
@@ -182,7 +192,7 @@ export async function importPageDirectory(pages, chunks, options = {}) {
   check(footer !== null, 'NEEDS_RESOLUTION', 'Page graph footer missing');
   check(header.format === PAGE_GRAPH_FORMAT && header.type === 'header' && header.previous === null,
     'INVALID_SCHEMA', 'Invalid page graph header');
-  await directoryPages.finish?.(directory);
+  await finishBatch(); await directoryPages.finish?.(directory);
   return {
     directory,
     roots: header.roots,

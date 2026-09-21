@@ -12,9 +12,9 @@
 
 已验收：**T-02 身份、历史版本与上下文契约，verified**。审核实现为 `1891043`，R1～R5 已关闭；Chat 独立复跑48项契约与11文件语法检查通过，R5同组测试在修复前实际旧版6项失败、修复后通过。Head、固定分叉、逐层失效、幂等和逻辑包校验限Node参考模型范围，不等于已有正式记忆引擎。证据见 `notes/t-02-final-review.md`。
 
-当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。G1和受控P3高难项review已通过；P4索引/诊断增量及322项回归完成，但固定TT的百万字符1x在30分钟资源停止线前未完成，整个任务未完成。旧 proposal 已 superseded。
+当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。G1和受控P3高难项review已通过；本轮按fc3264b回执修复候选/备份快照一致性及有界目录发布，333项回归保留原322项。最新资源与返修边界见 `notes/t-03-p4-repair-handoff.md`。旧 proposal 已 superseded。
 
-**P4/P5 当前交接（2026-09-21）：** `4a76c14` 已关闭P3-R1/R2并放行P4/P5。可重建索引和最终候选过滤已实现；P5只读诊断、合成空目标恢复命令及操作/回退说明完成到implemented_unverified。固定TT新run在12/32次增长发布时超过30分钟停止线，仍是P4资源算法阻塞；5x/10x未执行。详见 `notes/t-03-p4-resource-review.md`、`docs/10-t03-storage-operations.md` 与 `evals/t03/p4-p5/`。自动外部维护仍为`HOST_MAINTENANCE_UNSUPPORTED`，整个T-03未完成。
+**P4/P5 当前交接（2026-09-21）：** 最新审核为 `notes/t-03-p4-p5-chat-review.md`；施工返修及最终批次验证见 `notes/t-03-p4-repair-handoff.md`、`evals/t03/p4-repair/`。候选返回前复核版本，备份固定同一导出快照，目录采用1024引用批次和16MiB临时硬上限；双向旧包恢复与固定TT新路径故障验证已执行。实现仍为implemented_unverified，自动维护门禁与手机pending保留。
 
 当前关卡回执：`notes/t-03-g1-final-review.md`。Chat对齐15个文件blob后独立复跑84项存储测试及15文件语法，全部通过；同一最终19项定向测试在实际旧实现上10通过/9失败。完整150项Node回归、23文件语法/diff和隔离TT小验证为Codex提交的证据，本轮明确区分独立执行与证据审阅。
 

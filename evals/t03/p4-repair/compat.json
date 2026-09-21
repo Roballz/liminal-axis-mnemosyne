@@ -1,0 +1,20 @@
+[
+  {
+    "direction": "old-to-new",
+    "status": "passed",
+    "checkpoint": {
+      "hash": "9cc6011f9f51ec93306e857cf9fce14044bffb756e4b6f262f4b2e08dbbb9f17",
+      "slot": 172374236372817
+    },
+    "old_baseline": "fc3264b"
+  },
+  {
+    "direction": "new-to-old",
+    "status": "passed",
+    "checkpoint": {
+      "hash": "8f0e2b103d24923de811b48a8b64585469bd4cae689a80c2b317bea8c14663ad",
+      "slot": 157291014864164
+    },
+    "old_baseline": "fc3264b"
+  }
+]

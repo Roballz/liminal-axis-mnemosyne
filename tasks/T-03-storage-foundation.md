@@ -1,6 +1,6 @@
 # T-03：可迁移、可恢复的存储地基
 
-状态：in_progress（G1与受控P3高难项review已通过；P4索引正确性完成但固定TT百万字符1x在30分钟停止线前仅完成12/32增长发布，资源算法阻塞待review；P5只读诊断/合成恢复命令/操作回退说明已完成到implemented_unverified；自动外部维护门禁保留，整个T-03未完成）
+状态：in_progress（按fc3264b返修P4-R1/R2与P5-R1，333项回归保留原322项；两处快照一致性、有界目录合并及兼容/新路径故障验证已实现，最新资源完成线见notes/t-03-p4-repair-handoff.md；自动维护门禁保留，待Chat复核）
 
 发布：2026-09-19。规划仓库基线：`4dcdaf568ddb596c9060c27ef4c57fb858095509`。
 T-02 已验收实现：`1891043f6fc907236e12bb85d63ea823f43abca8`；规范为 `docs/06-contracts.md` v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。
@@ -485,3 +485,21 @@ Node计量内存provider的1x完整通过：工作负载453.2秒、冷重开101.
 P5随后独立收尾：新增版本化只读诊断快照、结构化错误、空目标备份/恢复验证命令及`docs/10-t03-storage-operations.md`。Node命令完成1,006,060 bytes/1,622 records合成恢复；固定TT只读冷开`p4b`源库为ready、12条确认operation、pending为空、71,271节点，marker仍behind/evaluate，无写能力或sync/archive。P5状态为implemented_unverified，不再是未完成项。
 
 完整证据与待审问题见 `notes/t-03-p4-resource-review.md` 和 `evals/t03/p4-p5/`。需要Chat先审查普通发布的目录构建/重复持久写放大及允许的最小算法修复范围；后续仍在T-03内，不创建/执行T-04。回退停用本轮索引/诊断/harness并保留旧库、P4库和证据；没有生产格式迁移或真实档案写入。因P4强制完成线未过，仍不交整个T-03最终review。
+
+## P4-R1/R2与P5-R1返修（2026-09-21 Codex）
+
+基线main@fc3264b，已读最新联合回审、README、S-A、本卡和相关协议/源码。开工估计核心实现/计量300～500行、测试/harness400～650行；实际统计随 `evals/t03/p4-repair/verification.json` 收尾记录。仅原有`.codex/`排除提交，单线执行，无新依赖或T-04。
+
+先用真实coordinator补反例：首批4项旧实现全失败，修复后全通过。最终候选返回前复核source并传递behind；rebuild不把漂移包装为当前ready。exportSnapshot在同一队列边界固定诊断/流，目标核对checkpoint、分支和operation并审计；源端正常前进合法，目标新library合法，close失败不盖主错误。
+
+先计量128条目录批次：Node 1x虽完整通过，仍有249,529目录落盘；据此在原批准范围内固定为1024条引用批次，候选工作集保持16,384页/16MiB硬上限。只增量重建必要不可变AVL路径，已登记引用缓存限512条且恢复重建；未省略物理碰撞检查，未原地覆盖或删除已落盘页，未改变业务control/账本/导出格式。
+
+最终完整命令仍为 `node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`，333/333、0失败/跳过（77101.2322ms）。原322项保留，新11项涵盖真实纠错/编辑/view交错、两处源写入交错、目标checkpoint负例、不同library正例、关闭错误、目录写前/后失败和AVL旧根/平衡。原候选测试只适配返回对象，排除规则断言保留。
+
+旧源码fc3264b生成的小包→新恢复及新包→旧恢复均核对逻辑内容、checkpoint和幂等回执。固定TT最终配置run 20260921r3分别在paged-publish/before和paged-ack/before强杀，恢复为prepared/published，与独立边界generated IDs和结果相符，重复execute无额外发布。退出清理另列。r1的collector因沙箱EPERM无法保存证据，该run无效且库保留；r2为中间128批次证据。
+
+最终Node/固定TT原1x和资源分项结果统一见 `notes/t-03-p4-repair-handoff.md` 与 `evals/t03/p4-repair/`。原heap/RSS、30分钟、100万节点、512MiB包、20GiB磁盘余量与full持久化保留。实现为implemented_unverified；Chat复核返修与资源完成线后决定验收状态，自动维护HOST_MAINTENANCE_UNSUPPORTED和手机pending不变。
+
+最终Node 1x完整通过（workload97,266ms、恢复138,766ms、源187,816节点、峰值RSS617,533,440 bytes）。固定TT run 20260921r4最后上报20/32、1,348,946.4ms、74,952节点；下次检查触发原时间停止器，完整1x未完成。用户报告期间调整TT窗口、操作其他应用及窗口层级，未量化干扰，不将超时单独归因于算法。S09/T-03仍未完成；本次提交为返修回审，不冒充整个T-03最终验收。需Chat/用户决定受控重测安排，未追加重跑或5x/10x。
+
+回退停用新索引/诊断入口，保留所有测试源库/暂存库与导出材料，旧分页包互读小样本已验证；无生产迁移、真实档案写入、TT改动、B2/A切换或GC。同步09协议v0.9、10操作说明及CHANGELOG；提交push供review，不创建/执行T-04。

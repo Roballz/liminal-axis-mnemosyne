@@ -1,6 +1,6 @@
 # T-03 storage diagnostics
 
-状态：P0～P2已通过G1，P3分页业务与P3-R1/R2已通过受控高难review。P5只读诊断、合成空目标恢复命令及操作/回退说明完成到implemented_unverified；P4固定TT百万字符1x触发30分钟资源停止器，待算法回审。旧P2/intent入口与自动外部维护门禁保留；T-03未完成。见 `../../notes/t-03-p4-resource-review.md`。
+状态：P0～P2已通过G1，P3既有高难项已关闭。本轮P4-R1/R2与P5-R1快照/目录返修已实现，333项回归保留原322项；双向小包兼容与固定TT新路径故障恢复通过。最终1x结果与未完成边界见 `../../notes/t-03-p4-repair-handoff.md`。自动维护门禁保留，T-03待review。
 
 当前R1/R2返修代码、150项Node回归和隔离TT `20260919g1` 小验证已完成；G1已由最终回执放行；这些为原P0～P2证据。关闭成功后旧owner永久失效，必须经openTestStore取得替代owner；关闭失败保留同一owner，可显式recover或重试close。恢复只把原生null视为缺记录，损坏payload/root报NEEDS_RESOLUTION。证据见 `../../evals/t03/g1-repair/`。
 

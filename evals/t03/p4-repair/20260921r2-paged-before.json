@@ -1,0 +1,86 @@
+{
+  "phase": "paged-before",
+  "run": "20260921r2",
+  "events": [
+    {
+      "type": "kill-ready",
+      "phase": "paged-before",
+      "run": "20260921r2",
+      "namespace": "mnemo-t03-paged-20260921r2-crash-before",
+      "boundary": "paged-publish",
+      "edge": "before",
+      "operation_id": "op_00000000-0000-4000-8000-00000000000d",
+      "input": {
+        "kind": "history-delta",
+        "operation_id": "op_00000000-0000-4000-8000-00000000000d",
+        "payload": {
+          "branch_id": "br_00000000-0000-4000-8000-000000000002",
+          "change_kind": "append",
+          "created_at": "2026-09-19T00:00:00.000Z",
+          "expected_head": "hs_21a7b3ed-4637-43fd-9f4b-39b1ee4ad887",
+          "fork": null,
+          "messages": [
+            {
+              "message_id": "msg_00000000-0000-4000-8000-00000000000b",
+              "schema_version": 1,
+              "story_id": "st_00000000-0000-4000-8000-000000000001"
+            }
+          ],
+          "operation_id": "op_00000000-0000-4000-8000-00000000000d",
+          "revisions": [
+            {
+              "content": "P3 分页故障边界中的虚构正文 😀",
+              "content_fingerprint": "sha256:content:v1:6326f6640fd8c8fa80a109604c69065f91e3edb45a29265faf0ca9fb79172696",
+              "message_id": "msg_00000000-0000-4000-8000-00000000000b",
+              "provenance": {
+                "binding_id": null,
+                "host_kind": "fixture",
+                "host_scope": "fictional",
+                "import_batch": null,
+                "mutable_ref": null,
+                "observed_index": null,
+                "operation": "test",
+                "stable_id": null
+              },
+              "revision_id": "rev_00000000-0000-4000-8000-00000000000c",
+              "role": "user",
+              "schema_version": 1
+            }
+          ],
+          "splice": {
+            "delete_count": 0,
+            "entries": [
+              {
+                "message_id": "msg_00000000-0000-4000-8000-00000000000b",
+                "revision_id": "rev_00000000-0000-4000-8000-00000000000c"
+              }
+            ],
+            "start": 2
+          },
+          "story_id": "st_00000000-0000-4000-8000-000000000001"
+        }
+      },
+      "generated": [
+        {
+          "kind": "snapshot",
+          "value": "hs_3402d56c-39d1-4786-8e4d-7659f6d14661"
+        },
+        {
+          "kind": "block",
+          "value": "hm_eda0a4f2-e282-4248-b7d9-5284178e7389"
+        },
+        {
+          "kind": "block",
+          "value": "hm_a0d1e1d7-f411-4d63-9278-7abbab158475"
+        }
+      ],
+      "result": {
+        "snapshot_id": "hs_3402d56c-39d1-4786-8e4d-7659f6d14661"
+      },
+      "preparedMaterialsFlushed": true,
+      "publishedRootFlushed": false,
+      "independentBeforeEvidence": true,
+      "isolatedFixture": true
+    }
+  ]
+}

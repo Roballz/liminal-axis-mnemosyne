@@ -6,7 +6,7 @@ import { requireThat } from '../contracts/primitives.mjs';
 const key = Symbol.for('mnemosyne.t03.paged-test-owners.v1');
 const options = { dim: 2, syncMode: 'full', autoBuildQuiver: false };
 
-export async function openPagedTestStore(api, namespace, { create = false, restore = null, point } = {}) {
+export async function openPagedTestStore(api, namespace, { create = false, restore = null, point, meter } = {}) {
   requireThat(/^mnemo-t03-paged-[a-z0-9-]+$/.test(namespace),
     'INVALID_NAMESPACE', 'New P3 paged namespace required');
   requireThat(!(create && restore), 'INVALID_SCHEMA', 'Choose create or restore');
@@ -56,9 +56,10 @@ export async function openPagedTestStore(api, namespace, { create = false, resto
       },
       point,
     };
+    const measured = meter ? meter.io(io) : io;
     const coordinator = restore
-      ? await restorePagedIntoEmpty(io, restore)
-      : new PagedCoordinator(io);
+      ? await restorePagedIntoEmpty(measured, restore)
+      : new PagedCoordinator(measured);
     if (!restore) {
       if (create) await coordinator.create();
       else await coordinator.recover();

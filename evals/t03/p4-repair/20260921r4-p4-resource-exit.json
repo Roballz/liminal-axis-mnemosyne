@@ -1,0 +1,13 @@
+{
+  "action": "Resource-stop cleanup, not fault evidence",
+  "pid": 12504,
+  "executable": "D:\\Mnemosyne\\.t03-local\\tt-367b0c7\\tauritavern.exe",
+  "run": "20260921r4",
+  "namespace": "mnemo-t03-paged-20260921r4-p4-source",
+  "normal_close_requested": true,
+  "force_required": true,
+  "at": "2026-09-21T10:39:40.0496294Z",
+  "evidence_last_write": "2026-09-21T10:39:00.5843375Z",
+  "data_root_bytes": 240344103.0,
+  "free_bytes": 365676269568
+}

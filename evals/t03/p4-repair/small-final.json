@@ -1,0 +1,83 @@
+{
+  "fixture": "contracts fixture(8), one history prepare/execute",
+  "synthetic": true,
+  "node": "v24.19.0",
+  "physical_nodes": 3912,
+  "counters": {
+    "page.logical_put": {
+      "count": 3777,
+      "bytes": 0,
+      "ms": 0
+    },
+    "io.get": {
+      "count": 8504,
+      "bytes": 0,
+      "ms": 63.54360000000856
+    },
+    "page.new": {
+      "count": 1562,
+      "bytes": 462921,
+      "ms": 0
+    },
+    "io.put": {
+      "count": 3914,
+      "bytes": 0,
+      "ms": 32.675900000007026
+    },
+    "page.existing": {
+      "count": 2215,
+      "bytes": 520033,
+      "ms": 0
+    },
+    "publish.directory": {
+      "count": 3,
+      "bytes": 0,
+      "ms": 543.9370999999999
+    },
+    "directory.page.logical_put": {
+      "count": 2802,
+      "bytes": 0,
+      "ms": 0
+    },
+    "directory.page.new": {
+      "count": 2720,
+      "bytes": 1019206,
+      "ms": 0
+    },
+    "directory.candidate": {
+      "count": 2720,
+      "bytes": 0,
+      "ms": 0
+    },
+    "directory.persisted": {
+      "count": 2349,
+      "bytes": 0,
+      "ms": 0
+    },
+    "io.flush": {
+      "count": 6,
+      "bytes": 0,
+      "ms": 0.01729999999975007
+    },
+    "operation.prepare": {
+      "count": 1,
+      "bytes": 0,
+      "ms": 1624.8121
+    },
+    "prepare.compile": {
+      "count": 1,
+      "bytes": 0,
+      "ms": 906.6496
+    },
+    "directory.page.existing": {
+      "count": 82,
+      "bytes": 24738,
+      "ms": 0
+    },
+    "operation.execute": {
+      "count": 1,
+      "bytes": 0,
+      "ms": 42.162500000000136
+    }
+  }
+}

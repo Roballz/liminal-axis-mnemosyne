@@ -1,0 +1,105 @@
+{
+  "baseline": "fc3264b",
+  "status": "implemented_unverified-native-1x-incomplete",
+  "native_1x": "elapsed-time safety stop; desktop interaction reported; not an uncontaminated performance baseline",
+  "batch_references": 1024,
+  "candidate_limits": {
+    "pages": 16384,
+    "bytes": 16777216
+  },
+  "estimate": {
+    "tests_and_harness": "400-650",
+    "implementation": "300-500"
+  },
+  "actual": {
+    "implementation_added": 136,
+    "tests_added": 181,
+    "harness_added": 83,
+    "deleted": 36
+  },
+  "regression": {
+    "tests": 333,
+    "original_preserved": 322,
+    "duration_ms": 77101.2322,
+    "passed": 333
+  },
+  "syntax_files": 63,
+  "compat": "old-to-new and new-to-old passed",
+  "native_fault_run": "20260921r3",
+  "native_resource_run": "20260921r4",
+  "node_1x": "passed",
+  "maintenance": "HOST_MAINTENANCE_UNSUPPORTED",
+  "mobile": "pending",
+  "source_hashes": [
+    {
+      "path": "packages/storage/native/p4-native-suite.mjs",
+      "sha256": "228c1967523f30369c7291abdfb26fad60386362b77374bc8627a66c5c95018a",
+      "lines": 133
+    },
+    {
+      "path": "packages/storage/native/p4-resource.mjs",
+      "sha256": "e5d3bec9079b7cae9a45030492dbda4c9cfca3a15fc2294aa3956f4729ab60f8",
+      "lines": 123
+    },
+    {
+      "path": "packages/storage/paged-coordinator.mjs",
+      "sha256": "264b91378346bb89790a99f14a743e2467a16aff7a80b799b0ead943a45caa02",
+      "lines": 238
+    },
+    {
+      "path": "packages/storage/paged-diagnostics.mjs",
+      "sha256": "e8a0b8aedabbd408e3c608a7e04dc03471064f59a6c33f874ac49008753bbf92",
+      "lines": 115
+    },
+    {
+      "path": "packages/storage/paged-directory.mjs",
+      "sha256": "b3adc40fe4a70a772012b46255ccb96bb42bfa144abcd91c52594b25db83e30d",
+      "lines": 30
+    },
+    {
+      "path": "packages/storage/paged-transport.mjs",
+      "sha256": "0119b1b44dc27f1288133b20caab6bdedd61408c0597a6b0ec9ef674318bdc48",
+      "lines": 213
+    },
+    {
+      "path": "packages/storage/paged-tt-adapter.mjs",
+      "sha256": "bacadc0062254e4022628f345d450993b12d0751d4e0317c3b5a2e039d7ba723",
+      "lines": 84
+    },
+    {
+      "path": "packages/storage/pages.mjs",
+      "sha256": "61facf7a555d95e4df38de15598be20a953a744af65b7a1cab2bd417f55b1ba5",
+      "lines": 271
+    },
+    {
+      "path": "packages/storage/recall-index.mjs",
+      "sha256": "a25dd5bfd4f028c043fc5109fc97f5758f68159131331b1b03ade459e6c05fde",
+      "lines": 206
+    },
+    {
+      "path": "packages/storage/tests/p4-p5.test.mjs",
+      "sha256": "7d3cfdde89dbfc56342c40af0993816fb2b51319fb01b5f7e45d57424bf7af81",
+      "lines": 150
+    },
+    {
+      "path": "packages/storage/resource-meter.mjs",
+      "sha256": "2c7fb46545d1cfc3ccb41bfaca6dd4d28107628f4a9706181c94f3860121d176",
+      "lines": 25
+    },
+    {
+      "path": "packages/storage/tests/p4-review.test.mjs",
+      "sha256": "cbbff1828ec00e6956f520ddb6e17a24a21d29c1b416aefe90dd5fc1f76a635b",
+      "lines": 179
+    },
+    {
+      "path": "packages/storage/native/p4-small.mjs",
+      "sha256": "2b7c39fdad14250e8678045b5c8101daaafed9eea091d865652a1543cfc7161f",
+      "lines": 25
+    },
+    {
+      "path": "packages/storage/native/p4-compat.mjs",
+      "sha256": "f1d5e068961a8a18a22bb5fafaa52e14bd0d01b110d5a8bae5ca1ee6b325f090",
+      "lines": 40
+    }
+  ]
+}

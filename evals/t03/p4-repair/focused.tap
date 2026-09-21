@@ -1,0 +1,256 @@
+TAP version 13
+# Subtest: recall index failure/loss is rebuildable and never changes confirmed storage
+ok 1 - recall index failure/loss is rebuildable and never changes confirmed storage
+  ---
+  duration_ms: 5429.9159
+  type: 'test'
+  ...
+# Subtest: diagnostics expose checkpoint/head/view/index state without write methods
+ok 2 - diagnostics expose checkpoint/head/view/index state without write methods
+  ---
+  duration_ms: 10817.3366
+  type: 'test'
+  ...
+# Subtest: inventory separates business, active, unreachable and directory pages across restore
+ok 3 - inventory separates business, active, unreachable and directory pages across restore
+  ---
+  duration_ms: 14429.9635
+  type: 'test'
+  ...
+# Subtest: recall rejects a view change after accepting the first real coordinator candidate
+ok 4 - recall rejects a view change after accepting the first real coordinator candidate
+  ---
+  duration_ms: 4373.7116
+  type: 'test'
+  ...
+# Subtest: index rebuild does not report ready after a concurrent view publication
+ok 5 - index rebuild does not report ready after a concurrent view publication
+  ---
+  duration_ms: 2991.8677
+  type: 'test'
+  ...
+# Subtest: backup compares the exported snapshot when the source advances during restore
+ok 6 - backup compares the exported snapshot when the source advances during restore
+  ---
+  duration_ms: 7365.1345
+  type: 'test'
+  ...
+# Subtest: backup rejects a wrong checkpoint even if target audit and branch are unchanged
+ok 7 - backup rejects a wrong checkpoint even if target audit and branch are unchanged
+  ---
+  duration_ms: 5022.9058
+  type: 'test'
+  ...
+# Subtest: backup captures a publication before export and permits a different target library
+ok 8 - backup captures a publication before export and permits a different target library
+  ---
+  duration_ms: 9285.5274
+  type: 'test'
+  ...
+# Subtest: backup preserves the verification error when target close also fails
+ok 9 - backup preserves the verification error when target close also fails
+  ---
+  duration_ms: 4742.8176
+  type: 'test'
+  ...
+# Subtest: directory batch IO failure preserves committed root: before
+ok 10 - directory batch IO failure preserves committed root: before
+  ---
+  duration_ms: 1375.0489
+  type: 'test'
+  ...
+# Subtest: directory batch IO failure preserves committed root: after
+ok 11 - directory batch IO failure preserves committed root: after
+  ---
+  duration_ms: 1353.2936
+  type: 'test'
+  ...
+# Subtest: bounded map batch preserves old roots and AVL invariants across overlapping batches
+ok 12 - bounded map batch preserves old roots and AVL invariants across overlapping batches
+  ---
+  duration_ms: 832.0477
+  type: 'test'
+  ...
+# Subtest: paged domain integrates delta history, edit, fixed fork, memory graph, correction, and binding
+ok 13 - paged domain integrates delta history, edit, fixed fork, memory graph, correction, and binding
+  ---
+  duration_ms: 12046.6061
+  type: 'test'
+  ...
+# Subtest: paged checkpoint selection rejects a non-checkpoint advance and preserves the oracle state
+ok 14 - paged checkpoint selection rejects a non-checkpoint advance and preserves the oracle state
+  ---
+  duration_ms: 2513.48
+  type: 'test'
+  ...
+# Subtest: paged recovery retains operation and IDs at paged-prepare/before
+ok 15 - paged recovery retains operation and IDs at paged-prepare/before
+  ---
+  duration_ms: 3878.7583
+  type: 'test'
+  ...
+# Subtest: paged recovery retains operation and IDs at paged-prepare/after
+ok 16 - paged recovery retains operation and IDs at paged-prepare/after
+  ---
+  duration_ms: 3819.6666
+  type: 'test'
+  ...
+# Subtest: paged recovery retains operation and IDs at paged-materials/before
+ok 17 - paged recovery retains operation and IDs at paged-materials/before
+  ---
+  duration_ms: 4366.8191
+  type: 'test'
+  ...
+# Subtest: paged recovery retains operation and IDs at paged-materials/after
+ok 18 - paged recovery retains operation and IDs at paged-materials/after
+  ---
+  duration_ms: 3759.01
+  type: 'test'
+  ...
+# Subtest: paged recovery retains operation and IDs at paged-publish/before
+ok 19 - paged recovery retains operation and IDs at paged-publish/before
+  ---
+  duration_ms: 2545.8743
+  type: 'test'
+  ...
+# Subtest: paged recovery retains operation and IDs at paged-publish/after
+ok 20 - paged recovery retains operation and IDs at paged-publish/after
+  ---
+  duration_ms: 2614.352
+  type: 'test'
+  ...
+# Subtest: paged recovery retains operation and IDs at paged-ack/before
+ok 21 - paged recovery retains operation and IDs at paged-ack/before
+  ---
+  duration_ms: 2390.7125
+  type: 'test'
+  ...
+# Subtest: paged recovery retains operation and IDs at paged-ack/after
+ok 22 - paged recovery retains operation and IDs at paged-ack/after
+  ---
+  duration_ms: 2288.7776
+  type: 'test'
+  ...
+# Subtest: paged recovery reads the checkpoint instead of replaying every durable operation
+ok 23 - paged recovery reads the checkpoint instead of replaying every durable operation
+  ---
+  duration_ms: 36593.6111
+  type: 'test'
+  ...
+# Subtest: paged export remains a checked directory artifact and exact reopen preserves logical state
+ok 24 - paged export remains a checked directory artifact and exact reopen preserves logical state
+  ---
+  duration_ms: 1482.275
+  type: 'test'
+  ...
+# Subtest: mapPrefix returns a balanced immutable prefix for fixed fork pruning
+ok 25 - mapPrefix returns a balanced immutable prefix for fixed fork pruning
+  ---
+  duration_ms: 8258.4825
+  type: 'test'
+  ...
+# Subtest: paged current dependencies reject a selection cycle and preserve the last confirmed graph
+ok 26 - paged current dependencies reject a selection cycle and preserve the last confirmed graph
+  ---
+  duration_ms: 3001.6878
+  type: 'test'
+  ...
+# Subtest: paged derived-only retains same-branch prefix semantics after append, cutoff, fork and edit
+ok 27 - paged derived-only retains same-branch prefix semantics after append, cutoff, fork and edit
+  ---
+  duration_ms: 4967.0335
+  type: 'test'
+  ...
+# Subtest: paged local insert/delete/reorder/restore and no-op import preserve oracle transitions
+ok 28 - paged local insert/delete/reorder/restore and no-op import preserve oracle transitions
+  ---
+  duration_ms: 5569.1144
+  type: 'test'
+  ...
+# Subtest: streamed canonical hash agrees with the original runtime across padding and UTF-8 boundaries
+ok 29 - streamed canonical hash agrees with the original runtime across padding and UTF-8 boundaries
+  ---
+  duration_ms: 45.5933
+  type: 'test'
+  ...
+# Subtest: paged restore paged-restore-stage/before never activates a partial target
+ok 30 - paged restore paged-restore-stage/before never activates a partial target
+  ---
+  duration_ms: 115.9936
+  type: 'test'
+  ...
+# Subtest: paged restore paged-restore-stage/after never activates a partial target
+ok 31 - paged restore paged-restore-stage/after never activates a partial target
+  ---
+  duration_ms: 0.4777
+  type: 'test'
+  ...
+# Subtest: paged restore paged-restore-materials/before never activates a partial target
+ok 32 - paged restore paged-restore-materials/before never activates a partial target
+  ---
+  duration_ms: 327.9455
+  type: 'test'
+  ...
+# Subtest: paged restore paged-restore-materials/after never activates a partial target
+ok 33 - paged restore paged-restore-materials/after never activates a partial target
+  ---
+  duration_ms: 262.6247
+  type: 'test'
+  ...
+# Subtest: paged restore paged-restore-audit/before never activates a partial target
+ok 34 - paged restore paged-restore-audit/before never activates a partial target
+  ---
+  duration_ms: 281.7624
+  type: 'test'
+  ...
+# Subtest: paged restore paged-restore-audit/after never activates a partial target
+ok 35 - paged restore paged-restore-audit/after never activates a partial target
+  ---
+  duration_ms: 354.1638
+  type: 'test'
+  ...
+# Subtest: paged restore paged-restore-activate/before never activates a partial target
+ok 36 - paged restore paged-restore-activate/before never activates a partial target
+  ---
+  duration_ms: 315.3673
+  type: 'test'
+  ...
+# Subtest: paged restore paged-restore-activate/after never activates a partial target
+ok 37 - paged restore paged-restore-activate/after never activates a partial target
+  ---
+  duration_ms: 383.9025
+  type: 'test'
+  ...
+# Subtest: paged restore rejects checksum-valid R5 and compiled-result contradictions, preserves staging
+ok 38 - paged restore rejects checksum-valid R5 and compiled-result contradictions, preserves staging
+  ---
+  duration_ms: 8558.8862
+  type: 'test'
+  ...
+# Subtest: missing referenced page is rejected before semantic replay can recreate it
+ok 39 - missing referenced page is rejected before semantic replay can recreate it
+  ---
+  duration_ms: 209.7717
+  type: 'test'
+  ...
+# Subtest: restore refuses an occupied target and old intent readers reject the new paged identity
+ok 40 - restore refuses an occupied target and old intent readers reject the new paged identity
+  ---
+  duration_ms: 304.0348
+  type: 'test'
+  ...
+# Subtest: normal paged recovery rejects a missing exact directory and never guesses an empty library
+ok 41 - normal paged recovery rejects a missing exact directory and never guesses an empty library
+  ---
+  duration_ms: 36.91
+  type: 'test'
+  ...
+1..41
+# tests 41
+# suites 0
+# pass 41
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 100293.3363

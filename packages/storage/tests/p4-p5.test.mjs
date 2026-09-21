@@ -95,7 +95,8 @@ test('recall index failure/loss is rebuildable and never changes confirmed stora
       { ...candidate, memory_revision_id: archived.memory.memory_revision_id,
         fingerprint: sha256(canonicalize(archived.memory)) }, candidate,
     ]);
-  assert.deepEqual(rejected.map(item => item.memory_revision_id), [selected.memory.memory_revision_id]);
+  assert.equal(rejected.status, 'ready');
+  assert.deepEqual(rejected.results.map(item => item.memory_revision_id), [selected.memory.memory_revision_id]);
 
   await append(context);
   assert.deepEqual(await rebuilt.search(context.handle, context.f.branch,

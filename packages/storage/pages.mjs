@@ -21,11 +21,13 @@ export class Pages {
     if (this.#cache.size > PAGE_LIMITS.cache) this.#cache.delete(this.#cache.keys().next().value);
   }
   async put(body) {
+    this.#io.metric?.('page.logical_put');
     const page = { format: PAGE_FORMAT, body }, hash = sha256(canonicalize(page));
     const ref = { hash, slot: this.#address(hash) };
     check(reference(ref), 'RESOURCE_LIMIT', 'Page address outside exact integer range');
     check(bytes(page) <= PAGE_LIMITS.bytes, 'RESOURCE_LIMIT', 'Page exceeds byte limit');
     const old = await this.#io.get(ref.slot);
+    this.#io.metric?.(old === null ? 'page.new' : 'page.existing', 1, bytes(page));
     check(old === null || equal(old, page), 'ID_COLLISION', 'Physical address collision; existing page preserved');
     if (old === null) {
       await this.#io.point?.('page-write', 'before');
@@ -101,6 +103,34 @@ export class Pages {
     if (key === n.key) return equal(n.value, value) ? root : this.#node(key, value, n.left, n.right);
     return key < n.key ? this.#balance(n.key, n.value, await this.mapSet(n.left, key, value, depth + 1), n.right)
       : this.#balance(n.key, n.value, n.left, await this.mapSet(n.right, key, value, depth + 1));
+  }
+  async mapSetMany(root, entries) {
+    check(Array.isArray(entries) && entries.length <= 1024, 'RESOURCE_LIMIT', 'Map batch limit');
+    const sorted = [...entries].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    for (let i = 0; i < sorted.length; i++) {
+      const [key, value] = sorted[i];
+      check(typeof key === 'string' && key.isWellFormed() && bytes(key) <= PAGE_LIMITS.keyBytes && reference(value),
+        'RESOURCE_LIMIT', 'Map batch key/value limit');
+      check(i === 0 || sorted[i - 1][0] !== key, 'INVALID_SCHEMA', 'Duplicate batch key');
+    }
+    const merge = async (ref, lo, hi, depth) => {
+      if (lo === hi) return ref;
+      check(depth < PAGE_LIMITS.depth, 'RESOURCE_LIMIT', 'Map batch depth');
+      if (ref === null) {
+        const mid = (lo + hi) >>> 1, [key, value] = sorted[mid];
+        return this.#node(key, value, await merge(null, lo, mid, depth + 1),
+          await merge(null, mid + 1, hi, depth + 1));
+      }
+      const n = await this.#map(ref);
+      let a = lo, b = hi;
+      while (a < b) { const m = (a + b) >>> 1; if (sorted[m][0] < n.key) a = m + 1; else b = m; }
+      const hit = a < hi && sorted[a][0] === n.key;
+      const left = await merge(n.left, lo, a, depth + 1), right = await merge(n.right, a + Number(hit), hi, depth + 1);
+      const value = hit ? sorted[a][1] : n.value;
+      if (equal(left, n.left) && equal(right, n.right) && equal(value, n.value)) return ref;
+      return this.#joinMap(n.key, value, left, right);
+    };
+    return merge(root, 0, sorted.length, 0);
   }
   async #joinMap(key, value, left, right, depth = 0) {
     check(depth < PAGE_LIMITS.depth, 'RESOURCE_LIMIT', 'Map join depth');

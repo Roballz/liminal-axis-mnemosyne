@@ -1,0 +1,5 @@
+{
+  "pid": 14140,
+  "forced_cleanup": true,
+  "reason": "normal close left isolated process alive; invalid collector run, not fault evidence"
+}

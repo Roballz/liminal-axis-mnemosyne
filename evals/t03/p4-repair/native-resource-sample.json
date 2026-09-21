@@ -1,0 +1,48 @@
+{
+  "at": "2026-09-21T10:09:52.5872949Z",
+  "run": "20260921r4",
+  "processes": [
+    {
+      "Id": 4040,
+      "ProcessName": "msedgewebview2",
+      "WorkingSet64": 23494656
+    },
+    {
+      "Id": 6444,
+      "ProcessName": "msedgewebview2",
+      "WorkingSet64": 19087360
+    },
+    {
+      "Id": 7236,
+      "ProcessName": "msedgewebview2",
+      "WorkingSet64": 172441600
+    },
+    {
+      "Id": 12968,
+      "ProcessName": "msedgewebview2",
+      "WorkingSet64": 46108672
+    },
+    {
+      "Id": 13200,
+      "ProcessName": "msedgewebview2",
+      "WorkingSet64": 11210752
+    },
+    {
+      "Id": 13352,
+      "ProcessName": "msedgewebview2",
+      "WorkingSet64": 240427008
+    },
+    {
+      "Id": 16872,
+      "ProcessName": "msedgewebview2",
+      "WorkingSet64": 89317376
+    },
+    {
+      "Id": 12504,
+      "ProcessName": "tauritavern",
+      "WorkingSet64": 156925952
+    }
+  ],
+  "working_set_sum": 759013376.0,
+  "free_bytes": 365750181888
+}

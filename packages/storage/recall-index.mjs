@@ -107,11 +107,12 @@ function markerScore(query, candidate) {
   return found / new Set([...query, ...candidate]).size;
 }
 
-export async function filterRecallCandidates(handle, scope, candidates) {
+export async function filterRecallCandidates(handle, scope, candidates, { withStatus = true } = {}) {
   check(Array.isArray(candidates) && candidates.length <= RECALL_INDEX_LIMITS.candidates,
     'RESOURCE_LIMIT', 'Recall candidate limit');
   const source = await currentSource(handle, scope.branch_id);
-  if (scope.story_id !== source.story_id || !sameSource(source, scope.source)) return [];
+  const finish = (status, results) => withStatus ? { status, results, source } : results;
+  if (scope.story_id !== source.story_id || !sameSource(source, scope.source)) return finish('behind', []);
   const view = await handle.read('views', scope.branch_id), accepted = [], seen = new Set();
   for (const candidate of candidates) {
     if (!candidate || seen.has(candidate.memory_revision_id) || candidate.story_id !== source.story_id ||
@@ -125,7 +126,8 @@ export async function filterRecallCandidates(handle, scope, candidates) {
     accepted.push({ memory_revision_id: memory.memory_revision_id, kind: memory.kind, content: memory.content,
       index_score: candidate.index_score, rerank_score: null });
   }
-  return accepted;
+  if (!sameSource(source, await currentSource(handle, scope.branch_id))) return finish('behind', []);
+  return finish('ready', accepted);
 }
 
 export class RecallIndex {
@@ -172,9 +174,10 @@ export class RecallIndex {
           view_version: source.view_version, fingerprint: memoryFingerprint(memory),
           markers: markers(await tokenize(clone(memory))), vector: vector(await vectorize(clone(memory))) });
       }
+      if (!sameSource(source, await currentSource(handle, branchId))) return { ...this.describe(), status: 'behind' };
       await this.#write({ ...building, status: 'ready', entries,
         progress: { scanned, indexed: entries.length } });
-      return this.describe();
+      return this.status(handle, branchId);
     } catch (error) {
       await this.#write({ ...building, status: 'failed', progress: { scanned, indexed: 0 },
         error: { code: error.code ?? 'INDEX_BUILD_FAILED', message: String(error.message) } });
@@ -196,8 +199,8 @@ export class RecallIndex {
     const candidates = this.#root.entries.map(entry => ({ ...entry,
       index_score: (markerScore(queryMarkers, entry.markers) + cosine(queryVector, entry.vector)) / 2 }))
       .sort((a, b) => b.index_score - a.index_score || a.memory_revision_id.localeCompare(b.memory_revision_id));
-    const results = await filterRecallCandidates(handle,
-      { story_id: state.source.story_id, branch_id: branchId, source: state.source }, candidates);
-    return { status: 'ready', results: results.slice(0, limit) };
+    const filtered = await filterRecallCandidates(handle,
+      { story_id: state.source.story_id, branch_id: branchId, source: state.source }, candidates, { withStatus: true });
+    return { ...filtered, results: filtered.results.slice(0, limit) };
   }
 }

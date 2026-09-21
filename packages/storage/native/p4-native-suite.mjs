@@ -3,6 +3,7 @@ import { RecallIndex, artificialVector } from '../recall-index.mjs';
 import { describePagedStore } from '../paged-diagnostics.mjs';
 import { exercisePagedScale } from '../p4-workload.mjs';
 import { equal } from '../../contracts/primitives.mjs';
+import { resourceMeter } from '../resource-meter.mjs';
 
 const options = { dim: 2, syncMode: 'full', autoBuildQuiver: false };
 const limit = { elapsed_ms: 30 * 60 * 1000, physical_nodes: 1000000, package_bytes: 512 * 1024 * 1024 };
@@ -45,15 +46,16 @@ export async function runP4Native(api, { run }, send) {
     return value;
   };
 
-  const sourceOwner = await openPagedTestStore(api, sourceNamespace, { create: true });
-  let source = sourceOwner.handle(), workloadStarted = performance.now();
+  const sourceMeter = resourceMeter(), targetMeter = resourceMeter();
+  const sourceOwner = await openPagedTestStore(api, sourceNamespace, { create: true, meter: sourceMeter });
+  let source = sourceMeter.handle(sourceOwner.handle()), workloadStarted = performance.now();
   await send({ type: 'progress', phase: 'p4-resource', run, stage: 'started', elapsed_ms: 0,
     source_namespace: sourceNamespace });
   const workload = await exercisePagedScale(source, { scale: 1, onProgress: async state => {
     if (state.operations % 4 === 0) {
       const value = await sample(state.phase + '-' + state.operations, source);
       await send({ type: 'progress', phase: 'p4-resource', run, stage: state.phase,
-        completed: state.completed, total: state.total, operations: state.operations, ...value });
+        completed: state.completed, total: state.total, operations: state.operations, counters: sourceMeter.snapshot(), ...value });
     }
   } });
   const workloadMs = performance.now() - workloadStarted;
@@ -75,7 +77,7 @@ export async function runP4Native(api, { run }, send) {
 
   const beforeClose = await source.diagnostics(workload.branch_id);
   await sourceOwner.close(); const reopenStarted = performance.now();
-  const reopenedOwner = await openPagedTestStore(api, sourceNamespace); source = reopenedOwner.handle();
+  const reopenedOwner = await openPagedTestStore(api, sourceNamespace, { meter: sourceMeter }); source = reopenedOwner.handle();
   const coldReopen = { elapsed_ms: performance.now() - reopenStarted,
     diagnostic: await source.diagnostics(workload.branch_id) };
   assert(coldReopen.diagnostic.operation_count === beforeClose.operation_count, 'Native cold reopen count');
@@ -91,7 +93,7 @@ export async function runP4Native(api, { run }, send) {
     }
   }
   const restoreStarted = performance.now();
-  const targetOwner = await openPagedTestStore(api, targetNamespace, { restore: countedExport() });
+  const targetOwner = await openPagedTestStore(api, targetNamespace, { restore: countedExport(), meter: targetMeter });
   const restoreMs = performance.now() - restoreStarted, target = targetOwner.handle();
   await send({ type: 'progress', phase: 'p4-resource', run, stage: 'restore-complete',
     elapsed_ms: performance.now() - started, restore_ms: restoreMs, backup_bytes: backupBytes,
@@ -103,6 +105,7 @@ export async function runP4Native(api, { run }, send) {
   assert((await target.read('memories', workload.memory.memory_revision_id)).content === workload.memory.content,
     'Native restored memory mismatch');
   const targetDiagnostic = await target.diagnostics(workload.branch_id);
+  await sample('restore-verified', target);
   assert(targetDiagnostic.operation_count === coldReopen.diagnostic.operation_count, 'Native restore operation count');
   const diagnostic = await describePagedStore(source, { branchId: workload.branch_id, index: reopenedIndex });
   let gate; try { requireExternalMaintenanceFence(); } catch (error) { gate = error.code; }
@@ -120,6 +123,7 @@ export async function runP4Native(api, { run }, send) {
     timings: { workload_ms: workloadMs, restore_ms: restoreMs, cold_reopen_ms: coldReopen.elapsed_ms,
       operation_ms: workload.metrics, main_thread_lag_max_ms: maxLag },
     provider: { source_physical_nodes: coldReopen.diagnostic.physical_nodes,
+      source_counters: sourceMeter.snapshot(), restored_counters: targetMeter.snapshot(),
       restored_physical_nodes: targetDiagnostic.physical_nodes, index_physical_nodes: indexStats.nodeCount },
     backup: { bytes: backupBytes, records: backupRecords }, progress, heap,
     correctness: { ranges: true, confirmed_results: true, selected_memory: true,

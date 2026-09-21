@@ -1,0 +1,472 @@
+{
+  "phase": "p4-resource",
+  "run": "20260921r4",
+  "events": [
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921r4",
+      "stage": "started",
+      "elapsed_ms": 0,
+      "source_namespace": "mnemo-t03-paged-20260921r4-p4-source"
+    },
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921r4",
+      "stage": "growth",
+      "completed": 4,
+      "total": 32,
+      "operations": 4,
+      "counters": {
+        "page.logical_put": {
+          "count": 9422,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 21328,
+          "bytes": 0,
+          "ms": 33997.39999970049
+        },
+        "page.new": {
+          "count": 2535,
+          "bytes": 750651,
+          "ms": 0
+        },
+        "io.put": {
+          "count": 7652,
+          "bytes": 0,
+          "ms": 84194.29999990761
+        },
+        "page.existing": {
+          "count": 6887,
+          "bytes": 1961768,
+          "ms": 0
+        },
+        "publish.directory": {
+          "count": 9,
+          "bytes": 0,
+          "ms": 77845.00000000373
+        },
+        "directory.page.logical_put": {
+          "count": 6985,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 6652,
+          "bytes": 2551480,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 6652,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 5108,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.flush": {
+          "count": 18,
+          "bytes": 0,
+          "ms": 1889.0000000037253
+        },
+        "operation.prepare": {
+          "count": 4,
+          "bytes": 0,
+          "ms": 119435.20000000298
+        },
+        "prepare.compile": {
+          "count": 4,
+          "bytes": 0,
+          "ms": 35628
+        },
+        "directory.page.existing": {
+          "count": 333,
+          "bytes": 97213,
+          "ms": 0
+        },
+        "operation.execute": {
+          "count": 4,
+          "bytes": 0,
+          "ms": 3313.39999999851
+        }
+      },
+      "label": "growth-4",
+      "elapsed_ms": 124728.5,
+      "physical_nodes": 7644
+    },
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921r4",
+      "stage": "growth",
+      "completed": 8,
+      "total": 32,
+      "operations": 8,
+      "counters": {
+        "page.logical_put": {
+          "count": 19439,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 57419,
+          "bytes": 0,
+          "ms": 92184.49999999627
+        },
+        "page.new": {
+          "count": 5456,
+          "bytes": 1657346,
+          "ms": 0
+        },
+        "io.put": {
+          "count": 20172,
+          "bytes": 0,
+          "ms": 234907.7999999188
+        },
+        "page.existing": {
+          "count": 13983,
+          "bytes": 3968297,
+          "ms": 0
+        },
+        "publish.directory": {
+          "count": 17,
+          "bytes": 0,
+          "ms": 242886.80000000447
+        },
+        "directory.page.logical_put": {
+          "count": 20282,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 19081,
+          "bytes": 7460362,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 19081,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 14699,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.flush": {
+          "count": 34,
+          "bytes": 0,
+          "ms": 5208.199999999255
+        },
+        "operation.prepare": {
+          "count": 8,
+          "bytes": 0,
+          "ms": 332583.00000000745
+        },
+        "prepare.compile": {
+          "count": 8,
+          "bytes": 0,
+          "ms": 77743.90000000224
+        },
+        "directory.page.existing": {
+          "count": 1201,
+          "bytes": 342131,
+          "ms": 0
+        },
+        "operation.execute": {
+          "count": 8,
+          "bytes": 0,
+          "ms": 9929.999999996275
+        }
+      },
+      "label": "growth-8",
+      "elapsed_ms": 344508.69999999925,
+      "physical_nodes": 20156
+    },
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921r4",
+      "stage": "growth",
+      "completed": 12,
+      "total": 32,
+      "operations": 12,
+      "counters": {
+        "page.logical_put": {
+          "count": 29903,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 103957,
+          "bytes": 0,
+          "ms": 166066.29999937862
+        },
+        "page.new": {
+          "count": 8691,
+          "bytes": 2682321,
+          "ms": 0
+        },
+        "io.put": {
+          "count": 36161,
+          "bytes": 0,
+          "ms": 434952.6999998018
+        },
+        "page.existing": {
+          "count": 21212,
+          "bytes": 6006851,
+          "ms": 0
+        },
+        "publish.directory": {
+          "count": 25,
+          "bytes": 0,
+          "ms": 468926.8000000119
+        },
+        "directory.page.logical_put": {
+          "count": 37605,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 35232,
+          "bytes": 13930981,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 35232,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 27445,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.flush": {
+          "count": 50,
+          "bytes": 0,
+          "ms": 10367.000000003725
+        },
+        "operation.prepare": {
+          "count": 12,
+          "bytes": 0,
+          "ms": 612280.0000000075
+        },
+        "prepare.compile": {
+          "count": 12,
+          "bytes": 0,
+          "ms": 124620.5
+        },
+        "directory.page.existing": {
+          "count": 2373,
+          "bytes": 671705,
+          "ms": 0
+        },
+        "operation.execute": {
+          "count": 12,
+          "bytes": 0,
+          "ms": 18768.999999996275
+        }
+      },
+      "label": "growth-12",
+      "elapsed_ms": 633063,
+      "physical_nodes": 36137
+    },
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921r4",
+      "stage": "growth",
+      "completed": 16,
+      "total": 32,
+      "operations": 16,
+      "counters": {
+        "page.logical_put": {
+          "count": 40454,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 156508,
+          "bytes": 0,
+          "ms": 249481.29999915138
+        },
+        "page.new": {
+          "count": 11946,
+          "bytes": 3721218,
+          "ms": 0
+        },
+        "io.put": {
+          "count": 54112,
+          "bytes": 0,
+          "ms": 660742.1999997981
+        },
+        "page.existing": {
+          "count": 28508,
+          "bytes": 8063675,
+          "ms": 0
+        },
+        "publish.directory": {
+          "count": 33,
+          "bytes": 0,
+          "ms": 727729.1000000127
+        },
+        "directory.page.logical_put": {
+          "count": 57051,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 53444,
+          "bytes": 21309963,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 53444,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 42133,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.flush": {
+          "count": 66,
+          "bytes": 0,
+          "ms": 17248.300000000745
+        },
+        "operation.prepare": {
+          "count": 16,
+          "bytes": 0,
+          "ms": 929088.6000000089
+        },
+        "prepare.compile": {
+          "count": 16,
+          "bytes": 0,
+          "ms": 175080.5
+        },
+        "directory.page.existing": {
+          "count": 3607,
+          "bytes": 1017702,
+          "ms": 0
+        },
+        "operation.execute": {
+          "count": 16,
+          "bytes": 0,
+          "ms": 28702.49999999255
+        }
+      },
+      "label": "growth-16",
+      "elapsed_ms": 959822.3999999985,
+      "physical_nodes": 54080
+    },
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921r4",
+      "stage": "growth",
+      "completed": 20,
+      "total": 32,
+      "operations": 20,
+      "counters": {
+        "page.logical_put": {
+          "count": 51414,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 217467,
+          "bytes": 0,
+          "ms": 345367.59999915585
+        },
+        "page.new": {
+          "count": 15528,
+          "bytes": 4876089,
+          "ms": 0
+        },
+        "io.put": {
+          "count": 74992,
+          "bytes": 0,
+          "ms": 932616.8999997377
+        },
+        "page.existing": {
+          "count": 35886,
+          "bytes": 10134316,
+          "ms": 0
+        },
+        "publish.directory": {
+          "count": 41,
+          "bytes": 0,
+          "ms": 878302.0000000149
+        },
+        "directory.page.logical_put": {
+          "count": 79675,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 74648,
+          "bytes": 29947555,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 74648,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 59423,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.flush": {
+          "count": 82,
+          "bytes": 0,
+          "ms": 26363.00000000745
+        },
+        "operation.prepare": {
+          "count": 20,
+          "bytes": 0,
+          "ms": 1305789.300000012
+        },
+        "prepare.compile": {
+          "count": 20,
+          "bytes": 0,
+          "ms": 245988.19999999553
+        },
+        "directory.page.existing": {
+          "count": 5027,
+          "bytes": 1413167,
+          "ms": 0
+        },
+        "operation.execute": {
+          "count": 20,
+          "bytes": 0,
+          "ms": 41105.799999993294
+        }
+      },
+      "label": "growth-20",
+      "elapsed_ms": 1348946.3999999985,
+      "physical_nodes": 74952
+    },
+    {
+      "type": "error",
+      "code": null,
+      "message": "P4 native elapsed-time safety stop",
+      "cause": null,
+      "stack": [
+        "Error: P4 native elapsed-time safety stop",
+        "    at assert (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:10:63)",
+        "    at sample (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:44:5)",
+        "    at async onProgress (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:56:21)",
+        "    at async exercisePagedScale (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/p4-workload.mjs:39:5)"
+      ]
+    }
+  ]
+}

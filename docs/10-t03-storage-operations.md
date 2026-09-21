@@ -46,7 +46,7 @@ collector收到`done`后才执行：
 
 ## 4. 备份与空目标恢复验证
 
-产品代码只使用分页 `handle.export()` 的固定目录流；标准v2小包不是分页辅助账本的完整替代。验证函数为：
+分页 `handle.export()` 提供固定目录流；验证器使用 `handle.exportSnapshot(branchId)` 在一次coordinator队列边界同时固定诊断与导出流。标准v2小包不是分页辅助账本的完整替代。验证函数为：
 
 ```js
 await verifyPagedBackupRestore(sourceHandle, async stream => {
@@ -54,7 +54,7 @@ await verifyPagedBackupRestore(sourceHandle, async stream => {
 }, { branchId });
 ```
 
-它使用只读source facade，统计bytes/records，只允许调用方提供的空目标恢复入口，并核对operation数量、Branch状态和完整audit。目标验证后关闭；源库不得发生变化。恢复失败保留staging目标和源库，不重试到同一非空目标。
+它使用只读source facade，统计bytes/records，核对固定导出快照与目标的checkpoint、operation数量及Branch状态，执行目标audit并确认目标期间未改变。源库在捕获快照后可以正常前进，不会因此误报备份损坏；目标新library_id合法。目标finally关闭，关闭错误不能覆盖核验错误。恢复失败保留staging目标和源库，不重试到同一非空目标。
 
 完整分页包仍受1GiB、100万页、单行1MiB等09协议限制；P5合成命令不是P4百万字符性能替代。
 

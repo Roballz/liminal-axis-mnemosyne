@@ -21,10 +21,24 @@ export function checkRoot(root) {
   return root;
 }
 export class TrackedPages extends Pages {
-  constructor(io,directory=null) { super(io); this.directory=directory; this.catalog=new BufferedDirectory(io); }
+  constructor(io,directory=null) { super(io); this.directory=directory; this.catalog=new BufferedDirectory(io); this.registrations=new Map(); this.registered=new Map(); }
+  async finishDirectory() {
+    if(this.registrations.size) {
+      this.directory=await this.catalog.mapSetMany(this.directory,[...this.registrations]);
+      await this.catalog.finish(this.directory);
+      for(const [key,value] of this.registrations) {
+        this.registered.delete(key); this.registered.set(key,value);
+        if(this.registered.size>512) this.registered.delete(this.registered.keys().next().value);
+      }
+      this.registrations.clear();
+    }
+  }
   async put(body) {
     const ref=await super.put(body);
-    this.directory=await this.catalog.mapSet(this.directory,ref.hash,ref); await this.catalog.checkpoint(this.directory); return ref;
+    if(this.registered.has(ref.hash)) return ref;
+    this.registrations.set(ref.hash,ref);
+    if(this.registrations.size===1024) await this.finishDirectory();
+    return ref;
   }
 }
 export async function compilePaged(pages,root,input,replay=null) {
@@ -64,8 +78,10 @@ export class PagedCoordinator {
   #queue(fn) { const work=this.#tail.then(fn); this.#tail=work.catch(()=>{}); return work; }
   #alive() { check(!this.#closed,'OWNER_CLOSED','Coordinator permanently closed'); }
   async #point(label,fn) { await this.#io.point?.(label,'before'); const r=await fn(); await this.#io.point?.(label,'after'); return r; }
+  #measure(label,fn) { return this.#io.measure ? this.#io.measure(label,fn) : fn(); }
   async #publish(control,label='paged-publish') {
     const ref=await this.#pages.put(control);
+    await this.#measure('publish.directory',()=>this.#pages.finishDirectory());
     const root=sealRoot({format:PAGED_FORMAT,library_id:this.#root.library_id,status:'active',control:ref,directory:this.#pages.directory});
     await this.#pages.catalog.finish(this.#pages.directory);
     await this.#point('paged-materials',()=>this.#io.flush());
@@ -114,7 +130,7 @@ export class PagedCoordinator {
     if(existing) { check(equal(existing.input,input),'OPERATION_CONFLICT','Operation payload changed'); return existing; }
     check(this.#control.pending===null,'PENDING_OPERATION','Resolve prepared request first');
     let compiled;
-    try { compiled=await compilePaged(this.#pages,this.#control.domain,input); }
+    try { compiled=await this.#measure('prepare.compile',()=>compilePaged(this.#pages,this.#control.domain,input)); }
     catch(cause) {
       if(['HEAD_CONFLICT','VERSION_CONFLICT','INVALID_SCHEMA','INVALID_TRANSITION','NOT_READY','UNSUPPORTED','ID_COLLISION','RESOURCE_LIMIT'].includes(cause.code)) {
         // Compilation only wrote immutable, unpublished candidates. Discard its
@@ -176,6 +192,11 @@ export class PagedCoordinator {
       read:(table,key)=>run(()=>new PagedDomain(this.#pages,this.#control.domain).logical(table,key)),
       range:(snapshot,start=0,count=16)=>run(async()=>{check(Number.isSafeInteger(count)&&count>=0&&count<=1024,'RESOURCE_LIMIT','Read page limit');const output=[]; for await(const ref of new PagedDomain(this.#pages,this.#control.domain).entries(snapshot,start,count)) output.push(ref); return output;}),
       export:()=>run(()=>exportPageDirectory(this.#pages.catalog,this.#root.directory,{format:PAGED_FORMAT,library_id:this.#root.library_id,control:this.#root.control})),
+      exportSnapshot:(branch=null)=>run(async()=>({
+        diagnostic:await this.#diagnostics(branch),
+        stream:exportPageDirectory(this.#pages.catalog,this.#root.directory,
+          {format:PAGED_FORMAT,library_id:this.#root.library_id,control:copy(this.#root.control)}),
+      })),
       logical:()=>run(()=>this.#logical()),
       audit:()=>run(async()=>{const {auditPaged}=await import('./paged-recovery.mjs');return auditPaged(new Pages(this.#io),this.#root.directory,this.#root.control);}),
     });

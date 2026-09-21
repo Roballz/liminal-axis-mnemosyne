@@ -11,6 +11,7 @@ import { inventoryPagedIO, describePagedStore } from '../paged-diagnostics.mjs';
 import { RecallIndex, artificialVector } from '../recall-index.mjs';
 import { exercisePagedScale } from '../p4-workload.mjs';
 import { canonicalize } from '../../contracts/primitives.mjs';
+import { resourceMeter } from '../resource-meter.mjs';
 
 class MeteredIO {
   live = new Map(); durable = new Map(); dirty = new Map(); reads = 0; writes = 0; flushes = 0;
@@ -26,7 +27,7 @@ class MeteredIO {
 const scale = Number(process.argv[2] ?? 1);
 if (![1, 5, 10].includes(scale)) throw Error('usage: p4-resource.mjs [1|5|10] [output.json]');
 const output = resolve(process.argv[3] ?? ('evals/t03/p4-p5/resource-' + scale + 'x.json'));
-const backup = resolve('.t03-local/p4/p4-' + scale + 'x.ndjson');
+const backup = resolve('.t03-local/p4/p4-repair-' + scale + 'x.ndjson');
 mkdirSync(dirname(output), { recursive: true }); mkdirSync(dirname(backup), { recursive: true });
 
 const limits = { rss_bytes: 1400 * 1024 * 1024, package_bytes: 512 * 1024 * 1024,
@@ -47,8 +48,9 @@ function resourceSample(label, io = null) {
 }
 
 const delay = monitorEventLoopDelay({ resolution: 20 }); delay.enable();
-const sourceIO = new MeteredIO(), sourceOwner = new PagedCoordinator(sourceIO);
-let source = await sourceOwner.create();
+const sourceMeter = resourceMeter(), targetMeter = resourceMeter();
+const sourceIO = new MeteredIO(), sourceOwner = new PagedCoordinator(sourceMeter.io(sourceIO));
+let source = sourceMeter.handle(await sourceOwner.create());
 const workloadStarted = performance.now();
 const workload = await exercisePagedScale(source, { scale, onProgress: async progress => {
   if (progress.operations % 4 === 0) resourceSample(progress.phase + '-' + progress.operations, sourceIO);
@@ -57,7 +59,7 @@ const workloadMs = performance.now() - workloadStarted;
 resourceSample('workload-complete', sourceIO);
 
 await sourceOwner.close(); sourceIO.reads = 0; const reopenStarted = performance.now();
-const reopenedOwner = new PagedCoordinator(sourceIO); source = await reopenedOwner.recover();
+const reopenedOwner = new PagedCoordinator(sourceMeter.io(sourceIO)); source = await reopenedOwner.recover();
 const coldReopen = { elapsed_ms: performance.now() - reopenStarted, provider_reads: sourceIO.reads };
 for (const range of workload.ranges) assert.deepEqual(await source.range(range.snapshot_id, range.start, range.values.length), range.values);
 const sourceDiagnostic = await source.diagnostics(workload.branch_id), sourceInventory = await inventoryPagedIO(sourceIO);
@@ -87,7 +89,7 @@ async function* checkedInput() {
     if (++records % 1000 === 0) resourceSample('restore-stream-' + records, targetIO);
   }
 }
-const targetOwner = await restorePagedIntoEmpty(targetIO, checkedInput()), target = targetOwner.handle();
+const targetOwner = await restorePagedIntoEmpty(targetMeter.io(targetIO), checkedInput()), target = targetOwner.handle();
 const restoreMs = performance.now() - restoreStarted;
 for (const range of workload.ranges) assert.deepEqual(await target.range(range.snapshot_id, range.start, range.values.length), range.values);
 for (const operation of [workload.operations[0], workload.operations.at(-1)])
@@ -108,8 +110,10 @@ const report = { status: 'passed', date: '2026-09-21', scale, synthetic: true,
   timings: { workload_ms: workloadMs, cold_reopen: coldReopen, export_ms: exportMs, restore_ms: restoreMs,
     operation_ms: workload.metrics, event_loop_delay_max_ms: delay.max / 1e6 },
   provider: { source: { reads: sourceIO.reads, writes: sourceIO.writes, flushes: sourceIO.flushes,
+    counters: sourceMeter.snapshot(),
     physical_payload_bytes: physicalBytes(sourceIO), inventory: sourceInventory },
     restored: { reads: targetIO.reads, writes: targetIO.writes, flushes: targetIO.flushes,
+      counters: targetMeter.snapshot(),
       physical_payload_bytes: physicalBytes(targetIO), inventory: targetInventory } },
   backup: { path: backup, bytes: backupBytes, records: backupRecords },
   resources: { peaks, samples, limits, stop_triggered: false }, diagnostic,

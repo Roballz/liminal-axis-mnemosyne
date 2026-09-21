@@ -1,0 +1,804 @@
+{
+  "status": "passed",
+  "date": "2026-09-21",
+  "scale": 1,
+  "synthetic": true,
+  "scope": "Windows desktop P4 resource exploration with metered in-memory provider; not native TT/mobile acceptance",
+  "device": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v24.19.0",
+    "os_release": "10.0.19045",
+    "cpu": "Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz",
+    "logical_cpus": 8,
+    "total_memory_bytes": 17010008064
+  },
+  "scenario": {
+    "scale": 1,
+    "story_id": "st_00000000-0000-4000-8000-000000000001",
+    "branch_id": "br_00000000-0000-4000-8000-000000000002",
+    "child_branch_id": "br_00000000-0000-4000-8000-0000000000b0",
+    "head_snapshot_id": "hs_c5add4a8-f2d7-4be1-b822-536f9077b0b3",
+    "child_head_snapshot_id": "hs_60ce0eef-5b8d-45c5-93d6-42e3f7e7d4fa",
+    "operations": [
+      "op_00000000-0000-4000-8000-00000000000b",
+      "op_00000000-0000-4000-8000-000000000010",
+      "op_00000000-0000-4000-8000-000000000015",
+      "op_00000000-0000-4000-8000-00000000001a",
+      "op_00000000-0000-4000-8000-00000000001f",
+      "op_00000000-0000-4000-8000-000000000024",
+      "op_00000000-0000-4000-8000-000000000029",
+      "op_00000000-0000-4000-8000-00000000002e",
+      "op_00000000-0000-4000-8000-000000000033",
+      "op_00000000-0000-4000-8000-000000000038",
+      "op_00000000-0000-4000-8000-00000000003d",
+      "op_00000000-0000-4000-8000-000000000042",
+      "op_00000000-0000-4000-8000-000000000047",
+      "op_00000000-0000-4000-8000-00000000004c",
+      "op_00000000-0000-4000-8000-000000000051",
+      "op_00000000-0000-4000-8000-000000000056",
+      "op_00000000-0000-4000-8000-00000000005b",
+      "op_00000000-0000-4000-8000-000000000060",
+      "op_00000000-0000-4000-8000-000000000065",
+      "op_00000000-0000-4000-8000-00000000006a",
+      "op_00000000-0000-4000-8000-00000000006f",
+      "op_00000000-0000-4000-8000-000000000074",
+      "op_00000000-0000-4000-8000-000000000079",
+      "op_00000000-0000-4000-8000-00000000007e",
+      "op_00000000-0000-4000-8000-000000000083",
+      "op_00000000-0000-4000-8000-000000000088",
+      "op_00000000-0000-4000-8000-00000000008d",
+      "op_00000000-0000-4000-8000-000000000092",
+      "op_00000000-0000-4000-8000-000000000097",
+      "op_00000000-0000-4000-8000-00000000009c",
+      "op_00000000-0000-4000-8000-0000000000a1",
+      "op_00000000-0000-4000-8000-0000000000a6",
+      "op_00000000-0000-4000-8000-0000000000a8",
+      "op_00000000-0000-4000-8000-0000000000aa",
+      "op_00000000-0000-4000-8000-0000000000ac",
+      "op_00000000-0000-4000-8000-0000000000ae",
+      "op_00000000-0000-4000-8000-0000000000af",
+      "op_00000000-0000-4000-8000-0000000000b1",
+      "op_00000000-0000-4000-8000-0000000000b4",
+      "op_00000000-0000-4000-8000-0000000000b7"
+    ],
+    "ranges": [
+      {
+        "snapshot_id": "hs_c5add4a8-f2d7-4be1-b822-536f9077b0b3",
+        "start": 0,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_c5add4a8-f2d7-4be1-b822-536f9077b0b3",
+        "start": 27,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_c5add4a8-f2d7-4be1-b822-536f9077b0b3",
+        "start": 55,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_60ce0eef-5b8d-45c5-93d6-42e3f7e7d4fa",
+        "start": 27,
+        "count": 5
+      }
+    ],
+    "memory": {
+      "schema_version": 1,
+      "memory_id": "mem_00000000-0000-4000-8000-0000000000b5",
+      "memory_revision_id": "mr_00000000-0000-4000-8000-0000000000b6",
+      "story_id": "st_00000000-0000-4000-8000-000000000001",
+      "basis_snapshot_id": "hs_c5add4a8-f2d7-4be1-b822-536f9077b0b3",
+      "kind": "Record",
+      "origin": "source_derived",
+      "input_refs": [
+        {
+          "type": "source",
+          "message_id": "msg_00000000-0000-4000-8000-000000000007",
+          "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+        },
+        {
+          "type": "source",
+          "message_id": "msg_00000000-0000-4000-8000-000000000009",
+          "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+        }
+      ],
+      "coverage": {
+        "mode": "interval",
+        "members": [
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000007",
+            "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+          },
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000009",
+            "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+          }
+        ],
+        "boundary": {
+          "start": "msg_00000000-0000-4000-8000-000000000007",
+          "end": "msg_00000000-0000-4000-8000-000000000009"
+        },
+        "observed_span": [
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000007",
+            "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+          },
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000009",
+            "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      "recipe_id": "p4-synthetic-v1",
+      "model_profile": "artificial-vector-v1",
+      "input_fingerprint": "sha256:derived-input:v1:e56f728d21866a01a6fb13c1670d2f7a27d571197aa684d04bdb70107f980e48",
+      "content": "青石门 月台 角色约定 P4 synthetic marker",
+      "visibility": "normal",
+      "recall_enabled": true,
+      "source_declaration": null,
+      "scope_branch_id": null
+    },
+    "messages": 63,
+    "current_characters": 976500,
+    "archived_revision_characters": 1069500,
+    "growth_rounds": 32,
+    "edits": 4,
+    "deletes": 1,
+    "forks": 1
+  },
+  "timings": {
+    "workload_ms": 150926.0841,
+    "cold_reopen": {
+      "elapsed_ms": 80.66300000000047,
+      "provider_reads": 22
+    },
+    "export_ms": 7972.876400000008,
+    "restore_ms": 145396.162,
+    "operation_ms": [
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000000b",
+        "kind": "history-delta",
+        "prepare_ms": 1120.4261000000001,
+        "execute_ms": 29.700599999999895,
+        "total_ms": 1150.1267
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000010",
+        "kind": "history-delta",
+        "prepare_ms": 1548.4815,
+        "execute_ms": 28.452899999999772,
+        "total_ms": 1576.9343999999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000015",
+        "kind": "history-delta",
+        "prepare_ms": 1858.4384999999997,
+        "execute_ms": 38.172600000000784,
+        "total_ms": 1896.6111000000005
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000001a",
+        "kind": "history-delta",
+        "prepare_ms": 2257.4132,
+        "execute_ms": 39.796299999999974,
+        "total_ms": 2297.2095
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000001f",
+        "kind": "history-delta",
+        "prepare_ms": 2417.8136999999997,
+        "execute_ms": 42.95139999999992,
+        "total_ms": 2460.7650999999996
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000024",
+        "kind": "history-delta",
+        "prepare_ms": 2786.9856,
+        "execute_ms": 50.33480000000054,
+        "total_ms": 2837.3204000000005
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000029",
+        "kind": "history-delta",
+        "prepare_ms": 2711.583200000001,
+        "execute_ms": 49.91599999999926,
+        "total_ms": 2761.4992
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000002e",
+        "kind": "history-delta",
+        "prepare_ms": 2993.854000000001,
+        "execute_ms": 55.95179999999891,
+        "total_ms": 3049.8058
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000033",
+        "kind": "history-delta",
+        "prepare_ms": 3091.0057000000015,
+        "execute_ms": 55.925899999998364,
+        "total_ms": 3146.9316
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000038",
+        "kind": "history-delta",
+        "prepare_ms": 3483.8754999999983,
+        "execute_ms": 63.32430000000022,
+        "total_ms": 3547.1997999999985
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000003d",
+        "kind": "history-delta",
+        "prepare_ms": 3299.971300000001,
+        "execute_ms": 63.45679999999993,
+        "total_ms": 3363.428100000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000042",
+        "kind": "history-delta",
+        "prepare_ms": 3728.6288999999997,
+        "execute_ms": 61.459100000000035,
+        "total_ms": 3790.0879999999997
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000047",
+        "kind": "history-delta",
+        "prepare_ms": 3467.4257000000034,
+        "execute_ms": 65.80589999999938,
+        "total_ms": 3533.231600000003
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000004c",
+        "kind": "history-delta",
+        "prepare_ms": 3742.471400000002,
+        "execute_ms": 65.05539999999746,
+        "total_ms": 3807.5267999999996
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000051",
+        "kind": "history-delta",
+        "prepare_ms": 3537.8953000000038,
+        "execute_ms": 63.827299999997194,
+        "total_ms": 3601.722600000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000056",
+        "kind": "history-delta",
+        "prepare_ms": 3921.6440999999977,
+        "execute_ms": 68.08080000000336,
+        "total_ms": 3989.724900000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000005b",
+        "kind": "history-delta",
+        "prepare_ms": 4026.8892999999953,
+        "execute_ms": 66.3405000000057,
+        "total_ms": 4093.229800000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000060",
+        "kind": "history-delta",
+        "prepare_ms": 4316.3601999999955,
+        "execute_ms": 69.07870000000548,
+        "total_ms": 4385.438900000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000065",
+        "kind": "history-delta",
+        "prepare_ms": 4081.9861999999994,
+        "execute_ms": 74.3856999999989,
+        "total_ms": 4156.371899999998
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000006a",
+        "kind": "history-delta",
+        "prepare_ms": 4489.394999999997,
+        "execute_ms": 70.4207000000024,
+        "total_ms": 4559.815699999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000006f",
+        "kind": "history-delta",
+        "prepare_ms": 4271.2814,
+        "execute_ms": 74.84840000000258,
+        "total_ms": 4346.129800000002
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000074",
+        "kind": "history-delta",
+        "prepare_ms": 4583.5389,
+        "execute_ms": 73.68899999999849,
+        "total_ms": 4657.227899999998
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000079",
+        "kind": "history-delta",
+        "prepare_ms": 4328.2746999999945,
+        "execute_ms": 73.57090000000608,
+        "total_ms": 4401.845600000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000007e",
+        "kind": "history-delta",
+        "prepare_ms": 4663.971999999994,
+        "execute_ms": 76.51250000001164,
+        "total_ms": 4740.484500000006
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000083",
+        "kind": "history-delta",
+        "prepare_ms": 4311.077600000004,
+        "execute_ms": 78.02760000000126,
+        "total_ms": 4389.105200000005
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000088",
+        "kind": "history-delta",
+        "prepare_ms": 4698.3313999999955,
+        "execute_ms": 75.17960000000312,
+        "total_ms": 4773.510999999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000008d",
+        "kind": "history-delta",
+        "prepare_ms": 4554.402600000001,
+        "execute_ms": 74.88180000000284,
+        "total_ms": 4629.284400000004
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000092",
+        "kind": "history-delta",
+        "prepare_ms": 4750.852100000004,
+        "execute_ms": 73.84649999999965,
+        "total_ms": 4824.698600000003
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000097",
+        "kind": "history-delta",
+        "prepare_ms": 4541.511400000003,
+        "execute_ms": 70.40619999999763,
+        "total_ms": 4611.917600000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000009c",
+        "kind": "history-delta",
+        "prepare_ms": 4800.8666000000085,
+        "execute_ms": 77.48249999999825,
+        "total_ms": 4878.349100000007
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a1",
+        "kind": "history-delta",
+        "prepare_ms": 4516.244999999995,
+        "execute_ms": 87.96719999999914,
+        "total_ms": 4604.2121999999945
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a6",
+        "kind": "history-delta",
+        "prepare_ms": 4844.4967999999935,
+        "execute_ms": 73.8350999999966,
+        "total_ms": 4918.33189999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a8",
+        "kind": "history-delta",
+        "prepare_ms": 5118.973800000007,
+        "execute_ms": 64.02679999999236,
+        "total_ms": 5183.000599999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000aa",
+        "kind": "history-delta",
+        "prepare_ms": 5352.983199999988,
+        "execute_ms": 75.31350000000384,
+        "total_ms": 5428.296699999992
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000ac",
+        "kind": "history-delta",
+        "prepare_ms": 5102.423600000009,
+        "execute_ms": 70.69749999998021,
+        "total_ms": 5173.121099999989
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000ae",
+        "kind": "history-delta",
+        "prepare_ms": 4722.131499999989,
+        "execute_ms": 69.68919999999343,
+        "total_ms": 4791.820699999982
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000af",
+        "kind": "history-delta",
+        "prepare_ms": 2841.1582000000053,
+        "execute_ms": 62.99700000000303,
+        "total_ms": 2904.1552000000083
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b1",
+        "kind": "history",
+        "prepare_ms": 2409.5353999999934,
+        "execute_ms": 74.73950000002515,
+        "total_ms": 2484.2749000000185
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b4",
+        "kind": "history-delta",
+        "prepare_ms": 3868.3605999999854,
+        "execute_ms": 69.22320000000764,
+        "total_ms": 3937.583799999993
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b7",
+        "kind": "memory",
+        "prepare_ms": 1120.1468000000168,
+        "execute_ms": 64.04269999999087,
+        "total_ms": 1184.1895000000077
+      }
+    ],
+    "event_loop_delay_max_ms": 99.155967
+  },
+  "provider": {
+    "source": {
+      "reads": 145123,
+      "writes": 282020,
+      "flushes": 164,
+      "counters": {
+        "page.logical_put": {
+          "count": 96794,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 936475,
+          "bytes": 0,
+          "ms": 6952.876700007033
+        },
+        "page.new": {
+          "count": 32410,
+          "bytes": 10373176,
+          "ms": 0
+        },
+        "io.put": {
+          "count": 282020,
+          "bytes": 0,
+          "ms": 1839.54449999562
+        },
+        "page.existing": {
+          "count": 64384,
+          "bytes": 17989684,
+          "ms": 0
+        },
+        "publish.directory": {
+          "count": 81,
+          "bytes": 0,
+          "ms": 9711.147399999974
+        },
+        "directory.page.logical_put": {
+          "count": 300899,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 286927,
+          "bytes": 121190308,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 286927,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 249529,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.flush": {
+          "count": 163,
+          "bytes": 0,
+          "ms": 92.34840000003986
+        },
+        "operation.prepare": {
+          "count": 40,
+          "bytes": 0,
+          "ms": 148282.92340000003
+        },
+        "prepare.compile": {
+          "count": 40,
+          "bytes": 0,
+          "ms": 125060.57199999997
+        },
+        "directory.page.existing": {
+          "count": 13972,
+          "bytes": 3877859,
+          "ms": 0
+        },
+        "operation.execute": {
+          "count": 40,
+          "bytes": 0,
+          "ms": 2583.2529999999942
+        }
+      },
+      "physical_payload_bytes": 117294372,
+      "inventory": {
+        "physical_nodes": 281940,
+        "cataloged_business_pages": 32410,
+        "active_checkpoint_reachable_pages": 14553,
+        "cataloged_unreachable_pages": 17857,
+        "active_directory_pages": 32410,
+        "stale_directory_or_intermediate_pages": 217119,
+        "root_nodes": 1
+      }
+    },
+    "restored": {
+      "reads": 1058368,
+      "writes": 66605,
+      "flushes": 4,
+      "counters": {
+        "io.put": {
+          "count": 66605,
+          "bytes": 0,
+          "ms": 523.1817000000447
+        },
+        "io.flush": {
+          "count": 4,
+          "bytes": 0,
+          "ms": 10.509799999941606
+        },
+        "page.logical_put": {
+          "count": 104454,
+          "bytes": 0,
+          "ms": 0
+        },
+        "io.get": {
+          "count": 978994,
+          "bytes": 0,
+          "ms": 9187.233999998687
+        },
+        "page.new": {
+          "count": 32410,
+          "bytes": 10373176,
+          "ms": 0
+        },
+        "directory.page.logical_put": {
+          "count": 47316,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.new": {
+          "count": 45800,
+          "bytes": 17726017,
+          "ms": 0
+        },
+        "directory.candidate": {
+          "count": 45800,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.persisted": {
+          "count": 34193,
+          "bytes": 0,
+          "ms": 0
+        },
+        "directory.page.existing": {
+          "count": 1516,
+          "bytes": 643835,
+          "ms": 0
+        },
+        "page.existing": {
+          "count": 72044,
+          "bytes": 21345916,
+          "ms": 0
+        }
+      },
+      "physical_payload_bytes": 22926810,
+      "inventory": {
+        "physical_nodes": 66604,
+        "cataloged_business_pages": 32410,
+        "active_checkpoint_reachable_pages": 14553,
+        "cataloged_unreachable_pages": 17857,
+        "active_directory_pages": 32410,
+        "stale_directory_or_intermediate_pages": 1783,
+        "root_nodes": 1
+      }
+    }
+  },
+  "backup": {
+    "path": "D:\\Mnemosyne\\.t03-local\\p4\\p4-repair-1x.ndjson",
+    "bytes": 20959225,
+    "records": 32412
+  },
+  "resources": {
+    "peaks": {
+      "rss": 795111424,
+      "heap_used": 610383488
+    },
+    "samples": [
+      {
+        "label": "growth-4",
+        "elapsed_ms": 6974.5473,
+        "rss": 207073280,
+        "heap_used": 85042968,
+        "physical_nodes": 12861,
+        "free_disk_bytes": 365805907968
+      },
+      {
+        "label": "growth-8",
+        "elapsed_ms": 18087.8718,
+        "rss": 252772352,
+        "heap_used": 78766096,
+        "physical_nodes": 33421,
+        "free_disk_bytes": 365805907968
+      },
+      {
+        "label": "growth-12",
+        "elapsed_ms": 31939.576200000003,
+        "rss": 281272320,
+        "heap_used": 158319720,
+        "physical_nodes": 59227,
+        "free_disk_bytes": 365805907968
+      },
+      {
+        "label": "growth-16",
+        "elapsed_ms": 46875.817599999995,
+        "rss": 317829120,
+        "heap_used": 177387088,
+        "physical_nodes": 86834,
+        "free_disk_bytes": 365805907968
+      },
+      {
+        "label": "growth-20",
+        "elapsed_ms": 64074.498199999995,
+        "rss": 365617152,
+        "heap_used": 192089976,
+        "physical_nodes": 118784,
+        "free_disk_bytes": 365805907968
+      },
+      {
+        "label": "growth-24",
+        "elapsed_ms": 82224.4909,
+        "rss": 404828160,
+        "heap_used": 169637024,
+        "physical_nodes": 152372,
+        "free_disk_bytes": 365805907968
+      },
+      {
+        "label": "growth-28",
+        "elapsed_ms": 100844.7453,
+        "rss": 471457792,
+        "heap_used": 327673832,
+        "physical_nodes": 187084,
+        "free_disk_bytes": 365805907968
+      },
+      {
+        "label": "growth-32",
+        "elapsed_ms": 119862.074,
+        "rss": 477233152,
+        "heap_used": 327295440,
+        "physical_nodes": 222772,
+        "free_disk_bytes": 365805907968
+      },
+      {
+        "label": "edit-36",
+        "elapsed_ms": 140440.48460000003,
+        "rss": 537513984,
+        "heap_used": 268844152,
+        "physical_nodes": 262071,
+        "free_disk_bytes": 365805899776
+      },
+      {
+        "label": "workload-complete",
+        "elapsed_ms": 150971.6026,
+        "rss": 566861824,
+        "heap_used": 389037808,
+        "physical_nodes": 281940,
+        "free_disk_bytes": 365805899776
+      },
+      {
+        "label": "export-10000",
+        "elapsed_ms": 160472.8342,
+        "rss": 559677440,
+        "heap_used": 289114080,
+        "physical_nodes": 281940,
+        "free_disk_bytes": 365799411712
+      },
+      {
+        "label": "export-20000",
+        "elapsed_ms": 162962.777,
+        "rss": 560402432,
+        "heap_used": 277988240,
+        "physical_nodes": 281940,
+        "free_disk_bytes": 365792923648
+      },
+      {
+        "label": "export-30000",
+        "elapsed_ms": 165389.2464,
+        "rss": 568471552,
+        "heap_used": 309295608,
+        "physical_nodes": 281940,
+        "free_disk_bytes": 365786435584
+      },
+      {
+        "label": "restore-complete",
+        "elapsed_ms": 317969.4189,
+        "rss": 795111424,
+        "heap_used": 610383488,
+        "physical_nodes": 66604,
+        "free_disk_bytes": 365784940544
+      }
+    ],
+    "limits": {
+      "rss_bytes": 1468006400,
+      "package_bytes": 536870912,
+      "physical_nodes": 1000000,
+      "elapsed_ms": 1800000,
+      "minimum_free_disk_bytes": 21474836480
+    },
+    "stop_triggered": false
+  },
+  "diagnostic": {
+    "storage": {
+      "format": "mnemosyne-paged-storage-v1",
+      "library_id": "op_7617b411-044f-4f72-aa01-9a443d696bc4",
+      "status": "ready",
+      "checkpoint": {
+        "hash": "4d66b942f9ff755922841b70a0b31b5b855da9fa47c4b9835473d461ac6181bf",
+        "slot": 85103590242815
+      },
+      "operation_count": 40,
+      "pending_operation_id": null,
+      "physical_nodes": 281940,
+      "error": null,
+      "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+      "branch": {
+        "story_id": "st_00000000-0000-4000-8000-000000000001",
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "head_snapshot_id": "hs_c5add4a8-f2d7-4be1-b822-536f9077b0b3",
+        "view_version": "mv_4876f49f-8931-4a92-a277-75c9f60c2ac4",
+        "marker": {
+          "head": "hs_c5add4a8-f2d7-4be1-b822-536f9077b0b3",
+          "index": "behind",
+          "rebuild": "evaluate",
+          "view": "mv_4876f49f-8931-4a92-a277-75c9f60c2ac4"
+        }
+      }
+    },
+    "index": {
+      "format": "mnemosyne-recall-index-v1",
+      "status": "ready",
+      "source": {
+        "library_id": "op_7617b411-044f-4f72-aa01-9a443d696bc4",
+        "checkpoint": {
+          "hash": "4d66b942f9ff755922841b70a0b31b5b855da9fa47c4b9835473d461ac6181bf",
+          "slot": 85103590242815
+        },
+        "story_id": "st_00000000-0000-4000-8000-000000000001",
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "head_snapshot_id": "hs_c5add4a8-f2d7-4be1-b822-536f9077b0b3",
+        "view_version": "mv_4876f49f-8931-4a92-a277-75c9f60c2ac4"
+      },
+      "progress": {
+        "scanned": 1,
+        "indexed": 1
+      },
+      "error": null,
+      "entry_count": 1
+    },
+    "errors": [],
+    "maintenance": {
+      "automatic_external": "HOST_MAINTENANCE_UNSUPPORTED",
+      "cooperative": "suspend-required"
+    }
+  },
+  "correctness": {
+    "ranges": true,
+    "confirmed_results": true,
+    "selected_memory": true,
+    "complete_restore": true
+  },
+  "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+  "mobile": "pending"
+}
