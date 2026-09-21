@@ -33,6 +33,7 @@ T-03 最终回执为 `notes/t-03-capability-final-review.md`，审核基线 de67
 | `notes/t-04-final-review.md` | T-04受控验收及真实原会话内容核验，覆盖旧待审状态 |
 | `tasks/T-04-readonly-import-and-sync.md` | verified（受控范围）：只读导入、精确映射、暂停/确认与恢复的实施证据 |
 | `docs/11-stage-b-import-policy.md` | 导入白名单、两主入口、删除人工处理、配对及手动搜索匹配边界 |
+| `docs/12-edit-review-policy.md` | accepted：正文编辑后摘要人工审核、保留兼容或逐层重建策略（未来T-07+实现） |
 | `stages/S-A-foundation.md` | 已收口地基及未验证项 |
 | `notes/t-03-capability-final-review.md` | T-03最终能力验收，覆盖旧P3/P4/P5待审状态 |
 | `notes/t-02-final-review.md`、`docs/06-contracts.md` | T-02最终契约、逻辑包v2与正确性边界 |
