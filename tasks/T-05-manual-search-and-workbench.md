@@ -1,6 +1,6 @@
 # T-05：手动正文搜索、来源对照与最小工作台
 
-状态：planned。发布：2026-09-22。阶段：S-B；依赖 T-04 verified（受控只读桥接范围）及 T-02/T-03 已验收能力。发布基线 main=`233b16458d6035b7e20219d8faaf2ee1f9e56f8e`，T-04审核实现=`5fe2706`。开工重新记录实际commit，不将基线简称当作main永远不变。
+状态：implemented_unverified（实现候选；S08待现场验证）。发布：2026-09-22。阶段：S-B；依赖 T-04 verified（受控只读桥接范围）及 T-02/T-03 已验收能力。发布基线 main=`233b16458d6035b7e20219d8faaf2ee1f9e56f8e`，T-04审核实现=`5fe2706`。开工重新记录实际commit，不将基线简称当作main永远不变。
 
 本卡按用户已确认的11文档及“无新未决项即可写卡”请求发布；没有必须重新询问的产品阻塞。本轮只发布文档，未实现或测试。Codex按用户交付本卡的开工指令执行，先报告范围及实现/测试分别预计行数；任务内部检查点不是新审批关卡。
 
@@ -134,3 +134,32 @@ S08用既有隔离实例中的小型合成档案（例如4～8条消息、1份�
 交付更新：本卡追加实际改动/实现测试行数、S01～S08证据、实际运行范围/未验证项、数据影响/回退及下游依赖；S-B、README/AGENTS、受影响包说明和CHANGELOG保持一致。正式接口/规则有新增时写入既有契约的对应小节，不产生每次聊天一份新方案文件。实现止于implemented_unverified，Chat决定T-05/S-B验收。
 
 本卡发布时没有执行代码或测试；当前唯一新增工作是任务规划。T-06的混合召回、T-07摘要生成以及T-11/12实体/编辑不由本卡自动开启。
+
+
+## 8. Codex 实施回报（2026-09-22，待 Chat review）
+
+实际开工：main@7d0e68f，从5fe2706快进；原工作树仅未跟踪.codex/，不纳入提交。按用户授权W0→W1→W2→W3单线执行，没有新任务卡或T-06代码。实现期间未逐组件跑测试，全部候选写完后集中验证。
+
+- W0：协调器只新增readView小型有界读入口；工作台借用导入页同一owner。无prepare/execute/recoverPending/resume，pending和paused不自动解除，读取超限不会隔离owner。open/flush仍可能发生。
+- W1：固定library/owner epoch/checkpoint、Story/Branch/snapshot、查询/类别/规则/UI代次；每次读前和返回前复核。指定snapshot成员按序扫描所有角色，一消息一结果，opaque会话游标，partial/empty-query/exhausted及超限未检查位置区分。完整Unicode17 C+F映射，不使用lowercase替代。
+- W2：固定原文与邻接；摘要scope与assetMap当前版本共同核对；其他同分支快照/旧版本只在显式历史辅助中显示。不猜原始floor→当前消息；offset/map/正式引用一致时才展示锚，完整生成输入仍未证明。没有已核验宿主定位接口，明确档案回退。
+- W3：目录分页、当前/旧快照、导入状态、两种匹配、取消/继续、详情/来源、完整库导出接实际面板。所有内容textContent，不渲染HTML。下载完整包16MiB上限，固定checkpoint，关闭不关闭共享owner。
+
+接口/预算/兼容性见packages/workbench/README.md。默认32扫描项/20结果/2MiB读取/256KiB文本/1秒；metadata和详情10秒，版本fence单独有界；在途读取不会被超时伪取消。超大单条保留未检查位置，不声明全库已查完。NFKC使用宿主运行时，Unicode17折叠表固定；临时投影不跨运行时持久化。
+
+### 有限验证对应
+
+| 集合 | 本轮证据 |
+| --- | --- |
+| S01 | workbench.test：同文异Story、父线未来、旧swipe/删除、User/system、历史Head不回滚、paused及prepared pending不被查询解除 |
+| S02 | 完整fold的ß/希腊/土耳其默认/切罗基、NFKC、Unicode空白、长度变化与空格边界；原样模式 |
+| S03 | 小批次分页、迟到命中、不重复游标、空/超长查询、对象/文本预算未检查状态 |
+| S04 | 实际entry与revision读取之间插入append、绑定独立变化、取消迟到返回及稳定对照；源码另有页面代次门禁 |
+| S05 | 同scope当前/旧asset版本、其他scope排除、无原文高层资料、正式坏引用拒绝；Assistant锚仍为unproven |
+| S06 | 原快照邻接、续聊offset、HTML只显示文本、宿主不可定位明确回退；宿主改名仍依T-04既有映射，未新增跳转能力 |
+| S07 | 工作台完整包导出期间真实append；包恢复到空FakeIO后查询、候选空位、摘要、绑定/会话保持；查询checkpoint不变 |
+| S08 | 已准备4正文/1摘要的一次性真实页面处理函数演示。TT调试端口未开，截图接口两次失败；用户已提出手动操作，待页面执行。未重导原25条私人样本 |
+
+首轮新集合7/9通过，两失败分别是冻结fixture注入与简化DOM默认select值；未削弱断言，修正夹具/显式默认值后仅受影响2/2通过。原始记录保留evals/t05/workbench-tests.tap和affected-tests.tap。最终一次全量与原生结果待本节补记；旧346项不冒充本轮执行。
+
+数据影响：无格式/持久字段/发布协议变更，无内容编辑、LLM、远程查询或生产库操作；仅测试fixture建库/恢复有业务写入。回退关闭工作台及其临时入口即可，保留档案与同步owner。S-B保持in_progress；T-05保持implemented_unverified，由Chat验收，手机/规模和真实宿主定位未验证。

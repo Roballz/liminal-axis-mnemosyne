@@ -8,6 +8,7 @@ import { compileMemory, compileBinding, pagedMemoryStatus } from './paged-memory
 import { canonicalize, equal, fingerprint, newId, id, requireThat as check } from '../contracts/primitives.mjs';
 import { exportLogical } from '../contracts/transfer.mjs';
 import { exportPageDirectory } from './paged-transport.mjs';
+import { boundedRead } from './paged-reader.mjs';
 export const PAGED_FORMAT='mnemosyne-paged-storage-v1';
 export const ROOT_SLOT=0;
 const hash=value=>fingerprint('write-payload',value);
@@ -179,6 +180,7 @@ export class PagedCoordinator {
       });
     };
     return Object.freeze({
+      readView:request=>{ const captured=copy(request); return run(()=>boundedRead(this.#io,this.#root,this.#control,epoch,captured)); },
       prepare:input=>{ const captured=copy(input); return run(()=>this.#prepare(captured)); },
       execute:operation=>run(()=>this.#execute(operation)), lookup:operation=>run(()=>this.#lookup(operation)),
       pending:()=>run(async()=>this.#control.pending?[await this.#lookup(this.#control.pending)]:[]),

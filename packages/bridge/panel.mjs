@@ -2,6 +2,7 @@ import { TTSource } from './source.mjs';
 import { Importer } from './importer.mjs';
 import { openPagedTestStore } from '../storage/paged-tt-adapter.mjs';
 import { BridgeEvents } from './events.mjs';
+import { mountWorkbench } from '../workbench/panel.mjs';
 
 // Isolated-only entry. User content always uses textContent, never HTML.
 export function mountPanel(host = globalThis) {
@@ -23,7 +24,7 @@ export function mountPanel(host = globalThis) {
   const cutoff=add('input');cutoff.type='number';cutoff.min='0';cutoff.placeholder='含端点消息数（楼层+1）';
   const options={};for(const [k,t] of [['items','物品'],['scenes','地点'],['lifeDetails','生活档案']]){const e=add('input');e.type='checkbox';options[k]=e;add('span',t);}
   const status=add('pre','尚未读取来源。');status.style.whiteSpace='pre-wrap';
-  let owner,importer,plan,activeSource=null;
+  let owner,importer,plan,workbench,activeSource=null;
   const source=new TTSource(host), categories=()=>Object.keys(options).filter(k=>options[k].checked);
   const show=v=>{status.textContent=typeof v==='string'?v:JSON.stringify(v,null,2);};
   const events=new BridgeEvents(source,{show,onSwitch:()=>{plan=null;activeSource=null;}});
@@ -32,8 +33,8 @@ export function mountPanel(host = globalThis) {
     try{return{ok:true,value:await fn()};}catch(e){show({code:e.code??'ERROR',message:e.message});return{ok:false,code:e.code??'ERROR',message:e.message};}
     finally{b.disabled=false;}};return b;};
   async function open(){
-    if(owner)return;
-    owner=await openPagedTestStore(host.__TAURITAVERN__.api.db,namespace.value,{create:create.checked});
+    if(owner&&importer)return;
+    if(!owner)owner=await openPagedTestStore(host.__TAURITAVERN__.api.db,namespace.value,{create:create.checked});
     importer=new Importer(owner.handle(),input=>source.guard(input));await importer.recoverPending();
     let after=null;do{const page=await owner.handle().enumerate('branches',after,64);for(const id of page.keys)branches.add(new Option(id,id));after=page.keys.length===64?page.after:null;}while(after);
     after=null;do{const page=await owner.handle().enumerate('bindings',after,64);for(const id of page.keys){const b=await owner.handle().read('bindings',id);legacyBinding.add(new Option(`已有分支 ${b.branch_id}`,b.host_scope));}after=page.keys.length===64?page.after:null;}while(after);
@@ -77,7 +78,15 @@ export function mountPanel(host = globalThis) {
     const url=URL.createObjectURL(new Blob(chunks,{type:'application/x-ndjson'})),a=document.createElement('a');a.href=url;a.download='mnemosyne-paged-bridge.jsonl';a.click();
     setTimeout(()=>URL.revokeObjectURL(url),30000);show('已导出原文、旧资料和会话/暂停回执。');
   });
-  button('停止桥接',async()=>{importer?.cancel();await events.stop();if(owner)await owner.close();root.remove();});
+  button('打开手动搜索工作台',()=>{
+    workbench?.close();
+    workbench=mountWorkbench({preferredSource:activeSource,getHandle:async()=>{
+      // Reading may open/flush the store, but never completes a pending business request.
+      if(!owner)owner=await openPagedTestStore(host.__TAURITAVERN__.api.db,namespace.value);
+      namespace.disabled=true;create.disabled=true;return owner.handle();
+    }});return workbench;
+  });
+  button('停止桥接',async()=>{workbench?.close();importer?.cancel();await events.stop();if(owner)await owner.close();root.remove();});
   document.body.append(root);return{root,source,events,controls:{namespace,create},
     // Uses the same handler as a user click; no separate testing import path.
     perform:label=>buttons.get(label).onclick()};

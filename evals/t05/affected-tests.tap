@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: S05 missing formal anchor reference is data error, unproven higher summary is retained
+ok 1 - S05 missing formal anchor reference is data error, unproven higher summary is retained
+  ---
+  duration_ms: 7865.7829
+  type: 'test'
+  ...
+# Subtest: S06/S07 product page handlers render untrusted text, paginate, detail, fallback, export and preserve shared owner
+ok 2 - S06/S07 product page handlers render untrusted text, paginate, detail, fallback, export and preserve shared owner
+  ---
+  duration_ms: 9151.4562
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 17172.5813

@@ -112,3 +112,10 @@ T-03 的 `HOST_MAINTENANCE_UNSUPPORTED`、生产手机 pending、未经授权真
 TT来源键使用宿主/角色作用域与稳定ID，可变定位独立持久化。改名与复制有歧义时确认同一来源；旧source回执以alias指向原绑定。已知作用域或稳定ID冲突仍拒绝。
 
 面板共用事件控制器在稳定后核对总数、局部映射和版本；旧摘要通知比较白名单内容，无变化不写入。超出局部预算或证据不足暂停转人工；旧资料仍非正式有效记忆，维护/手机门禁不变。
+
+
+## 12. T-05实施接口（implemented_unverified）
+
+手动读取使用队列内有界readView facade，沿固定snapshot成员扫描；checkpoint/owner代次和UI代次三处核对，变化则撤销当前结果。规范化固定Unicode17完整默认case folding数据，NFKC由ECMAScript运行时提供；投影不持久化、不用于身份/原文偏移。详细限额与超大单条未检查状态见packages/workbench/README.md。
+
+旧摘要需所选scope及assetMap版本同时匹配；其他同分支快照/旧版本仅显式历史资料，不等于所选剧情。当前无经过验证的宿主定位适配，因此一律明确档案原文回退。完整库导出复用exportSnapshot，16MiB本地Blob上限，超限不交付半包。无业务写入/自动恢复，不关闭共享owner；这不是手机生产或宿主维护准入。

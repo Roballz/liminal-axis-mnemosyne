@@ -51,3 +51,7 @@ assetMap 是该来源最后观察版本的索引，不是“可直接注入的�
 实际TT导入档案可包含null候选槽；rawMessage原样保留null及swipe索引，当前mes仍为正文权威，不补造候选文本。未知对象/数字/undefined候选仍拒绝。完整分页包保留这些空位，见native-null-swipe-short.tap。
 
 原会话后续工具：native-inspect只查询原库、要求旧owner已关闭，未调用prepare/execute；native-resume仅在明确授权后继续固定会话的一个剩余摘要批次，prepare前检查预算、已准备请求按原ID排空，并逐项核对正文/候选槽/摘要及明确close结果。源码、脱敏阶段回执与hash见evals/t04/native-20260922*；真实核验现已完成，仍待Chat复审。临时酒馆助手全局脚本不属于普通产品入口，结束可禁用。
+
+## 手动工作台
+
+现有导入面板新增“打开手动搜索工作台”，共享唯一owner，阅读不调用recoverPending；工作台关闭不关闭导入连接。功能、预算及完整导出见../workbench/README.md，T-05待Chat review。

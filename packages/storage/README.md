@@ -110,3 +110,7 @@ node --max-old-space-size=1536 packages/storage/native/p4-resource.mjs 1 evals/t
 固定TT入口为 `collector.mjs p4-resource <new-run>` 后启动既有隔离副本。必须使用新run/namespace和固定30分钟、100万节点、512MiB包限制；不得在失败后提高阈值重跑。`20260921p4b` 在第12/32次增长发布后触发elapsed stop，故原生1x未完成，5x/10x不执行。证据与精确清理边界见 `../../evals/t03/p4-p5/`。
 
 P5命令：`node packages/storage/native/p5-command.mjs evals/t03/p4-p5/p5-diagnostic.json`。操作/回退见`../../docs/10-t03-storage-operations.md`。P5已完成到implemented_unverified，但P4强制完成线未过，T-03仍不完成。不要自动清理测试库；不要修改TT、触发sync/archive、操作真实档案或手机。
+
+## T-05只读接入（待review）
+
+handle.readView 在原队列提供固定stamp的state/record/entry/前缀list及读取限额；不改持久格式，不提供写入或恢复能力。详见../workbench/README.md。

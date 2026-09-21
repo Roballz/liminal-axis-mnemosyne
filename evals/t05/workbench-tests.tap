@@ -1,0 +1,55 @@
+✔ S02 full default fold, explicit whitespace, exact mode and length changes preserve literal boundaries (2.5354ms)
+✔ S01/S03 scoped snapshot members, stable pagination, roles, old swipe and explicit history (25743.6877ms)
+✔ S03 partial zero is not exhausted, opaque cursor, empty/long queries and oversized text stay unchecked (3903.3101ms)
+✔ S04 append BETWEEN entry and revision read fences scan; stable control and cancel reject late return (7979.1516ms)
+✔ S04 binding-only changes and details fence stale results, without changing business state (4596.4335ms)
+✔ S05/S06 summary scopes and exact anchors; older summary versions remain visibly historical (16902.3366ms)
+✖ S05 missing formal anchor reference is data error, unproven higher summary is retained (7445.4782ms)
+✔ S07 complete export through workbench restores raw/candidates/assets/receipts at fixed checkpoint during append (17705.953ms)
+✖ S06/S07 product page handlers render untrusted text, paginate, detail, fallback, export and preserve shared owner (4065.9683ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 7
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 88499.3511
+
+✖ failing tests:
+
+test at packages\workbench\tests\workbench.test.mjs:98:1
+✖ S05 missing formal anchor reference is data error, unproven higher summary is retained (7445.4782ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + Comparison {}
+  - Comparison {
+  -   code: 'NEEDS_RESOLUTION'
+  - }
+  
+      at async TestContext.<anonymous> (file:///D:/Mnemosyne/packages/workbench/tests/workbench.test.mjs:109:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: TypeError: Cannot assign to read only property 'revision_id' of object '#<Object>'
+        at Object.readView (file:///D:/Mnemosyne/packages/workbench/tests/workbench.test.mjs:107:91)
+        at async Workbench.read (file:///D:/Mnemosyne/packages/workbench/service.mjs:23:13)
+        at async Workbench.detail (file:///D:/Mnemosyne/packages/workbench/service.mjs:166:19)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async TestContext.<anonymous> (file:///D:/Mnemosyne/packages/workbench/tests/workbench.test.mjs:109:3)
+        at async Test.run (node:internal/test_runner/test:1389:7)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:960:7),
+    expected: { code: 'NEEDS_RESOLUTION' },
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at packages\workbench\tests\workbench.test.mjs:127:1
+✖ S06/S07 product page handlers render untrusted text, paginate, detail, fallback, export and preserve shared owner (4065.9683ms)
+  TypeError: Cannot read properties of undefined (reading 'status')
+      at TestContext.<anonymous> (file:///D:/Mnemosyne/packages/workbench/tests/workbench.test.mjs:132:87)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
