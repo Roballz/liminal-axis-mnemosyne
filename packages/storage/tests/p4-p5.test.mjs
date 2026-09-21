@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { PagedCoordinator } from '../paged-coordinator.mjs';
 import { restorePagedIntoEmpty } from '../paged-recovery.mjs';
 import { RecallIndex, artificialVector, filterRecallCandidates } from '../recall-index.mjs';
-import { describePagedStore, inventoryPagedIO, readOnlyPagedHandle } from '../paged-diagnostics.mjs';
+import { collectPagedDiagnostic, describePagedStore, diagnosticFailure, inventoryPagedIO,
+  readOnlyPagedHandle, verifyPagedBackupRestore } from '../paged-diagnostics.mjs';
 import { fixture } from '../../contracts/tests/fixture.mjs';
 import { canonicalize } from '../../contracts/primitives.mjs';
 import { derivedFingerprint } from '../../contracts/memory.mjs';
@@ -116,6 +117,18 @@ test('diagnostics expose checkpoint/head/view/index state without write methods'
   const readOnly = readOnlyPagedHandle(context.handle);
   assert.equal(readOnly.prepare, undefined); assert.equal(readOnly.execute, undefined);
   assert.equal((await readOnly.read('memories', selected.memory.memory_revision_id)).content, selected.memory.content);
+  const before = await context.handle.logical(), snapshot = await collectPagedDiagnostic(context.handle,
+    { branchId: context.f.branch, index, namespace: 'node-test', io: context.io,
+      capturedAt: () => '2026-09-21T00:00:00.000Z' });
+  assert.equal(snapshot.format, 'mnemosyne-storage-diagnostic-v1');
+  assert.equal(snapshot.read_only, true); assert.equal(snapshot.capabilities.writes, false);
+  assert.equal(snapshot.index.status, 'ready'); assert.ok(snapshot.inventory.physical_nodes > 0);
+  const verified = await verifyPagedBackupRestore(context.handle,
+    stream => restorePagedIntoEmpty(new MemoryIO(), stream), { branchId: context.f.branch });
+  assert.equal(verified.status, 'passed'); assert.ok(verified.bytes > 0); assert.ok(verified.records > 0);
+  assert.deepEqual(await context.handle.logical(), before);
+  const failure = diagnosticFailure(Object.assign(Error('synthetic failure'), { code: 'P5_SYNTHETIC' }));
+  assert.deepEqual(failure, { code: 'P5_SYNTHETIC', message: 'synthetic failure', cause: null });
 });
 
 test('inventory separates business, active, unreachable and directory pages across restore', async () => {

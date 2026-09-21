@@ -6,11 +6,18 @@
     "docs_and_evidence": "250-450"
   },
   "actual": {
-    "implementation_added": 281,
-    "tests_added": 136,
-    "harness_added": 369,
-    "tests_and_harness_added": 505,
-    "tracked_deletions": 4,
-    "note": "checkpoint at P4 native resource blocker; docs/evidence excluded"
+    "implementation_added": 323,
+    "tests_added": 150,
+    "harness_added": 446,
+    "tests_and_harness_added": 596,
+    "tracked_deletions": 8,
+    "p5_increment": {
+      "implementation_added": 42,
+      "tests_added": 14,
+      "harness_added": 77,
+      "operations_docs_added": 104,
+      "tracked_deletions": 4
+    },
+    "note": "P4 resource checkpoint plus completed P5 increment; docs/evidence excluded from cumulative code totals"
   }
 }

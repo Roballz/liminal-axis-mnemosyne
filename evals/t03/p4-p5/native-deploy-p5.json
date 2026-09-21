@@ -1,0 +1,38 @@
+{
+  "deployed_at": "2026-09-21T08:12:21.4737860Z",
+  "purpose": "P5 read-only diagnostic of existing p4b library",
+  "tt_commit": "367b0c7e9410e8fcf394f668302d70073e5a3ce5",
+  "exe_sha256": "11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4",
+  "files": [
+    {
+      "path": "index.js",
+      "source_sha256": "ee4892add61baa134df9e7276f5e28894958cdd0e812dd10726323c932e6d2c1",
+      "deployed_sha256": "ee4892add61baa134df9e7276f5e28894958cdd0e812dd10726323c932e6d2c1"
+    },
+    {
+      "path": "packages/storage/native/suite.mjs",
+      "source_sha256": "9458478bad6a07d351d65e09b0677bf3ef3b62d1ab61a80520518a9a714d90b0",
+      "deployed_sha256": "9458478bad6a07d351d65e09b0677bf3ef3b62d1ab61a80520518a9a714d90b0"
+    },
+    {
+      "path": "packages/storage/native/p5-native-suite.mjs",
+      "source_sha256": "bd5c6d77e7eddc062229c4325bf94b9041add490471b82ad0ac3911d98dc0d93",
+      "deployed_sha256": "bd5c6d77e7eddc062229c4325bf94b9041add490471b82ad0ac3911d98dc0d93"
+    },
+    {
+      "path": "packages/storage/paged-diagnostics.mjs",
+      "source_sha256": "64667f2ad843dd08bd1e04f7f16f82f174c481e968555688e67fd562699e0e95",
+      "deployed_sha256": "64667f2ad843dd08bd1e04f7f16f82f174c481e968555688e67fd562699e0e95"
+    },
+    {
+      "path": "packages/storage/paged-coordinator.mjs",
+      "source_sha256": "07138bbb80d399bcc84fd6266e95026d69f6d90bcd6f49dc5140de8aece39d48",
+      "deployed_sha256": "07138bbb80d399bcc84fd6266e95026d69f6d90bcd6f49dc5140de8aece39d48"
+    },
+    {
+      "path": "packages/storage/paged-tt-adapter.mjs",
+      "source_sha256": "72c700ed251fd722f8c254a741adcff6c1f110b3043dae6afba3c28447445b32",
+      "deployed_sha256": "72c700ed251fd722f8c254a741adcff6c1f110b3043dae6afba3c28447445b32"
+    }
+  ]
+}

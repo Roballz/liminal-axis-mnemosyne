@@ -2,6 +2,8 @@ import { Pages } from './pages.mjs';
 import { ROOT_SLOT, checkRoot } from './paged-coordinator.mjs';
 import { equal, requireThat as check } from '../contracts/primitives.mjs';
 
+export const DIAGNOSTIC_FORMAT = 'mnemosyne-storage-diagnostic-v1';
+
 const isRef = value => value && typeof value === 'object' && !Array.isArray(value) &&
   equal(Object.keys(value).sort(), ['hash', 'slot']) && /^[0-9a-f]{64}$/.test(value.hash) &&
   Number.isSafeInteger(value.slot);
@@ -19,6 +21,46 @@ export async function describePagedStore(handle, { branchId = null, index = null
   const indexStatus = index && branchId ? await index.status(handle, branchId) : null;
   return { storage, index: indexStatus, errors: [storage.error, indexStatus?.error].filter(Boolean),
     maintenance: { automatic_external: 'HOST_MAINTENANCE_UNSUPPORTED', cooperative: 'suspend-required' } };
+}
+
+export function diagnosticFailure(error) {
+  return { code: error?.code ?? 'UNKNOWN', message: String(error?.message ?? error),
+    cause: error?.cause ? String(error.cause.message ?? error.cause) : null };
+}
+
+export async function collectPagedDiagnostic(handle, { branchId = null, index = null,
+  namespace = null, io = null, capturedAt = () => new Date().toISOString() } = {}) {
+  const readOnly = readOnlyPagedHandle(handle), described = await describePagedStore(readOnly, { branchId, index });
+  return { format: DIAGNOSTIC_FORMAT, captured_at: capturedAt(), namespace, read_only: true,
+    storage: described.storage, index: described.index ?? { status: 'not-configured' },
+    errors: described.errors, maintenance: described.maintenance,
+    inventory: io ? await inventoryPagedIO(io) : null,
+    capabilities: { export: true, restore_target: 'empty-only', writes: false } };
+}
+
+export async function verifyPagedBackupRestore(sourceHandle, openTarget, { branchId = null } = {}) {
+  check(typeof openTarget === 'function', 'INVALID_SCHEMA', 'Restore target opener required');
+  const source = readOnlyPagedHandle(sourceHandle), sourceStatus = await source.diagnostics(branchId);
+  let bytes = 0, records = 0;
+  async function* countedExport() {
+    for await (const chunk of await source.export()) {
+      check(chunk && Number.isSafeInteger(chunk.byteLength), 'INVALID_SCHEMA', 'Backup chunk required');
+      bytes += chunk.byteLength; records++; yield chunk;
+    }
+  }
+  const targetOwner = await openTarget(countedExport());
+  try {
+    const targetHandle = typeof targetOwner.handle === 'function' ? targetOwner.handle() : targetOwner;
+    const target = readOnlyPagedHandle(targetHandle), targetStatus = await target.diagnostics(branchId);
+    check(sourceStatus.operation_count === targetStatus.operation_count,
+      'NEEDS_RESOLUTION', 'Restored operation count mismatch');
+    check(equal(sourceStatus.branch, targetStatus.branch), 'NEEDS_RESOLUTION', 'Restored branch status mismatch');
+    check(equal(await source.audit(), await target.audit()), 'NEEDS_RESOLUTION', 'Restored audit mismatch');
+    return { status: 'passed', bytes, records, source_checkpoint: sourceStatus.checkpoint,
+      target_checkpoint: targetStatus.checkpoint, branch: targetStatus.branch };
+  } finally {
+    if (typeof targetOwner.close === 'function') await targetOwner.close();
+  }
 }
 
 export async function inventoryPagedIO(io) {

@@ -10,7 +10,7 @@
     "evidence": "node-tests.tap"
   },
   "syntax": {
-    "javascript_files": 60,
+    "javascript_files": 62,
     "powershell_files": 2,
     "passed": true,
     "evidence": "syntax.json"
@@ -18,6 +18,8 @@
   "diff_check": "passed",
   "node_1x": "passed metered in-memory provider; not native acceptance",
   "native_1x": "blocked: elapsed-time safety stop after the 12th of 32 growth publications",
+  "p5_node_diagnostic": "passed: read-only diagnostic plus empty-target backup/restore verification",
+  "p5_native_diagnostic": "passed: read-only cold reopen of stopped P4 isolated TT library; no archive/sync/write path",
   "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
   "scale_5x_10x": "not run: native 1x stopped and linear node projection exceeds the fixed limit",
   "mobile": "pending",
@@ -29,8 +31,8 @@
     },
     {
       "path": "packages/storage/paged-diagnostics.mjs",
-      "sha256": "17c441d93bbd8f98d53db28b62cc82fb2804b1a94c48056b57dc13b791466601",
-      "lines": 62
+      "sha256": "64667f2ad843dd08bd1e04f7f16f82f174c481e968555688e67fd562699e0e95",
+      "lines": 104
     },
     {
       "path": "packages/storage/p4-workload.mjs",
@@ -48,9 +50,19 @@
       "lines": 129
     },
     {
+      "path": "packages/storage/native/p5-command.mjs",
+      "sha256": "b667d78e8014e06563823677f1fd6290c53cf1d5153fbb3208a900a09b79444a",
+      "lines": 50
+    },
+    {
+      "path": "packages/storage/native/p5-native-suite.mjs",
+      "sha256": "bd5c6d77e7eddc062229c4325bf94b9041add490471b82ad0ac3911d98dc0d93",
+      "lines": 22
+    },
+    {
       "path": "packages/storage/tests/p4-p5.test.mjs",
-      "sha256": "2fb2e83169069d8f01ac547ce5b61e975c25e6ac471fcbead29f9cb93247909f",
-      "lines": 136
+      "sha256": "e8e1d269cfa4ff0ce7a06ed23e51fd044ca3efeb6febc6721ce648b0f0c17b29",
+      "lines": 149
     },
     {
       "path": "packages/storage/paged-coordinator.mjs",
@@ -64,18 +76,23 @@
     },
     {
       "path": "packages/storage/native/collector.mjs",
-      "sha256": "71e5e56364aaeb42f9cf8d8fcac92e0cbfff10bd72ff3f2ae3da4e1353988734",
+      "sha256": "e8f6f3de9076c38a5f7d38b5bee5dd9ffaad9ba46185fc631552f6816ce5a16d",
       "lines": 36
     },
     {
       "path": "packages/storage/native/suite.mjs",
-      "sha256": "78dd12c5dc7f60480bc656a60f41d5320385dc04c2dfde09ae734df0cebc106b",
-      "lines": 197
+      "sha256": "9458478bad6a07d351d65e09b0677bf3ef3b62d1ab61a80520518a9a714d90b0",
+      "lines": 199
     },
     {
       "path": "packages/storage/native/stop-isolated-complete.ps1",
-      "sha256": "1a154ee7d1fac6790e47b34c93f233c16d09828f2710cb13c32324b04c51dbd8",
+      "sha256": "656abe9dc500fe4bf92b514d20e47d3406f550a39143b17aa4f9a61676991491",
       "lines": 33
+    },
+    {
+      "path": "docs/10-t03-storage-operations.md",
+      "sha256": "747bb81f3c23f3f75550712d68f625ed2d1ec05a1b77be9c6aa8189831868089",
+      "lines": 104
     }
   ]
 }

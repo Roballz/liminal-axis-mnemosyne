@@ -5,7 +5,8 @@
 - 新增可重建小型召回sidecar、最终领域候选过滤、只读分页诊断和物理库存分类；索引失败/丢失不改变确认正文，人工向量分数不冒充rerank。
 - 新增固定百万字符1x工作负载及Node/隔离TT资源harness。完整322项回归通过，保留原319项；Node计量provider完成完整恢复并暴露333,608源节点及268,911陈旧目录/中间页。
 - 上游断网污染的首轮不作结论；新run `20260921p4b` 在固定TT的第12/32次增长发布后触发30分钟停止器。P4 1x未完成，5x/10x未执行，形成新的资源算法回审边界。
-- 自动维护继续`HOST_MAINTENANCE_UNSUPPORTED`，手机pending；P5和整个T-03不标完成，不创建/执行T-04。证据见`notes/t-03-p4-resource-review.md`及`evals/t03/p4-p5/`。
+- P5补齐版本化只读诊断快照、结构化错误、合成空目标恢复命令及操作/回退文档；固定TT只读冷开停止后的p4b库为ready、12条确认operation、pending为空、71,271节点。
+- 自动维护继续`HOST_MAINTENANCE_UNSUPPORTED`，手机pending；P5状态implemented_unverified，但整个T-03仍因P4阻塞不完成，不创建/执行T-04。证据见`notes/t-03-p4-resource-review.md`及`evals/t03/p4-p5/`。
 
 ## 2026-09-21 T-03 P3-R1/R2返修
 

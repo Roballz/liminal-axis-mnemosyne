@@ -1,6 +1,6 @@
 # T-03：存储发布与恢复协议及P3前置边界
 
-版本：v0.8，2026-09-21。状态：G1和受控P3高难项review已通过；P4索引/诊断增量见第11节，固定TT百万字符1x触发30分钟资源停止器，待算法回审。自动外部维护门禁保留。**P4/P5与T-03均未完成，B1未获手机/生产准入。**
+版本：v0.8，2026-09-21。状态：G1和受控P3高难项review已通过；P5只读诊断/合成恢复命令完成到implemented_unverified，P4索引与资源边界见第11节。固定TT百万字符1x触发30分钟资源停止器，待算法回审。自动外部维护门禁保留。**P4与T-03未完成，B1未获手机/生产准入。**
 
 下文1～7节保留P0～P2协议与当时限制；其中“G1待审/未放行”是历史状态，当前许可按最终回执。第8节保留前置增量，P3最新协议与边界见第10节及 `../notes/t-03-p3-handoff.md`。
 实施基线 `852260acd8d3e65d9d756af81cdf72e52c50046b`；继承 06 v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。本文没有更改领域语义。
@@ -200,4 +200,4 @@ Node计量provider的固定1x场景完整通过：32轮增长、4次深层编辑
 
 当前需review普通发布的目录构建、重复持久写和prepare成本，确定保持旧快照、checkpoint、幂等与完整恢复语义的最小算法修复范围。不得静默提高时间/节点限制、缩小1x、关闭`syncMode=full`、删除历史、自动GC、改TT或切B2/A。是否引入目录批量构建、写合并、离线维护或宿主批量原语属于待审设计，不由本节批准。
 
-P5只读诊断能力可保留，但P4完成线未过，不能宣称P5或T-03完成。自动维护继续`HOST_MAINTENANCE_UNSUPPORTED`，手机pending；完整证据与回退见原task、`../notes/t-03-p4-resource-review.md`及`../evals/t03/p4-p5/`。
+P5已补齐版本化只读诊断快照、结构化错误、空目标备份/恢复验证命令，并在固定TT只读冷开资源停止后的库；状态为implemented_unverified。安装/启停、故障复现和只读回退见`10-t03-storage-operations.md`。P4完成线仍未过，不能宣称T-03完成。自动维护继续`HOST_MAINTENANCE_UNSUPPORTED`，手机pending；完整证据见原task、`../notes/t-03-p4-resource-review.md`及`../evals/t03/p4-p5/`。

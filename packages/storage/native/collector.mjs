@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const phase = process.argv[2] ?? 'p0';
-if (!['p0', 'before', 'recover-before', 'after', 'recover-after', 'roundtrip', 'reopen-check', 'g1-repair', 'p3-intent', 'p3-recovery', 'p3-before', 'p3-after', 'recover-p3-before', 'recover-p3-after', 'paged-reopen-check','paged-roundtrip', 'paged-before', 'paged-after', 'recover-paged-before', 'recover-paged-after', 'p4-resource'].includes(phase)) throw Error('Unknown phase');
+if (!['p0', 'before', 'recover-before', 'after', 'recover-after', 'roundtrip', 'reopen-check', 'g1-repair', 'p3-intent', 'p3-recovery', 'p3-before', 'p3-after', 'recover-p3-before', 'recover-p3-after', 'paged-reopen-check','paged-roundtrip', 'paged-before', 'paged-after', 'recover-paged-before', 'recover-paged-after', 'p4-resource', 'p5-diagnostics'].includes(phase)) throw Error('Unknown phase');
 const run = process.argv[3] ?? '20260919a';
 if (!/^[a-z0-9]+$/.test(run)) throw Error('Invalid run');
 const root = resolve('.t03-local/evidence'); mkdirSync(root, { recursive: true });

@@ -1,10 +1,10 @@
-# T-03 P4 资源阻塞回审
+# T-03 P4资源阻塞与P5收尾回审
 
-日期：2026-09-21。施工基线：`42c6624178eeb3e3826a4fee37c3fe1ad843e0f2`。状态：`in_progress`，P4 的索引/候选正确性已实现并通过 Node 回归；固定 TT 的百万字符 `1x` 资源完成线未通过，因此不进入整个 T-03 最终 review。
+日期：2026-09-21。施工基线：`42c6624178eeb3e3826a4fee37c3fe1ad843e0f2`。状态：`in_progress`，P4 的索引/候选正确性已实现并通过 Node 回归，P5只读诊断与操作收尾已完成到`implemented_unverified`；固定TT的百万字符`1x`资源完成线未通过，因此不能进入整个T-03最终review。
 
 ## 1. 范围与停止条件
 
-本轮依 `notes/t-03-p3-repair-review.md` 进入原 P4 → P5。开工估计实现 450～750 行、测试/harness 550～900 行；实际截至阻塞点为实现约 281 行、测试/harness 约 505 行，另有文档与 JSON/TAP 证据。没有新增依赖、付费模型、真实 RP、生产手机、TT 修改或 T-04。
+本轮依 `notes/t-03-p3-repair-review.md` 进入原 P4 → P5。开工估计实现 450～750 行、测试/harness 550～900 行；P4检查点加P5收尾累计实现约323行、测试/harness约596行，另有104行操作文档与JSON/TAP证据。没有新增依赖、付费模型、真实RP、生产手机、TT修改或T-04。
 
 固定限制：Node `--max-old-space-size=1536`，RSS 1.4GiB、临时包 512MiB、物理节点 1,000,000、单场景 30 分钟、磁盘余量 20GiB。`1x` 未完成时不放宽阈值；5x/10x 只作容量探索。自动维护继续固定返回 `HOST_MAINTENANCE_UNSUPPORTED`。
 
@@ -46,4 +46,14 @@ Node 计量内存 provider 的 `1x` 完成：工作负载 453.2 秒、冷重开 
 
 候选后续工作仍须留在 T-03：定位普通发布中的目录构建/重复持久写，给出保持 checkpoint、旧快照、完整恢复及崩溃语义的最小算法改动和新的代码量估计。是否允许原地目录复用、批量原生写或显式离线维护，应由 review 决定；本记录不批准任何方案。
 
-P5 的只读诊断代码和回归可以保留，但由于 P4 强制完成线未过，不将 P5 或整个 T-03 标为完成，也不交最终 review。所有新测试库和证据保留，不自动清理。
+P4受影响写路径保持冻结。所有新测试库和证据保留，不自动清理。
+
+## 5. P5已完成的独立收尾
+
+P4资源阻塞不影响P5只读功能。新增`mnemosyne-storage-diagnostic-v1`快照、结构化错误、空目标备份/恢复验证命令及操作/回退文档：
+
+- `node packages/storage/native/p5-command.mjs evals/t03/p4-p5/p5-diagnostic.json` 使用小型虚构fixture，输出版本、namespace、checkpoint、Head/view、operation/pending、索引、门禁和物理库存；同时完成1,006,060 bytes / 1,622 records的空目标恢复核对，源库不变。
+- 固定TT `p5-diagnostics 20260921p4b` 只读冷开此前资源停止后的源库：状态ready、12条确认operation、pending为空、71,271物理节点、marker保持`index=behind/rebuild=evaluate`，索引报告`not-configured`，无写能力、sync或archive。完成后的进程退出单列为清理，不作故障证据。
+- 安装/启停、诊断、备份验证、P4故障复现和只读回退见`docs/10-t03-storage-operations.md`。旧reader不得写新分页库，失败目标不覆盖源库，自动维护门禁不变。
+
+因此本次提交给Chat的是“P5完成 + P4资源算法阻塞”的联合回审。P5不再是未完成项；但P4的1x强制完成线仍未通过，S09和整个T-03继续`in_progress`，不创建或执行T-04。

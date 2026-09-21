@@ -22,6 +22,8 @@ async function inspectRaw(api, namespace, physicalId) {
   return { node, nodeCount: stats.nodeCount };
 }
 export async function runNative(api, { phase, run, crashEvidence }, send) {
+  if (phase === 'p5-diagnostics')
+    return (await import('./p5-native-suite.mjs')).runP5Native(api, { run }, send);
   if (phase === 'p4-resource')
     return (await import('./p4-native-suite.mjs')).runP4Native(api, { run }, send);
   if (['paged-reopen-check','paged-roundtrip', 'paged-before', 'paged-after', 'recover-paged-before', 'recover-paged-after'].includes(phase))

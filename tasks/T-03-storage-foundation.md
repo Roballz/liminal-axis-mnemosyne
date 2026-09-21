@@ -1,6 +1,6 @@
 # T-03：可迁移、可恢复的存储地基
 
-状态：in_progress（G1与受控P3高难项review已通过；P4索引/诊断增量及322项回归完成，但固定TT百万字符1x在30分钟停止线前仅完成12/32增长发布，资源算法阻塞待review；自动外部维护门禁保留，P5与整个T-03未完成）
+状态：in_progress（G1与受控P3高难项review已通过；P4索引正确性完成但固定TT百万字符1x在30分钟停止线前仅完成12/32增长发布，资源算法阻塞待review；P5只读诊断/合成恢复命令/操作回退说明已完成到implemented_unverified；自动外部维护门禁保留，整个T-03未完成）
 
 发布：2026-09-19。规划仓库基线：`4dcdaf568ddb596c9060c27ef4c57fb858095509`。
 T-02 已验收实现：`1891043f6fc907236e12bb85d63ea823f43abca8`；规范为 `docs/06-contracts.md` v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。
@@ -459,7 +459,7 @@ Windows x64 / Node v24.19.0。证据目录`evals/t03/p3-review-repair/`：
 
 ## P4索引/诊断增量与资源阻塞（2026-09-21 Codex）
 
-依据 `notes/t-03-p3-repair-review.md` 从 main@`42c6624178eeb3e3826a4fee37c3fe1ad843e0f2` 进入原 P4 → P5。已读最新review、README、S-A、本task、G1与维护边界、P3交接、09协议及相关实现。开工估计实现450～750、测试/harness550～900行；截至阻塞点实际实现约281行、测试/harness约505行，另有文档/TAP/JSON。无新依赖、子代理、真实数据、付费模型、TT修改、手机操作或T-04。
+依据 `notes/t-03-p3-repair-review.md` 从 main@`42c6624178eeb3e3826a4fee37c3fe1ad843e0f2` 进入原 P4 → P5。已读最新review、README、S-A、本task、G1与维护边界、P3交接、09协议及相关实现。开工估计实现450～750、测试/harness550～900行；P4检查点加P5收尾累计实现约323行、测试/harness约596行，另有104行操作文档及TAP/JSON证据。无新依赖、子代理、真实数据、付费模型、TT修改、手机操作或T-04。
 
 ### 已实现与回归
 
@@ -480,6 +480,8 @@ Node计量内存provider的1x完整通过：工作负载453.2秒、冷重开101.
 
 ### 当前关卡、回退与review请求
 
-这是最新放行规定的新增资源算法问题。P4的1x仍未完成冷重开、范围读取、索引、导出/恢复，S09未通过；不提高阈值、不缩小样本、不关闭full flush、不自动GC，也不将Node通过写成TT通过。P5只读诊断代码可保留，但P5与整个T-03均不标完成，不交最终review。
+这是最新放行规定的新增资源算法问题。P4的1x仍未完成冷重开、范围读取、索引、导出/恢复，S09未通过；不提高阈值、不缩小样本、不关闭full flush、不自动GC，也不将Node通过写成TT通过。
 
-完整证据与待审问题见 `notes/t-03-p4-resource-review.md` 和 `evals/t03/p4-p5/`。需要Chat先审查普通发布的目录构建/重复持久写放大及允许的最小算法修复范围；后续仍在T-03内，不创建/执行T-04。回退停用本轮索引/诊断/harness并保留旧库、P4库和证据；没有生产格式迁移或真实档案写入。
+P5随后独立收尾：新增版本化只读诊断快照、结构化错误、空目标备份/恢复验证命令及`docs/10-t03-storage-operations.md`。Node命令完成1,006,060 bytes/1,622 records合成恢复；固定TT只读冷开`p4b`源库为ready、12条确认operation、pending为空、71,271节点，marker仍behind/evaluate，无写能力或sync/archive。P5状态为implemented_unverified，不再是未完成项。
+
+完整证据与待审问题见 `notes/t-03-p4-resource-review.md` 和 `evals/t03/p4-p5/`。需要Chat先审查普通发布的目录构建/重复持久写放大及允许的最小算法修复范围；后续仍在T-03内，不创建/执行T-04。回退停用本轮索引/诊断/harness并保留旧库、P4库和证据；没有生产格式迁移或真实档案写入。因P4强制完成线未过，仍不交整个T-03最终review。

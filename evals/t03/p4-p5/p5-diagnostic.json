@@ -1,0 +1,103 @@
+{
+  "status": "passed",
+  "date": "2026-09-21",
+  "synthetic": true,
+  "scope": "P5 reproducible Node diagnostic and empty-target restore command; not native/mobile acceptance",
+  "diagnostic": {
+    "format": "mnemosyne-storage-diagnostic-v1",
+    "captured_at": "2026-09-21T08:11:30.759Z",
+    "namespace": "node-synthetic-p5",
+    "read_only": true,
+    "storage": {
+      "format": "mnemosyne-paged-storage-v1",
+      "library_id": "op_9dfcf143-ff81-4a43-9f49-8ae1d8a26a71",
+      "status": "ready",
+      "checkpoint": {
+        "hash": "b334a3611b919bb1b1a7b9143aff55035163f232f74807158cc2c8395b7e1596",
+        "slot": 197038660787089
+      },
+      "operation_count": 2,
+      "pending_operation_id": null,
+      "physical_nodes": 8872,
+      "error": null,
+      "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+      "branch": {
+        "story_id": "st_00000000-0000-4000-8000-000000000001",
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "head_snapshot_id": "hs_95779fb7-67db-47e4-a62f-9036672b916f",
+        "view_version": "mv_c7225307-cbc0-4abb-985c-06e976276630",
+        "marker": {
+          "head": "hs_95779fb7-67db-47e4-a62f-9036672b916f",
+          "index": "behind",
+          "rebuild": "evaluate",
+          "view": "mv_c7225307-cbc0-4abb-985c-06e976276630"
+        }
+      }
+    },
+    "index": {
+      "format": "mnemosyne-recall-index-v1",
+      "status": "ready",
+      "source": {
+        "library_id": "op_9dfcf143-ff81-4a43-9f49-8ae1d8a26a71",
+        "checkpoint": {
+          "hash": "b334a3611b919bb1b1a7b9143aff55035163f232f74807158cc2c8395b7e1596",
+          "slot": 197038660787089
+        },
+        "story_id": "st_00000000-0000-4000-8000-000000000001",
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "head_snapshot_id": "hs_95779fb7-67db-47e4-a62f-9036672b916f",
+        "view_version": "mv_c7225307-cbc0-4abb-985c-06e976276630"
+      },
+      "progress": {
+        "scanned": 1,
+        "indexed": 1
+      },
+      "error": null,
+      "entry_count": 1
+    },
+    "errors": [],
+    "maintenance": {
+      "automatic_external": "HOST_MAINTENANCE_UNSUPPORTED",
+      "cooperative": "suspend-required"
+    },
+    "inventory": {
+      "physical_nodes": 8872,
+      "cataloged_business_pages": 1620,
+      "active_checkpoint_reachable_pages": 661,
+      "cataloged_unreachable_pages": 959,
+      "active_directory_pages": 1620,
+      "stale_directory_or_intermediate_pages": 5631,
+      "root_nodes": 1
+    },
+    "capabilities": {
+      "export": true,
+      "restore_target": "empty-only",
+      "writes": false
+    }
+  },
+  "backup_restore_verification": {
+    "status": "passed",
+    "bytes": 1006060,
+    "records": 1622,
+    "source_checkpoint": {
+      "hash": "b334a3611b919bb1b1a7b9143aff55035163f232f74807158cc2c8395b7e1596",
+      "slot": 197038660787089
+    },
+    "target_checkpoint": {
+      "hash": "b334a3611b919bb1b1a7b9143aff55035163f232f74807158cc2c8395b7e1596",
+      "slot": 197038660787089
+    },
+    "branch": {
+      "story_id": "st_00000000-0000-4000-8000-000000000001",
+      "branch_id": "br_00000000-0000-4000-8000-000000000002",
+      "head_snapshot_id": "hs_95779fb7-67db-47e4-a62f-9036672b916f",
+      "view_version": "mv_c7225307-cbc0-4abb-985c-06e976276630",
+      "marker": {
+        "head": "hs_95779fb7-67db-47e4-a62f-9036672b916f",
+        "index": "behind",
+        "rebuild": "evaluate",
+        "view": "mv_c7225307-cbc0-4abb-985c-06e976276630"
+      }
+    }
+  }
+}

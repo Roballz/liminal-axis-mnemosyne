@@ -1,5 +1,5 @@
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('p3-recovery','recover-p3-before','recover-p3-after','paged-reopen-check','paged-roundtrip','recover-paged-before','recover-paged-after','p4-resource')][string]$Phase,
+  [Parameter(Mandatory=$true)][ValidateSet('p3-recovery','recover-p3-before','recover-p3-after','paged-reopen-check','paged-roundtrip','recover-paged-before','recover-paged-after','p4-resource','p5-diagnostics')][string]$Phase,
   [Parameter(Mandatory=$true)][ValidatePattern('^[a-z0-9]+$')][string]$Run
 )
 $ErrorActionPreference = 'Stop'
@@ -19,7 +19,7 @@ $invalidNamespaces = if ($Phase -eq 'p4-resource') {
     !$_.StartsWith("mnemo-t03-paged-$Run-") -and !$_.StartsWith("mnemo-t03-index-$Run-")
   })
 } else {
-  $expectedPrefix = if ($Phase.Contains('paged')) { "mnemo-t03-paged-$Run-" } else { "mnemo-t03-p3-$Run-" }
+  $expectedPrefix = if ($Phase.Contains('paged') -or $Phase -eq 'p5-diagnostics') { "mnemo-t03-paged-$Run-" } else { "mnemo-t03-p3-$Run-" }
   @($namespaces | Where-Object { !$_.StartsWith($expectedPrefix) })
 }
 if ($namespaces.Count -eq 0 -or $invalidNamespaces.Count -ne 0) { throw 'Unexpected namespace evidence' }

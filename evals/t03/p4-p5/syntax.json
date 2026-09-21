@@ -117,6 +117,16 @@
       "output": ""
     },
     {
+      "path": "packages\\storage\\native\\p5-command.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\p5-native-suite.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
       "path": "packages\\storage\\native\\paged-growth-reopen.mjs",
       "passed": true,
       "output": ""

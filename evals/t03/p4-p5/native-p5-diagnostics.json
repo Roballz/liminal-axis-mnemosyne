@@ -1,0 +1,65 @@
+{
+  "phase": "p5-diagnostics",
+  "run": "20260921p4b",
+  "events": [
+    {
+      "type": "done",
+      "phase": "p5-diagnostics",
+      "run": "20260921p4b",
+      "status": "passed",
+      "synthetic": true,
+      "scope": "Read-only cold reopen of the stopped P4 isolated TT library; not mobile/production acceptance",
+      "namespace": "mnemo-t03-paged-20260921p4b-p4-source",
+      "diagnostic": {
+        "format": "mnemosyne-storage-diagnostic-v1",
+        "captured_at": "2026-09-21T08:13:01.941Z",
+        "namespace": "mnemo-t03-paged-20260921p4b-p4-source",
+        "read_only": true,
+        "storage": {
+          "format": "mnemosyne-paged-storage-v1",
+          "library_id": "op_b0d7034d-3911-4bc4-ae9b-bb988a792911",
+          "status": "ready",
+          "checkpoint": {
+            "hash": "8e25f3559f50c729004f16563abcdc431cc51a09dc2ec6ba1be45694b8e5b3e8",
+            "slot": 156293647474512
+          },
+          "operation_count": 12,
+          "pending_operation_id": null,
+          "physical_nodes": 71271,
+          "error": null,
+          "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+          "branch": {
+            "story_id": "st_00000000-0000-4000-8000-000000000001",
+            "branch_id": "br_00000000-0000-4000-8000-000000000002",
+            "head_snapshot_id": "hs_cbd2e9ce-a9ef-4ea0-94fa-4fd20f9cecad",
+            "view_version": "mv_41a46534-b08d-4bf4-a90e-39d486dc24cf",
+            "marker": {
+              "head": "hs_cbd2e9ce-a9ef-4ea0-94fa-4fd20f9cecad",
+              "index": "behind",
+              "rebuild": "evaluate",
+              "view": "mv_41a46534-b08d-4bf4-a90e-39d486dc24cf"
+            }
+          }
+        },
+        "index": {
+          "status": "not-configured"
+        },
+        "errors": [],
+        "maintenance": {
+          "automatic_external": "HOST_MAINTENANCE_UNSUPPORTED",
+          "cooperative": "suspend-required"
+        },
+        "inventory": null,
+        "capabilities": {
+          "export": true,
+          "restore_target": "empty-only",
+          "writes": false
+        }
+      },
+      "externalMaintenanceGate": "HOST_MAINTENANCE_UNSUPPORTED",
+      "backupRestoreVerification": "node-command",
+      "nativeArchiveOrSyncTriggered": false,
+      "mobile": "pending"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # T-03 storage diagnostics
 
-状态：P0～P2已通过G1，P3分页业务与P3-R1/R2已通过受控高难review。P4索引/诊断增量和322项回归完成，但固定TT百万字符1x触发30分钟资源停止器，待算法回审。旧P2/intent入口与自动外部维护门禁保留；P5和T-03未完成。见 `../../notes/t-03-p4-resource-review.md`。
+状态：P0～P2已通过G1，P3分页业务与P3-R1/R2已通过受控高难review。P5只读诊断、合成空目标恢复命令及操作/回退说明完成到implemented_unverified；P4固定TT百万字符1x触发30分钟资源停止器，待算法回审。旧P2/intent入口与自动外部维护门禁保留；T-03未完成。见 `../../notes/t-03-p4-resource-review.md`。
 
 当前R1/R2返修代码、150项Node回归和隔离TT `20260919g1` 小验证已完成；G1已由最终回执放行；这些为原P0～P2证据。关闭成功后旧owner永久失效，必须经openTestStore取得替代owner；关闭失败保留同一owner，可显式recover或重试close。恢复只把原生null视为缺记录，损坏payload/root报NEEDS_RESOLUTION。证据见 `../../evals/t03/g1-repair/`。
 
@@ -109,4 +109,4 @@ node --max-old-space-size=1536 packages/storage/native/p4-resource.mjs 1 evals/t
 
 固定TT入口为 `collector.mjs p4-resource <new-run>` 后启动既有隔离副本。必须使用新run/namespace和固定30分钟、100万节点、512MiB包限制；不得在失败后提高阈值重跑。`20260921p4b` 在第12/32次增长发布后触发elapsed stop，故原生1x未完成，5x/10x不执行。证据与精确清理边界见 `../../evals/t03/p4-p5/`。
 
-P5只读诊断代码已存在，但因P4强制完成线未过，不标P5或T-03完成。不要自动清理测试库；不要修改TT、触发sync/archive、操作真实档案或手机。
+P5命令：`node packages/storage/native/p5-command.mjs evals/t03/p4-p5/p5-diagnostic.json`。操作/回退见`../../docs/10-t03-storage-operations.md`。P5已完成到implemented_unverified，但P4强制完成线未过，T-03仍不完成。不要自动清理测试库；不要修改TT、触发sync/archive、操作真实档案或手机。

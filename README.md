@@ -14,7 +14,7 @@
 
 当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。G1和受控P3高难项review已通过；P4索引/诊断增量及322项回归完成，但固定TT的百万字符1x在30分钟资源停止线前未完成，整个任务未完成。旧 proposal 已 superseded。
 
-**P4 当前交接（2026-09-21）：** `4a76c14` 已关闭P3-R1/R2并放行P4/P5。可重建索引、最终候选过滤和只读诊断已实现；完整322项回归通过。Node计量provider完成1x，但固定TT新run在12/32次增长发布时超过30分钟停止线，属于新的资源算法阻塞；5x/10x未执行。详见 `notes/t-03-p4-resource-review.md` 与 `evals/t03/p4-p5/`。自动外部维护仍为`HOST_MAINTENANCE_UNSUPPORTED`，P5和T-03均未完成。
+**P4/P5 当前交接（2026-09-21）：** `4a76c14` 已关闭P3-R1/R2并放行P4/P5。可重建索引和最终候选过滤已实现；P5只读诊断、合成空目标恢复命令及操作/回退说明完成到implemented_unverified。固定TT新run在12/32次增长发布时超过30分钟停止线，仍是P4资源算法阻塞；5x/10x未执行。详见 `notes/t-03-p4-resource-review.md`、`docs/10-t03-storage-operations.md` 与 `evals/t03/p4-p5/`。自动外部维护仍为`HOST_MAINTENANCE_UNSUPPORTED`，整个T-03未完成。
 
 当前关卡回执：`notes/t-03-g1-final-review.md`。Chat对齐15个文件blob后独立复跑84项存储测试及15文件语法，全部通过；同一最终19项定向测试在实际旧实现上10通过/9失败。完整150项Node回归、23文件语法/diff和隔离TT小验证为Codex提交的证据，本轮明确区分独立执行与证据审阅。
 
@@ -34,6 +34,7 @@
 | `notes/t-02-final-review.md` | T-02 最终结论、独立实测、R5关闭与未验证边界 |
 | `packages/contracts/` | T-02 最小形状/跨引用校验、内存参考逻辑与确定性测试 |
 | `docs/08-history-snapshot-and-rebuild.md` | 已接受的 Head、正文权威、来源重建与分叉边界 |
+| `docs/10-t03-storage-operations.md` | P5隔离诊断、合成备份恢复、故障复现和只读回退 |
 | `docs/03-decisions-and-open-questions.md` | 当前决定、未决项与实验门禁 |
 | `docs/06-contracts.md` | v0.3 / schema_version=1、逻辑包v2；已验收最小契约基线 |
 | `docs/07-t02-contract-proposal.md` | 首轮候选讨论；新确认以 03/08 为准 |
