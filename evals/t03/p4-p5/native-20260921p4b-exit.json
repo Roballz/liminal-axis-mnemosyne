@@ -1,0 +1,25 @@
+{
+  "action": "Resource-stop cleanup, not fault-injection evidence",
+  "run": "20260921p4b",
+  "pid": 9024,
+  "executable": "D:\\Mnemosyne\\.t03-local\\tt-367b0c7\\tauritavern.exe",
+  "phase": "p4-resource",
+  "terminal_event": {
+    "type": "error",
+    "code": null,
+    "message": "P4 native elapsed-time safety stop",
+    "cause": null,
+    "stack": [
+      "Error: P4 native elapsed-time safety stop",
+      "    at assert (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:9:63)",
+      "    at sample (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:43:5)",
+      "    at async onProgress (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:54:21)",
+      "    at async exercisePagedScale (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/p4-workload.mjs:39:5)"
+    ]
+  },
+  "normal_close_requested": true,
+  "force_required": true,
+  "data_bytes_after": 148351628.0,
+  "disk_free_bytes_after": 365849935872,
+  "at": "2026-09-21T07:43:55.2870936Z"
+}

@@ -1,0 +1,16 @@
+{
+  "baseline": "42c6624178eeb3e3826a4fee37c3fe1ad843e0f2",
+  "estimate": {
+    "implementation": "450-750",
+    "tests_and_harness": "550-900",
+    "docs_and_evidence": "250-450"
+  },
+  "actual": {
+    "implementation_added": 281,
+    "tests_added": 136,
+    "harness_added": 369,
+    "tests_and_harness_added": 505,
+    "tracked_deletions": 4,
+    "note": "checkpoint at P4 native resource blocker; docs/evidence excluded"
+  }
+}

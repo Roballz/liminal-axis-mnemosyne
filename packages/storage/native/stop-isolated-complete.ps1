@@ -1,5 +1,5 @@
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('p3-recovery','recover-p3-before','recover-p3-after','paged-reopen-check','paged-roundtrip','recover-paged-before','recover-paged-after')][string]$Phase,
+  [Parameter(Mandatory=$true)][ValidateSet('p3-recovery','recover-p3-before','recover-p3-after','paged-reopen-check','paged-roundtrip','recover-paged-before','recover-paged-after','p4-resource')][string]$Phase,
   [Parameter(Mandatory=$true)][ValidatePattern('^[a-z0-9]+$')][string]$Run
 )
 $ErrorActionPreference = 'Stop'
@@ -13,9 +13,16 @@ $evidencePath = Join-Path $repoRoot ".t03-local\evidence\$Run-$Phase.json"
 $evidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
 $last = $evidence.events[-1]
 if ($last.type -ne 'done' -or $last.phase -ne $Phase -or $evidence.run -ne $Run) { throw 'No matching completed test' }
-$expectedPrefix = if ($Phase.Contains('paged')) { "mnemo-t03-paged-$Run-" } else { "mnemo-t03-p3-$Run-" }
 $namespaces = if ($last.namespaces) { @($last.namespaces) } else { @($last.namespace) }
-if ($namespaces.Count -eq 0 -or @($namespaces | Where-Object { !$_.StartsWith($expectedPrefix) }).Count -ne 0) { throw 'Unexpected namespace evidence' }
+$invalidNamespaces = if ($Phase -eq 'p4-resource') {
+  @($namespaces | Where-Object {
+    !$_.StartsWith("mnemo-t03-paged-$Run-") -and !$_.StartsWith("mnemo-t03-index-$Run-")
+  })
+} else {
+  $expectedPrefix = if ($Phase.Contains('paged')) { "mnemo-t03-paged-$Run-" } else { "mnemo-t03-p3-$Run-" }
+  @($namespaces | Where-Object { !$_.StartsWith($expectedPrefix) })
+}
+if ($namespaces.Count -eq 0 -or $invalidNamespaces.Count -ne 0) { throw 'Unexpected namespace evidence' }
 $process = Get-Process -Id $instances[0].ProcessId
 if ((Get-Item -LiteralPath $evidencePath).LastWriteTime -lt $process.StartTime) { throw 'Stale completion evidence' }
 $requested = $process.CloseMainWindow()

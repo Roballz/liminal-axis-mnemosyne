@@ -12,9 +12,9 @@
 
 已验收：**T-02 身份、历史版本与上下文契约，verified**。审核实现为 `1891043`，R1～R5 已关闭；Chat 独立复跑48项契约与11文件语法检查通过，R5同组测试在修复前实际旧版6项失败、修复后通过。Head、固定分叉、逐层失效、幂等和逻辑包校验限Node参考模型范围，不等于已有正式记忆引擎。证据见 `notes/t-02-final-review.md`。
 
-当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。**48663c4 已通过 G1，G1-R1/R2关闭，允许继续B1路线的P3；P3～P5尚未验收，整个任务未完成。** 旧 proposal 已 superseded。
+当前正式任务：**T-03 可迁移、可恢复存储地基，in_progress**，入口 `tasks/T-03-storage-foundation.md`。G1和受控P3高难项review已通过；P4索引/诊断增量及322项回归完成，但固定TT的百万字符1x在30分钟资源停止线前未完成，整个任务未完成。旧 proposal 已 superseded。
 
-**P3 当前交接（2026-09-21）：** 75abeea集成review提出P3-R1/R2；精确成员与共享依赖遍历已返修，待再次review，详见 `notes/t-03-p3-handoff.md` 第8节及 `notes/t-03-p3-integration-review.md`。原314项及原生证据保留，本轮验证见`evals/t03/p3-review-repair/`。状态implemented_unverified，自动外部维护门禁仍保留，P4/P5未进入，T-03未完成。
+**P4 当前交接（2026-09-21）：** `4a76c14` 已关闭P3-R1/R2并放行P4/P5。可重建索引、最终候选过滤和只读诊断已实现；完整322项回归通过。Node计量provider完成1x，但固定TT新run在12/32次增长发布时超过30分钟停止线，属于新的资源算法阻塞；5x/10x未执行。详见 `notes/t-03-p4-resource-review.md` 与 `evals/t03/p4-p5/`。自动外部维护仍为`HOST_MAINTENANCE_UNSUPPORTED`，P5和T-03均未完成。
 
 当前关卡回执：`notes/t-03-g1-final-review.md`。Chat对齐15个文件blob后独立复跑84项存储测试及15文件语法，全部通过；同一最终19项定向测试在实际旧实现上10通过/9失败。完整150项Node回归、23文件语法/diff和隔离TT小验证为Codex提交的证据，本轮明确区分独立执行与证据审阅。
 
@@ -27,6 +27,7 @@
 | 文件 | 用途 |
 | --- | --- |
 | `tasks/T-03-storage-foundation.md` | 当前 in_progress：原任务范围、P0～P2实施证据及P3～P5要求 |
+| `notes/t-03-p4-resource-review.md` | 当前P4资源阻塞、固定TT证据、停止边界及待审问题 |
 | `notes/t-03-g1-final-review.md` | G1通过、R1/R2关闭、独立测试边界与P3高难前置要求 |
 | `tasks/T-03-storage-foundation.proposal.md` | superseded，仅保留旧预案历史入口 |
 | `tasks/T-02-identity-version-context.md` | 已 verified：实施证据、原验收范围与最终 Chat review |
@@ -44,7 +45,7 @@
 
 ## 实现与数据边界
 
-实现位于 `apps/tt-adapter-probe/`、`packages/contracts/` 和 `packages/storage/`。Node回归命令为 `node --test packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`。最新Codex完整回归314/314及分页原生证据见 `evals/t03/p3-integration/`；上轮275项见 `evals/t03/p3-structures-recovery/`；原211项全部保留，其历史证据见 `evals/t03/p3-prerequisites/`；G1最终review独立执行84项存储测试，不混称独立重跑150项。原131项记录继续保留在 `evals/t03/node-tests.tap`，不是最终返修结果。
+实现位于 `apps/tt-adapter-probe/`、`packages/contracts/` 和 `packages/storage/`。Node回归命令为 `node --test packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`。最新Codex完整回归322/322及P4资源证据见 `evals/t03/p4-p5/`；其中原319项全部保留。P3分页原生证据仍见 `evals/t03/p3-integration/`，不混称本轮重跑或P4原生通过。
 
 B/A 共用 Mnemosyne 的领域身份、规则与逻辑导出；宿主 stableId、数据库 NodeId 与物理文件格式不能替代正式 ID。用户主要在单手机长期 RP，已接受单权威写入与跨端明确交接，不建设离线多主自动合并。
 

@@ -1,6 +1,6 @@
 # T-03：可迁移、可恢复的存储地基
 
-状态：in_progress（48663c4 已通过 G1；P3有界基元/v1完整辅助恢复增量 implemented_unverified；普通领域编译/分页发布/checkpoint与规模化恢复尚未完成；自动外部维护门禁保留，P4/P5未执行）
+状态：in_progress（G1与受控P3高难项review已通过；P4索引/诊断增量及322项回归完成，但固定TT百万字符1x在30分钟停止线前仅完成12/32增长发布，资源算法阻塞待review；自动外部维护门禁保留，P5与整个T-03未完成）
 
 发布：2026-09-19。规划仓库基线：`4dcdaf568ddb596c9060c27ef4c57fb858095509`。
 T-02 已验收实现：`1891043f6fc907236e12bb85d63ea823f43abca8`；规范为 `docs/06-contracts.md` v0.3 / 对象 schema_version=1 / 逻辑包 format_version=2。
@@ -456,3 +456,30 @@ Windows x64 / Node v24.19.0。证据目录`evals/t03/p3-review-repair/`：
 旧库不就地改写。既存旧非法reorder或超过新增预算的请求会在完整恢复重编译审计时拒绝，源与staging材料保留，不修剪历史强行通过。普通checkpoint重开不追溯审计全部历史；回退保留原库/包和读者，不能把有已知漏洞的75abeea写入行为描述为安全替代。
 
 自动维护仍HOST_MAINTENANCE_UNSUPPORTED，c90d77d不作已修复证据，不改TT、不切B2/A。此前空间放大、设备资源和手机边界仍未关闭。本轮状态implemented_unverified，高难交接第8节已更新，R1/R2是否关闭及P3是否放行待Chat再次review；T-03继续in_progress，P4/P5未进入。按要求commit/push供线上审查。
+
+## P4索引/诊断增量与资源阻塞（2026-09-21 Codex）
+
+依据 `notes/t-03-p3-repair-review.md` 从 main@`42c6624178eeb3e3826a4fee37c3fe1ad843e0f2` 进入原 P4 → P5。已读最新review、README、S-A、本task、G1与维护边界、P3交接、09协议及相关实现。开工估计实现450～750、测试/harness550～900行；截至阻塞点实际实现约281行、测试/harness约505行，另有文档/TAP/JSON。无新依赖、子代理、真实数据、付费模型、TT修改、手机操作或T-04。
+
+### 已实现与回归
+
+- 新增可重建小型索引 `mnemosyne-recall-index-v1`，索引失败/丢失不改变确认正文；返回候选前复核checkpoint、Story/Branch/view、selection、memory fingerprint与当前领域状态。人工向量分数不冒充rerank。
+- 新增只读分页诊断与库存分类，报告版本/library/checkpoint/operation/pending、Head/view/marker、索引状态及业务页、当前可达/不可达页、活动/陈旧目录页。没有产品写入口或完整工作台。
+- 新增同一固定合成工作负载的Node与隔离TT harness：32轮增长、4次深层编辑、1次删除、固定fork/子线追加、中文marker记忆；当前正文976,500字符，保留历史版本1,069,500字符。
+- 完整命令 `node --test --test-reporter=tap packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`：**322/322通过**，0失败/取消/跳过，即原319项全部保留，加3项索引/诊断/库存回归。证据 `evals/t03/p4-p5/node-tests.tap`。
+
+### 资源结果与停止
+
+固定停止条件为Node heap 1536MiB、RSS 1.4GiB、临时包512MiB、物理节点1,000,000、单场景30分钟、磁盘余量20GiB。自动维护继续 `HOST_MAINTENANCE_UNSUPPORTED`。
+
+Node计量内存provider的1x完整通过：工作负载453.2秒、冷重开101.5ms、导出8.0秒、空库完整恢复262.9秒；峰值RSS833,236,992 bytes，备份20,915,028 bytes/32,350 records。源库333,608物理节点，其中活动checkpoint可达业务页14,596、当前不可达保留业务页17,752、活动目录32,348、陈旧目录/中间页268,911；恢复库77,692节点，陈旧目录/中间页12,995。该结果不是原生TT或手机验收。
+
+首轮原生 `20260921p4a` 受用户报告的上游供应商/网络中断污染，不作算法结论。随后使用哈希一致的进度版扩展和新namespace执行 `20260921p4b`，固定TT `367b0c7e9410`、exe SHA256 `11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4`。宿主全程响应：4/32发布为401,846.6ms/15,769节点；8/32为1,078,023.6ms/40,651节点；第12次发布返回后超过1,800,000ms，停止器报 `P4 native elapsed-time safety stop`。停止前断言先于进度发送，未补造第12次节点数。data root增加60,445,275 bytes。
+
+停止后只核验唯一固定路径/PID/二进制哈希并做退出清理；普通关闭5秒未退出才强制结束，明确不是崩溃恢复实验。所有库与证据保留。5x/10x未执行：原生1x已失败，Node 1x源节点按线性外推到5x亦超过100万节点停止线。
+
+### 当前关卡、回退与review请求
+
+这是最新放行规定的新增资源算法问题。P4的1x仍未完成冷重开、范围读取、索引、导出/恢复，S09未通过；不提高阈值、不缩小样本、不关闭full flush、不自动GC，也不将Node通过写成TT通过。P5只读诊断代码可保留，但P5与整个T-03均不标完成，不交最终review。
+
+完整证据与待审问题见 `notes/t-03-p4-resource-review.md` 和 `evals/t03/p4-p5/`。需要Chat先审查普通发布的目录构建/重复持久写放大及允许的最小算法修复范围；后续仍在T-03内，不创建/执行T-04。回退停用本轮索引/诊断/harness并保留旧库、P4库和证据；没有生产格式迁移或真实档案写入。

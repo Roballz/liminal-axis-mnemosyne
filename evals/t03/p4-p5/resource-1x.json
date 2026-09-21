@@ -1,0 +1,670 @@
+{
+  "status": "passed",
+  "date": "2026-09-21",
+  "scale": 1,
+  "synthetic": true,
+  "scope": "Windows desktop P4 resource exploration with metered in-memory provider; not native TT/mobile acceptance",
+  "device": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v24.19.0",
+    "os_release": "10.0.19045",
+    "cpu": "Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz",
+    "logical_cpus": 8,
+    "total_memory_bytes": 17010008064
+  },
+  "scenario": {
+    "scale": 1,
+    "story_id": "st_00000000-0000-4000-8000-000000000001",
+    "branch_id": "br_00000000-0000-4000-8000-000000000002",
+    "child_branch_id": "br_00000000-0000-4000-8000-0000000000b0",
+    "head_snapshot_id": "hs_0e8e958d-4400-4fb8-b39e-3454f0ca5d37",
+    "child_head_snapshot_id": "hs_d65aa9bc-67a0-4c22-85cc-338472576735",
+    "operations": [
+      "op_00000000-0000-4000-8000-00000000000b",
+      "op_00000000-0000-4000-8000-000000000010",
+      "op_00000000-0000-4000-8000-000000000015",
+      "op_00000000-0000-4000-8000-00000000001a",
+      "op_00000000-0000-4000-8000-00000000001f",
+      "op_00000000-0000-4000-8000-000000000024",
+      "op_00000000-0000-4000-8000-000000000029",
+      "op_00000000-0000-4000-8000-00000000002e",
+      "op_00000000-0000-4000-8000-000000000033",
+      "op_00000000-0000-4000-8000-000000000038",
+      "op_00000000-0000-4000-8000-00000000003d",
+      "op_00000000-0000-4000-8000-000000000042",
+      "op_00000000-0000-4000-8000-000000000047",
+      "op_00000000-0000-4000-8000-00000000004c",
+      "op_00000000-0000-4000-8000-000000000051",
+      "op_00000000-0000-4000-8000-000000000056",
+      "op_00000000-0000-4000-8000-00000000005b",
+      "op_00000000-0000-4000-8000-000000000060",
+      "op_00000000-0000-4000-8000-000000000065",
+      "op_00000000-0000-4000-8000-00000000006a",
+      "op_00000000-0000-4000-8000-00000000006f",
+      "op_00000000-0000-4000-8000-000000000074",
+      "op_00000000-0000-4000-8000-000000000079",
+      "op_00000000-0000-4000-8000-00000000007e",
+      "op_00000000-0000-4000-8000-000000000083",
+      "op_00000000-0000-4000-8000-000000000088",
+      "op_00000000-0000-4000-8000-00000000008d",
+      "op_00000000-0000-4000-8000-000000000092",
+      "op_00000000-0000-4000-8000-000000000097",
+      "op_00000000-0000-4000-8000-00000000009c",
+      "op_00000000-0000-4000-8000-0000000000a1",
+      "op_00000000-0000-4000-8000-0000000000a6",
+      "op_00000000-0000-4000-8000-0000000000a8",
+      "op_00000000-0000-4000-8000-0000000000aa",
+      "op_00000000-0000-4000-8000-0000000000ac",
+      "op_00000000-0000-4000-8000-0000000000ae",
+      "op_00000000-0000-4000-8000-0000000000af",
+      "op_00000000-0000-4000-8000-0000000000b1",
+      "op_00000000-0000-4000-8000-0000000000b4",
+      "op_00000000-0000-4000-8000-0000000000b7"
+    ],
+    "ranges": [
+      {
+        "snapshot_id": "hs_0e8e958d-4400-4fb8-b39e-3454f0ca5d37",
+        "start": 0,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_0e8e958d-4400-4fb8-b39e-3454f0ca5d37",
+        "start": 27,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_0e8e958d-4400-4fb8-b39e-3454f0ca5d37",
+        "start": 55,
+        "count": 8
+      },
+      {
+        "snapshot_id": "hs_d65aa9bc-67a0-4c22-85cc-338472576735",
+        "start": 27,
+        "count": 5
+      }
+    ],
+    "memory": {
+      "schema_version": 1,
+      "memory_id": "mem_00000000-0000-4000-8000-0000000000b5",
+      "memory_revision_id": "mr_00000000-0000-4000-8000-0000000000b6",
+      "story_id": "st_00000000-0000-4000-8000-000000000001",
+      "basis_snapshot_id": "hs_0e8e958d-4400-4fb8-b39e-3454f0ca5d37",
+      "kind": "Record",
+      "origin": "source_derived",
+      "input_refs": [
+        {
+          "type": "source",
+          "message_id": "msg_00000000-0000-4000-8000-000000000007",
+          "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+        },
+        {
+          "type": "source",
+          "message_id": "msg_00000000-0000-4000-8000-000000000009",
+          "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+        }
+      ],
+      "coverage": {
+        "mode": "interval",
+        "members": [
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000007",
+            "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+          },
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000009",
+            "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+          }
+        ],
+        "boundary": {
+          "start": "msg_00000000-0000-4000-8000-000000000007",
+          "end": "msg_00000000-0000-4000-8000-000000000009"
+        },
+        "observed_span": [
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000007",
+            "revision_id": "rev_00000000-0000-4000-8000-000000000008"
+          },
+          {
+            "message_id": "msg_00000000-0000-4000-8000-000000000009",
+            "revision_id": "rev_00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      "recipe_id": "p4-synthetic-v1",
+      "model_profile": "artificial-vector-v1",
+      "input_fingerprint": "sha256:derived-input:v1:e56f728d21866a01a6fb13c1670d2f7a27d571197aa684d04bdb70107f980e48",
+      "content": "青石门 月台 角色约定 P4 synthetic marker",
+      "visibility": "normal",
+      "recall_enabled": true,
+      "source_declaration": null,
+      "scope_branch_id": null
+    },
+    "messages": 63,
+    "current_characters": 976500,
+    "archived_revision_characters": 1069500,
+    "growth_rounds": 32,
+    "edits": 4,
+    "deletes": 1,
+    "forks": 1
+  },
+  "timings": {
+    "workload_ms": 453201.1117,
+    "cold_reopen": {
+      "elapsed_ms": 101.53349999996135,
+      "provider_reads": 19
+    },
+    "export_ms": 7989.250999999989,
+    "restore_ms": 262889.43679999997,
+    "operation_ms": [
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000000b",
+        "kind": "history-delta",
+        "prepare_ms": 6007.9273,
+        "execute_ms": 28.97989999999936,
+        "total_ms": 6036.9072
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000010",
+        "kind": "history-delta",
+        "prepare_ms": 7443.266299999999,
+        "execute_ms": 35.51330000000053,
+        "total_ms": 7478.7796
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000015",
+        "kind": "history-delta",
+        "prepare_ms": 8329.258100000001,
+        "execute_ms": 40.98790000000008,
+        "total_ms": 8370.246000000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000001a",
+        "kind": "history-delta",
+        "prepare_ms": 9021.179200000002,
+        "execute_ms": 46.00330000000031,
+        "total_ms": 9067.182500000003
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000001f",
+        "kind": "history-delta",
+        "prepare_ms": 9813.286999999997,
+        "execute_ms": 59.69360000000597,
+        "total_ms": 9872.980600000003
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000024",
+        "kind": "history-delta",
+        "prepare_ms": 10701.449700000005,
+        "execute_ms": 68.65669999999955,
+        "total_ms": 10770.106400000004
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000029",
+        "kind": "history-delta",
+        "prepare_ms": 10483.437599999997,
+        "execute_ms": 69.14500000000407,
+        "total_ms": 10552.582600000002
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000002e",
+        "kind": "history-delta",
+        "prepare_ms": 11134.918300000005,
+        "execute_ms": 71.55210000000079,
+        "total_ms": 11206.470400000006
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000033",
+        "kind": "history-delta",
+        "prepare_ms": 11265.523100000006,
+        "execute_ms": 84.43889999999374,
+        "total_ms": 11349.962
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000038",
+        "kind": "history-delta",
+        "prepare_ms": 12300.920800000007,
+        "execute_ms": 86.92879999999423,
+        "total_ms": 12387.849600000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000003d",
+        "kind": "history-delta",
+        "prepare_ms": 10402.193400000004,
+        "execute_ms": 89.59549999999581,
+        "total_ms": 10491.7889
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000042",
+        "kind": "history-delta",
+        "prepare_ms": 11558.161400000012,
+        "execute_ms": 89.03069999998843,
+        "total_ms": 11647.1921
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000047",
+        "kind": "history-delta",
+        "prepare_ms": 11054.801200000002,
+        "execute_ms": 91.29869999999937,
+        "total_ms": 11146.099900000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000004c",
+        "kind": "history-delta",
+        "prepare_ms": 11840.758099999992,
+        "execute_ms": 88.56530000001658,
+        "total_ms": 11929.323400000008
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000051",
+        "kind": "history-delta",
+        "prepare_ms": 11959.883299999987,
+        "execute_ms": 97.60289999999804,
+        "total_ms": 12057.486199999985
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000056",
+        "kind": "history-delta",
+        "prepare_ms": 12873.6691,
+        "execute_ms": 83.52050000001327,
+        "total_ms": 12957.189600000012
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000005b",
+        "kind": "history-delta",
+        "prepare_ms": 12891.37950000001,
+        "execute_ms": 92.80929999999353,
+        "total_ms": 12984.188800000004
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000060",
+        "kind": "history-delta",
+        "prepare_ms": 13629.583100000018,
+        "execute_ms": 103.74639999997453,
+        "total_ms": 13733.329499999993
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000065",
+        "kind": "history-delta",
+        "prepare_ms": 13090.271500000003,
+        "execute_ms": 111.02799999999115,
+        "total_ms": 13201.299499999994
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000006a",
+        "kind": "history-delta",
+        "prepare_ms": 13779.930200000003,
+        "execute_ms": 103.1085000000021,
+        "total_ms": 13883.038700000005
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000006f",
+        "kind": "history-delta",
+        "prepare_ms": 11888.035000000003,
+        "execute_ms": 110.2271999999939,
+        "total_ms": 11998.262199999997
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000074",
+        "kind": "history-delta",
+        "prepare_ms": 13358.18239999999,
+        "execute_ms": 105.12530000001425,
+        "total_ms": 13463.307700000005
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000079",
+        "kind": "history-delta",
+        "prepare_ms": 12421.81349999999,
+        "execute_ms": 110.4265000000014,
+        "total_ms": 12532.23999999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000007e",
+        "kind": "history-delta",
+        "prepare_ms": 13330.945699999982,
+        "execute_ms": 110.5114000000176,
+        "total_ms": 13441.4571
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000083",
+        "kind": "history-delta",
+        "prepare_ms": 13511.873699999996,
+        "execute_ms": 113.59720000001835,
+        "total_ms": 13625.470900000015
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000088",
+        "kind": "history-delta",
+        "prepare_ms": 14322.713099999994,
+        "execute_ms": 111.5859000000055,
+        "total_ms": 14434.298999999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000008d",
+        "kind": "history-delta",
+        "prepare_ms": 13863.738500000036,
+        "execute_ms": 115.27519999997457,
+        "total_ms": 13979.01370000001
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000092",
+        "kind": "history-delta",
+        "prepare_ms": 14579.295899999968,
+        "execute_ms": 121.98190000001341,
+        "total_ms": 14701.277799999982
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-000000000097",
+        "kind": "history-delta",
+        "prepare_ms": 14209.43909999996,
+        "execute_ms": 118.89459999999963,
+        "total_ms": 14328.33369999996
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-00000000009c",
+        "kind": "history-delta",
+        "prepare_ms": 14762.129399999976,
+        "execute_ms": 109.88160000002244,
+        "total_ms": 14872.010999999999
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a1",
+        "kind": "history-delta",
+        "prepare_ms": 12386.767799999972,
+        "execute_ms": 115.80540000001201,
+        "total_ms": 12502.573199999984
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a6",
+        "kind": "history-delta",
+        "prepare_ms": 13707.955800000054,
+        "execute_ms": 104.46089999994729,
+        "total_ms": 13812.416700000002
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000a8",
+        "kind": "history-delta",
+        "prepare_ms": 10911.52390000003,
+        "execute_ms": 105.81979999999749,
+        "total_ms": 11017.343700000027
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000aa",
+        "kind": "history-delta",
+        "prepare_ms": 12122.511799999978,
+        "execute_ms": 118.26610000000801,
+        "total_ms": 12240.777899999986
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000ac",
+        "kind": "history-delta",
+        "prepare_ms": 11562.522699999972,
+        "execute_ms": 114.87809999997262,
+        "total_ms": 11677.400799999945
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000ae",
+        "kind": "history-delta",
+        "prepare_ms": 11073.71610000002,
+        "execute_ms": 109.00429999997141,
+        "total_ms": 11182.720399999991
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000af",
+        "kind": "history-delta",
+        "prepare_ms": 4717.67359999998,
+        "execute_ms": 111.17770000000019,
+        "total_ms": 4828.85129999998
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b1",
+        "kind": "history",
+        "prepare_ms": 4811.294999999984,
+        "execute_ms": 116.65989999996964,
+        "total_ms": 4927.954899999953
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b4",
+        "kind": "history-delta",
+        "prepare_ms": 9531.913900000043,
+        "execute_ms": 116.88939999998547,
+        "total_ms": 9648.803300000029
+      },
+      {
+        "operation_id": "op_00000000-0000-4000-8000-0000000000b7",
+        "kind": "memory",
+        "prepare_ms": 2697.404899999965,
+        "execute_ms": 106.44900000002235,
+        "total_ms": 2803.8538999999873
+      }
+    ],
+    "event_loop_delay_max_ms": 320.602111
+  },
+  "provider": {
+    "source": {
+      "reads": 144919,
+      "writes": 333688,
+      "flushes": 164,
+      "physical_payload_bytes": 140822279,
+      "inventory": {
+        "physical_nodes": 333608,
+        "cataloged_business_pages": 32348,
+        "active_checkpoint_reachable_pages": 14596,
+        "cataloged_unreachable_pages": 17752,
+        "active_directory_pages": 32348,
+        "stale_directory_or_intermediate_pages": 268911,
+        "root_nodes": 1
+      }
+    },
+    "restored": {
+      "reads": 1522178,
+      "writes": 77693,
+      "flushes": 4,
+      "physical_payload_bytes": 27767800,
+      "inventory": {
+        "physical_nodes": 77692,
+        "cataloged_business_pages": 32348,
+        "active_checkpoint_reachable_pages": 14596,
+        "cataloged_unreachable_pages": 17752,
+        "active_directory_pages": 32348,
+        "stale_directory_or_intermediate_pages": 12995,
+        "root_nodes": 1
+      }
+    }
+  },
+  "backup": {
+    "path": "D:\\Mnemosyne\\.t03-local\\p4\\p4-1x.ndjson",
+    "bytes": 20915028,
+    "records": 32350
+  },
+  "resources": {
+    "peaks": {
+      "rss": 833236992,
+      "heap_used": 528545480
+    },
+    "samples": [
+      {
+        "label": "growth-4",
+        "elapsed_ms": 31120.1297,
+        "rss": 234835968,
+        "heap_used": 109978632,
+        "physical_nodes": 15760,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "growth-8",
+        "elapsed_ms": 73526.2396,
+        "rss": 292954112,
+        "heap_used": 165483312,
+        "physical_nodes": 40648,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "growth-12",
+        "elapsed_ms": 119407.1168,
+        "rss": 316129280,
+        "heap_used": 152727232,
+        "physical_nodes": 71403,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "growth-16",
+        "elapsed_ms": 167501.4719,
+        "rss": 383258624,
+        "heap_used": 145986016,
+        "physical_nodes": 104210,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "growth-20",
+        "elapsed_ms": 221307.0773,
+        "rss": 416608256,
+        "heap_used": 215524512,
+        "physical_nodes": 142003,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "growth-24",
+        "elapsed_ms": 272748.052,
+        "rss": 476680192,
+        "heap_used": 309732808,
+        "physical_nodes": 181880,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "growth-28",
+        "elapsed_ms": 329492.5683,
+        "rss": 546295808,
+        "heap_used": 401714224,
+        "physical_nodes": 222693,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "growth-32",
+        "elapsed_ms": 385011.7941,
+        "rss": 616112128,
+        "heap_used": 351608856,
+        "physical_nodes": 264731,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "edit-36",
+        "elapsed_ms": 431132.2287,
+        "rss": 621084672,
+        "heap_used": 388798712,
+        "physical_nodes": 310838,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "workload-complete",
+        "elapsed_ms": 453360.8385,
+        "rss": 673099776,
+        "heap_used": 522209000,
+        "physical_nodes": 333608,
+        "free_disk_bytes": 365996544000
+      },
+      {
+        "label": "export-10000",
+        "elapsed_ms": 462489.2193,
+        "rss": 686014464,
+        "heap_used": 302119656,
+        "physical_nodes": 333608,
+        "free_disk_bytes": 365990055936
+      },
+      {
+        "label": "export-20000",
+        "elapsed_ms": 465015.8623,
+        "rss": 685654016,
+        "heap_used": 345585016,
+        "physical_nodes": 333608,
+        "free_disk_bytes": 365983567872
+      },
+      {
+        "label": "export-30000",
+        "elapsed_ms": 467400.1687,
+        "rss": 693886976,
+        "heap_used": 335122760,
+        "physical_nodes": 333608,
+        "free_disk_bytes": 365977145344
+      },
+      {
+        "label": "restore-complete",
+        "elapsed_ms": 737411.1900000001,
+        "rss": 833236992,
+        "heap_used": 528545480,
+        "physical_nodes": 77692,
+        "free_disk_bytes": 365975625728
+      }
+    ],
+    "limits": {
+      "rss_bytes": 1468006400,
+      "package_bytes": 536870912,
+      "physical_nodes": 1000000,
+      "elapsed_ms": 1800000,
+      "minimum_free_disk_bytes": 21474836480
+    },
+    "stop_triggered": false
+  },
+  "diagnostic": {
+    "storage": {
+      "format": "mnemosyne-paged-storage-v1",
+      "library_id": "op_64efbed4-22d8-4a1e-acd4-a1a4205a3c17",
+      "status": "ready",
+      "checkpoint": {
+        "hash": "f1e8968f82abfaeaef08bb4a4543fb36306a1f0aed5aa88c5e6a1981aeb81d42",
+        "slot": 265981260759723
+      },
+      "operation_count": 40,
+      "pending_operation_id": null,
+      "physical_nodes": 333608,
+      "error": null,
+      "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+      "branch": {
+        "story_id": "st_00000000-0000-4000-8000-000000000001",
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "head_snapshot_id": "hs_0e8e958d-4400-4fb8-b39e-3454f0ca5d37",
+        "view_version": "mv_ea9df17d-fd44-4312-96c2-48981ece78c6",
+        "marker": {
+          "head": "hs_0e8e958d-4400-4fb8-b39e-3454f0ca5d37",
+          "index": "behind",
+          "rebuild": "evaluate",
+          "view": "mv_ea9df17d-fd44-4312-96c2-48981ece78c6"
+        }
+      }
+    },
+    "index": {
+      "format": "mnemosyne-recall-index-v1",
+      "status": "ready",
+      "source": {
+        "library_id": "op_64efbed4-22d8-4a1e-acd4-a1a4205a3c17",
+        "checkpoint": {
+          "hash": "f1e8968f82abfaeaef08bb4a4543fb36306a1f0aed5aa88c5e6a1981aeb81d42",
+          "slot": 265981260759723
+        },
+        "story_id": "st_00000000-0000-4000-8000-000000000001",
+        "branch_id": "br_00000000-0000-4000-8000-000000000002",
+        "head_snapshot_id": "hs_0e8e958d-4400-4fb8-b39e-3454f0ca5d37",
+        "view_version": "mv_ea9df17d-fd44-4312-96c2-48981ece78c6"
+      },
+      "progress": {
+        "scanned": 1,
+        "indexed": 1
+      },
+      "error": null,
+      "entry_count": 1
+    },
+    "errors": [],
+    "maintenance": {
+      "automatic_external": "HOST_MAINTENANCE_UNSUPPORTED",
+      "cooperative": "suspend-required"
+    }
+  },
+  "correctness": {
+    "ranges": true,
+    "confirmed_results": true,
+    "selected_memory": true,
+    "complete_restore": true
+  },
+  "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+  "mobile": "pending"
+}

@@ -1,6 +1,6 @@
 # T-03 storage diagnostics
 
-状态：P0～P2已通过G1；P3分页业务、发布checkpoint与完整恢复已接通，P3-R1/R2返修待review，implemented_unverified。旧P2/intent入口保留原上限。自动外部维护门禁保留，P4/P5未开工，T-03仍in_progress。见 `../../notes/t-03-p3-handoff.md`。
+状态：P0～P2已通过G1，P3分页业务与P3-R1/R2已通过受控高难review。P4索引/诊断增量和322项回归完成，但固定TT百万字符1x触发30分钟资源停止器，待算法回审。旧P2/intent入口与自动外部维护门禁保留；P5和T-03未完成。见 `../../notes/t-03-p4-resource-review.md`。
 
 当前R1/R2返修代码、150项Node回归和隔离TT `20260919g1` 小验证已完成；G1已由最终回执放行；这些为原P0～P2证据。关闭成功后旧owner永久失效，必须经openTestStore取得替代owner；关闭失败保留同一owner，可显式recover或重试close。恢复只把原生null视为缺记录，损坏payload/root报NEEDS_RESOLUTION。证据见 `../../evals/t03/g1-repair/`。
 
@@ -87,4 +87,26 @@ const restored = await openPagedTestStore(api.db, 'mnemo-t03-paged-example-resto
 - P3增长正确性：`node --max-old-space-size=1536 packages/storage/native/paged-growth.mjs`；虚构样本，输出到`evals/t03/p3-integration/`，临时分页包仅在`.t03-local/`。
 - 原生：collector的`paged-roundtrip`、`paged-before`→Crash→`recover-paged-before`、`paged-after`→Crash→`recover-paged-after`；`paged-reopen-check`复核同run已完成往返的库。只通过既有精确隔离脚本启停。
 
-协议见09第10节；测试边界见原task与高难项交接。新格式没有迁移真实档案；自动维护仍`HOST_MAINTENANCE_UNSUPPORTED`，不授权手机或生产使用。P4/P5未进入，T-03未完成。
+协议见09第10节；测试边界见原task与高难项交接。新格式没有迁移真实档案；自动维护仍`HOST_MAINTENANCE_UNSUPPORTED`，不授权手机或生产使用。
+
+## P4 index, diagnostics, and resource blocker
+
+`RecallIndex` 使用独立可重建 sidecar；正文发布不依赖它成功。`rebuild(handle, branch)` 固定到当前 checkpoint，`search()` 在返回前重新核对Story/Branch/view、当前selection、memory fingerprint和`memoryStatus`，所以旧sidecar候选不能直接进入结果。当前只使用中文marker和人工数值向量，不是完整BM25/embedding/rerank实现。
+
+`handle.diagnostics(branch)` 是只读入口，报告分页格式、library、checkpoint、operation/pending、物理节点及Head/view/marker。`readOnlyPagedHandle()`移除prepare/execute等写方法；`describePagedStore()`合并索引状态；`inventoryPagedIO()`离线分类业务页、当前可达/不可达页及活动/陈旧目录页。
+
+定向回归：
+
+```powershell
+node --test packages/storage/tests/p4-p5.test.mjs
+```
+
+Node 资源测量：
+
+```powershell
+node --max-old-space-size=1536 packages/storage/native/p4-resource.mjs 1 evals/t03/p4-p5/resource-1x.json
+```
+
+固定TT入口为 `collector.mjs p4-resource <new-run>` 后启动既有隔离副本。必须使用新run/namespace和固定30分钟、100万节点、512MiB包限制；不得在失败后提高阈值重跑。`20260921p4b` 在第12/32次增长发布后触发elapsed stop，故原生1x未完成，5x/10x不执行。证据与精确清理边界见 `../../evals/t03/p4-p5/`。
+
+P5只读诊断代码已存在，但因P4强制完成线未过，不标P5或T-03完成。不要自动清理测试库；不要修改TT、触发sync/archive、操作真实档案或手机。

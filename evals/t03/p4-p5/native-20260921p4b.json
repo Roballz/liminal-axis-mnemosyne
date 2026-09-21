@@ -1,0 +1,51 @@
+{
+  "phase": "p4-resource",
+  "run": "20260921p4b",
+  "events": [
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921p4b",
+      "stage": "started",
+      "elapsed_ms": 0,
+      "source_namespace": "mnemo-t03-paged-20260921p4b-p4-source"
+    },
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921p4b",
+      "stage": "growth",
+      "completed": 4,
+      "total": 32,
+      "operations": 4,
+      "label": "growth-4",
+      "elapsed_ms": 401846.5999999996,
+      "physical_nodes": 15769
+    },
+    {
+      "type": "progress",
+      "phase": "p4-resource",
+      "run": "20260921p4b",
+      "stage": "growth",
+      "completed": 8,
+      "total": 32,
+      "operations": 8,
+      "label": "growth-8",
+      "elapsed_ms": 1078023.5999999996,
+      "physical_nodes": 40651
+    },
+    {
+      "type": "error",
+      "code": null,
+      "message": "P4 native elapsed-time safety stop",
+      "cause": null,
+      "stack": [
+        "Error: P4 native elapsed-time safety stop",
+        "    at assert (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:9:63)",
+        "    at sample (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:43:5)",
+        "    at async onProgress (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/native/p4-native-suite.mjs:54:21)",
+        "    at async exercisePagedScale (http://tauri.localhost/scripts/extensions/third-party/mnemosyne-t03-storage/packages/storage/p4-workload.mjs:39:5)"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "deployed_at": "2026-09-21T06:26:15.9976434Z",
+  "tt_commit": "367b0c7e9410e8fcf394f668302d70073e5a3ce5",
+  "exe_sha256": "11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4",
+  "files": [
+    {
+      "path": "index.js",
+      "source_sha256": "ee4892add61baa134df9e7276f5e28894958cdd0e812dd10726323c932e6d2c1",
+      "deployed_sha256": "ee4892add61baa134df9e7276f5e28894958cdd0e812dd10726323c932e6d2c1"
+    },
+    {
+      "path": "packages/storage/native/suite.mjs",
+      "source_sha256": "78dd12c5dc7f60480bc656a60f41d5320385dc04c2dfde09ae734df0cebc106b",
+      "deployed_sha256": "78dd12c5dc7f60480bc656a60f41d5320385dc04c2dfde09ae734df0cebc106b"
+    },
+    {
+      "path": "packages/storage/native/p4-native-suite.mjs",
+      "source_sha256": "ccf6704c6abd71d725c0dc6eaffa3568a15c0987b88455ea12e6d9248d80094b",
+      "deployed_sha256": "ccf6704c6abd71d725c0dc6eaffa3568a15c0987b88455ea12e6d9248d80094b"
+    },
+    {
+      "path": "packages/storage/p4-workload.mjs",
+      "source_sha256": "5303412a270de068bd429a6e1909e262d1275bc3bd86c917cbf20676f689fdc7",
+      "deployed_sha256": "5303412a270de068bd429a6e1909e262d1275bc3bd86c917cbf20676f689fdc7"
+    },
+    {
+      "path": "packages/storage/recall-index.mjs",
+      "source_sha256": "7be6c3e98bf9ed3ccacf76679c2a6dfd827b4827bb436d8d88d8c6152185a9ec",
+      "deployed_sha256": "7be6c3e98bf9ed3ccacf76679c2a6dfd827b4827bb436d8d88d8c6152185a9ec"
+    },
+    {
+      "path": "packages/storage/paged-diagnostics.mjs",
+      "source_sha256": "17c441d93bbd8f98d53db28b62cc82fb2804b1a94c48056b57dc13b791466601",
+      "deployed_sha256": "17c441d93bbd8f98d53db28b62cc82fb2804b1a94c48056b57dc13b791466601"
+    },
+    {
+      "path": "packages/storage/paged-coordinator.mjs",
+      "source_sha256": "07138bbb80d399bcc84fd6266e95026d69f6d90bcd6f49dc5140de8aece39d48",
+      "deployed_sha256": "07138bbb80d399bcc84fd6266e95026d69f6d90bcd6f49dc5140de8aece39d48"
+    },
+    {
+      "path": "packages/storage/paged-tt-adapter.mjs",
+      "source_sha256": "72c700ed251fd722f8c254a741adcff6c1f110b3043dae6afba3c28447445b32",
+      "deployed_sha256": "72c700ed251fd722f8c254a741adcff6c1f110b3043dae6afba3c28447445b32"
+    }
+  ]
+}

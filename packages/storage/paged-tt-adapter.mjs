@@ -48,6 +48,7 @@ export async function openPagedTestStore(api, namespace, { create = false, resto
       },
       put: (slot, payload) => { owned(); return native.upsert(slot + 1, [1, 0], payload); },
       flush: () => { owned(); return native.flush(); },
+      stats: () => { owned(); return native.stats(); },
       close: () => { owned(); return native.close(); },
       assertEmpty: async () => {
         owned(); requireThat((await native.stats()).nodeCount === 0,

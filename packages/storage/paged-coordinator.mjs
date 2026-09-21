@@ -172,12 +172,27 @@ export class PagedCoordinator {
         return {keys,after:keys.at(-1)??null,checkpoint:copy(this.#root.control)};
       }),
       memoryStatus:(key,branch,cutoff=null)=>run(()=>pagedMemoryStatus(new PagedDomain(this.#pages,this.#control.domain),key,branch,cutoff)),
+      diagnostics:(branch=null)=>run(()=>this.#diagnostics(branch)),
       read:(table,key)=>run(()=>new PagedDomain(this.#pages,this.#control.domain).logical(table,key)),
       range:(snapshot,start=0,count=16)=>run(async()=>{check(Number.isSafeInteger(count)&&count>=0&&count<=1024,'RESOURCE_LIMIT','Read page limit');const output=[]; for await(const ref of new PagedDomain(this.#pages,this.#control.domain).entries(snapshot,start,count)) output.push(ref); return output;}),
       export:()=>run(()=>exportPageDirectory(this.#pages.catalog,this.#root.directory,{format:PAGED_FORMAT,library_id:this.#root.library_id,control:this.#root.control})),
       logical:()=>run(()=>this.#logical()),
       audit:()=>run(async()=>{const {auditPaged}=await import('./paged-recovery.mjs');return auditPaged(new Pages(this.#io),this.#root.directory,this.#root.control);}),
     });
+  }
+  async #diagnostics(branchId) {
+    const output={format:PAGED_FORMAT,library_id:this.#root.library_id,status:this.#status,
+      checkpoint:copy(this.#root.control),operation_count:this.#control.count,
+      pending_operation_id:this.#control.pending,physical_nodes:null,error:null,
+      maintenance_gate:'HOST_MAINTENANCE_UNSUPPORTED',branch:null};
+    if(typeof this.#io.stats==='function') output.physical_nodes=(await this.#io.stats()).nodeCount;
+    if(branchId!==null) {
+      const d=new PagedDomain(this.#pages,this.#control.domain), branch=await d.get('branches',branchId),
+        view=await d.get('views',branchId), marker=await d.get('markers',branchId);
+      output.branch={story_id:branch.story_id,branch_id:branch.branch_id,
+        head_snapshot_id:branch.head_snapshot_id,view_version:view.version,marker};
+    }
+    return output;
   }
   async #logical() {
     const d=new PagedDomain(this.#pages,this.#control.domain), state={schema_version:1}; let objects=0,bytes=0;

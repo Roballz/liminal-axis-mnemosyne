@@ -1,0 +1,318 @@
+{
+  "date": "2026-09-21",
+  "javascript": [
+    {
+      "path": "apps\\tt-adapter-probe\\index.js",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "apps\\tt-adapter-probe\\tests\\probe.test.js",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\context.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\history.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\index.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\memory.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\primitives.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\runtime.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\schema.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\tests\\contracts.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\tests\\fixture.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\tests\\review-round2.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\tests\\review.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\contracts\\transfer.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\intent-prototype.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\intent-recovery.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\intent-tt-adapter.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\memory-work.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\collector.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\index.js",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\intent-suite.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\p4-native-suite.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\p4-resource.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\paged-growth-reopen.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\paged-growth.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\paged-suite.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\recovery-suite.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\native\\suite.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\p4-workload.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-coordinator.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-diagnostics.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-directory.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-domain.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-history.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-json.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-memory.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-recovery.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-transport.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\paged-tt-adapter.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\pages.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\protocol.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\recall-index.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\strict-json.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\fake-io.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\g1-review.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\intent-adapter.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\intent-prototype.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\intent-recovery.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\p3-review.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\p4-p5.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\paged-adapter.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\paged-integration.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\paged-json.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\paged-native-suite.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\paged-recovery.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\paged-transport.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\pages.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\scenario.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tests\\storage.test.mjs",
+      "passed": true,
+      "output": ""
+    },
+    {
+      "path": "packages\\storage\\tt-adapter.mjs",
+      "passed": true,
+      "output": ""
+    }
+  ],
+  "powershell": [
+    {
+      "path": "packages\\storage\\native\\isolated-tt.ps1",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "path": "packages\\storage\\native\\stop-isolated-complete.ps1",
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "passed": true
+}

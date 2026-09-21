@@ -1,0 +1,14 @@
+{
+  "captured_at": "2026-09-21T07:11:23.8388786Z",
+  "run": "20260921p4b",
+  "tauritavern_processes": 0,
+  "data_root": "D:\\Mnemosyne\\.t03-local\\tt-367b0c7\\data",
+  "data_bytes": 87906353.0,
+  "disk_free_bytes": 365915013120,
+  "exe_sha256": "11a9bc110da5dc634ff8c0b7b8fe244110c360af46693e50de67968cb811f2c4",
+  "limits": {
+    "elapsed_ms": 1800000,
+    "physical_nodes": 1000000,
+    "package_bytes": 536870912
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "date": "2026-09-21",
+  "baseline": "42c6624178eeb3e3826a4fee37c3fe1ad843e0f2",
+  "full_regression": {
+    "tests": 322,
+    "pass": 322,
+    "fail": 0,
+    "skipped": 0,
+    "previous_regression_preserved": 319,
+    "evidence": "node-tests.tap"
+  },
+  "syntax": {
+    "javascript_files": 60,
+    "powershell_files": 2,
+    "passed": true,
+    "evidence": "syntax.json"
+  },
+  "diff_check": "passed",
+  "node_1x": "passed metered in-memory provider; not native acceptance",
+  "native_1x": "blocked: elapsed-time safety stop after the 12th of 32 growth publications",
+  "maintenance_gate": "HOST_MAINTENANCE_UNSUPPORTED",
+  "scale_5x_10x": "not run: native 1x stopped and linear node projection exceeds the fixed limit",
+  "mobile": "pending",
+  "source_hashes": [
+    {
+      "path": "packages/storage/recall-index.mjs",
+      "sha256": "7be6c3e98bf9ed3ccacf76679c2a6dfd827b4827bb436d8d88d8c6152185a9ec",
+      "lines": 203
+    },
+    {
+      "path": "packages/storage/paged-diagnostics.mjs",
+      "sha256": "17c441d93bbd8f98d53db28b62cc82fb2804b1a94c48056b57dc13b791466601",
+      "lines": 62
+    },
+    {
+      "path": "packages/storage/p4-workload.mjs",
+      "sha256": "5303412a270de068bd429a6e1909e262d1275bc3bd86c917cbf20676f689fdc7",
+      "lines": 104
+    },
+    {
+      "path": "packages/storage/native/p4-resource.mjs",
+      "sha256": "1e93c193564ac41d159a2a71f5d3b1584bc5860dabac86ba5e53c2979a65dffe",
+      "lines": 119
+    },
+    {
+      "path": "packages/storage/native/p4-native-suite.mjs",
+      "sha256": "551314ef88d80cdf8737f8312c156e07ca0b94ea38e57c52b2239620bec47d2a",
+      "lines": 129
+    },
+    {
+      "path": "packages/storage/tests/p4-p5.test.mjs",
+      "sha256": "2fb2e83169069d8f01ac547ce5b61e975c25e6ac471fcbead29f9cb93247909f",
+      "lines": 136
+    },
+    {
+      "path": "packages/storage/paged-coordinator.mjs",
+      "sha256": "07138bbb80d399bcc84fd6266e95026d69f6d90bcd6f49dc5140de8aece39d48",
+      "lines": 217
+    },
+    {
+      "path": "packages/storage/paged-tt-adapter.mjs",
+      "sha256": "72c700ed251fd722f8c254a741adcff6c1f110b3043dae6afba3c28447445b32",
+      "lines": 83
+    },
+    {
+      "path": "packages/storage/native/collector.mjs",
+      "sha256": "71e5e56364aaeb42f9cf8d8fcac92e0cbfff10bd72ff3f2ae3da4e1353988734",
+      "lines": 36
+    },
+    {
+      "path": "packages/storage/native/suite.mjs",
+      "sha256": "78dd12c5dc7f60480bc656a60f41d5320385dc04c2dfde09ae734df0cebc106b",
+      "lines": 197
+    },
+    {
+      "path": "packages/storage/native/stop-isolated-complete.ps1",
+      "sha256": "1a154ee7d1fac6790e47b34c93f233c16d09828f2710cb13c32324b04c51dbd8",
+      "lines": 33
+    }
+  ]
+}
