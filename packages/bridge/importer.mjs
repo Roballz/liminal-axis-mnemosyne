@@ -1,6 +1,6 @@
 import { newId, equal, requireThat as check } from '../contracts/primitives.mjs';
 import { recordKey, digest } from './records.mjs';
-import { restrictSnapshot } from './source.mjs';
+import { restrictSnapshot, snapshot } from './source.mjs';
 
 const now = () => new Date().toISOString();
 const key = (type, source, floor = '') => recordKey(type, floor === '' ? source : `${source}/${floor}`);
@@ -23,6 +23,46 @@ export class Importer {
     const k = key(type, source, floor), old = await this.h.bridgeRead(k);
     return { key: k, expected: old ? digest(old) : null, value };
   }
+  async storageSource(captured) {
+    if(!captured.identity)return captured.source;
+    const registered=await this.record('identity',captured.identity.source);
+    if(registered)return registered.binding_source;
+    return await this.record('binding',captured.identity.legacy_source)?captured.identity.legacy_source:captured.source;
+  }
+  async normalize(captured) {
+    if(!captured.identity)return captured;
+    const registered=await this.record('identity',captured.identity.source);
+    check(!registered||equal(registered.locator,captured.identity.locator),'VERSION_CONFLICT','Confirm changed locator before synchronization');
+    return {...captured,source:await this.storageSource(captured)};
+  }
+  async identify(input,choice) {
+    if(!input.identity)return{input,registration:null,locatorChanged:false};
+    const identity=input.identity,old=await this.record('identity',identity.source);
+    if(old)check(equal(old.scope,identity.scope)&&old.stable_id===identity.stable_id,'NOT_READY','Identity scope conflict');
+    let source=old?.binding_source??input.source;
+    if(!old){
+      const exactLegacy=await this.record('binding',identity.legacy_source);
+      if(exactLegacy)source=identity.legacy_source;
+      else if(choice.legacy_source){
+        const retained=await this.record('binding',choice.legacy_source);
+        check(choice.confirm_locator===true&&retained,'NOT_READY','Explicit existing binding confirmation required');
+        const formal=await this.h.read('bindings',retained.binding_id);
+        check(!formal.stable_id||formal.stable_id===identity.stable_id,'NOT_READY','Known stable identity differs');
+        if(formal.mutable_ref){
+          const locator=JSON.parse(formal.mutable_ref);
+          check(locator.kind===identity.scope.kind&&(locator.kind!=='character'||locator.characterId===identity.scope.owner),
+            'NOT_READY','Known source scope differs');
+        }
+        source=choice.legacy_source;
+      }
+    }
+    const locatorChanged=Boolean(old&&!equal(old.locator,identity.locator));
+    const value={version:1,type:'identity',source:identity.source,scope:identity.scope,stable_id:identity.stable_id,
+      locator:identity.locator,binding_source:source,previous_locator:locatorChanged?old.locator:(old?.previous_locator??null)};
+    const normalized={...snapshot(source,input.messages,{assets:input.assets,report:input.report},input.generation),identity};
+    return{input:normalized,locatorChanged,registration:old&&equal(old,value)?null:
+      {key:key('identity',identity.source),expected:old?digest(old):null,value}};
+  }
   async transact({ target = null, history = null, binding = null, records = [], operation_id = newId('operation') }) {
     const input = { kind: 'bridge', operation_id, payload: { version: 1, guard: target ? guardOf(target) : null, history, binding, records } };
     await this.h.prepare(input); return this.h.execute(operation_id);
@@ -38,9 +78,13 @@ export class Importer {
   }
   async preview(input, choice = { mode: 'new' }, categories = []) {
     await this.sourceGuard(input);
+    const originalFingerprint=input.fingerprint;
+    const identified=await this.identify(input,choice);input=identified.input;
     const bound = await this.record('binding', input.source);
-    const sourceFingerprint=input.fingerprint;
-    const inputLimit=!bound&&choice.mode==='fork'?choice.cutoff:null;
+    const sourceFingerprint=originalFingerprint;
+    const previousSession=bound?await this.record('session',bound.session):null;
+    const inputLimit=bound?(previousSession?.reason.inputLimit??null):
+      choice.mode==='fork'&&choice.input_mode==='parent-cutoff'?choice.cutoff:null;
     if(inputLimit!==null)input=restrictSnapshot(input,inputLimit);
     let target = null, inherited = [], fork = null;
     if (bound) {
@@ -58,6 +102,29 @@ export class Importer {
       if (choice.mode === 'fork') fork = { parent_branch_id: choice.branch_id, source_snapshot_id: snap.snapshot_id,
         prefix_length: count, anchor: inherited.at(-1) ?? null };
     }
+    let offset=bound?.offset??0;
+    if(!bound && inherited.length) {
+      if(choice.mode==='continue') {
+        const mode=choice.input_mode??(input.messages.length===0?'new-segment':null);
+        check(['new-segment','full-copy','overlap'].includes(mode),'NOT_READY','Confirm new segment, full copy, or overlapping tail before continuation');
+        if(mode==='new-segment'){offset=inherited.length;inherited=[];}
+        if(mode==='overlap'){
+          check(Number.isSafeInteger(choice.overlap_count)&&choice.overlap_count>0&&choice.overlap_count<=inherited.length,
+            'NOT_READY','Confirm exact overlap length');
+          offset=inherited.length-choice.overlap_count;inherited=inherited.slice(offset);
+        }
+      }
+      if(choice.mode==='fork')check(['parent-cutoff','existing-child'].includes(choice.input_mode),'NOT_READY','Confirm parent cutoff versus existing child input');
+      // Content only verifies the explicitly chosen mapping; it never chooses
+      // which story, source range or overlap the user meant.
+      check(input.messages.length>=inherited.length,'NOT_READY','Confirmed copy is shorter than inherited range');
+      for(let i=0;i<inherited.length;i++) {
+        const revision=await this.h.read('revisions',inherited[i].revision_id);
+        check(contentHash(revision)===contentHash(input.messages[i]),'NOT_READY','Confirmed inherited prefix differs; review source range');
+      }
+    } else if(!bound&&choice.mode==='fork') {
+      check(['parent-cutoff','existing-child'].includes(choice.input_mode),'NOT_READY','Confirm fork input range');
+    }
     const old = [];
     if (bound) for (let i = 0; i < bound.count; i++) {
       const m = await this.record('map', input.source, i);
@@ -71,26 +138,29 @@ export class Importer {
     while (prefix < Math.min(old.length, input.messages.length) && old[prefix].fingerprint === contentHash(input.messages[prefix])) prefix++;
     while (suffix < Math.min(old.length, input.messages.length) - prefix &&
       old[old.length - suffix - 1].fingerprint === contentHash(input.messages[input.messages.length - suffix - 1])) suffix++;
-    // An empty continuation file means a new host window, not deletion of inherited history.
-    const offset = bound?.offset ?? (!bound && choice.mode === 'continue' && input.messages.length === 0 ? inherited.length : 0);
-    if(!bound && offset)old.length=0;
     const same = bound?.fingerprint === input.fingerprint;
     const report = { originals: input.messages.length, summaries: input.assets.filter(a => ['summary','higher'].includes(a.category)).length,
       optional: input.assets.filter(a => !['summary','higher'].includes(a.category)).length, reused: prefix + suffix,
       changed: input.messages.length - prefix - suffix, removed: old.length - prefix - suffix,
       source_unproven: input.assets.length, sourceReport: input.report,
+      inherited_prefix:fork?.prefix_length??offset, input_mode:choice.input_mode??null,
+      locator_confirmation:identified.locatorChanged,
       needs_confirmation: !same, paused: bound?.status === 'paused', same: Boolean(same) };
     return { input: structuredClone(input), choice: structuredClone(choice), categories: [...categories], bound, target, old,
-      prefix, suffix, offset, fork, report, inputLimit, sourceFingerprint, epoch: this.epoch };
+      prefix, suffix, offset, fork, report, inputLimit, sourceFingerprint, registration:identified.registration, epoch: this.epoch };
   }
   async confirm(plan) {
     check(!this.busy, 'INVALID_TRANSITION', 'Bridge busy');
     check(plan.epoch === this.epoch, 'VERSION_CONFLICT', 'Cancelled preview');
+    check(!plan.report.locator_confirmation||plan.choice.confirm_locator===true,'NOT_READY','Same stable identity at another locator: confirm rename/same source, or resolve clone conflict');
     await this.sourceGuard(plan.input);
     const latest = await this.record('binding', plan.input.source);
     check(equal(latest, plan.bound), 'VERSION_CONFLICT', 'Binding changed during preview');
     if (plan.target) check(equal(await targetOf(this.h, plan.target.branch_id), plan.target), 'VERSION_CONFLICT', 'Target changed during preview');
-    if (plan.report.same && latest.status === 'complete') return latest;
+    if (plan.report.same && latest.status === 'complete') {
+      if(plan.registration)await this.transact({target:latest.target,records:[plan.registration]});
+      return latest;
+    }
     if (latest) {
       const session = await this.record('session', latest.session);
       if(session.cursor<session.total || session.assetCursor<session.assetTotal || session.reason.phase==='messages') {
@@ -109,7 +179,7 @@ export class Importer {
         categories: plan.categories, target, status: 'importing', cursor: 0, total: plan.input.messages.length,
         assetCursor: 0, assetTotal: plan.input.assets.length, generation: (latest?.generation ?? 0) + 1,
         reason: { prefix: plan.prefix, suffix: plan.suffix, oldCount: plan.old.length, offset: plan.offset,
-          phase: 'messages', deleted: false, base: plan.target?.head ?? null, inputLimit:plan.inputLimit }, report: plan.report, created_at: now() };
+          phase: 'messages', deleted: false, base: plan.fork?.source_snapshot_id??plan.target?.head??null, inputLimit:plan.inputLimit }, report: plan.report, created_at: now() };
       const bound = { version: 1, type: 'binding', source: session.source, binding_id: latest?.binding_id ?? newId('binding'), target, session: id,
         fingerprint: latest?.fingerprint ?? null, count: latest?.count ?? 0, offset: plan.offset, status: 'importing', sync: latest?.sync ?? false,
         generation: session.generation, reason: null };
@@ -118,10 +188,12 @@ export class Importer {
       const operation_id = newId('operation');
       const history = create ? command(operation_id, target, plan.fork ? 'fork' : 'init', plan.fork?.prefix_length ?? 0, 0, [], [], [], plan.fork) : null;
       const formal = {schema_version:1,binding_id:bound.binding_id,story_id:target.story_id,branch_id:target.branch_id,
-        host_kind:'TT',host_scope:session.source,stable_id:null,mutable_ref:null,binding_generation:session.generation,
+        host_kind:'TT',host_scope:session.source,stable_id:plan.input.identity?.stable_id??null,
+        mutable_ref:plan.input.identity?JSON.stringify(plan.input.identity.locator):null,binding_generation:session.generation,
         intent:latest?'confirmed_mapping':plan.fork?'fork':plan.choice.mode==='new'?'new_story':'carryover',message_map:[]};
       await this.transact({ operation_id, target, history, binding:formal, records: [
         await this.putRecord('session', id, session), await this.putRecord('binding', session.source, bound),
+        ...(plan.registration?[plan.registration]:[]),
       ] });
       // Fixed base snapshot is sufficient to recover inheritance maps after interruption.
       return await this.run(id, plan.input, plan.epoch);
@@ -131,6 +203,9 @@ export class Importer {
     check(!this.busy, 'INVALID_TRANSITION', 'Bridge busy'); this.busy = true;
     try {
       const s=await this.record('session',id);
+      input=await this.normalize(input);
+      check(input.source===s.source,'VERSION_CONFLICT','Resume source binding differs');
+      if(input.identity)input={...snapshot(input.source,input.messages,{assets:input.assets,report:input.report},input.generation),identity:input.identity};
       if(s?.reason.inputLimit!==null&&s?.reason.inputLimit!==undefined)input=restrictSnapshot(input,s.reason.inputLimit);
       return await this.run(id, input, this.epoch);
     } finally { this.busy = false; }
@@ -232,13 +307,15 @@ export class Importer {
   async enableSync(source, enabled) {
     const bound = await this.record('binding', source);
     check(bound && (!enabled || bound.status === 'complete'), 'NOT_READY', 'Finish/resolve import first');
+    if(enabled)check((await this.record('session',bound.session)).reason.inputLimit==null,'NOT_READY','Parent cutoff is a fixed archive; bind the child chat before enabling sync');
     bound.sync = Boolean(enabled);
     await this.transact({ target: bound.target, records: [await this.putRecord('binding', source, bound)] });
   }
   async applyLocal(change, kind) {
+    change=await this.normalize(change);
     check(!this.busy,'NOT_READY','Import active');
     const bound = await this.record('binding',change.source);
-    check(bound?.sync && (bound.status === 'complete' || bound.status === 'pending' && kind === 'regenerate'),
+    check(bound?.sync && (bound.status === 'complete' || bound.status === 'pending' && ['append','regenerate','edit'].includes(kind)),
       'NOT_READY','Resolve paused binding first');
     check(equal(await targetOf(this.h,bound.target.branch_id),bound.target),'VERSION_CONFLICT','Local target changed');
     await this.sourceGuard(change);
@@ -256,6 +333,7 @@ export class Importer {
     for(const m of change.messages) {
       const mapped=append?null:await this.record('map',change.source,m.floor);
       if(mapped?.fingerprint===contentHash(m)) {
+        if(equal(mapped.candidates,{values:m.candidates,selected:m.selected}))continue;
         mapped.candidates={values:m.candidates,selected:m.selected};
         records.push(await this.putRecord('map',change.source,mapped,m.floor));
         continue;
@@ -272,6 +350,7 @@ export class Importer {
       records.push(await this.putRecord('map',change.source,{version:1,type:'map',source:change.source,floor:m.floor,ref,
         fingerprint:contentHash(m),candidates:{values:m.candidates,selected:m.selected}},m.floor));
     }
+    if(!entries.length&&!records.length&&bound.status==='complete')return bound;
     bound.count=change.total; bound.fingerprint=null; bound.status='complete'; bound.reason=null;
     records.push(await this.putRecord('binding',change.source,bound));
     const operation_id=newId('operation');
@@ -281,6 +360,31 @@ export class Importer {
     try { await this.sourceGuard(change); }
     catch(error) { await this.setState(change.source,'paused','source-changed-during-local-publication');throw error; }
     return this.record('binding',change.source);
+  }
+  async applyLegacy(change) {
+    if(!change)return null;
+    change=await this.normalize(change);
+    const bound=await this.record('binding',change.source);
+    check(bound?.sync&&bound.status==='complete'&&!this.busy,'NOT_READY','Legacy sync is not ready');
+    await this.sourceGuard(change);
+    for(const m of change.messages){const mapped=await this.record('map',change.source,m.floor);
+      check(mapped?.fingerprint===contentHash(m),'VERSION_CONFLICT','Legacy anchor raw text has not been reconciled');}
+    const session=await this.record('session',bound.session),records=[];
+    for(const a of change.assets) {
+      const assetId=digest({source:bound.source,id:a.source_id}),hash=digest(a.data),map=await this.record('assetMap',assetId);
+      if(map?.fingerprint===hash)continue;
+      const versionId=digest({assetId,hash,branch:bound.target.branch_id});
+      if(!await this.record('asset',versionId))records.push(await this.putRecord('asset',versionId,{version:1,type:'asset',source:bound.source,
+        source_id:a.source_id,category:a.category,fingerprint:hash,data:a.data,declaration:'legacy-inputs-unproven',
+        scope:{story_id:bound.target.story_id,branch_id:bound.target.branch_id,snapshot_id:bound.target.head},anchor:a.anchor,previous:map?.asset??null}));
+      records.push(await this.putRecord('assetMap',assetId,{version:1,type:'assetMap',asset:versionId,fingerprint:hash}));
+    }
+    if(!records.length&&!change.changed)return bound;
+    session.report.sourceReport.legacy_selection=change.selection;bound.fingerprint=null;
+    records.push(await this.putRecord('session',session.id,session),await this.putRecord('binding',bound.source,bound));
+    await this.sourceGuard(change);await this.transact({target:bound.target,records});
+    try{await this.sourceGuard(change);}catch(e){await this.setState(bound.source,'paused','legacy-result-became-stale');throw e;}
+    return this.record('binding',bound.source);
   }
   async reconcile(input, evidence = null) {
     const bound = await this.record('binding', input.source);

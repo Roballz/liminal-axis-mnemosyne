@@ -81,7 +81,7 @@ test('B04 distinct same-text stories, stale preview, continuation and fixed fork
   assert.equal((await entries(h,continued)).length,3);
   const cleared = await importer.confirm(await importer.preview(input('C',[])));
   assert.equal((await entries(h,cleared)).length,2,'Removing new window text must preserve inherited prefix');
-  const f = await importer.confirm(await importer.preview(input('F'),{mode:'fork',branch_id:a.target.branch_id,snapshot_id:a.target.head,cutoff:1}));
+  const f = await importer.confirm(await importer.preview(input('F'),{mode:'fork',input_mode:'parent-cutoff',branch_id:a.target.branch_id,snapshot_id:a.target.head,cutoff:1}));
   assert.equal((await entries(h,f)).length,1); assert.deepEqual((await entries(h,f))[0],(await entries(h,a))[0]);
   const old = await importer.preview(input('stale')); importer.cancel();
   await assert.rejects(importer.confirm(old),e=>e.code==='VERSION_CONFLICT');
@@ -89,11 +89,11 @@ test('B04 distinct same-text stories, stale preview, continuation and fixed fork
 
 test('B05 bounded source read and event-correlated edit/append; generation pending and duplicate notifications', async()=>{
   const {importer,h}=await setup();
-  const chat=[raw('虚构提问',true),raw('虚构回答')], ref={type:'character',id:'synthetic',file:'fiction'};
+  const chat=[raw('虚构提问',true),raw('虚构回答')], ref={kind:'character',characterId:'synthetic',fileName:'fiction'};
   const context={chat,getCurrentChatId:()=> 'fiction'};
   let switchChat=false;
   const source=new TTSource({SillyTavern:{getContext:()=>context},__TAURITAVERN__:{api:{chat:{current:{
-    ref:async()=>switchChat?{...ref,file:'other'}:ref,handle:async()=>({stableId:async()=> 'stable'})}}}}});
+    ref:async()=>switchChat?{...ref,fileName:'other'}:ref,handle:async()=>({stableId:async()=> 'stable'})}}}}});
   const original=await source.capture(); importer.sourceGuard=x=>source.guard(x);
   let b=await importer.confirm(await importer.preview(original));await importer.enableSync(b.source,true);
   chat[1].mes='改文';source.generation++;
@@ -133,7 +133,7 @@ test('B05 local edit/swipe/regenerate preserve ID; repeated notices and late res
 test('B06 deletion persists pause, ignore does not release, confirmation retains child and old versions', async () => {
   const {importer,h,owner} = await setup();
   const a = await importer.confirm(await importer.preview(input()));
-  const f = await importer.confirm(await importer.preview(input('child'),{mode:'fork',branch_id:a.target.branch_id,cutoff:2}));
+  const f = await importer.confirm(await importer.preview(input('child'),{mode:'fork',input_mode:'existing-child',branch_id:a.target.branch_id,cutoff:2}));
   const old = await entries(h,a); await importer.enableSync(a.source,true);
   const cut = input('fiction-A',['虚构提问']);
   const warning = await importer.reconcile(cut); assert.equal(warning.status,'paused');

@@ -1,0 +1,10 @@
+{
+  "baseline": "90e5c9d",
+  "status": "implemented_unverified",
+  "short": {"R1": 2, "R3": 2, "R2": 2},
+  "full": {"runs": 1, "passed": 345, "failed": 0, "seconds": 125.7151732, "baselineTestsRetained": 339},
+  "nativeActualRead": "pending frontend cooperation; deployed temporary user-click entry",
+  "deployedHashes": "repair-deployed-hashes.json",
+  "scope": "R1 inheritance, R3 actual subscription controller, R2 scoped identity and durable v1 alias",
+  "notRun": ["scale benchmarks", "crash matrix", "phone", "long real archive migration", "model calls", "T-05"]
+}

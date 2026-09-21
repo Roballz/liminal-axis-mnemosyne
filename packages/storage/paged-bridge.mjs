@@ -44,6 +44,7 @@ export async function compileBridge(d, input, makeId) {
       const revision = await d.get('revisions', value.ref.revision_id);
       check(revision.message_id === value.ref.message_id, 'INVALID_SCHEMA', 'Bridge source reference');
     }
+    if(value.type==='identity')check(await d.get('manifests',PREFIX+'binding:'+value.binding_source,false),'INVALID_SCHEMA','Identity alias has no retained binding');
     await d.put('manifests', r.key, value);
   }
   await d.put('manifests', PREFIX + 'format', { version: 1 });

@@ -13,6 +13,7 @@ export function validateRecord(key, value) {
     map: ['version','type','source','floor','ref','fingerprint','candidates'],
     asset: ['version','type','source','source_id','category','fingerprint','data','declaration','scope','anchor','previous'],
     assetMap: ['version','type','asset','fingerprint'],
+    identity: ['version','type','source','scope','stable_id','locator','binding_source','previous_locator'],
   }[value.type];
   check(fields && equal(Object.keys(value).sort(), fields.sort()), 'INVALID_SCHEMA', 'Bridge record fields');
   check(key.startsWith(`${PREFIX}${value.type}:`), 'INVALID_SCHEMA', 'Bridge record type/key');
@@ -24,5 +25,12 @@ export function validateRecord(key, value) {
     check(['summary','higher','items','scenes','lifeDetails'].includes(value.category), 'INVALID_SCHEMA', 'Bridge category');
     check(value.declaration === 'legacy-inputs-unproven' && value.fingerprint === digest(value.data),
       'INVALID_SCHEMA', 'Legacy source declaration/fingerprint');
+  }
+  if(value.type==='identity') {
+    check(typeof value.stable_id==='string'&&value.stable_id.length>0&&value.scope?.host==='TT'&&
+      value.source===digest({identity_version:2,scope:value.scope,stable_id:value.stable_id})&&key===recordKey('identity',value.source),
+      'INVALID_SCHEMA','Scoped source identity');
+    check(value.locator?.kind===value.scope.kind&&(value.scope.kind!=='character'||value.locator.characterId===value.scope.owner),
+      'INVALID_SCHEMA','Locator scope differs');
   }
 }

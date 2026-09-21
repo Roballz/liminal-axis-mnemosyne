@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: R3 actual event subscription: new round, regenerate success/failure, duplicate and legacy/no-op notifications
+ok 1 - R3 actual event subscription: new round, regenerate success/failure, duplicate and legacy/no-op notifications
+  ---
+  duration_ms: 12927.0496
+  type: 'test'
+  ...
+# Subtest: R3 subscription drops old queued reads after chat switch without touching either branch
+ok 2 - R3 subscription drops old queued reads after chat switch without touching either branch
+  ---
+  duration_ms: 2997.393
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 16048.6968
