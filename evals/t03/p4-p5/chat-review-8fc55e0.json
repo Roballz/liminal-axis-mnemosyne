@@ -1,0 +1,34 @@
+{
+  "review_date": "2026-09-21",
+  "reviewed_commit": "8fc55e057d33547f65cbbf855cfb6bae85f98f2a",
+  "previous_implementation_commit": "1efb3348cd9d9b23c6c352f67f16ed71f10305a4",
+  "environment": {"platform": "isolated Linux", "node": "v22.16.0"},
+  "scope": "Method-level simulations. Complete original recall-index module loaded; readOnlyPagedHandle and verifyPagedBackupRestore extracted verbatim from original source. Handle and target callbacks are review doubles, not an actual PagedCoordinator or restorePagedIntoEmpty execution.",
+  "command": "node diagnostics.mjs",
+  "diagnostic_script_exit_code": 0,
+  "meaning": "Assertions confirmed the observed current behavior and defects below; this is not a passing acceptance test count.",
+  "source_files": [
+    {"path": "packages/contracts/primitives.mjs", "git_blob": "b59a3bacfa97289e9190c459db5b544bdcad94ca", "matched": true, "syntax_passed": true},
+    {"path": "packages/contracts/runtime.mjs", "git_blob": "ed5335f19038efa6e03cac249fee9b6d10cb4fd6", "matched": true, "syntax_passed": true},
+    {"path": "packages/storage/recall-index.mjs", "git_blob": "fae21991552d277ef902ab38cb29c5201900ab0f", "matched": true, "syntax_passed": true},
+    {"path": "packages/storage/paged-diagnostics.mjs", "git_blob": "df63c98c377d94aaee3c4559b18e88b136b73e33", "matched": true, "syntax_passed": true}
+  ],
+  "cases": [
+    {"name": "P4_FILTER_STATIC_CONTROL", "returned": ["A1", "B1"], "A1_current_status": "valid", "stale_A1_returned": false},
+    {"name": "P4_FILTER_INTERLEAVED_CORRECTION", "returned": ["A1", "B1"], "A1_current_status": "needs-rebuild", "checkpoint_changed": true, "stale_A1_returned": true},
+    {"name": "P5_BACKUP_NONE", "status": "passed", "target_exactly_matches_export": true, "target_closed": true},
+    {"name": "P5_BACKUP_BEFORE_EXPORT", "status": "rejected", "error_code": "NEEDS_RESOLUTION", "error_message": "Restored operation count mismatch", "target_exactly_matches_export": true, "source_advanced": true, "target_closed": true},
+    {"name": "P5_BACKUP_AFTER_EXPORT", "status": "rejected", "error_code": "NEEDS_RESOLUTION", "error_message": "Restored audit mismatch", "target_exactly_matches_export": true, "source_advanced": true, "target_closed": true},
+    {"name": "P5_DIFFERENT_CHECKPOINT_SAME_AUDIT_SUMMARY", "status": "passed", "checkpoints_differ": true, "scope_note": "Target callback deliberately substituted. Does not demonstrate that actual restorePagedIntoEmpty returns wrong contents."}
+  ],
+  "not_independently_executed": ["322-test full regression", "actual coordinator integration", "actual paged restore", "million-character workload", "TT native tests", "mobile tests"],
+  "codex_evidence_reviewed": [
+    "evals/t03/p4-p5/verification.json",
+    "evals/t03/p4-p5/resource-1x.json",
+    "evals/t03/p4-p5/native-20260921p4b.json",
+    "evals/t03/p4-p5/native-p5-diagnostics.json"
+  ],
+  "source_acquisition": "GitHub connector reads at fixed commit, copied to isolated files and checked using Git blob hashes. Direct container download failed DNS.",
+  "repository_implementation_modified_by_chat": false,
+  "review": "notes/t-03-p4-p5-chat-review.md"
+}
