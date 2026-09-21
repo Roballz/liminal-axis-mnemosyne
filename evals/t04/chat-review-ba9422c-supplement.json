@@ -1,0 +1,33 @@
+{
+  "date": "2026-09-21",
+  "reviewed_commit": "ba9422c56a5f7ef5e72edbdd687f73b9a6598358",
+  "primary_review": "notes/t-04-chat-review.md",
+  "primary_review_already_present_at": "f85f5beb6e6e111adf83a9996e2c916750d57f9c",
+  "kind": "supplemental-method-level-diagnostics",
+  "runtime": "Node v22.16.0 / Linux",
+  "cases_executed": 9,
+  "controls": 3,
+  "defect_observations": 6,
+  "method": "Execute selected TTSource identity/local-read/subscription, Importer preview/applyLocal and panel event-dispatch excerpts. Host, storage, crypto/equality helpers and opening/DOM setup are review substitutes. Display strings simplified. This is not a complete source-module blob verification, PagedCoordinator integration or native TT run.",
+  "results": [
+    {"case":"normal-generation-received-before-end","review_id":"T04-R3","status":"paused","host_count":4,"archived_count":2,"mock_history_writes":0,"attempted_kind":"regenerate"},
+    {"case":"normal-generation-received-after-end","review_id":"T04-R3","status":"paused","host_count":4,"archived_count":2,"mock_history_writes":0,"attempted_kinds":["regenerate","append"]},
+    {"case":"control-direct-append-without-generation","status":"complete","archived_count":4,"mock_history_writes":1},
+    {"case":"control-same-slot-regenerate","status":"complete","archived_count":2,"mock_history_writes":1},
+    {"case":"ordinary-legacy-change-only","review_id":"T04-R3","status":"paused","mock_history_writes":0,"local_calls":0},
+    {"case":"rename-same-stable-id-and-body","review_id":"T04-R2","bridge_source_changed":true,"existing_binding_found":false},
+    {"case":"nonempty-new-file-continuation","review_id":"T04-R1","offset":0,"removed":2,"changed":2,"proposed_delete_count":2},
+    {"case":"control-empty-file-continuation","offset":2,"removed":0},
+    {"case":"existing-child-chat-tail","review_id":"T04-R1","parent":["A","B","C","D"],"host_child":["A","B","E","F"],"cutoff":2,"planned_input":["A","B"],"reported_originals":2}
+  ],
+  "interpretation": "The assertions confirm observed defects and controls; do not report 9/9 product acceptance. Inheritance observations are plans, not executed real deletions. Mock write counts are not physical IO. The earlier primary review's seven simulations are a separate record, not a claimed full-suite rerun.",
+  "not_run": ["339-test full regression", "six repository bridge integration tests", "native TT", "real BaiBai data source", "private chat migration"],
+  "source_anchors": {
+    "packages/bridge/importer.mjs":"fcb1f6fce2c1d5125cae868631ed8dd6613015b2",
+    "packages/bridge/source.mjs":"b022e3524a9de0a4440f9f21470ed1986d5dca2a",
+    "packages/bridge/panel.mjs":"9d380012088f0a78ad1ad5cd1b290bb0195215c5",
+    "packages/bridge/native-demo.mjs":"7c4a3a2285ca54e9c68dcda27af5088824b96bac"
+  },
+  "source_access": "GitHub connector reads. One direct sandbox download failed DNS; not retried.",
+  "conclusion": "Existing T04-R1/R2/R3 confirmed; no new issue numbering or scope. T-04 remains implemented_unverified; T-05 not started. No implementation changes or new task card. Retain bounded testing and maintenance/data permission gates."
+}
