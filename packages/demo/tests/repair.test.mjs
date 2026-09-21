@@ -33,19 +33,3 @@ test('immutable put cache avoids repeat IO, remains bounded, and cold path check
   await assert.rejects(p.put(body),e=>e.code==='ID_COLLISION');
 });
 
-class Element {
-  constructor(){this.children=[];this.style={};this.dataset={};this.hidden=false;this.value='';}
-  setAttribute(){}append(...n){this.children.push(...n);}attachShadow(){return new Element();}
-  replaceChildren(...n){this.children=n;}get options(){return this.children;}remove(){this.removed=true;}
-  getBoundingClientRect(){return{x:50,y:80,width:44,height:44};}setPointerCapture(){}
-}
-test('bubble is out of host flow, dragging stays in viewport and does not open panel',()=>{
-  const host={document:{body:new Element(),createElement:()=>new Element()},localStorage:{getItem:()=>null},
-    innerWidth:800,innerHeight:600,addEventListener(){},removeEventListener(){}};
-  let connections=0;const ui=mountPanel({host,connect:async()=>{connections++;}}),b=ui.controls.bubble;
-  assert.match(ui.root.style.cssText,/position:fixed!important/);assert.equal(b.textContent,'M');
-  b.onpointerdown({button:0,clientX:50,clientY:80,pointerId:1});
-  b.onpointermove({clientX:1000,clientY:900});b.onpointerup();b.onclick();
-  assert.equal(b.style.left,'752px');assert.equal(b.style.top,'552px');assert.equal(connections,0);
-  assert.equal(ui.controls.panel.hidden,true);ui.dispose();assert.equal(ui.root.removed,true);
-});

@@ -120,7 +120,7 @@ async function idle(c){const deadline=Date.now()+30000;while(Date.now()<deadline
 
 test('actual panel buttons create, search, detail, clear on scope change and reject late detail',async()=>{
   const f=await fixture(),host=hostFixture();const ui=mountPanel({host,connect:async()=>f.demo,recover:async()=>f.demo}),c=ui.controls;
-  c.bubble.click();await idle(c);c.name.value='面板库';c.create.click();await idle(c);
+  ui.open();await idle(c);c.name.value='面板库';c.create.click();await idle(c);
   assert.equal(c.preview.hidden,false);c.confirm.click();await idle(c);assert.equal(f.demo.selected.name,'面板库');
   c.query.value='旧swipe';c.scopeDropdown.trigger.onkeydown({key:'ArrowDown',preventDefault(){}});
   assert.equal(c.scopeDropdown.menu.hidden,false);assert.equal(c.scopeDropdown.menu.children[0].focused,true);
@@ -140,7 +140,7 @@ test('actual panel buttons create, search, detail, clear on scope change and rej
 
 test('panel sync button changes only bound current chat and clears prior cursor and detail',async()=>{
   const f=await fixture();await create(f.demo);const ui=mountPanel({host:hostFixture(),connect:async()=>f.demo,recover:async()=>f.demo}),c=ui.controls;
-  c.bubble.click();await idle(c);c.query.value='钟楼';c.searchRow.onsubmit({preventDefault(){}});await idle(c);
+  ui.open();await idle(c);c.query.value='钟楼';c.searchRow.onsubmit({preventDefault(){}});await idle(c);
   c.results.children[0].click();await idle(c);assert.equal(c.detail.hidden,false);
   f.source.value=input('fixture',[{mes:'同步后的唯一正文',is_user:true}],null);
   c.sync.click();await idle(c);assert.equal(c.results.children.length,0);assert.equal(c.detail.hidden,true);assert.equal(c.next.disabled,true);
