@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-2026-09-22：**S-A及S-B/T-04均已在受控能力范围verified。S-B继续in_progress；T-05已实现候选，状态implemented_unverified（S01～S08已完成，待Chat review）：`tasks/T-05-manual-search-and-workbench.md`。** 当前目标是用户手动正文搜索、来源/旧摘要查看、分页工作台及完整库导出。工作台入口和预算见 `packages/workbench/README.md`；本轮只交T-05验收，不自动进入T-06/T-07。
+2026-09-22：**S-A 与 Stage-B（T-04～T-05）均已在受控能力范围 verified。** T-05 最终审核实现为 `11e5eef`，回执见 `notes/t-05-final-review.md`：手动正文搜索、旧摘要/历史查看、固定版本分页、档案回退与完整库导出已收口。当前不自动进入 T-06/T-07；如先做日常试用，只需另行规划薄的安装/固定入口/既有库选择封装，不需要新的存储后端或 A 服务器。
 
 T-04最终回执为 `notes/t-04-final-review.md`，审核实现5fe2706；原会话25/25正文、2/2摘要complete，正文/候选槽/摘要逐项相等、源及正文Head不变、pending为空、关闭成功。历史证据在 `tasks/T-04-readonly-import-and-sync.md`；不因开始T-05重新导入或复测这份档案。
 
