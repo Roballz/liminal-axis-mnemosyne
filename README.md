@@ -8,11 +8,11 @@
 
 ## 当前状态
 
-2026-09-21：**S-A已在受控能力范围收口；当前S-B/T-04。首轮Chat review未通过，R1/R3/R2返修候选已通过345项Node回归，原会话现已正文25/25、摘要2/2全部提交，内容逐项相等、源及Head不变、pending为空且关闭成功；返修证据齐备待Chat复审；状态implemented_unverified，T-05不启动。**
+2026-09-22：**S-A及S-B/T-04均已在受控能力范围verified。T-04最终审核提交5fe2706：原会话25/25正文、2/2摘要complete，正文/候选槽/摘要逐项相等、源及正文Head不变、pending为空、关闭成功。S-B继续in_progress，下一步由Chat／用户规划T-05；T-05尚未发布，不自动开工。**
 
-当前入口是 `tasks/T-04-readonly-import-and-sync.md`：只读迁入 TT 原文和柏宝书旧摘要，可选薄接物品/地点/生活档案，精确映射与可恢复影子同步，删除/复杂变化人工确认。此阶段不照搬旧插件实体 schema，不生成新摘要、不注入、不建设 A 服务器。
+T-04最终回执为 `notes/t-04-final-review.md`，任务与历史证据在 `tasks/T-04-readonly-import-and-sync.md`：只读迁入 TT 原文和柏宝书旧摘要，可选薄接物品/地点/生活档案，精确映射与可恢复影子同步，删除/复杂变化人工确认。此阶段不照搬旧插件实体 schema，不生成新摘要、不注入、不建设 A 服务器。
 
-T-05 后续提供用户手动原文搜索与最小工作台；向量/BM25自动召回及新摘要生成分别在 T-06/T-07。不要把任务卡发布视为功能已经可用。
+T-05 后续提供用户手动原文搜索与最小工作台；向量/BM25自动召回及新摘要生成分别在 T-06/T-07。不要把任务卡发布或受控验收视为手机生产准入。
 
 ## 已验收的地基及限制
 
@@ -29,7 +29,8 @@ T-03 最终回执为 `notes/t-03-capability-final-review.md`，审核基线 de67
 | 文件 | 用途 |
 | --- | --- |
 | `stages/S-B-archive-and-search.md` | 当前阶段目标、已确认事项、权限与测试预算 |
-| `tasks/T-04-readonly-import-and-sync.md` | implemented_unverified：只读导入、精确映射、暂停/确认与恢复的实施证据 |
+| `notes/t-04-final-review.md` | T-04受控验收及真实原会话内容核验，覆盖旧待审状态 |
+| `tasks/T-04-readonly-import-and-sync.md` | verified（受控范围）：只读导入、精确映射、暂停/确认与恢复的实施证据 |
 | `docs/11-stage-b-import-policy.md` | 本轮导入白名单、两主入口、删除人工处理、配对及手动搜索边界 |
 | `stages/S-A-foundation.md` | 已收口地基及未验证项 |
 | `notes/t-03-capability-final-review.md` | T-03最终能力验收，覆盖旧P3/P4/P5待审状态 |
@@ -45,7 +46,7 @@ T-03 最终回执为 `notes/t-03-capability-final-review.md`，审核基线 de67
 
 ## 实现、测试和数据边界
 
-已有实现位于 `apps/tt-adapter-probe/`、`packages/contracts/`、`packages/storage/`。既有 Node 回归入口：`node --test packages/storage/tests/*.test.mjs packages/contracts/tests/*.test.mjs apps/tt-adapter-probe/tests/probe.test.js`。T-03最近完整333项为Codex记录，见 `evals/t03/p4-repair/`；不把历史通过数当作T-04已运行。
+已有实现位于 `apps/tt-adapter-probe/`、`apps/tt-import/`、`packages/contracts/`、`packages/storage/`、`packages/bridge/`。回归入口见当前任务卡，含bridge集合；没有新代码/失败依据不因阅读文档重新运行。T-04既有验证是R1/R3/R2候选一次345/345全量，现场null候选修复另有1项针对性测试，以及原会话查询和43.343秒实际续传/内容核验；不能合称最终代码另跑346项。Chat最终review只审阅源码与提交证据，未独立重跑测试或TT。
 
 测试按风险清单执行：短反例/相关回归先行，最终候选稳定后一次全量；文档变更不自动重跑。T-04不跑旧机1x/5x/10x；长原生循环/新强杀/设备变更需单独许可。无新阻塞可在已授权任务内持续推进，检查点提交不是新审批关卡。
 
@@ -53,4 +54,4 @@ B/A共用Mnemosyne领域身份、规则和逻辑材料，宿主stableId与数据
 
 本私有仓库保存代码和工程文档，不保存真实聊天、模型密钥、生产日志/配置或数据库备份。默认合成与明确获准的脱敏样本。未来复用外部实现需核查许可；读取公开DTO不等于可以写回原插件。
 
-accepted表示方案确认，planned表示任务发布，implemented_unverified表示待Chat验收；任何一种都不能冒充手机生产可用。T-04完成后review，T-05尚未发布，不自动顺延施工。
+accepted表示方案确认，planned表示任务发布，implemented_unverified表示待Chat验收；verified也必须带上对应范围，不能冒充手机生产可用。T-04已通过受控review；T-05尚未发布，不自动顺延施工。
