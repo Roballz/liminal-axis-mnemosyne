@@ -1,0 +1,54 @@
+{
+  "review_date": "2026-09-21",
+  "implementation_commit": "ba9422c56a5f7ef5e72edbdd687f73b9a6598358",
+  "decision": "implemented_unverified; T04-R1/R2/R3 require repair; no T-05",
+  "review_document": "notes/t-04-chat-review.md",
+  "codex_reported": {
+    "full_regression_passed": 339,
+    "full_regression_runs": 1,
+    "bridge_integration_groups": 6,
+    "native_scope": "Synthetic source API, actual isolated TT database; existing source and restored namespaces recovered and checked. Actual BaiBai API capability/version only, not source-content read."
+  },
+  "chat_independent_execution": {
+    "platform": "isolated Linux",
+    "node": "v22.16.0",
+    "scope": "Method-level review diagnostic; mocked storage/host/hash helpers. Copied preview/identity and panel decision logic; applyLocal only through pre-write guards. No repository implementation changes.",
+    "scenario_count": 7,
+    "positive_controls": 2,
+    "defect_behaviors": 5,
+    "full_regression_run": false,
+    "paged_coordinator_integration_run": false,
+    "tt_native_run": false,
+    "real_chat_read_or_import": false,
+    "full_runtime_local_blob_verified": false,
+    "diagnostic_script_sha256": "858b93e9286cccda3e6ab7f2598f9e5286a05812dc992ed5fb3b85b046133504",
+    "note": "Diagnostic assertions confirm observed behavior, including defects. Successful script completion is not T-04 passing. The final rename fixture uses the fixed TT character ChatRef shape. Three display strings in the copied event logic are shortened; branching and guards are unchanged."
+  },
+  "results": [
+    {"id":"C1", "case":"empty continuation", "offset":2, "removed":0, "control":"expected behavior"},
+    {"id":"C2", "case":"identical confirmed mapping", "reused":2, "removed":0, "control":"expected behavior"},
+    {"id":"T04-R1a", "case":"nonempty continuation", "old":["A","B"], "new_file":["E","F"], "observed_offset":0, "planned_remove":2, "planned_insert_start":0, "live_write_executed":false},
+    {"id":"T04-R1b", "case":"existing child suffix", "parent":["A","B","C","D"], "child_input":["A","B","E","F"], "cutoff":2, "prepared_input":["A","B"], "reported_originals":2},
+    {"id":"T04-R2", "case":"rename", "same_stable_id":true, "same_character_scope":true, "changed_locator_field":"fileName", "bridge_source_changed":true},
+    {"id":"T04-R3a", "case":"normal new User and Assistant", "events":["GENERATION_STARTED","MESSAGE_RECEIVED while generating","GENERATION_ENDED"], "initial_count":2, "source_count":4, "stored_count":2, "states":["pending","pending","paused"]},
+    {"id":"T04-R3b", "case":"legacy change notice", "initial_status":"complete", "final_status":"paused", "actual_legacy_content_read_by_handler":false}
+  ],
+  "source_blob_refs_read_via_connector": {
+    "packages/bridge/source.mjs":"b022e3524a9de0a4440f9f21470ed1986d5dca2a",
+    "packages/bridge/importer.mjs":"fcb1f6fce2c1d5125cae868631ed8dd6613015b2",
+    "packages/bridge/panel.mjs":"9d380012088f0a78ad1ad5cd1b290bb0195215c5",
+    "packages/bridge/records.mjs":"8c6581acedb6e6e8a411f9bd9b39af7bd9deba98",
+    "packages/bridge/native-demo.mjs":"7c4a3a2285ca54e9c68dcda27af5088824b96bac",
+    "packages/bridge/tests/bridge.test.mjs":"c1f8336de56f662216759708a76cf116d838698e",
+    "packages/storage/paged-bridge.mjs":"58525fd2bf1a68c5d6a4fedc8156819e1aa0e9aa"
+  },
+  "external_fixed_source_checks": [
+    "Darkatse/TauriTavern@367b0c7e9410/src/tauri/main/api/chat.js: character ref contains fileName",
+    "Roballz/ST-BaiBai-Book@32dbb48a0a643804256d496bc35bf7699dea9ebe/src/public/types.ts: published DTO shapes"
+  ],
+  "limits": [
+    "One direct source-download attempt failed DNS; no repeated download attempts.",
+    "No load/scale benchmarks, crash matrix, paid API, production phone or user-private archive tests.",
+    "Repair regression must cover actual paged business entry and event wiring, not only these mocked method diagnoses."
+  ]
+}
