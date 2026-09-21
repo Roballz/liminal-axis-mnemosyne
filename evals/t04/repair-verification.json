@@ -13,7 +13,7 @@
     "seconds": 125.7151732,
     "baselineTestsRetained": 339
   },
-  "nativeActualRead": "Actual panel preview: 25 originals / 2 valid summaries; collector timed out, user paused; import/content equality not yet verified",
+  "nativeActualRead": "Actual panel preview: 25 originals / 2 valid summaries. Budget expired; user paused; terminal VERSION_CONFLICT received. Import/content equality not verified.",
   "deployedHashes": "repair-deployed-hashes.json",
   "scope": "R1 inheritance, R3 actual subscription controller, R2 scoped identity and durable v1 alias",
   "notRun": [
@@ -42,5 +42,6 @@
   "nativeObservation": "native-20260921r1live-observation.json",
   "normalEntryRestoredOnDisk": true,
   "normalEntrySHA256": "a333377c740935fd4d2b23ea1836e36028c9c76a1e7bd3dc642d5b83d6ff5898",
-  "currentPageReloaded": false
+  "currentPageReloaded": false,
+  "nativeTerminal": "native-20260921r1live.json"
 }

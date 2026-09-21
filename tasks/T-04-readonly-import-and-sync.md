@@ -154,3 +154,4 @@ items/scenes/lifeDetails（仅实际确认匹配的部分）可选以原样旧�
 - 原生收集器5分钟未获终态。用户已点“暂停后续批次”，仅等待既有操作排空；不清库、不换namespace、不重启导入、不强杀TT。原库mnemo-t03-paged-t04-live-20260921r1live保留，落盘完成/摘要内容相等仍待确认。只收取旧操作结果的drain收集器拒绝/phase，不授权新演示。
 - 证据：native-20260921r1live-initial-error.json、native-20260921r1diag.json、native-20260921r1shape.json、native-20260921r1live-observation.json。正文/摘要/来源ID未入库仓库。旧synthetic恢复证据及Node恢复测试不替代这次真实落盘确认。
 - 此项尚未达到完整演示完成线，T-04维持implemented_unverified。超过原短时预算的后续原生工作须另报范围；下一步先确认排空/原操作状态，再决定是否开展额外核验，不自动延长实验。T-05不启动。
+排空后续：收到了native-20260921r1live.json终态，确认阶段VERSION_CONFLICT，与用户暂停后观察代次失效的保护路径一致。演示finally已等待停止处理函数返回；该harness未单独断言close返回值，不能额外宣称关闭核验通过。已不再运行导入；已提交批次数/内容相等仍未核验。保留原目标，后续先核对持久请求状态，不盲重试。

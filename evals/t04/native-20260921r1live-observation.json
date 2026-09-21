@@ -1,11 +1,26 @@
 {
   "run": "20260921r1live",
   "evidenceSource": "User-reported actual panel preview after null-swipe repair",
-  "actualReadPreview": {"originals":25,"validLegacySummaries":2,"optionalAssets":0,"pluginVersion":"1.2.9","coverageComplete":false,"missingAssistantFloorsCount":11},
-  "candidateShapeDiagnosis": {"string":13,"null":20,"sourceWrites":0,"targetWrites":0},
+  "actualReadPreview": {
+    "originals": 25,
+    "validLegacySummaries": 2,
+    "optionalAssets": 0,
+    "pluginVersion": "1.2.9",
+    "coverageComplete": false,
+    "missingAssistantFloorsCount": 11
+  },
+  "candidateShapeDiagnosis": {
+    "string": 13,
+    "null": 20,
+    "sourceWrites": 0,
+    "targetWrites": 0
+  },
   "collectorBudgetExpired": true,
   "userRequestedPause": true,
-  "importCompletion": "unknown; awaiting current-operation drain, no new import authorized by this observation",
+  "importCompletion": "Interrupted; terminal VERSION_CONFLICT at panel confirmation received after user pause. Committed batch count and content equality not verified.",
   "contentEqualityVerified": false,
-  "privateContentIncluded": false
+  "privateContentIncluded": false,
+  "drainTerminalReceived": true,
+  "stopHandlerAwaited": true,
+  "closeOutcomeSeparatelyVerified": false
 }
