@@ -1,0 +1,17 @@
+{
+  "info": "仅在隔离TT全局脚本库启用；不刷新、不续传、不改源聊天。先等待Codex启动收集器。",
+  "button": {
+    "buttons": [],
+    "enabled": false
+  },
+  "content": "const host=window.parent;\nconst doc=host.document;\nif(!doc.getElementById('mnemosyne-inspect-box')) {\n  const box=doc.createElement('div');box.id='mnemosyne-inspect-box';\n  box.style.cssText='position:fixed;bottom:12px;right:12px;z-index:10000;background:#20242d;color:#eee;padding:12px;max-width:480px;max-height:70vh;overflow:auto';\n  const button=doc.createElement('button');button.textContent='核对原会话（不续传）';\n  const status=doc.createElement('pre');status.id='mnemosyne-inspect-status';status.style.whiteSpace='pre-wrap';\n  status.textContent='入口已就绪。请先回复Codex，等收集器启动后再点击。';\n  box.append(button,status);doc.body.append(box);\n  button.onclick=()=>{\n    button.disabled=true;status.textContent='正在核对旧owner及原库状态；请勿刷新或重复点击。';\n    const script=doc.createElement('script');script.type='module';\n    script.src='http://127.0.0.1:19375/packages/bridge/native-inspect-launch.mjs';\n    script.onerror=()=>{status.textContent='检查入口未加载，请返回Codex；不要重复点击。';};\n    doc.body.append(script);\n  };\n  window.addEventListener('pagehide',()=>box.remove(),{once:true});\n}",
+  "type": "script",
+  "export_with": {
+    "button": false,
+    "data": false
+  },
+  "data": {},
+  "id": "mnemosyne-original-session-inspector",
+  "name": "Mnemosyne 原会话只读核对",
+  "enabled": false
+}

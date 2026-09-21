@@ -155,3 +155,23 @@ items/scenes/lifeDetails（仅实际确认匹配的部分）可选以原样旧�
 - 证据：native-20260921r1live-initial-error.json、native-20260921r1diag.json、native-20260921r1shape.json、native-20260921r1live-observation.json。正文/摘要/来源ID未入库仓库。旧synthetic恢复证据及Node恢复测试不替代这次真实落盘确认。
 - 此项尚未达到完整演示完成线，T-04维持implemented_unverified。超过原短时预算的后续原生工作须另报范围；下一步先确认排空/原操作状态，再决定是否开展额外核验，不自动延长实验。T-05不启动。
 排空后续：收到了native-20260921r1live.json终态，确认阶段VERSION_CONFLICT，与用户暂停后观察代次失效的保护路径一致。演示finally已等待停止处理函数返回；该harness未单独断言close返回值，不能额外宣称关闭核验通过。已不再运行导入；已提交批次数/内容相等仍未核验。保留原目标，后续先核对持久请求状态，不盲重试。
+
+## 12. 原会话一次状态核对（2026-09-22）
+
+用户明确授权在原目标库核对已提交进度与待处理请求；开工拉取main到0a177a5，读取notes/t-04-repair-review.md与更新后的S-B。未调用新的导入/续传，不重跑全套回归或完整演示。
+
+实施范围：新增native-inspect查询脚本、本地收集器及应用内入口。原预计120–160行；实际查询模块74行、收集器24行、入口8行，另有临时脚本JSON（包含显示按钮的脚本）；未改业务或存储发布实现。只运行语法/JSON解析检查，无新增功能回归。用户提供的JSONL本地确认26行（header+25条消息）、72068字节；文件及内容未复制入仓库，也未用它重导。
+
+最初Console入口不可用，未执行查询。参考固定TT提交367b0c7e9410和隔离实例酒馆助手4.9.5的现有全局脚本热加载机制，提供默认关闭的临时按钮脚本；由用户导入全局脚本并启用，未刷新原页面。查询在父页面模块环境执行，保留既有owner registry；旧owner未确认closed即停止，避免竞争owner。
+
+一次实际回执native-20260922inspect.json：1.363秒，10次查询；prepare=0、execute=0。原namespace仍为mnemo-t03-paged-t04-live-20260921r1live。先确认旧owner已closed，再使用现有协调器重新打开/flush并校验root/checkpoint，未调用Importer.recoverPending/confirm/resume。查询前后checkpoint相同，存储ready、operation_count=4，维护门禁保持。
+
+- 正文cursor/total=25/25，逐楼映射count=25；已发布快照message_count=25，binding目标与已发布快照一致。
+- 摘要assetCursor/assetTotal=0/2；剩余正文0，剩余摘要2。
+- binding和session均partial，phase=assets，持久停止原因source-changed-after-durable-batch。
+- pending为空，没有需要执行的prepared请求；本次没有生成导入操作ID或执行任何批次。
+- 本次close明确await成功且owner.status为closed；可确认旧owner状态和本次关闭结果。不能据此补称此前演示已完成。
+
+结论：不是只差最后内容核验，确实还剩2份摘要未提交。用户本轮只批准核对；因此停在报告边界，未自动续传。若另获继续授权，应沿原session/namespace、复核同一固定输入后仅完成剩余摘要，再核对已发布内容；不得清库、换库或绕过原持久请求协议重试。正文/摘要逐项内容相等尚未验证，T-04保持implemented_unverified，T-05不启动。
+
+回退/清理：本地收集器收到回执已退出；可在酒馆助手禁用临时全局脚本，移除按钮，不删除原库。脚本源码hash见native-20260922inspect-hashes.json；只提交计数、状态及匿名操作/快照标识，不保存完整pending.input或私人内容。未进行模型调用、规模试验、强杀、文件迁移或后台循环。

@@ -43,5 +43,22 @@
   "normalEntryRestoredOnDisk": true,
   "normalEntrySHA256": "a333377c740935fd4d2b23ea1836e36028c9c76a1e7bd3dc642d5b83d6ff5898",
   "currentPageReloaded": false,
-  "nativeTerminal": "native-20260921r1live.json"
+  "nativeTerminal": "native-20260921r1live.json",
+  "nativeStateInspection": {
+    "priorOwnerClosed": true,
+    "executeCalls": 0,
+    "evidence": "native-20260922inspect.json",
+    "pending": 0,
+    "assetsCommitted": 0,
+    "seconds": 1.363,
+    "bodyTotal": 25,
+    "status": "partial",
+    "prepareCalls": 0,
+    "checkpointUnchanged": true,
+    "contentEqualityVerified": false,
+    "phase": "assets",
+    "inspectionCloseConfirmed": true,
+    "bodyCommitted": 25,
+    "assetsTotal": 2
+  }
 }

@@ -1,0 +1,42 @@
+{
+  "type": "done",
+  "run": "20260922inspect",
+  "namespace": "mnemo-t03-paged-t04-live-20260921r1live",
+  "phase": "state-query-complete",
+  "queries": 10,
+  "prepareCalls": 0,
+  "executeCalls": 0,
+  "close": {
+    "attempted": true,
+    "confirmed": true
+  },
+  "sessions": [
+    {
+      "session": "0635b6496310a2ca",
+      "binding": "3f6bc3d0c9d77871",
+      "bindingStatus": "partial",
+      "sessionStatus": "partial",
+      "bodyCursor": 25,
+      "bodyTotal": 25,
+      "assetCursor": 0,
+      "assetTotal": 2,
+      "mappedOriginals": 25,
+      "offset": 0,
+      "phase": "assets",
+      "stopReason": "source-changed-after-durable-batch",
+      "publishedSnapshot": "0968de7a6530a509",
+      "publishedMessages": 25,
+      "targetMatchesPublished": true,
+      "remainingBody": 0,
+      "remainingAssets": 2
+    }
+  ],
+  "pending": [],
+  "priorOwnerStatus": "closed",
+  "checkpoint": "bd61de807e5d095d",
+  "operationCount": 4,
+  "storageStatus": "ready",
+  "maintenanceGate": "HOST_MAINTENANCE_UNSUPPORTED",
+  "checkpointUnchanged": true,
+  "elapsedMs": 1363
+}

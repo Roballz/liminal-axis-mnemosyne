@@ -1,0 +1,6 @@
+{
+  "packages/bridge/native-inspect-launch.mjs": "0edd41392342508f28346019dab19af98be64f517af4e52d2cf5e7e2354e108e",
+  "packages/bridge/native-inspect-button.json": "d265828791ea1e7d6d866f90084f2f288d9e4c0639481ced880193eeaa101ed0",
+  "packages/bridge/native-inspect-collector.mjs": "df0ab9db65a8b6414dfcec4356dfe38846d1019f02966fa4ef9f0d50cb6fede9",
+  "packages/bridge/native-inspect.mjs": "66775a7f8a1e3c4f86c18ae19f5173b70da1dcffc8851b14578e6a42f7df4747"
+}
