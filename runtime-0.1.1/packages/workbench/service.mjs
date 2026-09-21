@@ -165,7 +165,7 @@ export class Workbench {
             if(Math.max(bytes,size(projected))>b.text){limitReason='text';break;}
             b.text-=Math.max(bytes,size(projected));
             if(s.browse||projected.includes(s.query)) {
-              const item={kind:a.category,key,snippet:short(text),declaration:a.declaration,scope:a.scope,
+              const item={kind:a.category,level:a.category==='summary'?0:(Number.isInteger(a.data.level)?a.data.level:null),key,snippet:short(text),declaration:a.declaration,scope:a.scope,
                 historical:!current,mode:s.mode,source_id:a.source_id,anchor:a.anchor};
               this.hits.set(item,{s,key});items.push(item);
             }

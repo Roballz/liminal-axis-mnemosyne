@@ -26,6 +26,13 @@ export class Pages {
     const ref = { hash, slot: this.#address(hash) };
     check(reference(ref), 'RESOURCE_LIMIT', 'Page address outside exact integer range');
     check(bytes(page) <= PAGE_LIMITS.bytes, 'RESOURCE_LIMIT', 'Page exceeds byte limit');
+    // Already verified immutable pages remain authoritative only within this bounded owner cache.
+    // A different hash/address still takes the collision-checking IO path.
+    const cached=this.#cache.get(ref.hash);
+    if(cached) {
+      check(equal(cached,page),'ID_COLLISION','Cached page hash collision');
+      this.#io.metric?.('page.put_cache_hit');return ref;
+    }
     const old = await this.#io.get(ref.slot);
     this.#io.metric?.(old === null ? 'page.new' : 'page.existing', 1, bytes(page));
     check(old === null || equal(old, page), 'ID_COLLISION', 'Physical address collision; existing page preserved');

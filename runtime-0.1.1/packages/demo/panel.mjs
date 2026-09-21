@@ -2,6 +2,8 @@ import { styles } from './styles.mjs';
 
 export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
   const doc=host.document,root=doc.createElement('div');root.id='mnemosyne-daily';
+  // The light-DOM host must never become a flex item in TT's drawer layout.
+  root.style.cssText='position:fixed!important;inset:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;pointer-events:none;z-index:2147483000';
   const shadow=root.attachShadow({mode:'open'});doc.body.append(root);
   const el=(tag,text='',cls='')=>{const n=doc.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;};
   const button=(text,cls='action')=>{const n=el('button',text,cls);n.type='button';return n;};
@@ -35,7 +37,7 @@ export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
   const outside=e=>dropdowns.forEach(d=>{if(!e.composedPath().includes(d.wrap))d.close();});
   host.addEventListener('pointerdown',outside);
   const style=el('style',styles);shadow.append(style);
-  const bubble=button('◈ Mnemosyne 档案','bubble');bubble.setAttribute('aria-label','打开 Mnemosyne 档案');
+  const bubble=button('M','bubble');bubble.setAttribute('aria-label','打开 Mnemosyne 档案');
   const panel=el('section','','panel');panel.hidden=true;panel.setAttribute('aria-label','Mnemosyne 手动搜索');
   const header=el('header'),brand=el('div','Mnemosyne 档案','brand');brand.append(el('small','LOCAL ARCHIVE · MANUAL SEARCH'));
   const theme=button('◐','icon'),close=button('×','icon');theme.title='切换浅色 / 深色';close.title='收起窗口';
@@ -95,7 +97,7 @@ export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
   };
   const present=page=>{
     for(const hit of page.items){const card=button('','result');
-      const type=hit.kind==='body'?`${hit.role} · 正文 #${hit.index+1}`:hit.kind==='swipe'?`SWIPE 候选 · #${hit.index+1} · ${hit.slots.length}处命中`:'已有摘要 · 生成来源未证明';
+      const type=hit.kind==='body'?`${hit.role} · 正文 #${hit.index+1}`:hit.kind==='swipe'?`SWIPE 候选 · #${hit.index+1} · ${hit.slots.length}处命中`:`${Number.isInteger(hit.level)?'L'+hit.level+' · ':''}已有摘要 · 生成来源未证明`;
       card.append(el('span',type,'meta'),el('span',hit.snippet,'snippet'));
       card.onclick=()=>run(async()=>{const token=epoch;detail.replaceChildren();detail.hidden=true;const value=await demo.detail(hit);if(token!==epoch)return;
         detail.append(el('h3',type));
@@ -111,14 +113,17 @@ export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
     say(page.status==='empty-query'?'请输入关键词。':`已显示 ${count} 条结果 · 已检查 ${page.scanned??0}/${page.total??0} 条正文\n${page.status==='exhausted'?'本次搜索完成。':'尚未检查完，可点“继续查找”。'}${page.limitReason?' 本批达到读取预算；若持续停在同一位置，当前对象超过 demo 预算。':''}`);
     if(!count&&page.status==='exhausted')results.append(el('div','没有找到匹配内容。试试更短的关键词，或检查搜索范围。','empty'));
   };
-  bubble.onclick=()=>{panel.hidden=!panel.hidden;if(!panel.hidden)run(async()=>{await ready();clear();await catalog();await followCurrent();});};
+  let bubbleMoved=false;
+  bubble.onclick=()=>{if(bubbleMoved){bubbleMoved=false;return;}panel.hidden=!panel.hidden;if(!panel.hidden)run(async()=>{await ready();clear();await catalog();await followCurrent();});};
   close.onclick=()=>{clear();demo?.invalidate();preview.hidden=true;panel.hidden=true;};
   current.onclick=()=>run(async()=>{await ready();await followCurrent();});
   moreArchives.onclick=()=>run(()=>catalog(false));
   archives.onchange=()=>run(()=>choose(items.find(a=>a.source===archives.value)));
   const prepare=syncing=>run(async()=>{await ready();clear();preview.hidden=true;
     const token=epoch,r=await demo.preview(name.value,{sync:syncing});if(token!==epoch)return;
-    previewText.textContent=`${r.name}\n${r.originals} 条正文 · ${r.summaries} 条已有摘要\n本次变更 ${r.changed} 条，原范围替换/移除 ${r.removed} 条。${r.sourceReport.available?'':'未检测到柏宝书摘要，仅导入正文。'}\n最新内容作为默认搜索范围；旧正文仅保留为恢复材料。`;
+    const stats=r.sourceReport.summaryCounts;
+    const breakdown=stats?`\nL0 ${stats.l0}（隐藏楼 ${stats.hiddenL0}）· 选中高层 ${stats.higherSelected}\n番外 ${stats.omitted} · 失效 ${stats.invalid} · 未存摘要 ${stats.missing}\n高层仅为公开接口选中节点，不代表全部 L1～L4。`:'';
+    previewText.textContent=`${r.name}\n${r.originals} 条正文 · ${r.summaries} 条已有摘要${breakdown}\n本次变更 ${r.changed} 条，原范围替换/移除 ${r.removed} 条。${r.sourceReport.available?'':'未检测到柏宝书摘要，仅导入正文。'}\n最新内容作为默认搜索范围；旧正文仅保留为恢复材料。`;
     preview.hidden=false;say('请核对预览后确认。不会改动 TT 或柏宝书。');
   });
   create.onclick=()=>prepare(false);sync.onclick=()=>prepare(true);
@@ -150,7 +155,14 @@ export function mountPanel({host=globalThis,connect,recover,version='demo'}) {
     node.onpointerup=node.onpointercancel=node.onlostpointercapture=()=>{origin=null;};
   };drag(header,false);drag(grip,true);
   grip.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();const r=panel.getBoundingClientRect();fit(r.x,r.y,r.width+(e.key==='ArrowRight'?20:e.key==='ArrowLeft'?-20:0),r.height+(e.key==='ArrowDown'?20:e.key==='ArrowUp'?-20:0));};
-  const resize=()=>{if(!panel.hidden){const r=panel.getBoundingClientRect();fit(r.x,r.y,r.width,r.height);}};host.addEventListener('resize',resize);
+  let bubbleDrag=null;
+  const placeBubble=(x,y)=>Object.assign(bubble.style,{left:Math.max(4,Math.min(x,host.innerWidth-48))+'px',top:Math.max(4,Math.min(y,host.innerHeight-48))+'px',right:'auto',bottom:'auto'});
+  bubble.onpointerdown=e=>{if(e.button!==0)return;const r=bubble.getBoundingClientRect();bubbleMoved=false;
+    bubbleDrag={x:e.clientX,y:e.clientY,left:r.x,top:r.y};bubble.setPointerCapture(e.pointerId);};
+  bubble.onpointermove=e=>{if(!bubbleDrag)return;const dx=e.clientX-bubbleDrag.x,dy=e.clientY-bubbleDrag.y;
+    if(Math.hypot(dx,dy)>5)bubbleMoved=true;if(bubbleMoved)placeBubble(bubbleDrag.left+dx,bubbleDrag.top+dy);};
+  bubble.onpointerup=bubble.onpointercancel=bubble.onlostpointercapture=()=>{bubbleDrag=null;};
+  const resize=()=>{const b=bubble.getBoundingClientRect();placeBubble(b.x,b.y);if(!panel.hidden){const r=panel.getBoundingClientRect();fit(r.x,r.y,r.width,r.height);}};host.addEventListener('resize',resize);
   return {root,controls:{bubble,panel,archives,current,create,sync,name,confirm,query,search,searchRow,scope,scopeDropdown,archiveDropdown,summaries,next,results,detail,status,preview,close},
     invalidate(){clear();preview.hidden=true;if(!panel.hidden)say('聊天或摘要已变化。旧结果已清除；请点击“当前聊天”重新选择，按需手动同步。');},
     dispose(){disposed=true;clear();host.removeEventListener('resize',resize);host.removeEventListener('pointerdown',outside);root.remove();}};
