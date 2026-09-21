@@ -4,7 +4,7 @@
 
 ## 当前入口（2026-09-22）
 
-**S-A/T-03及S-B/T-04均已在受控能力范围verified。当前正式任务卡为 `tasks/T-05-manual-search-and-workbench.md`，状态implemented_unverified（S01～S08已完成，待Chat review）。** T-05只做手动正文搜索、旧摘要/来源查看和最小工作台。先读 `stages/S-B-archive-and-search.md`、本卡和11文档相关规则，再按需读现有代码；不反复读取全部历史评审。候选已实现，实施/有限验证记录见本卡第8节；不因待审重跑旧矩阵。
+**S-A 与 Stage-B（T-04～T-05）均已在受控能力范围 verified。T-05 最终审核实现为 `11e5eef`，回执是 `notes/t-05-final-review.md`；T05-R1 已关闭。** 当前没有已发布的 T-06/T-07 正式施工卡，不自动开工。若用户先要求日常手动搜索 Demo，应作为薄的受控试用封装规划，复用现有 B 本机持久库和工作台，不重造存储、不过早加入自动召回/摘要/注入。
 
 T-03 收口以 `notes/t-03-capability-final-review.md` 为准，覆盖旧 README/roadmap/task 内的 P3/P4待审、先重测旧机性能等临时状态。旧 `T-03-storage-foundation.proposal.md` 不是施工入口。T-04收口以 `notes/t-04-final-review.md` 为准：审核5fe2706，原会话25/25正文、2/2摘要已核验、pending为空、关闭成功；保留原始失败和执行记录，不重复原生导入/续传/全量作为T-05前置。
 
