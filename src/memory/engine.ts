@@ -1411,6 +1411,7 @@ async function summarizeBatchWork(
     const sb = deriveMemory(chat, f);
     applyLeafForFloor(chat, f, lean, sb);
     attachSummaryEvidence(chat, f, mnEvidence, floorTargets(chat, f, covered));
+    attachTableResult(chat, f, null);
   });
 
   attachTableResult(chat, block.at(-1)!, tablePlan);

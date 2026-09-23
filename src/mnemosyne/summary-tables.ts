@@ -44,7 +44,12 @@ export async function validateSummaryTableResult(plan: SummaryTablePlan | null) 
         await (await activeLibrary()).transaction(['custom_table_defs'], 'readonly', (tx) => assertTablePlan(tx, plan));
 }
 export function attachTableResult(chat: STMessage[], floor: number, plan: SummaryTablePlan | null) {
-    if (!plan) return;
+    if (!plan) {
+        // Regenerating a historical summary supersedes its old, uncommitted operation.
+        // Committed table history remains in canonical receipts; no table rows are rolled back.
+        if (chat[floor].extra) delete chat[floor].extra![TABLE_OUTPUT_KEY];
+        return;
+    }
     const leaf = chat[floor].extra?.bbs_leaf;
     check(leaf, '填表结果缺少同次摘要');
     chat[floor].extra![TABLE_OUTPUT_KEY] = { version: 2, leaf: leaf.id, text: leaf.text, plan };

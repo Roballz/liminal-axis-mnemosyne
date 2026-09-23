@@ -232,3 +232,20 @@ test('an in-flight native summary cannot overwrite a newly edited table',async()
  await runSummary(1,{checkResummary:false});expect(engineState.lastError).toContain('已改变');
  expect(ctx.chat[1].extra?.bbs_leaf?.text).toBe('合成旧摘要');expect((await lib.all<any>('custom_table_rows')).map(r=>r.values.v)).toEqual(['用户刚保存']);flushLeavesNow();
 });
+
+
+test('regenerating a historical leaf clears its superseded failed table request, even with identical text',async()=>{
+ const {newTable,saveTable,readTables,parseSummaryTables,applyRows}=await import('./tables');
+ const {attachTableResult,TABLE_OUTPUT_KEY}=await import('./summary-tables');
+ const view=await syncDaily(),def=newTable(view,'失败后重摘表');def.columns=[{id:'v',name:'值',type:'text',mode:'append',description:''}];
+ await saveTable(lib,view,def);
+ const plan=parseSummaryTables([{table_id:def.id,add:[{v:'旧请求'}],update:[]}],await readTables(lib,view.branch),view.branch.id)!;
+ attachTableResult(ctx.chat,1,plan);
+ const current=await capture(lib,view.branch.id),stored=(await lib.get<any>('custom_table_defs',def.id))!;
+ await applyRows(lib,current,stored,[{row_id:null,values:{v:'后续人工值'}}],false);
+ await syncDaily();expect(dailyState.tableError).toContain('#1 楼');
+ const receipts=await lib.all('table_receipts');
+ attachTableResult(ctx.chat,1,null); // Same-text historical regeneration has no current table request.
+ await syncDaily();expect(dailyState.tableError).toBe('');expect(ctx.chat[1].extra?.[TABLE_OUTPUT_KEY]).toBeUndefined();
+ expect(await lib.all('table_receipts')).toEqual(receipts);expect((await lib.all<any>('custom_table_rows'))[0].values.v).toBe('后续人工值');
+});

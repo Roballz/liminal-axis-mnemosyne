@@ -329,7 +329,7 @@ export async function syncDaily(): Promise<CapturedView> {
             check(host === hostVersion() && generation === dailyState.generation, '归档完成；当前视图已变化');
             dailyState.tableError = '';
             const receipts = new Set((await lib.all('table_receipts', 'branch', branch.id)).map((r) => r.id));
-            for (const message of ctx.chat) {
+            for (const [floor, message] of ctx.chat.entries()) {
                 const saved = message.extra?.[TABLE_OUTPUT_KEY] as
                     { version: number; leaf: string; text: string; plan: SummaryTablePlan } | undefined;
                 const leaf = getLeaf(message);
@@ -354,7 +354,7 @@ export async function syncDaily(): Promise<CapturedView> {
                         () => host === hostVersion() && generation === dailyState.generation,
                     );
                 } catch (error) {
-                    dailyState.tableError = `摘要已保存，填表待处理：${String((error as Error).message)}。可刷新重试；若表已改动，请重新生成最新楼摘要。`;
+                    dailyState.tableError = `摘要已保存，#${floor} 楼填表待处理：${String((error as Error).message)}。可刷新重试；若表已改动，请重新生成该楼摘要以替代旧请求。`;
                 }
             }
             const inputs = await readTables(lib, view.branch);
