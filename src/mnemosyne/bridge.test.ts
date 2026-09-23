@@ -131,3 +131,104 @@ test('retained higher summaries require an explicit one-level rebuild after a ch
   expect(high.content).toBe('重建后的高层摘要');expect((await statuses(lib,view)).get(high.id)).toBe('valid');
   expect(client.requestViaMainApi).toHaveBeenCalledTimes(1);expect(memory.summaries).toHaveLength(1);
 });
+
+test('unchanged refresh and lightweight page scope do not resave or scan sources/summaries', async () => {
+    const bridge = await import('./bridge');
+    await syncDaily();
+    const all = vi.spyOn(lib, 'all'), transaction = vi.spyOn(lib, 'transaction');
+    vi.mocked(ctx.saveChat).mockClear(); vi.mocked(ctx.saveMetadata).mockClear();
+    expect((await bridge.dailyBranch())?.id).toBe(dailyState.branch);
+    invalidateDaily(); // a UI-derived notification with no actual host change
+    await syncDaily(); await syncDaily();
+    expect(ctx.saveChat).not.toHaveBeenCalled(); expect(ctx.saveMetadata).not.toHaveBeenCalled();
+    expect(all).not.toHaveBeenCalled();
+    expect(transaction.mock.calls.every(([stores,mode]) => mode === 'readonly' && stores.length === 1 && stores[0] === 'branches')).toBe(true);
+});
+
+test.each([false,true])('one native summary call also fills tables and enters current-state injection (custom=%s)', async custom => {
+    const { newTable, saveTable } = await import('./tables');
+    const { refreshDailyTables, dailyTableText } = await import('./bridge');
+    const { runSummary, engineState } = await import('@/memory/engine');
+    const { buildStateInjectionText } = await import('@/memory/inject');
+    const { flushLeavesNow } = await import('@/memory/store');
+    const view = await syncDaily(), def = newTable(view, '同次调用合成表');
+    def.columns = [{ id:'name',name:'名称',type:'text',mode:'lock',description:'事项名',prompt:'从本轮正文提取' }];
+    await saveTable(lib,view,def); await refreshDailyTables();
+    ctx.name1='User';ctx.name2='Character';ctx.saveMetadataDebounced=vi.fn();
+    const oldMode=api.apiSettings.summaryOnlyMode, oldPrompt=api.apiSettings.prompts.summary;
+    api.apiSettings.summaryOnlyMode=false;api.apiSettings.prompts.summary=custom?'CUSTOM {{content}}':'';
+    vi.spyOn(api,'engineActiveHere').mockReturnValue(true);vi.spyOn(api,'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client,'mainApiAvailable').mockReturnValue(true);
+    const request=vi.spyOn(client,'requestViaMainApi').mockResolvedValue(JSON.stringify({summary:'本轮摘要与表格',customTables:[{table_id:def.id,add:[{name:'玉佩约定'}],update:[]}]}));
+    try {
+        await runSummary(1,{checkResummary:false});
+        expect(engineState.lastError).toBe(''); expect(request).toHaveBeenCalledTimes(1);
+        const messages=request.mock.calls[0][0];
+        expect(messages.map(m=>m.content).join('\n')).toContain('从本轮正文提取');
+        expect(messages.map(m=>m.content).join('\n')).toContain('customTables');
+        expect(ctx.chat[1].extra?.bbs_leaf?.text).toBe('本轮摘要与表格');
+        expect(JSON.stringify(ctx.chat[1].extra?.bbs_leaf?.delta)).not.toContain('customTables');
+        await syncDaily();await syncDaily();
+        expect(await lib.all('custom_table_rows')).toHaveLength(1);expect(await lib.all('table_receipts')).toHaveLength(1);
+        expect(dailyTableText()).toContain('玉佩约定');expect(buildStateInjectionText()).toContain('玉佩约定');
+    } finally {api.apiSettings.summaryOnlyMode=oldMode;api.apiSettings.prompts.summary=oldPrompt;flushLeavesNow();}
+});
+
+test('host save failure retains a table operation, retry commits once without another model call',async()=>{
+    const { newTable, saveTable, readTables, parseSummaryTables }=await import('./tables');
+    const { attachTableResult }=await import('./summary-tables');
+    const view=await syncDaily(),def=newTable(view,'重试表');def.columns=[{id:'v',name:'进展',type:'text',mode:'append',description:''}];
+    await saveTable(lib,view,def);
+    const inputs=await readTables(lib,view.branch),plan=parseSummaryTables([{table_id:def.id,add:[{v:'只追加一次'}],update:[]}],inputs,view.branch.id)!;
+    attachTableResult(ctx.chat,1,plan);
+    vi.mocked(ctx.saveChat).mockRejectedValueOnce(Error('合成聊天保存失败'));
+    await expect(syncDaily()).rejects.toThrow('聊天保存失败');expect(await lib.all('custom_table_rows')).toHaveLength(0);
+    await syncDaily();await syncDaily();expect(await lib.all('custom_table_rows')).toHaveLength(1);expect(await lib.all('table_receipts')).toHaveLength(1);
+});
+
+test('historical summary does not read current table rows and invalid source rows are not sent',async()=>{
+    const { prepareSummaryTables }=await import('./summary-tables');
+    const { newTable,saveTable,applyRows }=await import('./tables');
+    let view=await syncDaily();const def=newTable(view,'时点表');def.columns=[{id:'v',name:'内容',type:'text',mode:'replace',description:''}];
+    await saveTable(lib,view,def);view=await syncDaily();
+    const stored=(await lib.get<any>('custom_table_defs',def.id))!;
+    await applyRows(lib,view,stored,[{row_id:null,values:{v:'失效来源记录'}}],false,[view.memories[0].id]);
+    ctx.chat.push(message(true,'新问题'),message(false,'新回复'));invalidateDaily();view=await syncDaily();
+    const spy=vi.spyOn(lib,'transaction');
+    expect(await prepareSummaryTables(view,ctx.chat,[1])).toBeNull();expect(spy).not.toHaveBeenCalled();spy.mockRestore();
+    ctx.chat[0].mes='改写旧正文';invalidateDaily();view=await syncDaily();
+    const request=await prepareSummaryTables(view,ctx.chat,[3]);expect(request?.user).not.toContain('失效来源记录');
+});
+
+test('latest-floor batch puts table changes beside floors in one request',async()=>{
+ const {newTable,saveTable}=await import('./tables');const {refreshDailyTables}=await import('./bridge');
+ const {batchBackfill,engineState}=await import('@/memory/engine');const {flushLeavesNow}=await import('@/memory/store');
+ ctx.name1='User';ctx.name2='Character';ctx.saveMetadataDebounced=vi.fn();delete ctx.chat[1].extra!.bbs_leaf;
+ ctx.chat.push(message(true,'另一问'),message(false,'另一段正文'));
+ const view=await syncDaily(),def=newTable(view,'批量同次表');def.columns=[{id:'v',name:'值',type:'text',mode:'replace',description:''}];
+ await saveTable(lib,view,def);await refreshDailyTables();
+ vi.spyOn(api,'engineActiveHere').mockReturnValue(true);vi.spyOn(api,'getChannelForTask').mockReturnValue(null);vi.spyOn(client,'mainApiAvailable').mockReturnValue(true);
+ const request=vi.spyOn(client,'requestViaMainApi').mockResolvedValue(JSON.stringify({floors:[{summary:'第一条'},{summary:'第二条'}],customTables:[{table_id:def.id,add:[{v:'整批净变化'}],update:[]}]}));
+ const old=api.apiSettings.batchMaxFloors;api.apiSettings.batchMaxFloors=10;
+ try{
+  expect(await batchBackfill({floors:[1,3]})).toMatchObject({done:2});expect(engineState.lastError).toBe('');
+  expect(request).toHaveBeenCalledTimes(1);expect(request.mock.calls[0][0].map(m=>m.content).join('\n')).toContain('与 floors 并列');
+  await syncDaily();expect(await lib.all('custom_table_rows')).toHaveLength(1);
+ }finally{api.apiSettings.batchMaxFloors=old;flushLeavesNow();}
+});
+
+test('an in-flight native summary cannot overwrite a newly edited table',async()=>{
+ const {newTable,saveTable,applyRows}=await import('./tables');const {refreshDailyTables}=await import('./bridge');
+ const {runSummary,engineState}=await import('@/memory/engine');const {flushLeavesNow}=await import('@/memory/store');
+ ctx.name1='User';ctx.name2='Character';ctx.saveMetadataDebounced=vi.fn();
+ const view=await syncDaily(),def=newTable(view,'冲突表');def.columns=[{id:'v',name:'值',type:'text',mode:'replace',description:''}];
+ await saveTable(lib,view,def);await refreshDailyTables();
+ vi.spyOn(api,'engineActiveHere').mockReturnValue(true);vi.spyOn(api,'getChannelForTask').mockReturnValue(null);vi.spyOn(client,'mainApiAvailable').mockReturnValue(true);
+ vi.spyOn(client,'requestViaMainApi').mockImplementationOnce(async()=>{
+  const current=await capture(lib,view.branch.id),stored=(await lib.get<any>('custom_table_defs',def.id))!;
+  await applyRows(lib,current,stored,[{row_id:null,values:{v:'用户刚保存'}}],false);
+  return JSON.stringify({summary:'迟到摘要',customTables:[{table_id:def.id,add:[{v:'迟到 AI 值'}],update:[]}]});
+ });
+ await runSummary(1,{checkResummary:false});expect(engineState.lastError).toContain('已改变');
+ expect(ctx.chat[1].extra?.bbs_leaf?.text).toBe('合成旧摘要');expect((await lib.all<any>('custom_table_rows')).map(r=>r.values.v)).toEqual(['用户刚保存']);flushLeavesNow();
+});

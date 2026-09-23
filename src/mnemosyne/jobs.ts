@@ -7,8 +7,7 @@ import { activeLibrary } from './db';
 import { capture, current } from './canonical';
 import { syncDaily, dailyState, hostVersion, dailyCurrent } from './bridge';
 import { prepareEventBatch, parseEventOutput, commitEventBatch } from './events';
-import { tablePrompt, parseTableOutput, applyRows } from './tables';
-import { check, type TableDef } from './model';
+import { check } from './model';
 export const settings = reactive({ eventsEnabled: false, interval: 40, delay: 0, batchSize: 20, maxChars: 48000,
     chains: 2, excerptChars: 500, totalChars: 1600, extra: 1 });
 export const jobState = reactive({ busy: false, status: '未运行', chars: 0, completed: 0, stopped: false });
@@ -23,7 +22,7 @@ export async function saveDailySettings() {
         check(Number.isInteger(settings[key]) && settings[key] > 0, '间隔/批量/预算必须为正整数');
     for (const key of ['delay', 'chains', 'excerptChars', 'totalChars'] as const)
         check(Number.isInteger(settings[key]) && settings[key] >= 0, '延迟/额度不能为负');
-    check(settings.batchSize <= 200 && settings.extra >= 0 && settings.extra <= 1, '批量最多200；每链额外进展最多1');
+    check(settings.batchSize <= 200 && [0,1].includes(settings.extra), '批量最多200；每链额外进展最多1');
     await (await activeLibrary()).transaction(['library_meta'], 'readwrite', tx => tx.put('library_meta', { id: 'daily-settings', schema: 1, value: JSON.parse(JSON.stringify(settings)) } as any));
 }
 export type Sender = (prompt: string) => Promise<string>;
@@ -84,30 +83,6 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
     }
     catch (error) {
         jobState.status = String((error as Error).message);
-    }
-    finally {
-        jobState.busy = false;
-    }
-}
-export async function fillTable(def: TableDef, selected: string[], sender: Sender = sendDaily) {
-    check(!jobState.busy, '另一个任务正在运行');
-    jobState.busy = true;
-    stop = false;
-    try {
-        const view = await syncDaily();
-        const lib = await activeLibrary();
-        const host = hostVersion(), generation = dailyState.generation;
-        const prompt = await tablePrompt(lib, view, def, selected, settings.maxChars);
-        jobState.chars = prompt.length;
-        jobState.status = `填写 ${def.name} · ${prompt.length} 字符`;
-        const result = await sender(prompt);
-        check(!stop && await dailyCurrent(view, host, generation), '填表已停止或结果过期');
-        await applyRows(lib, view, def, parseTableOutput(result), true, selected);
-        jobState.status = '填表已保存（允许无变化）';
-    }
-    catch (error) {
-        jobState.status = String((error as Error).message);
-        throw error;
     }
     finally {
         jobState.busy = false;

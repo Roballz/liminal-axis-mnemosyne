@@ -1,4 +1,4 @@
-import { summaryAllowed } from '@/mnemosyne/bridge';
+import { summaryPermission, dailyTableText } from '@/mnemosyne/bridge';
 /**
  * 把记忆注入回主对话上下文。
  *
@@ -102,6 +102,7 @@ function buildView(
   chat: STMessage[] | null,
 ): { byId: Map<string, ViewNode>; roots: ViewNode[] } {
   const byId = new Map<string, ViewNode>();
+  const summaryAllowed = summaryPermission();
 
   if (chat) {
     for (let i = 0; i < chat.length; i++) {
@@ -648,7 +649,9 @@ export function buildStateInjectionText(): string {
   // 但只要存在摘要或时间/地点就值得带上整块)
   const hasProtagonist = inj.protagonist && Object.values(memory.protagonist).some(value => !!oneLine(value));
   const hasState = memory.state.time || memory.state.location || (inj.sceneFocus && memory.state.sceneFocus) || hasProtagonist || (itemsOn && memory.items.length) || (scenesOn && memory.scenes.length) || (npcsOn && memory.npcs.length) || openPlans.length || hasVarState || (inj.lifeDetails && memory.lifeDetails.length);
-  if (!hasState) return '';
+  const customTables = dailyTableText();
+  if (!hasState && !customTables) return '';
+  if (customTables) st.push(customTables);
   // 首尾私密简报框定,避免主模型把状态快照当成要复述/输出的模板(正文后跟吐一份状态)
   return `${MEMORY_BRIEFING_NOTE}\n[当前状态]\n${st.join('\n')}\n${MEMORY_BRIEFING_END}`;
 }

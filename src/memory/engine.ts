@@ -1,3 +1,4 @@
+import { prepareSummaryTables, parseSummaryTableResult, validateSummaryTableResult, attachTableResult } from '@/mnemosyne/summary-tables';
 import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, syncDaily, summaryAllowed } from '@/mnemosyne/bridge';
 import type { ChatMsg } from '@/api/client';
 import { mainApiAvailable, requestCompletion, requestViaMainApi } from '@/api/client';
@@ -1186,6 +1187,8 @@ async function summarizeFloorWork(
     varsRule: (['global', 'char', 'chat'] as const).map(t => memory.varTemplates[t].rule.trim()).filter(Boolean).join('\n\n'),
   });
 
+  const tableRequest = await prepareSummaryTables(mnEvidence?.view, chat, [aiFloor]);
+  if (tableRequest) { prompt.system += tableRequest.system; prompt.user += tableRequest.user; }
   const { checklist, prefill } = buildSummaryThinking(ctx.name1);
   const messages: ChatMsg[] = [];
   const jb = apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT;
@@ -1200,6 +1203,7 @@ async function summarizeFloorWork(
     { role: 'assistant', content: prefill },
   );
   options.onRequestStart?.();
+  let tablePlan: ReturnType<typeof parseSummaryTableResult> = null;
   const delta = await sendAndParse(sender.send, messages, raw => {
     console.log('[柏宝书] 摘要原始返回(未清洗):\n', raw);
     const d = extractJsonObject<SummaryDelta>(raw);
@@ -1207,12 +1211,15 @@ async function summarizeFloorWork(
     if (!d || !summary) {
       throw new Error(raw.trim() ? '摘要失败:AI道歉或掉格式' : '摘要失败:AI空回');
     }
+    tablePlan = parseSummaryTableResult((d as any).customTables, tableRequest);
     return { ...d, summary } as SummaryDelta & { summary: string };
   });
 
+  await validateSummaryTableResult(tablePlan);
   assertSummaryEvidence(mnEvidence);
   applyLeafForFloor(chat, aiFloor, delta, stateBefore, options.replaceLeaf);
   attachSummaryEvidence(chat, aiFloor, mnEvidence, targets);
+  attachTableResult(chat, aiFloor, tablePlan);
   engineState.lastRunAt = Date.now();
 
   // 立刻反映到派生与注入;落盘走防抖(隐藏由收尾的 syncWindowHiddenState 统一负责)
@@ -1349,6 +1356,8 @@ async function summarizeBatchWork(
     floorCount: block.length,
   });
 
+  const tableRequest = await prepareSummaryTables(mnEvidence?.view, chat, block);
+  if (tableRequest) { prompt.system += tableRequest.system + '\n本次为批量摘要：保留根对象 floors，customTables 放在根对象与 floors 并列，返回整批按顺序结算后的净变化，不放进各楼对象。'; prompt.user += tableRequest.user; }
   const { checklist, prefill } = buildBatchThinking(block.length);
   const messages: ChatMsg[] = [];
   const jb = apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT;
@@ -1364,6 +1373,7 @@ async function summarizeBatchWork(
   );
 
   // 解析 { floors: [...] };校验长度等于块楼数(缺楼/多楼都算失败,触发重试/回退)
+  let tablePlan: ReturnType<typeof parseSummaryTableResult> = null;
   const list = await sendAndParse(sender.send, messages, raw => {
     console.log('[柏宝书] 批量摘要原始返回(未清洗):\n', raw);
     const d = extractJsonObject<{ floors?: SummaryDelta[] }>(raw);
@@ -1382,9 +1392,11 @@ async function summarizeBatchWork(
     if (cleaned.some(f => !f)) {
       throw new Error('批量摘要失败:有楼层缺 summary');
     }
+    tablePlan = parseSummaryTableResult((d as any).customTables, tableRequest);
     return cleaned as Array<SummaryDelta & { summary: string }>;
   });
 
+  await validateSummaryTableResult(tablePlan);
   assertSummaryEvidence(mnEvidence);
   // 逐楼落叶(块内顺序,严格按 block 升序)。批量只取 summary + 起止时间:
   // 显式剥掉 items/plans/location —— 这些跨多楼难保顺序正确(易致计划/时间错乱),
@@ -1401,6 +1413,7 @@ async function summarizeBatchWork(
     attachSummaryEvidence(chat, f, mnEvidence, floorTargets(chat, f, covered));
   });
 
+  attachTableResult(chat, block.at(-1)!, tablePlan);
   engineState.lastRunAt = Date.now();
   recomputeDerived();
   refreshInjection();

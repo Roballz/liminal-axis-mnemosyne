@@ -123,3 +123,15 @@
 - [自动填表提交与进度](https://github.com/gaigai315/yuzuki-Memory/blob/14ddb8df3207f5f8e0ac8af4c93b72edce00f704/config/task-runner.js#L4090-L4180)
 - [floor ledger](https://github.com/gaigai315/yuzuki-Memory/blob/14ddb8df3207f5f8e0ac8af4c93b72edce00f704/config/floor-ledger.js)
 - [IndexedDB的版本升级与事务](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API/Using_IndexedDB)：物理object store/index结构变更使用versionchange，普通记录读写不必改物理schema。
+
+## 8. 2026-09-23 手机反馈后的用户明确修订
+
+以下用户新要求覆盖第5节和 W-01 初版 R8 的手动选摘要填表入口，实施仍在 W-01 同分支内，不另开正式任务卡。
+
+- 自定义表改为原生最新楼摘要同一次 LLM 调用的附加 JSON 表格增量；发送各表当前可见内容、字段定义/说明/填写提示词，不另起填表请求。
+- 中文写入策略：覆写、追加、首次写入后锁定；旧 manual 保持人工独占，不静默解释为仅填一次。
+- 表列表作为主界面；右键/长按菜单管理；独立设计页与单字段五项弹窗；行列表只预览前两列，完整行弹窗编辑；长按多选，隐藏行不发给摘要 AI 或正文模型。可见有效行并入原当前状态注入，遵守仅摘要模式。
+- 档案页默认仅状态与说明，不读全量正文/摘要列表；待审核操作按需加载。自定义表页不读取摘要。原摘要页继续保留。
+- 表记录协议 tableSchema=2；逻辑导出包 v2，读取 v1 向后兼容；物理 IndexedDB 维持 v1，不破坏性升级。纯历史补摘/高层压缩不读取当前表冒充历史状态；包含最新楼的批量请求返回整批表格净变化。
+
+用户说明见 `daily-memory-user-guide.md`；实施和验证见 `../notes/w-01-final-review.md`。状态仅 `implemented_unverified`。

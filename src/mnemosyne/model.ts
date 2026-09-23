@@ -179,9 +179,12 @@ export interface Column {
     name: string;
     type: ColumnType;
     description: string;
-    mode: 'replace' | 'append' | 'manual';
+    mode: 'replace' | 'append' | 'manual' | 'lock';
+    prompt?: string;
 }
 export interface TableDef extends Row {
+    tableSchema?: 2;
+    dataVersion?: number;
     story: string;
     branch: string;
     name: string;
@@ -194,6 +197,7 @@ export interface TableDef extends Row {
     deleted: boolean;
 }
 export interface TableRow extends Row {
+    hidden?: boolean;
     story: string;
     branch: string;
     owner: string;
