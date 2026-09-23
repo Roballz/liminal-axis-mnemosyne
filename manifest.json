@@ -1,0 +1,13 @@
+{
+  "display_name": "Mnemosyne 日用记忆",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "dist/index.js?ver=1.2.9",
+  "generate_interceptor": "mnemosyne_generateInterceptor",
+  "author": "Roballz / 柏宝书 upstream",
+  "version": "1.2.9",
+  "homePage": "https://github.com/Roballz/liminal-axis-mnemosyne",
+  "auto_update": false,
+  "minimum_client_version": "1.12.13"
+}

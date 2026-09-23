@@ -2,4 +2,8 @@
 /.t03-local/
 
 # Reproducible temporary demo packages.
-/dist/
+# W-01 root dist is a tracked, installable extension.
+
+node_modules
+*.log
+.pnpm-store/

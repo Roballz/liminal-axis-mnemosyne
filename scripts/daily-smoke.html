@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div>
+<script type="module">
+import {createApp} from 'vue';
+import App from '/src/App.vue';
+import {ui} from '/src/state/ui.ts';
+import {bindDaily,syncDaily} from '/src/mnemosyne/bridge.ts';
+import {activeLibrary} from '/src/mnemosyne/db.ts';
+import {editEvent} from '/src/mnemosyne/events.ts';
+import '/src/styles/base.css';import '/src/styles/theme.css';import '/src/mnemosyne/ui.css';
+const ctx={chat:[{name:'User',is_user:true,is_system:false,mes:'合成用户借出玉佩',extra:{}},
+{name:'Character',is_user:false,is_system:false,mes:'合成角色约定归还玉佩',extra:{bbs_leaf:{id:'smoke-leaf',text:'借出玉佩并约定归还',delta:{},createdAt:1,swipe:0,v:1}}}],
+chatMetadata:{},characters:[{name:'Synthetic',avatar:'synthetic.png'}],characterId:0,
+getCurrentChatId:()=> 'synthetic-browser-smoke',saveChat:async()=>{},saveMetadata:async()=>{},saveMetadataDebounced:()=>{},
+eventTypes:{},eventSource:{on:()=>{},off:()=>{}},setExtensionPrompt:()=>{}};
+window.SillyTavern={getContext:()=>ctx};window.__smoke={ui,ctx};
+bindDaily();const view=await syncDaily();await editEvent(await activeLibrary(),view,null,{title:'玉佩归还',status:'open',keywords:['约定']},{memory:view.memories[0].id,active:true,kind:'progress'});
+ui.open=true;ui.activePage='archive';ui.navTapClose=false;createApp(App).mount('#app');window.__smoke.ready=true;
+</script></body></html>

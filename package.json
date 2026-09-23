@@ -1,0 +1,30 @@
+{
+  "name": "liminal-axis-mnemosyne",
+  "version": "1.2.9",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-version": "node scripts/sync-version.mjs",
+    "prebuild": "node scripts/sync-version.mjs",
+    "build": "vite build",
+    "test": "vitest run && node scripts/test-time-rel.mjs && node scripts/test-vector-depth.mjs && node scripts/test-memory-regressions.mjs",
+    "test:time": "node scripts/test-time-rel.mjs",
+    "test:vector-depth": "node scripts/test-vector-depth.mjs",
+    "test:memory": "node scripts/test-memory-regressions.mjs",
+    "prewatch": "node scripts/sync-version.mjs",
+    "watch": "vite build --watch --mode development"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "^5.7.0",
+    "vite": "^7.3.3",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.3"
+  },
+  "dependencies": {
+    "minisearch": "7.2.0",
+    "vue": "^3.5.35"
+  }
+}

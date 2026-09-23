@@ -1,6 +1,6 @@
 # W-01 柏宝书基线的 Mnemosyne 日用记忆 MVP
 
-状态：**authorized_for_implementation**（用户已明确授权 Work 在本任务范围内直接施工，不需要每个内部阶段再次等待确认）。
+状态：**implemented_unverified**（实现与有限自动测试完成；等待 Chat review + 用户 TT 手机实测。实施回执见 `../notes/w-01-final-review.md`。原用户施工授权保持有效。）
 目标分支：`work/daily-memory-mvp-baibai`
 目标仓库：`Roballz/liminal-axis-mnemosyne`
 源代码基线：`Roballz/ST-BaiBai-Book@393873acd27906a09308ae65fe7e636a3d3941ab`（分支 `codex/item-keywords-presence`）

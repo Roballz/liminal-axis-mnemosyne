@@ -1,0 +1,550 @@
+import { dailyInstalled, syncDaily, canonicalLeaves, hostVersion, dailyState } from '@/mnemosyne/bridge';
+import { activeLibrary } from '@/mnemosyne/db';
+import { current } from '@/mnemosyne/canonical';
+import { eventView, wrapEvents } from '@/mnemosyne/events';
+import { settings as dailySettings } from '@/mnemosyne/jobs';
+/**
+ * 阻塞式向量召回:生成主回复前,按用户输入 + 近期上下文检索相关旧记忆,注入主对话。
+ *
+ * 管线(全程阻塞,对齐既定方案,不做预取/异步):
+ *  1. 必经 Query 重写得到 INTENT + 多条 Q，各 Q embed；失败结束本轮召回。
+ *  2. 向量多 Q max 融合 + 当前聊天本地 BM25，分别保留候选榜。
+ *  3. 开启 BM25 时，两路去重 + RRF 截取候选，INTENT 对候选原文 rerank。
+ *  4. 先选原文，再按独立 BM25 榜跳过已选条目并补位，最后补达标向量摘要。
+ *  5. 所有条目共享身份去重与注入总额；BM25/向量都排除当前全文窗口。
+ *
+ * 失败/未配置全程静默降级(清空注入槽),向量是增强项,绝不阻断生成。
+ */
+
+import { getContext, type STMessage } from '@/st/context';
+import { apiSettings, engineActiveHere } from '@/api/settings';
+import type { VecHit } from '@/api/baibaoku';
+import { vecSearch } from './store';
+import { getLeaf, leafValid } from '../apply';
+import { MEMORY_BRIEFING_NOTE, MEMORY_BRIEFING_END } from '../prompts';
+import { embedTexts, encodeFloat32Base64, rerankDocuments } from './embed';
+import { rewriteQuery } from './rewrite';
+import { collectLeaves, ensureRecallIndex } from './index';
+import { searchBm25 } from './bm25';
+import { candidateKey, fuseCandidates, normalizeHybridLimits, selectRecall, type HybridHit, type RankedHit } from './hybrid';
+import { currentBundleHashes, currentChatId, currentChatScope, currentVectorDb, recallScopes } from './scope';
+import { isAiFloor, resolveKeepStart } from '../engine';
+import { cleanBody, compactTimeLabel, latestStoryTime, splitTimeLabel } from '../timeTag';
+import { relativeTimeLabel } from '../timeRel';
+import { normalizeRecallInjectionDepth } from './depth';
+import { RECALL_CACHE_STORAGE_KEY } from './cache';
+import { eligibleKnowledge, embeddingIdentity, knowledgeDebug, knowledgeFingerprint, listKnowledge, recallKnowledge } from './knowledge';
+import {
+  previewOf,
+  resetRecallDebug,
+  restoreRecallDebug,
+  setRecallEmbedding,
+  setRecallBm25,
+  setRecallFusion,
+  setRecallInjected,
+  setRecallRerank,
+  setRecallRewrite,
+  setRecallStatus,
+  snapshotRecallDebug,
+  type RecallDebug,
+  type RecallDebugRerankHit,
+} from './debug';
+
+// 注入槽位:贴近历史摘要层(顶部附近),与 inject.ts 的历史摘要同一区域但独立 key。
+const RECALL_INJECT_KEY = 'mnemosyne_vector_recall';
+const IN_CHAT = 1;
+const ROLE_SYSTEM = 0;
+
+/** 当前召回注入深度;运行时再归一化,兼容用户正在编辑输入框时产生的临时非法值。 */
+function recallInjectionDepth(): number {
+  return normalizeRecallInjectionDepth(apiSettings.vector.recall.injectionDepth);
+}
+
+/**
+ * 命中来源标记:
+ *  - scope 等于当前聊天 → 本聊天命中,显示楼层号「#5」(msgIndex 即当前楼层号);
+ *  - 否则(bundle:<hash>)→ 来自「带数据建新对话」冻结的旧聊天快照,显示「旧档」。
+ * 旧聊天的真实名字/楼层号未追踪(bundle 只存 hash),故统一标「旧档」让用户知道非本聊天。
+ */
+function sourceLabel(hit: HybridHit, selfScope: string | null): string {
+  if (selfScope && hit.scope === selfScope) {
+    return typeof hit.msgIndex === 'number' && hit.msgIndex >= 0 ? `#${hit.msgIndex}` : '本聊天';
+  }
+  return '旧档';
+}
+
+/** 当前保留窗口内、已发全文的叶子 id(召回要排除它们,避免与全文重复)。 */
+function windowLeafIds(chat: STMessage[]): string[] {
+  const keepStart = resolveKeepStart(chat);
+  const ids: string[] = [];
+  for (let i = apiSettings.autoHideEnabled ? keepStart : 0; i < chat.length; i++) {
+    if (chat[i]?.extra?.bbs_omit) continue;
+    if (!apiSettings.autoHideEnabled && chat[i]?.is_system === true) continue;
+    if (leafValid(chat[i])) {
+      const key = dailyInstalled() ? canonicalLeaves().find(l => l.msgIndex === i)?.leafId : getLeaf(chat[i])!.id;
+      if (key) ids.push(key);
+    }
+  }
+  return ids;
+}
+
+/** 当前聊天 AI 楼数(与 keepRecent/minAiFloors 同口径:只数 AI 消息)。 */
+function aiFloorCount(chat: STMessage[]): number {
+  let n = 0;
+  for (const m of chat) if (isAiFloor(m)) n++;
+  return n;
+}
+
+/**
+ * 本回合是否值得跑召回。带数据建新对话的旧档(bundle)始终值得召回——里面是当前聊天没有的旧记忆,
+ * 不受任何阈值限制,直接放行。无 bundle 时才看本聊天是否有「窗口外」可召的旧楼:
+ *  - resolveKeepStart===0:没有任何 AI 楼被推出滑动窗口,全在窗口内全文发送,
+ *    召回的旧楼都会被 windowLeafIds 排除掉,纯属浪费(重写+embed+search+rerank 的额度与延迟)→ 跳过。
+ *  - AI 楼数 < minAiFloors(用户设的起召门槛):早期剧情旧记忆少,用户嫌没必要 → 跳过。
+ * 任一跳过条件命中即返回 false;否则 true。
+ */
+function recallWorthRunning(chat: STMessage[]): boolean {
+  if (currentBundleHashes().length > 0) return true; // 旧档无条件召回
+  if (resolveKeepStart(chat) === 0) return false; // 全在窗口内,无窗口外旧楼可召
+  const min = Math.max(0, apiSettings.vector.recall.minAiFloors);
+  if (min > 0 && aiFloorCount(chat) < min) return false; // 未达用户起召门槛
+  return true;
+}
+
+/** 轻量稳定 hash(FNV-1a,16 进制),与 index.ts 同口径。用于缓存 key 的内容指纹。 */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * 召回结果缓存:重新生成 / 翻页(swipe)时召回输入一字不变,直接复用上次结果,
+ * 省掉重写+embed+search+rerank 的额度与时间。只存「最近一次」一条,key 不匹配即覆盖。
+ *
+ * key = chatId | 最新user楼层号 | hash(最新user文本) | hash(上一条AI文本) | 召回参数指纹
+ *  - 带 user 文本 hash:编辑最新输入后重生成,楼层号没变但内容变了,靠它失效(否则错误复用)。
+ *  - 带 AI 文本 hash:编辑上一条 AI 楼后重生成,靠它失效。
+ *  - 带召回参数指纹:rerank/embedding 阈值、条数等任一改动则失效;只改别的设置(渠道/开关)不失效。
+ *  - 带 chatId:换聊天后楼层号/哈希偶然相同也不跨聊天误命中。
+ */
+interface RecallCache {
+  key: string;
+  text: string;
+  debug: RecallDebug;
+}
+
+// 暂存到 localStorage:切后台被浏览器丢弃、刷新、开新标签页后召回缓存仍在,免得白白重召回。
+// 跨天/跨标签的残留无副作用:key 已含 chatId+楼层+内容哈希+参数指纹,对不上只会重算,绝不误命中。
+// (不违反「设置别用 localStorage」那条——那是设置要跨设备同步必走服务器;召回缓存是本机临时结果,无需同步。)
+// 失败全静默(隐私模式/配额满):退化为无缓存,绝不影响召回主流程。
+function loadRecallCache(): RecallCache | null {
+  try {
+    const raw = localStorage.getItem(RECALL_CACHE_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as RecallCache) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveRecallCache(cache: RecallCache): void {
+  try {
+    localStorage.setItem(RECALL_CACHE_STORAGE_KEY, JSON.stringify(cache));
+  } catch {
+    /* 配额满/不可用:放弃持久化,本次仅本进程内有效 */
+  }
+}
+
+/**
+ * 召回参数指纹:覆盖全部影响最终注入文本的档位参数。
+ * 注入深度只改变同一文本的位置,不改变检索结果,故不计入并可直接复用缓存。
+ */
+function recallParamFingerprint(cfg: typeof apiSettings.vector.recall): string {
+  return [
+    cfg.rerankCandidates,
+    cfg.bm25Candidates,
+    cfg.fusionCandidates,
+    cfg.bm25Count,
+    cfg.rrfCount,
+    cfg.embeddingThreshold,
+    cfg.rerankThreshold,
+    cfg.fullTextCount,
+    cfg.finalRecallCount,
+  ].join(',');
+}
+
+/**
+ * 构造当前轮的缓存 key。取「最新 user 楼层」需从后往前扫第一条 is_user——
+ * 重生成时末尾可能是待替换的 AI 楼/系统楼,直接取 chat[length-1] 会取错。
+ * 上一条 AI 文本 = 该 user 楼**之前**第一条非 user 楼(没有则空)。
+ * ⚠️ 不能取 user 之后那条:swipe 时那正是被重生成、内容每次都变的当前 AI 楼,
+ *    取了它缓存永不命中、白做。取 user 之前的稳定 AI 楼才对。
+ * 缺 chatId 或无 user 楼 → 返回 null,本轮不走缓存(照常实算)。
+ */
+function buildRecallCacheKey(chat: STMessage[], cfg: typeof apiSettings.vector.recall): string | null {
+  const chatId = currentChatId();
+  if (!chatId) return null;
+
+  let userIdx = -1;
+  for (let i = chat.length - 1; i >= 0; i--) {
+    if (chat[i]?.is_user) {
+      userIdx = i;
+      break;
+    }
+  }
+  if (userIdx < 0) return null;
+
+  const userText = chat[userIdx]?.mes ?? '';
+  let aiText = '';
+  for (let i = userIdx - 1; i >= 0; i--) {
+    if (isAiFloor(chat[i])) {
+      aiText = chat[i]?.mes ?? '';
+      break;
+    }
+  }
+
+  return `${chatId}|${userIdx}|${fnv1a(userText)}|${fnv1a(aiText)}|${recallParamFingerprint(cfg)}`;
+}
+
+let recalling = false;
+let recallEpoch = 0;
+
+/** 召回是否在当前聊天生效。 */
+function recallActiveHere(): boolean {
+  if (!engineActiveHere()) return false; // 插件总开关关 / 当前角色被排除 → 不召回
+  if (!apiSettings.vector.enabled) return false;
+  return !!currentVectorDb() && recallScopes().length > 0;
+}
+
+/** 这种生成类型是否该触发召回:只在产出新正文的生成前召回。 */
+export function shouldRecallForType(type: string | undefined): boolean {
+  // 续写/安静/扮演不需要召回旧记忆(continue 接着写、quiet/impersonate 非剧情推进)
+  return type !== 'continue' && type !== 'quiet' && type !== 'impersonate';
+}
+
+/** 清空召回注入槽(降级/未命中/切聊天时)。 */
+export function clearRecallInjection(): void {
+  recallEpoch++;
+  getContext()?.setExtensionPrompt?.(RECALL_INJECT_KEY, '', IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
+}
+
+/**
+ * 执行一次阻塞召回并写注入槽。在生成拦截器放行路径里 await。
+ * 任何失败都清空槽并返回(静默降级)。
+ */
+export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
+  if (!recallActiveHere()) {
+    clearRecallInjection();
+    return;
+  }
+  if (recalling) return;
+  const database = currentVectorDb();
+  if (!database) return;
+
+  const ctx = getContext();
+  const chat = ctx?.chat ?? [];
+  const fn = ctx?.setExtensionPrompt;
+  if (typeof fn !== 'function' || !chat.length) return;
+
+  let canonicalView: Awaited<ReturnType<typeof syncDaily>> | null = null;
+  if (dailyInstalled()) {
+    try { canonicalView = await syncDaily(); } catch { /* Knowledge remains independently available. */ }
+  }
+  const canonicalHost = hostVersion();
+  const canonicalGeneration = dailyState.generation;
+  const canonicalPolicy = JSON.stringify(dailySettings);
+  const cfg = normalizeHybridLimits({ ...apiSettings.vector.recall });
+  const knowledgeConfig = { ...apiSettings.vector.knowledge };
+  const scopes = recallScopes();
+  const sourceChat = currentChatId();
+  const epoch = ++recallEpoch;
+  const settingsKey = () => JSON.stringify([apiSettings.vector.recall, apiSettings.vector.knowledge, embeddingIdentity(),
+    apiSettings.vector.queryRewrite, apiSettings.vector.rerank, apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags]);
+  const settingsAtStart = settingsKey();
+  const sourceKey = buildRecallCacheKey(chat, cfg);
+  // BM25 从当前聊天有效叶子构建；全文/摘要/删除变化都参与缓存及异步结果复核。
+  const leafFingerprint = () => JSON.stringify(collectLeaves(getContext()?.chat ?? [])
+    .map(l => [l.leafId, l.docHash, l.payloadHash, l.msgIndex]));
+  const leafVersion = leafFingerprint();
+  const stillCurrent = () => (!dailyInstalled() || (canonicalHost === hostVersion() && canonicalGeneration === dailyState.generation && canonicalPolicy === JSON.stringify(dailySettings))) && !signal?.aborted && epoch === recallEpoch && recallActiveHere() &&
+    currentVectorDb() === database && currentChatId() === sourceChat && settingsKey() === settingsAtStart &&
+    buildRecallCacheKey(getContext()?.chat ?? [], cfg) === sourceKey && leafFingerprint() === leafVersion;
+  recalling = true;
+  fn(RECALL_INJECT_KEY, '', IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
+  try {
+    let files: Awaited<ReturnType<typeof listKnowledge>> = [];
+    let knowledgeStoreReady = true;
+    if (knowledgeConfig.enabled) {
+      try { files = await listKnowledge(database); }
+      catch { knowledgeStoreReady = false; knowledgeDebug.status = '知识库本机存储不可用'; }
+    }
+    if (!stillCurrent()) return;
+    const fingerprint = knowledgeFingerprint(files);
+    const summaryWanted = recallWorthRunning(chat) && (!dailyInstalled() || !!canonicalView);
+    const knowledgeWanted = eligibleKnowledge(files, knowledgeConfig).length > 0;
+    if (!summaryWanted && !knowledgeWanted) {
+      setRecallStatus('未召回:没有可召回的旧摘要或启用的知识库');
+      return;
+    }
+    // Knowledge revisions/configuration and character identity participate in cache invalidation.
+    const cacheKey = sourceKey && !dailyInstalled() ? `hybrid-v1|${database}|${sourceKey}|${fnv1a(settingsAtStart)}|${fingerprint}|${summaryWanted}|${leafVersion}` : null;
+    const cached = cacheKey ? loadRecallCache() : null;
+    if (cached && cached.key === cacheKey) {
+      fn(RECALL_INJECT_KEY, cached.text, IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
+      restoreRecallDebug(cached.debug);
+      knowledgeDebug.hits = [];
+      knowledgeDebug.status = '复用已缓存的联合召回文本';
+      setRecallStatus(`${cached.debug.status}(复用缓存)`);
+      return;
+    }
+    // 开一次新调试快照(进入有效召回路径才记录,避免「功能未启用」时反复清空上次结果)
+    resetRecallDebug();
+
+    // 召回前先补齐窗口外缺失的向量索引(载入老聊天/向量后开 → 旧叶子可能从未索引),
+    // 否则这些旧剧情会直接漏召回。只阻塞窗口外,窗口内交给防抖增量。
+    let summaryReady = summaryWanted;
+    if (summaryWanted) {
+      try { await ensureRecallIndex(signal); }
+      catch (error) { summaryReady = false; console.warn('[柏宝书] 摘要索引不可用，继续知识库召回', error); }
+    }
+    if (!stillCurrent()) return;
+
+    // 1) 查询重写(强制启用,无降级):得多条 query 向量 + rerank 用的 query 文本。
+    // 重写失败/无 query 会抛错 → 落到外层 catch,清空注入槽、结束本次召回。
+    const { queryVectors, rerankQuery, queries } = await resolveQueryVectors(signal);
+    if (!stillCurrent()) return;
+    if (!queryVectors.length) {
+      setRecallStatus('未召回:查询重写未产出 query');
+      clearRecallInjection();
+      return;
+    }
+
+    // 2) 后端检索:多路在范围内纯按 embedding 得分取前 rerankCandidates(后端 max 融合,不套阈值),排除窗口内叶子
+    const exclude = windowLeafIds(chat);
+    const selfScope = currentChatScope();
+    let bm25Failed = false;
+    let bm25Results: HybridHit[] = [];
+    if (summaryWanted && cfg.bm25Candidates > 0 && selfScope) {
+      try {
+        const leaves = collectLeaves(chat);
+        const byId = new Map(leaves.map(l => [l.leafId, l]));
+        const user = [...chat].reverse().find(m => m.is_user && !m.extra?.bbs_omit);
+        const lexical = await searchBm25({ database, scope: selfScope,
+          documents: leaves.map(l => ({ id: l.leafId, text: l.document })),
+          queries: [user ? cleanBody(user.mes) : '', ...queries], exclude, topK: cfg.bm25Candidates }, signal);
+        if (!stillCurrent()) return;
+        bm25Results = lexical.hits.flatMap(hit => {
+          const leaf = byId.get(hit.id);
+          return leaf ? [{ ...leaf, scope: selfScope, similarity: null, queryIndex: -1, bm25Score: hit.score }] : [];
+        });
+        setRecallBm25(bm25Results, lexical.persistent ? '本地 BM25' : 'BM25 内存检索；索引持久化不可用');
+      } catch (error) {
+        bm25Failed = true;
+        setRecallBm25([], `BM25 失败，本轮仅向量：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (!stillCurrent()) return;
+    let results: VecHit[] = [];
+    if (summaryReady && cfg.rerankCandidates > 0) {
+      try { results = (await vecSearch(database, scopes, queryVectors, {
+        topK: Math.max(1, cfg.rerankCandidates), excludeLeafIds: exclude,
+      })).results; }
+      catch (error) { summaryReady = false; console.warn('[柏宝书] 摘要检索失败，继续知识库召回', error); }
+    }
+    if (dailyInstalled()) {
+      const allowed = new Map(canonicalLeaves().map(l => [l.leafId,l]));
+      results = results.flatMap(hit => {
+        const leaf = allowed.get(hit.leafId);
+        return leaf && hit.scope === selfScope ? [{ ...hit, ...leaf }] : [];
+      });
+    }
+    setRecallEmbedding(
+      results.map(h => ({
+        leafId: h.leafId,
+        similarity: h.similarity,
+        queryIndex: h.queryIndex ?? -1,
+        source: sourceLabel(h, selfScope),
+        storyTime: compactTimeLabel((h.storyTime || '').trim()),
+        preview: previewOf(h.document),
+      })),
+    );
+    let knowledgeText = '';
+    let knowledgeFailed = false;
+    knowledgeDebug.hits = [];
+    if (knowledgeWanted) {
+      try { knowledgeText = await recallKnowledge(database, files, queryVectors, knowledgeConfig); }
+      catch { knowledgeFailed = true; knowledgeDebug.status = '知识库检索失败，本轮只使用摘要召回'; }
+    } else knowledgeDebug.status = '知识库未启用或无匹配当前 Embedding 配置的文件';
+
+    // 3) rerank(用 INTENT/重写 query;渠道未配 → 降级:用 embedding 序,score 复用 similarity)
+    if (!stillCurrent()) return;
+    const hybridEnabled = cfg.bm25Candidates > 0;
+    // 摘要补位使用完整融合榜，不被送入 rerank 的候选上限截断。
+    const fused = hybridEnabled ? fuseCandidates(results, bm25Results, results.length + bm25Results.length) : [];
+    const candidates: HybridHit[] = hybridEnabled ? fused.slice(0, cfg.fusionCandidates) : results;
+    setRecallFusion(candidates);
+    const ranked = candidates.length ? await rerankCandidates(rerankQuery, candidates, signal) : [];
+
+    // 4) 分档 + 上限(now = 故事内最新时间,作相对时间参照点,对齐历史摘要注入)
+    const now = latestStoryTime(chat);
+    const selected = selectRecall(ranked, bm25Results, hybridEnabled ? results : ranked, cfg, fused);
+    const { text: summaryText, tiers } = buildRecallText(selected, selfScope, now);
+    let eventText = '';
+    if (canonicalView) {
+      const lib = await activeLibrary();
+      if (!await current(lib, canonicalView)) return;
+      const events = await eventView(lib, canonicalView);
+      eventText = wrapEvents(events.cards, canonicalView, selected.map(s => s.hit.leafId), exclude, dailySettings);
+      if (!await current(lib, canonicalView)) return;
+    }
+    const text = [summaryText, eventText, knowledgeText].filter(Boolean).join('\n\n');
+    if (!stillCurrent()) return;
+    if (knowledgeConfig.enabled && knowledgeStoreReady && knowledgeFingerprint(await listKnowledge(database)) !== fingerprint) return;
+    if (!stillCurrent()) return;
+    const debugHits = [...ranked];
+    const debugKeys = new Set(ranked.map(candidateKey));
+    for (const { hit } of selected) if (!debugKeys.has(candidateKey(hit))) debugHits.push({ ...hit, rerankScore: null });
+    recordRerankDebug(debugHits, tiers, selfScope);
+    fn(RECALL_INJECT_KEY, text, IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
+    setRecallInjected(text);
+    setRecallStatus(text ? '召回完成' : '召回完成:无内容达标,本回合未注入');
+    // 实算成功才落缓存(失败/降级路径不缓存,下次重试)。存调试快照供命中时还原面板。
+    if (cacheKey && knowledgeStoreReady && !knowledgeFailed && !bm25Failed && !ranked.some(h => h.rerankFallback) &&
+      (!summaryWanted || summaryReady)) saveRecallCache({ key: cacheKey, text, debug: snapshotRecallDebug() });
+  } catch (e) {
+    console.warn('[柏宝书向量] 召回失败(降级为不召回):', e);
+    setRecallStatus(`失败:${e instanceof Error ? e.message : String(e)}`);
+    if (stillCurrent()) fn(RECALL_INJECT_KEY, '', IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
+  } finally {
+    recalling = false;
+  }
+}
+
+/** 把分档结果写入调试快照:按 leaf_id 去重(保留首条),tier 取 buildRecallText 标记,缺省 drop。 */
+function recordRerankDebug(
+  ranked: RankedHit[],
+  tiers: Map<string, 'full' | 'brief'>,
+  selfScope: string | null,
+): void {
+  const seen = new Set<string>();
+  const hits: RecallDebugRerankHit[] = [];
+  for (const h of ranked) {
+    if (seen.has(h.leafId)) continue;
+    seen.add(h.leafId);
+    hits.push({
+      leafId: h.leafId,
+      rerankScore: h.rerankScore,
+      rerankFallback: h.rerankFallback,
+      similarity: h.similarity,
+      tier: tiers.get(h.leafId) ?? 'drop',
+      source: sourceLabel(h, selfScope),
+      storyTime: compactTimeLabel((h.storyTime || '').trim()),
+      preview: previewOf(h.document),
+    });
+  }
+  setRecallRerank(hits);
+}
+
+/**
+ * 解析检索用的多条 query 向量 + rerank 用的 query 文本。
+ * 查询重写**强制启用、无降级**:rewrite 得 INTENT + 多条 Q,各自 embed;rerank query 用 INTENT(无则首条 Q)。
+ * 重写失败 / 无 query → 直接抛错,由 runVectorRecall 结束本次召回(不再降级为单 query)。
+ */
+async function resolveQueryVectors(
+  signal?: AbortSignal,
+): Promise<{ queryVectors: string[]; rerankQuery: string; queries: string[] }> {
+  const { intent, queries } = await rewriteQuery(signal);
+  setRecallRewrite(intent, queries);
+  if (!queries.length) throw new Error('查询重写未产出任何 query');
+  // 检索向量:多条 Q(INTENT 偏长偏全文,留给 rerank,不进检索向量以免稀释)
+  const vecs = await embedTexts(queries, signal);
+  const queryVectors = vecs.map(v => encodeFloat32Base64(v));
+  return { queryVectors, rerankQuery: intent || queries[0], queries };
+}
+
+/** 对候选做 rerank;失败/未配置则用 embedding 相似度序降级。 */
+async function rerankCandidates(query: string, hits: HybridHit[], signal?: AbortSignal): Promise<RankedHit[]> {
+  // rerank 渠道未配置 → 直接降级(embedTexts/resolveVectorModel 在 rerank 缺渠道时会抛错)
+  try {
+    // 全文精排:发楼层原文(mesFull,已含内嵌起止时间)给 rerank,语义比摘要更全;
+    // 无原文(如种子叶子)退摘要 document,此时补 【故事时间】头给时间上下文。
+    // (超长由 rerankDocuments 内部按 token 截断/分批)
+    const docs = hits.map(h => {
+      // mesFull 现存原文,发给 rerank 前过 cleanBody(剔除状态栏/思维链/自定义标签等,
+      // 保留内嵌起止时间);老索引存的是已清洗文本,再洗幂等无副作用。
+      const full = h.mesFull ? cleanBody(h.mesFull).trim() : '';
+      if (full) return full;
+      const body = (h.document || '').trim();
+      const t = (h.storyTime || '').trim();
+      return t ? `【${t}】\n${body}` : body;
+    });
+    const order = await rerankDocuments(query, docs, hits.length, signal);
+    // order 是 {index, score} 降序;映射回 hit
+    return order
+      .filter(o => hits[o.index] && Number.isFinite(o.score))
+      .map(o => ({ ...hits[o.index], rerankScore: o.score }));
+  } catch {
+    // 降级:保持 embedding 序,rerankScore 复用 similarity
+    // 保留原生向量回退；BM25 独有项没有余弦，不能借 BM25/RRF 分数升原文。
+    return [...hits].sort((a, b) => (b.similarity ?? -Infinity) - (a.similarity ?? -Infinity))
+      .map(h => ({ ...h, rerankScore: null, rerankFallback: true }));
+  }
+}
+
+/**
+ * 配额选择已在 selectRecall 完成；这里只沿用原生原文清洗、时间头和注入包装。
+ * 返回文本及分档，供调试面板标记独立 BM25 补位和重排结果。
+ */
+function buildRecallText(
+  selected: ReturnType<typeof selectRecall>,
+  selfScope: string | null,
+  now: string,
+): { text: string; tiers: Map<string, 'full' | 'brief'> } {
+  const tiers = new Map<string, 'full' | 'brief'>();
+  const chunks: string[] = [];
+  for (const { hit: h, tier } of selected) {
+    const full = tier === 'full' && h.mesFull ? cleanBody(h.mesFull).trim() : '';
+    const body = full || (h.document || '').trim();
+    if (!body) continue;
+    tiers.set(h.leafId, tier);
+    chunks.push(fmtChunk(h, body, !!full, selfScope, now));
+  }
+  if (!chunks.length) return { text: '', tiers };
+  // 首尾私密简报框定,避免主模型把召回回忆当成要复述/输出的模板
+  return { text: `${MEMORY_BRIEFING_NOTE}\n[相关回忆]\n${chunks.join('\n\n')}\n${MEMORY_BRIEFING_END}`, tiers };
+}
+
+/**
+ * 把索引时存的「未压缩起止段」格式化成展示用时间头:【(相对) 起 - 止】。
+ *  - 压缩成区间显示(compactTimeLabel:删结束端重复日期);
+ *  - 用结束时间相对「现在」(故事内最新时间 now)算相对前缀(对齐历史摘要的 inject.ts)。
+ * 无时间 → 空串。
+ */
+function fmtStoryTimeHead(storyTime: string, now: string): string {
+  const t = storyTime.trim();
+  if (!t) return '';
+  const shown = compactTimeLabel(t);
+  const end = splitTimeLabel(t).end ?? '';
+  const rel = relativeTimeLabel(end, now);
+  return rel ? `【(${rel}) ${shown}】` : `【${shown}】`;
+}
+
+/**
+ * 单条召回片段:行首加来源标记(本聊天「#5」/ 旧档),让主模型知道这段回忆出处;
+ * body 未自带内嵌时间时再补一个故事时间头【(相对) 起 - 止】(若有)。
+ */
+function fmtChunk(h: HybridHit, body: string, bodyHasInlineTime: boolean, selfScope: string | null, now: string): string {
+  const src = `[${sourceLabel(h, selfScope)}]`;
+  if (bodyHasInlineTime) {
+    // 全文自身保留原始起止时间标签，但仍需在全文前补充相对时间，
+    // 避免全文档与摘要档在时间感知上表现不一致。
+    const end = splitTimeLabel((h.storyTime || '').trim()).end ?? '';
+    const rel = relativeTimeLabel(end, now);
+    return rel ? `${src}【${rel}】 ${body}` : `${src} ${body}`;
+  }
+  const head = fmtStoryTimeHead(h.storyTime || '', now);
+  return head ? `${src}${head}${body}` : `${src} ${body}`;
+}
