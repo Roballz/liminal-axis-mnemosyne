@@ -5,8 +5,10 @@ import { bindDaily, syncDaily, invalidateDaily } from "./bridge";
 import { memory } from "@/memory/store";
 import { createEmptyMemory } from "@/memory/types";
 import type { STContext } from "@/st/context";
+import { apiSettings } from "@/api/settings";
+import { buildEventInstruction, EVENT_OVERVIEW_PROMPT } from "./event-prompts";
 import { capture } from "./canonical";
-import { eventView, editEvent, deleteEvent } from "./events";
+import { eventView, editEvent, deleteEvent, setEventArchived } from "./events";
 import {
   commitManualEvent,
   joinFloorEvent,
@@ -32,7 +34,10 @@ const answer = JSON.stringify({
   progress: "约会有新进展。",
 });
 let lib: Library, ctx: STContext, dispose: (() => void) | undefined;
+const originalEventPrompt = apiSettings.prompts.eventOverview;
+const originalInterval = settings.interval;
 beforeEach(async () => {
+  apiSettings.prompts.eventOverview = "";
   const storage = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => storage.get(k) ?? null,
@@ -79,6 +84,8 @@ beforeEach(async () => {
   settings.eventsEnabled = false;
 });
 afterEach(() => {
+  apiSettings.prompts.eventOverview = originalEventPrompt;
+  settings.interval = originalInterval;
   dispose?.();
   lib.close();
   vi.restoreAllMocks();
@@ -146,16 +153,73 @@ test("manual chain holds three separate floors and joins never call a model or d
   expect(card.progress).toHaveLength(2);
   expect(card.progress[1].memories).toHaveLength(2);
 });
-test("automatic/batch routine updates selected chains and never invents singleton chains", async () => {
-  await chain();
-  await joinFloorEvent(3, (await lib.all("event_chains"))[0].id);
-  const sender = vi.fn(async () => answer);
-  await runEvents(true, sender);
-  expect(sender).toHaveBeenCalledTimes(1);
-  expect(await lib.all("event_chains")).toHaveLength(1);
-  const card = (await eventView(lib, await syncDaily())).cards[0];
-  expect(card.members).toHaveLength(2);
-  expect(eventPending(card)).toBe(false);
+test.each([true, false])(
+  "batch/automatic routine (manual=%s) uses the custom prompt and only updates selected chains",
+  async (manual) => {
+    await chain();
+    await joinFloorEvent(3, (await lib.all("event_chains"))[0].id);
+    apiSettings.prompts.eventOverview = "合成批量规则：强调约定和关系改变。";
+    if (!manual) {
+      settings.interval = 1;
+      ctx.chat.push(
+        {
+          name: "用户",
+          is_user: true,
+          is_system: false,
+          mes: "接下来呢",
+          extra: {},
+        },
+        {
+          name: "角色",
+          is_user: false,
+          is_system: false,
+          mes: "新的回合",
+          extra: {},
+        },
+      );
+    }
+    const sender = vi.fn(async (prompt: string) => {
+      expect(prompt).toContain(apiSettings.prompts.eventOverview);
+      expect(prompt).toContain('"overview"');
+      expect(prompt).toContain("不超过500字");
+      return answer;
+    });
+    await runEvents(manual, sender);
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(await lib.all("event_chains")).toHaveLength(1);
+    const card = (await eventView(lib, await syncDaily())).cards[0];
+    expect(card.members).toHaveLength(2);
+    expect(eventPending(card)).toBe(false);
+  },
+);
+test("custom event writing replaces the default for create/update, blank restores default, output protocol remains", async () => {
+  expect(buildEventInstruction()).toContain(EVENT_OVERVIEW_PROMPT);
+  apiSettings.prompts.eventOverview = "合成自定义：用三句话概括关系转折。";
+  const createSender = vi.fn(async (messages) => {
+    const instruction = messages.find(
+      (m: { role: string; content: string }) =>
+        m.role === "system" && m.content.includes("事件任务输出约定"),
+    ).content;
+    expect(instruction).toContain(apiSettings.prompts.eventOverview);
+    expect(instruction).not.toContain("主动舍弃琐碎小事");
+    expect(instruction).toContain("不超过500字");
+    expect(instruction).toContain('"progress"');
+    return answer;
+  });
+  const id = await createFloorEvent(1, "整天约会", 200000, createSender);
+  await joinFloorEvent(3, id);
+  apiSettings.prompts.eventOverview = "合成新规则：重点交代承诺和兑现。";
+  const updateSender = vi.fn(async (messages) => {
+    expect(messages[0].content).toContain(apiSettings.prompts.eventOverview);
+    expect(messages[0].content).not.toContain("用三句话");
+    expect(messages[0].content).toContain("不超过500字");
+    return answer;
+  });
+  await updateEventOverview(lib, await syncDaily(), id, 48000, updateSender);
+  expect(createSender).toHaveBeenCalledTimes(1);
+  expect(updateSender).toHaveBeenCalledTimes(1);
+  apiSettings.prompts.eventOverview = " \n ";
+  expect(buildEventInstruction()).toContain(EVENT_OVERVIEW_PROMPT);
 });
 test("stopping an overview request does not publish late output or lose queued members", async () => {
   const id = await chain();
@@ -168,6 +232,19 @@ test("stopping an overview request does not publish late output or lose queued m
     (await eventView(lib, await syncDaily())).cards[0].meta.summarized,
   ).toHaveLength(1);
   expect(await lib.all("event_progress")).toHaveLength(1);
+});
+test("archiving during an overview request preserves the archive flag and still commits the overview", async () => {
+  const id = await chain();
+  await joinFloorEvent(3, id);
+  const view = await syncDaily();
+  await updateEventOverview(lib, view, id, 48000, async () => {
+    await setEventArchived(lib, view, id, true);
+    return answer;
+  });
+  const card = (await eventView(lib, await syncDaily())).cards[0];
+  expect(card.chain.archived).toBe(true);
+  expect(eventPending(card)).toBe(false);
+  expect(card.members).toHaveLength(2);
 });
 test("manual create uses native summary materials without changing summaries", async () => {
   const before = ctx.chat[1].extra!.bbs_leaf;
@@ -364,7 +441,7 @@ test("manual backfill runs while automatic filling is disabled, sends original d
     false,
   );
   const pack = await exportLibrary(lib);
-  expect(pack.version).toBe(3);
+  expect(pack.version).toBe(4);
   const restored = await restoreLibrary(pack, false);
   expect(
     (await restored.all<TableRow>("custom_table_rows"))[0].bodySources,
@@ -474,7 +551,7 @@ test("hiding and showing a backfilled row preserves provenance; explicit content
     (await lib.get<TableRow>("custom_table_rows", record.id))!.bodySources,
   ).toHaveLength(0);
 });
-test("event overview and pending membership survive v3 export/restore and reject malformed raw receipts", async () => {
+test("event overview and pending membership survive v4 export/restore and reject malformed raw receipts", async () => {
   const id = await chain();
   await joinFloorEvent(3, id);
   const pack = await exportLibrary(lib),

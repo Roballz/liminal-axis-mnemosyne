@@ -56,7 +56,9 @@ try {
         `url(data:font/woff2;base64,${readFileSync(resolve(dirname(fontPath), "files", file)).toString("base64")}) format('woff2')`,
     );
     await page.addStyleTag({
-      content: css + "\n.bbs-root{--bbs-font-sans:'Noto Sans SC',sans-serif}",
+      content:
+        css +
+        "\n.bbs-root{--bbs-font-sans:'Noto Sans SC',sans-serif;--bbs-font-mono:'Noto Sans SC',monospace}",
     });
     await page.evaluate(() => document.fonts.ready);
   }
@@ -67,6 +69,119 @@ try {
     0,
   );
   assert.equal(await page.getByText("摘要与来源", { exact: true }).count(), 0);
+
+  // Reuse the real prompt editor and mocked host persistence; no server settings are accessed.
+  await page.evaluate(async () => {
+    const { hydrateSettings } = await import("/src/api/settings.ts");
+    window.__smoke.ctx.extensionSettings = {
+      mnemosyne_daily: { prompts: { resummary2: "合成原二次总结模板" } },
+    };
+    window.__smoke.saves = 0;
+    window.__smoke.ctx.saveSettingsDebounced = () => window.__smoke.saves++;
+    hydrateSettings();
+    window.__smoke.ui.activePage = "settings";
+    window.__smoke.ui.navTapClose = false;
+  });
+  await page.getByRole("button", { name: "自定义提示词", exact: true }).click();
+  const promptEntry = page.getByRole("button", { name: /^事件概要提示词/ });
+  await promptEntry.click();
+  const promptEditor = page.getByRole("dialog", {
+    name: "编辑事件概要提示词",
+    exact: true,
+  });
+  const promptArea = promptEditor.getByRole("textbox", {
+    name: "事件概要提示词",
+    exact: true,
+  });
+  const builtin = await promptArea.inputValue();
+  assert.ok(builtin.includes("主动舍弃琐碎小事"));
+  assert.ok(builtin.includes("不超过500字"));
+  assert.equal(
+    await promptEditor.getByText("点击插入宏:", { exact: true }).count(),
+    0,
+  );
+  await promptArea.fill("取消的草稿不应保存");
+  await promptEditor.getByRole("button", { name: "取消", exact: true }).click();
+  await promptEditor.waitFor({ state: "hidden" });
+  await promptEntry.click();
+  assert.equal(await promptArea.inputValue(), builtin);
+  const custom = "合成事件规则：按起因、关系转折、承诺结果概括，不写无关过程。";
+  await promptArea.fill(custom);
+  await page.waitForTimeout(250);
+  await page.screenshot({
+    path: "/tmp/w01-event-prompt-editor.png",
+    fullPage: true,
+  });
+  await promptEditor.getByRole("button", { name: "完成", exact: true }).click();
+  await promptEditor.waitFor({ state: "hidden" });
+  await promptEntry.getByText("已自定义", { exact: true }).waitFor();
+  await page.waitForFunction(
+    (custom) =>
+      window.__smoke.ctx.extensionSettings.mnemosyne_daily.prompts
+        .eventOverview === custom,
+    custom,
+  );
+  assert.ok(await page.evaluate(() => window.__smoke.saves > 0));
+  const persisted = await page.evaluate(
+    () => window.__smoke.ctx.extensionSettings,
+  );
+  assert.equal(
+    persisted.mnemosyne_daily.prompts.resummary2,
+    "合成原二次总结模板",
+  );
+  // A fresh page/module instance must hydrate the saved custom event prompt.
+  const restored = await browser.newPage();
+  restored.on("pageerror", (e) => errors.push(e.message));
+  await restored.route("**/*", (route) =>
+    route.request().url().startsWith("http://127.0.0.1:4173/")
+      ? route.continue()
+      : route.abort(),
+  );
+  await restored.goto("http://127.0.0.1:4173/scripts/daily-smoke.html");
+  await restored.waitForFunction(() => window.__smoke?.ready);
+  assert.equal(
+    await restored.evaluate(async (saved) => {
+      window.__smoke.ctx.extensionSettings = saved;
+      window.__smoke.ctx.saveSettingsDebounced = () => {};
+      const { hydrateSettings, apiSettings } =
+        await import("/src/api/settings.ts");
+      hydrateSettings();
+      return apiSettings.prompts.eventOverview;
+    }, persisted),
+    custom,
+  );
+  await restored.close();
+  await promptEntry.click();
+  await promptEditor
+    .getByRole("button", { name: "恢复默认", exact: true })
+    .click();
+  assert.equal(await promptArea.inputValue(), builtin);
+  await promptEditor.getByRole("button", { name: "取消", exact: true }).click();
+  await promptEditor.waitFor({ state: "hidden" });
+  await promptEntry.click();
+  assert.equal(
+    await promptArea.inputValue(),
+    custom,
+    "reset is only a draft until completed",
+  );
+  await promptEditor
+    .getByRole("button", { name: "恢复默认", exact: true })
+    .click();
+  await promptEditor.getByRole("button", { name: "完成", exact: true }).click();
+  await promptEditor.waitFor({ state: "hidden" });
+  await promptEntry.getByText("默认", { exact: true }).waitFor();
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__smoke.ctx.extensionSettings.mnemosyne_daily.prompts
+          .eventOverview,
+    ),
+    "",
+  );
+  await promptEntry.click();
+  await promptArea.fill(custom);
+  await promptEditor.getByRole("button", { name: "完成", exact: true }).click();
+  await promptEditor.waitFor({ state: "hidden" });
 
   // Mount the real floor card next to the app with synthetic host data only.
   await page.evaluate(async () => {
@@ -242,6 +357,12 @@ try {
   await confirm.getByRole("button", { name: "确认发送" }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(await page.evaluate(() => window.__smoke.calls.length), 1);
+  assert.ok(
+    (
+      await page.evaluate(() => JSON.stringify(window.__smoke.calls[0]))
+    ).includes(custom),
+    "saved UI prompt reaches the event request",
+  );
   const success = page.getByRole("alertdialog", { name: "操作完成" });
   await success.getByText("事件已保存", { exact: true }).waitFor();
   assert.equal(await success.locator("button").count(), 1);
@@ -280,6 +401,100 @@ try {
   });
   const event = page.locator(".mn-event-card").filter({ hasText: "一日约会" });
   await event.waitFor();
+  const archiveAction = page.getByRole("dialog", {
+    name: "事件归档操作",
+    exact: true,
+  });
+  const eventTitle = event.locator(".mn-event-title");
+  await eventTitle.scrollIntoViewIfNeeded();
+  // Moving a finger cancels the hold; a real hold opens the menu without expanding the card.
+  const summary = event.locator(":scope > summary");
+  await summary.dispatchEvent("pointerdown", {
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+  });
+  await summary.dispatchEvent("pointermove", { clientX: 50, clientY: 10 });
+  await page.waitForTimeout(550);
+  await summary.dispatchEvent("pointerup");
+  assert.equal(await archiveAction.count(), 0);
+  const titleBox = await eventTitle.boundingBox();
+  await page.mouse.move(titleBox.x + 20, titleBox.y + titleBox.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(550);
+  await page.mouse.up();
+  await archiveAction.waitFor();
+  assert.equal(
+    await event.getAttribute("open"),
+    null,
+    "long press must not expand the card",
+  );
+  await archiveAction
+    .getByRole("button", { name: "归档", exact: true })
+    .click();
+  await archiveAction.waitFor({ state: "hidden" });
+  await event.waitFor({ state: "hidden" });
+  const archiveEntry = page.getByRole("button", {
+    name: "归档事件",
+    exact: true,
+  });
+  await archiveEntry.scrollIntoViewIfNeeded();
+  const createBox = await page
+    .getByRole("button", { name: "新建事件", exact: true })
+    .boundingBox();
+  const archiveBox = await archiveEntry.boundingBox();
+  assert.ok(
+    archiveBox.x >= createBox.x + createBox.width &&
+      archiveBox.x + archiveBox.width <= 390,
+  );
+  await archiveEntry.click();
+  await page.getByRole("heading", { name: "归档事件", exact: true }).waitFor();
+  await event.waitFor();
+  assert.equal(
+    (await summary.innerText()).trim(),
+    "一日约会",
+    "archived folded cards show the title only",
+  );
+  assert.equal(
+    await event.getByRole("button", { name: "编辑", exact: true }).isVisible(),
+    false,
+  );
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await event.waitFor();
+  await page.waitForTimeout(250);
+  await page.screenshot({
+    path: "/tmp/w01-event-archive-collapsed.png",
+    fullPage: true,
+  });
+  await eventTitle.click();
+  await event.getByText("事件概要：", { exact: true }).waitFor();
+  await event.getByRole("button", { name: "编辑", exact: true }).click();
+  const archivedEditor = page.getByRole("dialog", {
+    name: "编辑事件",
+    exact: true,
+  });
+  assert.equal(
+    await archivedEditor.getByLabel("标题", { exact: true }).inputValue(),
+    "一日约会",
+  );
+  await archivedEditor
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
+  await archivedEditor.waitFor({ state: "hidden" });
+  await eventTitle.click();
+  await eventTitle.click({ button: "right" });
+  await archiveAction
+    .getByRole("button", { name: "取消归档", exact: true })
+    .click();
+  await archiveAction.waitFor({ state: "hidden" });
+  await event.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "返回事件", exact: true }).click();
+  await event.waitFor();
+  assert.equal(
+    await page.evaluate(() => window.__smoke.calls.length),
+    1,
+    "archiving never calls the model",
+  );
   assert.equal(await event.getByText("最新进展：", { exact: true }).count(), 0);
   await event.getByRole("button", { name: "编辑", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "编辑事件", exact: true });
@@ -389,7 +604,7 @@ try {
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: synthetic mobile clipped floor popup; acknowledged success/budget-error dialogs with no inline feedback; shortened join labels; no latest-progress card block; Unicode 500-character overview edit limit; full-width member summary; API confirmation, one-call creation, duplicate join with no API, event edit/delete confirmation, raw table backfill and durable last floor; no page errors.",
+    "PASS: custom prompt save/reset/rehydration and request integration; event long-press archive with movement cancellation, title-only archive list, expanded edit, unarchive, no API calls; clipped floor popup, acknowledged feedback, 500-character limit, event edit/delete, raw table backfill; no page errors or live API calls.",
   );
 } finally {
   await browser?.close();

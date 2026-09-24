@@ -120,6 +120,9 @@ export interface CapturedView {
     cutoff: number;
 }
 export interface EventChain extends Row {
+    /** Current UI organization only; never a recall/visibility filter. */
+    archiveSchema?: 1;
+    archived?: boolean;
     story: string;
     branch: string;
     created: number;

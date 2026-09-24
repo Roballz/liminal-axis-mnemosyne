@@ -19,6 +19,7 @@ import {
   type PromptMacro,
 } from '@/memory/prompts';
 import { TIME_TAG_PROMPT } from '@/memory/timeTag';
+import { EVENT_OVERVIEW_PROMPT } from '@/mnemosyne/event-prompts';
 import { clearVectorIndex, syncVectorIndex } from '@/memory/vector';
 import { resetVectorStoreProbe, vectorBackendKind } from '@/memory/vector/store';
 import { checkForUpdate, performUpdate, updateState } from '@/memory/update';
@@ -243,8 +244,8 @@ function closeModelMenuSoon() {
   }, 150);
 }
 
-/* —— 自定义提示词:列表(摘要/总结/破限/时间标签),点开在弹窗里编辑大文本 —— */
-type PromptKey = 'summary' | 'resummary' | 'resummary2' | 'jailbreak' | 'timeTag';
+/* —— 自定义提示词:点开在统一弹窗里编辑大文本 —— */
+type PromptKey = keyof typeof apiSettings.prompts;
 interface PromptMeta {
   key: PromptKey;
   label: string;
@@ -273,6 +274,13 @@ const PROMPT_METAS: PromptMeta[] = [
     hint: '把多条总结再压一层(L1+ → 更上层)。动态字数区间:详细为输入的 40%–50%,精简为 30%–40%。',
     builtin: RESUMMARY2_PROMPT,
     macros: RESUMMARY2_MACROS,
+  },
+  {
+    key: 'eventOverview',
+    label: '事件概要提示词',
+    hint: '自定义事件概括的重点、取舍和写法。用于新建事件、立即更新、批量及自动更新；保存后从下一次请求生效。概要仍限500字，所需 JSON 格式由程序附加，无需填写材料宏。留空或恢复默认后点击完成，使用内置提示词。',
+    builtin: EVENT_OVERVIEW_PROMPT,
+    macros: [],
   },
   {
     key: 'jailbreak',
@@ -1876,7 +1884,7 @@ function exportPublicApiDocument() {
         <p class="bbs-modal-label">{{ editingPrompt.hint }}</p>
 
         <!-- 可用宏:点一下插入到光标处 -->
-        <div class="bbs-macro-bar">
+        <div v-if="editingPrompt.macros.length" class="bbs-macro-bar">
           <span class="bbs-macro-tip">点击插入宏:</span>
           <button
             v-for="mac in editingPrompt.macros"
@@ -1893,6 +1901,7 @@ function exportPublicApiDocument() {
         <textarea
           ref="promptArea"
           v-model="promptDraft"
+          :aria-label="editingPrompt.label"
           class="bbs-input bbs-prompt-area"
           spellcheck="false"
           rows="16"

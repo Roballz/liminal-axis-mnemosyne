@@ -56,13 +56,15 @@ export interface ApiChannel {
 
 export type TaskType = 'summary' | 'resummary';
 
-/** 自定义提示词:空串表示沿用 prompts.ts 内置模板,非空则整体覆盖该任务的模板。 */
+/** 自定义提示词:空串表示沿用内置模板;任务必需的输出约定仍由各请求附加。 */
 export interface CustomPrompts {
   summary: string;
   /** 普通总结(L0 叶子 → L1):把多条楼层摘要压成一条 L1 总结。 */
   resummary: string;
   /** 二次总结(L1+ → 更上层):把多条总结再压一层,字数按输入规模动态放宽以少丢信息。 */
   resummary2: string;
+  /** 事件概要:控制新建及更新事件的概括重点/风格,与摘要提示词独立。 */
+  eventOverview: string;
   /** 破限提示词:附加在摘要/总结请求里;空串=不附加。 */
   jailbreak: string;
   /** 固定提示词(时间标签):注入**主对话**模型,要求每条正文前后输出时间标签;空=用内置默认。 */
@@ -336,7 +338,7 @@ function defaults(): ApiSettings {
       orbOpacity: 62,
       orbSize: 48,
     },
-    prompts: { summary: '', resummary: '', resummary2: '', jailbreak: '', timeTag: '' },
+    prompts: { summary: '', resummary: '', resummary2: '', eventOverview: '', jailbreak: '', timeTag: '' },
     verbosity: 'detailed',
     vector: {
       knowledge: { enabled: false, count: 3, threshold: 0.8, maxChars: 6000 },
@@ -397,6 +399,7 @@ function normalize(raw: unknown): ApiSettings {
   const merged = { ...d, ...(raw as Partial<ApiSettings>) };
   // prompts 是嵌套对象,展开合并不会补全缺字段,单独兜底(老数据没有 prompts 键时回退默认)
   merged.prompts = { ...d.prompts, ...((raw as Partial<ApiSettings>).prompts ?? {}) };
+  merged.prompts.eventOverview = typeof merged.prompts.eventOverview === 'string' ? merged.prompts.eventOverview : '';
   // ui 同为嵌套对象,逐字段兜底(老数据没有 ui 键时回退默认,值非字符串时丢弃)
   merged.autoHideEnabled = typeof merged.autoHideEnabled === 'boolean' ? merged.autoHideEnabled : true;
   const ru = ((raw as Partial<ApiSettings>).ui ?? {}) as Partial<UiPrefs>;

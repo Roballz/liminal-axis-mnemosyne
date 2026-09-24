@@ -92,7 +92,7 @@ async function download() {
   const url = URL.createObjectURL(new Blob([JSON.stringify(pack)], { type: 'application/json' }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'mnemosyne-daily-v3.json';
+  a.download = `mnemosyne-daily-v${pack.version}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   notice.value = '核心包已生成，请确认浏览器已保存下载文件。';

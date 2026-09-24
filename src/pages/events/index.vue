@@ -17,6 +17,7 @@ import {
   eventView,
   editEvent,
   deleteEvent,
+  setEventArchived,
   EVENT_OVERVIEW_MAX_CHARS,
   eventOverviewLength,
   type EventCard,
@@ -48,6 +49,71 @@ const editing = ref(false),
   keywords = ref("");
 const overviewChars = computed(() => eventOverviewLength(overview.value));
 const removing = shallowRef<EventCard | null>(null);
+const archiveMode = ref(false),
+  archiveMenu = shallowRef<EventCard | null>(null);
+const visibleCards = computed(() =>
+  cards.value.filter((card) => !!card.chain.archived === archiveMode.value),
+);
+let pressTimer: ReturnType<typeof setTimeout> | undefined,
+  held = false,
+  pressX = 0,
+  pressY = 0;
+function cancelPress() {
+  if (pressTimer) clearTimeout(pressTimer);
+  pressTimer = undefined;
+}
+function startPress(event: PointerEvent, card: EventCard) {
+  cancelPress();
+  held = false;
+  if (
+    event.button !== 0 ||
+    busy.value ||
+    (event.target as HTMLElement).closest("button") ||
+    (event.currentTarget as HTMLElement).parentElement?.hasAttribute("open")
+  )
+    return;
+  pressX = event.clientX;
+  pressY = event.clientY;
+  pressTimer = setTimeout(() => {
+    held = true;
+    archiveMenu.value = card;
+  }, 500);
+}
+function movePress(event: PointerEvent) {
+  if (Math.abs(event.clientX - pressX) + Math.abs(event.clientY - pressY) > 12)
+    cancelPress();
+}
+function clickCard(event: MouseEvent) {
+  cancelPress();
+  if (held) {
+    held = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}
+function openArchiveMenu(card: EventCard) {
+  cancelPress();
+  if (!busy.value) archiveMenu.value = card;
+}
+function showArchives(value: boolean) {
+  cancelPress();
+  archiveMenu.value = null;
+  archiveMode.value = value;
+  pages.value = {};
+}
+async function archiveSelected() {
+  const card = archiveMenu.value;
+  check(card, "未选择事件");
+  await setEventArchived(
+    await activeLibrary(),
+    validView(),
+    card.chain.id,
+    !card.chain.archived,
+    () => scope === hostScope(),
+  );
+  archiveMenu.value = null;
+  await refresh();
+}
 const statusOptions = [
   { value: "open", label: "进行中" },
   { value: "resolved", label: "已结束" },
@@ -114,6 +180,7 @@ async function save() {
     () => scope === hostScope(),
   );
   editing.value = false;
+  if (!editId.value) showArchives(false);
   await refresh();
 }
 async function remove() {
@@ -161,16 +228,25 @@ watch(
     cards.value = [];
     editing.value = false;
     removing.value = null;
+    archiveMenu.value = null;
+    archiveMode.value = false;
+    cancelPress();
   },
 );
 onMounted(() => run(refresh));
 onBeforeUnmount(() => {
   request++;
+  cancelPress();
 });
 </script>
 <template>
   <section class="mn-page">
-    <h2>事件</h2>
+    <div class="mn-event-heading">
+      <h2>{{ archiveMode ? "归档事件" : "事件" }}</h2>
+      <button v-if="archiveMode" class="mn-back" @click="showArchives(false)">
+        返回事件
+      </button>
+    </div>
     <div class="mn-actions mn-event-toolbar">
       <button :disabled="busy" @click="run(refresh)">刷新</button
       ><button
@@ -185,14 +261,19 @@ onBeforeUnmount(() => {
       >
         新建事件
       </button>
+      <button v-if="!archiveMode" @click="showArchives(true)">归档事件</button>
     </div>
-    <p class="mn-muted">
+    <p v-if="!archiveMode" class="mn-muted">
       在聊天楼层卡片上指定事件链。AI
-      只更新你已归链内容的概要和关键词，不再自动拆分或创建事件。
+      只更新你已归链内容的概要和关键词。长按折叠卡片可归档，也可右键或按
+      Shift+F10。
+    </p>
+    <p v-else class="mn-muted">
+      归档只收起卡片，仍参与召回。点击标题看详情，长按标题可取消归档。
     </p>
     <p role="status">{{ jobState.status }}</p>
     <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
-    <details class="mn-card">
+    <details v-if="!archiveMode" class="mn-card">
       <summary>事件概要自动更新与召回设置</summary>
       <p>
         自动和批量整理仅更新已有链的待处理成员，每条待更新链一次摘要 API
@@ -273,15 +354,32 @@ onBeforeUnmount(() => {
       </button>
       <p role="status">{{ notice }}</p>
     </details>
-    <p v-if="!cards.length" class="mn-empty">
-      还没有事件链。可从聊天楼层创建，也可先在这里新建空链。
+    <p v-if="!visibleCards.length" class="mn-empty">
+      {{
+        archiveMode
+          ? "暂无归档事件。"
+          : cards.length
+            ? "事件已全部收起，可进入归档事件查看。"
+            : "还没有事件链。可从聊天楼层创建，也可先在这里新建空链。"
+      }}
     </p>
     <details
-      v-for="card in cards"
-      :key="card.chain.id"
+      v-for="card in visibleCards"
+      :key="`${archiveMode}:${card.chain.id}`"
       class="mn-card mn-event-card"
+      :class="{ 'mn-archive-card': archiveMode }"
     >
-      <summary>
+      <summary
+        @pointerdown="startPress($event, card)"
+        @pointermove="movePress"
+        @pointerup="cancelPress"
+        @pointercancel="cancelPress"
+        @pointerleave="cancelPress"
+        @click.capture="clickCard"
+        @contextmenu.prevent="openArchiveMenu(card)"
+        @keydown.shift.f10.prevent="openArchiveMenu(card)"
+        @keydown.esc="cancelPress"
+      >
         <strong class="mn-event-title">{{ card.meta.title }}</strong>
         <p class="mn-muted mn-event-keywords">
           {{ card.meta.keywords.join(" · ") || "暂无关键词" }}
@@ -357,6 +455,38 @@ onBeforeUnmount(() => {
         </div>
       </details>
     </details>
+    <ModalMask :open="!!archiveMenu" @close="!busy && (archiveMenu = null)">
+      <section
+        class="mn-dialog mn-archive-menu"
+        role="dialog"
+        aria-label="事件归档操作"
+        aria-modal="true"
+      >
+        <header>
+          <h3>{{ archiveMenu?.meta.title }}</h3>
+        </header>
+        <div class="mn-dialog-body">
+          <p>
+            {{
+              archiveMenu?.chain.archived
+                ? "取消归档后移回事件主页，内容和召回保持不变。"
+                : "归档后移入归档事件，仍参与召回，可随时移回主页。"
+            }}
+          </p>
+          <button
+            class="mn-primary"
+            :disabled="busy"
+            @click="run(archiveSelected)"
+          >
+            {{ archiveMenu?.chain.archived ? "取消归档" : "归档" }}
+          </button>
+          <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
+        </div>
+        <footer>
+          <button :disabled="busy" @click="archiveMenu = null">取消</button>
+        </footer>
+      </section>
+    </ModalMask>
     <ModalMask :open="editing" @close="!busy && (editing = false)"
       ><form
         class="mn-dialog"
@@ -382,9 +512,7 @@ onBeforeUnmount(() => {
               }"
             >
               {{ overviewChars }} /
-              {{
-                EVENT_OVERVIEW_MAX_CHARS
-              }}
+              {{ EVENT_OVERVIEW_MAX_CHARS }}
               字（含标点）。仅记录核心变化及影响关系或转变的重要细节。
             </small></label
           ><label
@@ -422,6 +550,33 @@ onBeforeUnmount(() => {
 <style scoped>
 .mn-event-toolbar {
   flex-wrap: nowrap;
+  gap: 6px;
+}
+.mn-event-toolbar button {
+  white-space: nowrap;
+  padding: 8px 6px;
+  font-size: 12px;
+}
+.mn-event-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mn-event-card > summary {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.mn-archive-card:not([open]) .mn-event-keywords,
+.mn-archive-card:not([open]) .mn-event-meta {
+  display: none;
+}
+.mn-archive-menu {
+  max-width: 380px;
+}
+.mn-archive-menu .mn-dialog-body > button {
+  width: 100%;
+  margin-top: 12px;
 }
 .mn-event-title {
   display: inline;

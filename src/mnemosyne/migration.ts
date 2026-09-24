@@ -3,7 +3,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3;
+    version: 1 | 2 | 3 | 4;
     schema: 1;
     created: number;
     excluded: string[];
@@ -20,7 +20,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta is restricted to non-secret daily feature settings, not upstream API configuration.
-    const base = { format: 'mnemosyne-daily' as const, version: 3 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 4 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     validateData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -40,7 +40,7 @@ const FIELDS: Record<Store, string[]> = {
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     check(pack.data && Object.keys(pack.data).length === STORES.length, '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
@@ -51,6 +51,7 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             check(r && r.schema === 1 && typeof r.id === 'string' && r.id && !maps[store].has(r.id), `非法或重复ID ${store}`);
             const optional = pack.version === 1 ? [] : store === 'custom_table_defs' ? ['tableSchema', 'dataVersion'] : store === 'custom_table_rows' ? ['hidden'] : [];
             if (pack.version >= 3) optional.push(...(store === 'event_revisions' ? ['eventSchema', 'overview', 'summarized'] : store === 'custom_table_rows' ? ['bodySources'] : store === 'table_receipts' ? ['backfillSchema', 'bodySources', 'start', 'end'] : []));
+            if (pack.version >= 4 && store === 'event_chains') optional.push('archiveSchema', 'archived');
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && FIELDS[store].every(k => k in r), `字段不合法 ${store}`);
             maps[store].set(r.id, r);
@@ -149,6 +150,11 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             const m = get('memory_revisions', key as string);
             check(m.owner === family && m.branch === v.branch, '摘要选择错误');
         }
+    for (const chain of maps.event_chains.values()) {
+        check(chain.story === get('branches', chain.branch).story, '事件链跨故事');
+        if (chain.archiveSchema !== undefined || chain.archived !== undefined)
+            check(chain.archiveSchema === 1 && typeof chain.archived === 'boolean', '事件归档标记非法');
+    }
     const memoryRefs = (r: any, ids: string[]) => { check(Array.isArray(ids), '摘要引用列表缺失'); for (const key of ids)
         check(get('memory_revisions', key).branch === r.branch, '摘要引用跨分支'); };
     for (const store of ['event_revisions', 'event_memberships', 'event_progress'] as Store[])

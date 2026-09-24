@@ -216,6 +216,17 @@ export async function commitEventBatch(lib: Library, batch: EventBatch, output: 
     });
 }
 export const EVENT_OVERVIEW_MAX_CHARS = 500;
+/** Archive changes presentation only, so in-flight narrative updates remain valid. */
+export async function setEventArchived(lib: Library, view: CapturedView, eventId: string, archived: boolean, guard: () => boolean = () => true) {
+    check(typeof archived === 'boolean', '归档标记无效');
+    await lib.transaction(['branches', 'event_chains'], 'readwrite', async tx => {
+        const branch = await tx.get<Branch>('branches', view.branch.id);
+        const chain = await tx.get<EventChain>('event_chains', eventId);
+        check(guard() && branch && branch.epoch === view.branch.epoch && branch.head === view.branch.head && branch.view === view.branch.view && chain?.branch === branch.id && chain.story === branch.story, '事件已改变，请刷新');
+        if (chain.archived === archived) return;
+        await tx.put('event_chains', { ...chain, archiveSchema: 1, archived } as EventChain);
+    });
+}
 export const eventOverviewLength = (text: string) => Array.from(text.trim()).length;
 export function checkEventOverview(text: string) {
     check(eventOverviewLength(text) <= EVENT_OVERVIEW_MAX_CHARS, `事件概要不能超过${EVENT_OVERVIEW_MAX_CHARS}字（含标点），未保存；请精简后重试`);
