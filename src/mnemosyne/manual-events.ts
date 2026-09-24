@@ -10,14 +10,10 @@ import { eventCreationContext } from "@/memory/engine";
 import { activeLibrary, type Library } from "./db";
 import { current } from "./canonical";
 import { syncDaily, hostVersion, dailyState, dailyCurrent } from "./bridge";
-import {
-  eventView,
-  editEvent,
-  checkEventOverview,
-  type EventCard,
-} from "./events";
+import { eventView, editEvent, type EventCard } from "./events";
 import { buildEventInstruction } from "./event-prompts";
-import { parseStrictJson } from "./json";
+import { parseManualEvent } from "./event-response";
+export { parseManualEvent } from "./event-response";
 import {
   STORES,
   check,
@@ -45,40 +41,6 @@ export function eventPending(card: EventCard) {
   );
   return card.members.some((m) => !done.has(m.memory));
 }
-export function parseManualEvent(raw: string) {
-  const v = parseStrictJson(
-    raw.replace(/^```(?:json)?\s*|\s*```$/g, ""),
-  ) as any;
-  check(
-    v && typeof v.title === "string" && v.title.trim() && v.title.length <= 300,
-    "事件标题无效",
-  );
-  check(["open", "resolved", "dormant"].includes(v.status), "事件状态无效");
-  check(
-    Array.isArray(v.keywords) &&
-      v.keywords.length <= 100 &&
-      v.keywords.every(
-        (k: unknown) => typeof k === "string" && k.length <= 100,
-      ),
-    "事件关键词无效",
-  );
-  check(
-    typeof v.overview === "string" &&
-      !!v.overview.trim() &&
-      typeof v.progress === "string" &&
-      v.progress.length <= 4000,
-    "概要或进展无效",
-  );
-  checkEventOverview(v.overview);
-  v.overview = v.overview.trim();
-  return v as {
-    title: string;
-    status: string;
-    keywords: string[];
-    overview: string;
-    progress: string;
-  };
-}
 export async function commitManualEvent(
   lib: Library,
   view: CapturedView,
@@ -86,6 +48,7 @@ export async function commitManualEvent(
   memories: string[],
   raw: string,
   guard: () => boolean,
+  reviewed = false,
 ) {
   const output = parseManualEvent(raw);
   const allowed = (await eventView(lib, view)).valid;
@@ -133,16 +96,18 @@ export async function commitManualEvent(
       ...row("er"),
       ...base,
       eventSchema: 2,
-      title: card?.meta.title ?? output.title,
-      status: card?.meta.status ?? output.status,
+      title: reviewed ? output.title : (card?.meta.title ?? output.title),
+      status: reviewed ? output.status : (card?.meta.status ?? output.status),
       keywords: output.keywords,
       overview: output.overview,
       summarized: memories,
       refs: memories,
       created: Date.now(),
     } as EventRevision);
-    if (!card)
-      for (const memory of memories)
+    if (!card || reviewed)
+      for (const memory of memories.filter(
+        (id) => !card?.members.some((m) => m.memory === id),
+      ))
         await tx.add("event_memberships", {
           ...row("link"),
           ...base,
@@ -178,11 +143,11 @@ export async function floorEventContext(floor: number) {
   check(memory, "请先生成本楼有效摘要；番外或待审核摘要不能加入事件");
   return { view, lib, memory, cards: data.cards };
 }
-export async function createFloorEvent(
+export async function prepareFloorEvent(
   floor: number,
   intent: string,
   maxChars: number,
-  sender: EventSender = sendEvent,
+  sender: EventSender = sendReviewEvent,
 ) {
   check(intent.trim(), "请说明要建立怎样的事件链");
   const { view, lib, memory } = await floorEventContext(floor);
@@ -212,15 +177,7 @@ export async function createFloorEvent(
   );
   check(await dailyCurrent(view, host, generation), "楼层已改变，请重新打开");
   const raw = await sender(messages);
-  check(await dailyCurrent(view, host, generation), "迟到事件结果已拒绝");
-  return commitManualEvent(
-    lib,
-    view,
-    null,
-    [memory.id],
-    raw,
-    () => host === hostVersion() && generation === dailyState.generation,
-  );
+  return makeEventReview(lib, view, null, [memory.id], raw, host, generation);
 }
 export async function joinFloorEvent(floor: number, eventId: string) {
   const { view, lib, memory, cards } = await floorEventContext(floor);
@@ -253,6 +210,28 @@ export async function updateEventOverview(
   check(card, "事件不存在或已失效");
   if (!eventPending(card)) return false;
   const memories = card.members.map((m) => m.memory);
+  const raw = await requestEventOverview(
+    view,
+    card,
+    memories,
+    maxChars,
+    sender,
+    guard,
+    lib,
+  );
+  await commitManualEvent(lib, view, card, memories, raw, guard);
+  return true;
+}
+async function requestEventOverview(
+  view: CapturedView,
+  card: EventCard,
+  memories: string[],
+  maxChars: number,
+  sender: EventSender,
+  guard: () => boolean,
+  lib: Library,
+  rewriteInstructions?: string,
+) {
   const materials = memories.map((id) => {
     const m = view.memories.find((m) => m.id === id)!;
     const refs = [
@@ -273,12 +252,22 @@ export async function updateEventOverview(
     };
   });
   const messages: ChatMsg[] = [
-    { role: "system", content: buildEventInstruction() },
+    {
+      role: "system",
+      content:
+        buildEventInstruction() +
+        (rewriteInstructions
+          ? "\n本次按用户 rewriteInstructions 重写已有事件概要，结合当前概要和全部成员正文重新提炼。保留事实，不把改写要求当已发生剧情；保留已有标题和状态。没有待整理的新成员时 progress 填空字符串，不把重新措辞当成新进展。"
+          : ""),
+    },
     {
       role: "user",
       content: JSON.stringify({
         title: card.meta.title,
         status: card.meta.status,
+        ...(rewriteInstructions
+          ? { rewriteInstructions, keywords: card.meta.keywords }
+          : {}),
         overview: eventOverview(card),
         summarized:
           card.meta.summarized ?? card.progress.flatMap((p) => p.memories),
@@ -292,7 +281,119 @@ export async function updateEventOverview(
   );
   check(guard() && (await current(lib, view)), "事件材料已改变");
   const raw = await sender(messages);
-  check(guard() && (await current(lib, view)), "迟到事件结果已拒绝");
-  await commitManualEvent(lib, view, card, memories, raw, guard);
-  return true;
+  return raw;
+}
+
+/** Floor calls retain empty/invalid content for review. Batch calls keep their strict path. */
+const sendReviewEvent: EventSender = (messages) => {
+  const channel = getChannelForTask("summary"),
+    options = { reviewResponse: true };
+  return channel
+    ? requestCompletion(channel, messages, options)
+    : requestViaMainApi(messages, options);
+};
+export type EventReview = ReturnType<typeof makeEventReview>;
+function makeEventReview(
+  lib: Library,
+  view: CapturedView,
+  card: EventCard | null,
+  memories: string[],
+  raw: string,
+  host: string,
+  generation: number,
+) {
+  let saving = false,
+    saved = false;
+  return {
+    raw,
+    title: card ? `更新：${card.meta.title}` : "新建事件链",
+    async confirm(text: string, live: () => boolean = () => true) {
+      check(!saving && !saved, "此返回正在保存或已经保存，请勿重复确认");
+      saving = true;
+      try {
+        parseManualEvent(text);
+        check(
+          live() && (await dailyCurrent(view, host, generation)),
+          "聊天、楼层或事件已改变，此返回不能写入；请复制草稿后重新打开",
+        );
+        const id = await commitManualEvent(
+          lib,
+          view,
+          card,
+          memories,
+          text,
+          () =>
+            live() &&
+            host === hostVersion() &&
+            generation === dailyState.generation,
+          true,
+        );
+        saved = true;
+        return id;
+      } finally {
+        saving = false;
+      }
+    },
+  };
+}
+export async function prepareFloorEventUpdate(
+  floor: number,
+  eventId: string,
+  maxChars: number,
+  sender: EventSender = sendReviewEvent,
+) {
+  const { view, lib, memory, cards } = await floorEventContext(floor);
+  const card = cards.find((c) => c.chain.id === eventId);
+  check(card, "事件不存在或不属于当前分支");
+  const memories = [
+    ...new Set([...card.members.map((m) => m.memory), memory.id]),
+  ];
+  if (memories.length === card.members.length && !eventPending(card))
+    return null;
+  const host = hostVersion(),
+    generation = dailyState.generation;
+  const raw = await requestEventOverview(
+    view,
+    card,
+    memories,
+    maxChars,
+    sender,
+    () => host === hostVersion() && generation === dailyState.generation,
+    lib,
+  );
+  return makeEventReview(lib, view, card, memories, raw, host, generation);
+}
+
+/** Explicit rewrite may run with no pending members, including archived chains. */
+export async function prepareEventRewrite(
+  eventId: string,
+  instructions: string,
+  maxChars: number,
+  sender: EventSender = sendReviewEvent,
+) {
+  check(instructions.trim(), "请说明希望怎样重写概要");
+  const view = await syncDaily(),
+    lib = await activeLibrary();
+  const host = hostVersion(),
+    generation = dailyState.generation;
+  const card = (await eventView(lib, view)).cards.find(
+    (c) => c.chain.id === eventId,
+  );
+  check(card, "事件不存在或不属于当前分支");
+  const memories = card.members.map((m) => m.memory);
+  check(
+    memories.length,
+    "该事件没有有效关联摘要，请先从楼层加入内容再重写概要",
+  );
+  const raw = await requestEventOverview(
+    view,
+    card,
+    memories,
+    maxChars,
+    sender,
+    () => host === hostVersion() && generation === dailyState.generation,
+    lib,
+    instructions.trim(),
+  );
+  return makeEventReview(lib, view, card, memories, raw, host, generation);
 }

@@ -45,6 +45,8 @@ function alternateUrl(url: string): string {
 
 export interface RequestOptions {
   signal?: AbortSignal;
+  /** 人工审阅：保留提取后的正文原样（含空串）；HTTP/API 错误仍抛出。 */
+  reviewResponse?: boolean;
 }
 
 function validTimeoutSec(value: unknown): number {
@@ -214,8 +216,7 @@ async function requestCompletionAtUrl(
     // 流式:按 SSE 增量拼接;非流式:直接解析 JSON。
     if (stream) {
       const content = await readSseContent(resp);
-      if (!content) throw new ApiError('副 API 返回空内容');
-      return content;
+      return completionText(content, '副 API', opts);
     }
 
     const data = await resp.json();
@@ -224,8 +225,7 @@ async function requestCompletionAtUrl(
     }
 
     const content = extractContent(data);
-    if (!content) throw new ApiError('副 API 返回空内容');
-    return content;
+    return completionText(content, '副 API', opts);
   });
 }
 
@@ -243,40 +243,43 @@ async function readSseContent(resp: Response): Promise<string> {
   const decoder = new TextDecoder();
   let buf = '';
   let out = '';
-  for (; ;) {
+  const consume = (line: string) => {
+    const t = line.trim();
+    if (!t.startsWith('data:')) return;
+    const payload = t.slice(5).trim();
+    if (payload === '[DONE]') return;
+    try {
+      const json = JSON.parse(payload);
+      if (json?.error) throw new ApiError(json.error.message || '副 API 返回错误');
+      const delta = json?.choices?.[0]?.delta?.content ?? json?.choices?.[0]?.message?.content ?? json?.choices?.[0]?.text;
+      if (typeof delta === 'string') out += delta;
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      // 单行解析失败忽略(可能是注释行/心跳)
+    }
+  };
+  for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
-    // 按行解析,保留最后一段不完整的行到下次
     const lines = buf.split('\n');
     buf = lines.pop() ?? '';
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t || !t.startsWith('data:')) continue;
-      const payload = t.slice(5).trim();
-      if (payload === '[DONE]') continue;
-      try {
-        const json = JSON.parse(payload);
-        if (json?.error) throw new ApiError(json.error.message || '副 API 返回错误');
-        const delta = json?.choices?.[0]?.delta?.content ?? json?.choices?.[0]?.message?.content ?? json?.choices?.[0]?.text;
-        if (typeof delta === 'string') out += delta;
-      } catch (e) {
-        if (e instanceof ApiError) throw e;
-        // 单行解析失败忽略(可能是注释行/心跳)
-      }
-    }
+    lines.forEach(consume);
   }
-  return out.trim();
+  // Some compatible endpoints end the final data line without a newline.
+  consume(buf + decoder.decode());
+  return out;
 }
 
 /** 从标准 OpenAI 响应体提取文本 */
 function extractContent(data: any): string {
-  return (
-    data?.choices?.[0]?.message?.content ??
-    data?.choices?.[0]?.text ??
-    data?.content ??
-    ''
-  ).trim();
+  const value = data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.text ?? data?.content;
+  return typeof value === 'string' ? value : '';
+}
+function completionText(content: string, label: string, opts: RequestOptions): string {
+  if (opts.reviewResponse) return content;
+  if (!content.trim()) throw new ApiError(`${label} 返回空内容`);
+  return content.trim();
 }
 
 /* ============ 跟随主 API(主界面当前在用的 API 设置) ============ */
@@ -300,14 +303,13 @@ export function mainApiAvailable(): boolean {
  * ⚠️ 这条路径的请求体由 ST 构造,带不上 `tool_choice: 'none'`,第三方 fetch 拦截器
  * (如防截断脚本)仍可能改写它。摘要/重摘要尽量指派副 API 渠道,走 buildRequestBody 那条路。
  */
-export async function requestViaMainApi(messages: ChatMsg[], _opts: RequestOptions = {}): Promise<string> {
+export async function requestViaMainApi(messages: ChatMsg[], opts: RequestOptions = {}): Promise<string> {
   const ctx = getContext();
   if (typeof ctx?.generateRaw !== 'function') {
     throw new ApiError('当前 ST 版本不支持 generateRaw,无法跟随主 API');
   }
-  const content = (await ctx.generateRaw({ prompt: messages, responseLength: MAIN_API_RESPONSE_LENGTH }))?.trim();
-  if (!content) throw new ApiError('主 API 返回空内容');
-  return content;
+  const content = await ctx.generateRaw({ prompt: messages, responseLength: MAIN_API_RESPONSE_LENGTH });
+  return completionText(typeof content === 'string' ? content : '', '主 API', opts);
 }
 
 /** 连通性测试:发一条极短请求 */

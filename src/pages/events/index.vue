@@ -11,7 +11,13 @@ import ModalMask from "@/components/ModalMask.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import BbsSelect from "@/components/BbsSelect.vue";
 import TableTextField from "@/components/TableTextField.vue";
-import { syncDaily, hostScope, dailyState } from "@/mnemosyne/bridge";
+import EventResponseReview from "@/components/EventResponseReview.vue";
+import {
+  syncDaily,
+  hostScope,
+  hostVersion,
+  dailyState,
+} from "@/mnemosyne/bridge";
 import { activeLibrary } from "@/mnemosyne/db";
 import {
   eventView,
@@ -26,6 +32,8 @@ import {
   manualEventState,
   eventOverview,
   eventPending,
+  prepareEventRewrite,
+  type EventReview,
 } from "@/mnemosyne/manual-events";
 import {
   settings,
@@ -113,6 +121,91 @@ async function archiveSelected() {
   );
   archiveMenu.value = null;
   await refresh();
+}
+const rewriteCard = shallowRef<EventCard | null>(null),
+  rewriteInstructions = ref("");
+const confirmRewrite = ref(false),
+  review = shallowRef<EventReview | null>(null),
+  reviewError = ref("");
+let rewriteTicket = 0,
+  rewriteHost = "";
+function cancelReview() {
+  const owned = !!review.value;
+  review.value = null;
+  reviewError.value = "";
+  if (owned && !busy.value) manualEventState.busy = false;
+}
+function resetRewrite() {
+  rewriteTicket++;
+  rewriteCard.value = null;
+  confirmRewrite.value = false;
+  cancelReview();
+}
+function openRewrite() {
+  if (busy.value || manualEventState.busy || jobState.busy) return;
+  rewriteCard.value = archiveMenu.value;
+  archiveMenu.value = null;
+  rewriteInstructions.value = "";
+  rewriteHost = hostVersion();
+  error.value = "";
+}
+async function generateRewrite() {
+  if (
+    busy.value ||
+    manualEventState.busy ||
+    jobState.busy ||
+    !rewriteCard.value
+  )
+    return;
+  const token = ++rewriteTicket;
+  busy.value = true;
+  manualEventState.busy = true;
+  confirmRewrite.value = false;
+  error.value = "";
+  try {
+    check(
+      scope === hostScope() && rewriteHost === hostVersion(),
+      "聊天或楼层已改变，请重新打开",
+    );
+    const result = await prepareEventRewrite(
+      rewriteCard.value.chain.id,
+      rewriteInstructions.value,
+      settings.maxChars,
+    );
+    if (token === rewriteTicket && scope === hostScope()) {
+      review.value = result;
+      reviewError.value = "";
+      rewriteCard.value = null;
+    }
+  } catch (e) {
+    if (token === rewriteTicket) error.value = (e as Error).message;
+  } finally {
+    busy.value = false;
+    manualEventState.busy = !!review.value;
+  }
+}
+async function saveRewrite(text: string) {
+  if (busy.value || !review.value) return;
+  const result = review.value,
+    token = rewriteTicket;
+  const live = () =>
+    token === rewriteTicket && review.value === result && scope === hostScope();
+  busy.value = true;
+  reviewError.value = "";
+  try {
+    await result.confirm(text, live);
+    if (live()) {
+      review.value = null;
+      notice.value = "概要已重写";
+      await refresh();
+    }
+  } catch (e) {
+    if (live()) reviewError.value = (e as Error).message;
+    else if (token === rewriteTicket) error.value = (e as Error).message;
+  } finally {
+    busy.value = false;
+    manualEventState.busy = !!review.value;
+  }
 }
 const statusOptions = [
   { value: "open", label: "进行中" },
@@ -230,12 +323,14 @@ watch(
     removing.value = null;
     archiveMenu.value = null;
     archiveMode.value = false;
+    resetRewrite();
     cancelPress();
   },
 );
 onMounted(() => run(refresh));
 onBeforeUnmount(() => {
   request++;
+  resetRewrite();
   cancelPress();
 });
 </script>
@@ -265,7 +360,7 @@ onBeforeUnmount(() => {
     </div>
     <p v-if="!archiveMode" class="mn-muted">
       在聊天楼层卡片上指定事件链。AI
-      只更新你已归链内容的概要和关键词。长按折叠卡片可归档，也可右键或按
+      只更新你已归链内容的概要和关键词。长按折叠卡片可归档或重写概要，也可右键或按
       Shift+F10。
     </p>
     <p v-else class="mn-muted">
@@ -480,6 +575,12 @@ onBeforeUnmount(() => {
           >
             {{ archiveMenu?.chain.archived ? "取消归档" : "归档" }}
           </button>
+          <button
+            :disabled="busy || manualEventState.busy || jobState.busy"
+            @click="openRewrite"
+          >
+            重写概要
+          </button>
           <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
         </div>
         <footer>
@@ -487,6 +588,67 @@ onBeforeUnmount(() => {
         </footer>
       </section>
     </ModalMask>
+    <ModalMask :open="!!rewriteCard" @close="!busy && (rewriteCard = null)">
+      <form
+        class="mn-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="重写概要"
+        @submit.prevent="confirmRewrite = true"
+      >
+        <header>
+          <h3>重写概要</h3>
+          <small>{{ rewriteCard?.meta.title }}</small>
+        </header>
+        <div class="mn-dialog-body">
+          <p>
+            写一段说明，告诉 AI
+            当前概要哪里不合意、希望保留或突出什么，以及怎样改写。将结合这条链的全部有效成员正文、摘要和当前概要重写。
+          </p>
+          <TableTextField
+            v-model="rewriteInstructions"
+            label="概要改写要求"
+            :disabled="busy"
+          />
+          <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
+        </div>
+        <footer>
+          <button type="button" :disabled="busy" @click="rewriteCard = null">
+            取消
+          </button>
+          <button
+            class="mn-primary"
+            :disabled="
+              busy ||
+              !rewriteInstructions.trim() ||
+              manualEventState.busy ||
+              jobState.busy
+            "
+          >
+            重写
+          </button>
+        </footer>
+      </form>
+    </ModalMask>
+    <ConfirmDialog
+      v-model:open="confirmRewrite"
+      title="确认重写概要"
+      top-layer
+      confirm-text="确认发送"
+      :busy="busy"
+      @confirm="generateRewrite"
+    >
+      将发送本链全部有效成员正文、摘要、当前概要和你的改写要求，调用一次摘要
+      API，可能产生费用。返回后先审阅，确认才保存；不会新建事件链。
+    </ConfirmDialog>
+    <EventResponseReview
+      v-if="review"
+      :review="review"
+      :busy="busy"
+      :save-error="reviewError"
+      @cancel="cancelReview"
+      @confirm="saveRewrite"
+    />
     <ModalMask :open="editing" @close="!busy && (editing = false)"
       ><form
         class="mn-dialog"

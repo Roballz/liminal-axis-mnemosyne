@@ -7,6 +7,7 @@ import { createEmptyMemory } from "@/memory/types";
 import type { STContext } from "@/st/context";
 import { apiSettings } from "@/api/settings";
 import { buildEventInstruction, EVENT_OVERVIEW_PROMPT } from "./event-prompts";
+import { eventResponseError } from "./event-response";
 import { capture } from "./canonical";
 import { eventView, editEvent, deleteEvent, setEventArchived } from "./events";
 import {
@@ -15,7 +16,9 @@ import {
   updateEventOverview,
   eventPending,
   parseManualEvent,
-  createFloorEvent,
+  prepareFloorEvent,
+  prepareFloorEventUpdate,
+  prepareEventRewrite,
 } from "./manual-events";
 import { newTable, saveTable, readTables, applyRows } from "./tables";
 import {
@@ -206,7 +209,8 @@ test("custom event writing replaces the default for create/update, blank restore
     expect(instruction).toContain('"progress"');
     return answer;
   });
-  const id = await createFloorEvent(1, "整天约会", 200000, createSender);
+  const draft = await prepareFloorEvent(1, "整天约会", 200000, createSender);
+  const id = await draft.confirm(draft.raw);
   await joinFloorEvent(3, id);
   apiSettings.prompts.eventOverview = "合成新规则：重点交代承诺和兑现。";
   const updateSender = vi.fn(async (messages) => {
@@ -256,10 +260,191 @@ test("manual create uses native summary materials without changing summaries", a
     expect(p).toContain("对人物关系或重要转变有实质影响");
     return answer;
   });
-  await createFloorEvent(1, "把这一天当成一个整体", 200000, sender);
+  const draft = await prepareFloorEvent(
+    1,
+    "把这一天当成一个整体",
+    200000,
+    sender,
+  );
+  expect(await lib.all("event_chains")).toHaveLength(0);
+  await draft.confirm(draft.raw);
   expect(sender).toHaveBeenCalledTimes(1);
   expect(ctx.chat[1].extra!.bbs_leaf).toBe(before);
   expect(await lib.all("event_chains")).toHaveLength(1);
+});
+test.each(["", '{"title":"半截', '{"title":invalid}', "{}", answer])(
+  "manual response %j reaches review without event writes; corrections are validated locally and saved once",
+  async (raw) => {
+    const sender = vi.fn(async () => raw);
+    const review = await prepareFloorEvent(1, "整天约会", 200000, sender);
+    expect(review.raw).toBe(raw);
+    expect(await lib.all("event_chains")).toHaveLength(0);
+    expect(await lib.all("event_memberships")).toHaveLength(0);
+    await expect(review.confirm('{"title":"不完整"}')).rejects.toThrow(
+      "status",
+    );
+    expect(await lib.all("event_chains")).toHaveLength(0);
+    const corrected = JSON.stringify({
+      ...JSON.parse(answer),
+      title: "人工校正标题",
+      status: "resolved",
+    });
+    const first = review.confirm(corrected);
+    await expect(review.confirm(corrected)).rejects.toThrow("重复确认");
+    const id = await first;
+    await expect(review.confirm(corrected)).rejects.toThrow("重复确认");
+    const card = (await eventView(lib, await syncDaily())).cards[0];
+    expect(card.chain.id).toBe(id);
+    expect(card.meta.title).toBe("人工校正标题");
+    expect(card.meta.status).toBe("resolved");
+    expect(card.members).toHaveLength(1);
+    expect(card.progress).toHaveLength(1);
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(review.raw).toBe(raw);
+  },
+);
+test("review diagnoses empty, truncated, syntax, duplicate and field errors without weakening strict validation", () => {
+  expect(eventResponseError(" ")).toContain("返回正文为空");
+  expect(eventResponseError('{"title":"unfinished')).toContain("疑似输出截断");
+  expect(eventResponseError('{\n title: "bad"}')).toContain("第 2 行");
+  expect(eventResponseError('{"title":"a","title":"b"}')).toContain(
+    "重复字段 title",
+  );
+  expect(eventResponseError("[]")).toContain("最外层");
+  for (const [field, value] of [
+    ["status", "已结束"],
+    ["keywords", "约会"],
+    ["overview", null],
+    ["progress", []],
+  ])
+    expect(
+      eventResponseError(
+        JSON.stringify({ ...JSON.parse(answer), [field as string]: value }),
+      ),
+    ).toContain(field);
+  expect(
+    eventResponseError(
+      JSON.stringify({ ...JSON.parse(answer), overview: "字".repeat(501) }),
+    ),
+  ).toContain("500字");
+  expect(parseManualEvent("  ```json\n" + answer + "\n```  ").title).toBe(
+    "一天约会",
+  );
+});
+test("immediate update stages membership, includes all pending bodies, and publishes only after review", async () => {
+  const id = await chain();
+  await joinFloorEvent(3, id);
+  const before = await lib.all("event_revisions");
+  const sender = vi.fn(async (messages) => {
+    const prompt = JSON.stringify(messages);
+    for (const floor of [1, 3, 5]) expect(prompt).toContain(`正文细节${floor}`);
+    return '{"overview":"bad';
+  });
+  const review = (await prepareFloorEventUpdate(5, id, 48000, sender))!;
+  expect(review.raw).toContain("bad");
+  expect(await lib.all("event_revisions")).toEqual(before);
+  expect(await lib.all("event_memberships")).toHaveLength(2);
+  await expect(review.confirm(review.raw)).rejects.toThrow("JSON");
+  expect(await lib.all("event_memberships")).toHaveLength(2);
+  await review.confirm(answer);
+  const card = (await eventView(lib, await syncDaily())).cards[0];
+  expect(card.members).toHaveLength(3);
+  expect(eventPending(card)).toBe(false);
+  expect(card.progress).toHaveLength(2);
+  expect(card.progress[1].memories).toHaveLength(2);
+  expect(await prepareFloorEventUpdate(5, id, 48000, sender)).toBeNull();
+  expect(sender).toHaveBeenCalledTimes(1);
+});
+test("discarded update and stale create reviews cannot publish or call the model again", async () => {
+  const id = await chain();
+  const discarded = await prepareFloorEventUpdate(
+    3,
+    id,
+    48000,
+    async () => answer,
+  );
+  expect(discarded).not.toBeNull();
+  expect(await lib.all("event_memberships")).toHaveLength(1);
+  const review = await prepareFloorEvent(
+    5,
+    "另一个事件",
+    200000,
+    async () => answer,
+  );
+  ctx.chat[5].mes = "审阅期间改写正文";
+  await expect(review.confirm(answer)).rejects.toThrow("已改变");
+  expect(await lib.all("event_chains")).toHaveLength(1);
+  expect(await lib.all("event_revisions")).toHaveLength(1);
+});
+test("a valid reply can still be inspected after an in-flight host change but cannot be committed", async () => {
+  const review = await prepareFloorEvent(1, "整天约会", 200000, async () => {
+    ctx.getCurrentChatId = () => "other-chat";
+    return answer;
+  });
+  expect(review.raw).toBe(answer);
+  await expect(review.confirm(answer)).rejects.toThrow("已改变");
+  expect(await lib.all("event_chains")).toHaveLength(0);
+});
+test("explicit rewrite works for an archived fully summarized chain, sends instructions and bodies, then waits for confirmation", async () => {
+  const id = await chain();
+  await setEventArchived(lib, await syncDaily(), id, true);
+  const before = (await eventView(lib, await syncDaily())).cards[0];
+  expect(eventPending(before)).toBe(false);
+  apiSettings.prompts.eventOverview = "合成自定义写法";
+  const output = JSON.stringify({
+    ...JSON.parse(answer),
+    overview: "改写后的核心关系变化",
+    progress: "",
+  });
+  const sender = vi.fn(async (messages) => {
+    const prompt = JSON.stringify(messages);
+    for (const part of [
+      "合成自定义写法",
+      "突出承诺，别逐站罗列",
+      "正文细节1",
+      before.meta.overview!,
+    ])
+      expect(prompt).toContain(part);
+    return output;
+  });
+  const review = await prepareEventRewrite(
+    id,
+    "突出承诺，别逐站罗列",
+    48000,
+    sender,
+  );
+  expect((await eventView(lib, await syncDaily())).cards[0].meta.id).toBe(
+    before.meta.id,
+  );
+  expect(await lib.all("event_revisions")).toHaveLength(1);
+  await review.confirm(review.raw);
+  const after = (await eventView(lib, await syncDaily())).cards[0];
+  expect(after.chain.id).toBe(id);
+  expect(after.chain.archived).toBe(true);
+  expect(after.meta.overview).toBe("改写后的核心关系变化");
+  expect(after.members).toEqual(before.members);
+  expect(after.progress).toEqual(before.progress);
+  expect(await lib.all("event_revisions")).toHaveLength(2);
+  expect(sender).toHaveBeenCalledTimes(1);
+});
+test("rewrite without instructions, valid members or sufficient budget does not send a request", async () => {
+  const id = await chain(),
+    sender = vi.fn(async () => answer);
+  await expect(prepareEventRewrite(id, " ", 48000, sender)).rejects.toThrow(
+    "说明",
+  );
+  await expect(prepareEventRewrite(id, "简洁", 1, sender)).rejects.toThrow(
+    "预算",
+  );
+  const empty = await editEvent(lib, await syncDaily(), null, {
+    title: "空链",
+    status: "open",
+    keywords: [],
+  });
+  await expect(
+    prepareEventRewrite(empty, "简洁", 48000, sender),
+  ).rejects.toThrow("没有有效关联摘要");
+  expect(sender).not.toHaveBeenCalled();
 });
 test("overview limit accepts 500 Unicode characters and rejects overlong creation/update without publishing", async () => {
   const atLimit = "核".repeat(499) + "🌸";

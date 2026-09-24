@@ -13,20 +13,16 @@ import ModalMask from "./ModalMask.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import BbsSelect from "./BbsSelect.vue";
 import TableTextField from "./TableTextField.vue";
+import EventResponseReview from "./EventResponseReview.vue";
 import {
   manualEventState,
   floorEventContext,
-  createFloorEvent,
+  prepareFloorEvent,
+  prepareFloorEventUpdate,
+  type EventReview,
   joinFloorEvent,
-  updateEventOverview,
 } from "@/mnemosyne/manual-events";
-import {
-  dailyState,
-  hostScope,
-  hostVersion,
-  syncDaily,
-} from "@/mnemosyne/bridge";
-import { activeLibrary } from "@/mnemosyne/db";
+import { dailyState, hostScope, hostVersion } from "@/mnemosyne/bridge";
 import { settings, jobState } from "@/mnemosyne/jobs";
 import { check } from "@/mnemosyne/model";
 const props = defineProps<{ floor: number; disabled?: boolean }>();
@@ -37,6 +33,14 @@ const menu = ref(false),
 const busy = ref(false),
   feedback = ref<{ title: string; message: string } | null>(null),
   confirmNew = ref(false);
+const review = shallowRef<EventReview | null>(null),
+  reviewError = ref("");
+function cancelReview() {
+  const owned = !!review.value;
+  review.value = null;
+  reviewError.value = "";
+  if (owned && !busy.value) manualEventState.busy = false;
+}
 const acknowledge = ref<HTMLButtonElement | null>(null);
 function showFeedback(message: string, failed = false) {
   feedback.value = { title: failed ? "操作未完成" : "操作完成", message };
@@ -58,6 +62,7 @@ watch(
     closeMenu();
     confirmNew.value = false;
     feedback.value = null;
+    cancelReview();
   },
 );
 const blocked = computed(
@@ -169,6 +174,7 @@ watch(blocked, (value) => {
 onBeforeUnmount(() => {
   ticket++;
   closeMenu();
+  cancelReview();
 });
 async function open(kind: "new" | "join") {
   const run = ++ticket;
@@ -198,7 +204,6 @@ async function open(kind: "new" | "join") {
 async function apply(create: boolean, update: boolean) {
   if (busy.value || jobState.busy || manualEventState.busy) return;
   const run = ++ticket;
-  let joined = false;
   busy.value = true;
   manualEventState.busy = true;
   feedback.value = null;
@@ -208,46 +213,56 @@ async function apply(create: boolean, update: boolean) {
       openedScope === hostScope() && openedHost === hostVersion(),
       "聊天或楼层已改变，请重新打开",
     );
-    if (create)
-      await createFloorEvent(props.floor, intent.value, settings.maxChars);
-    else {
-      await joinFloorEvent(props.floor, selected.value);
-      joined = true;
-      if (update) {
-        const view = await syncDaily(),
-          lib = await activeLibrary(),
-          host = hostVersion(),
-          generation = dailyState.generation;
-        await updateEventOverview(
-          lib,
-          view,
-          selected.value,
-          settings.maxChars,
-          undefined,
-          () => host === hostVersion() && generation === dailyState.generation,
-        );
-      }
-    }
+    const result = create
+      ? await prepareFloorEvent(props.floor, intent.value, settings.maxChars)
+      : update
+        ? await prepareFloorEventUpdate(
+            props.floor,
+            selected.value,
+            settings.maxChars,
+          )
+        : (await joinFloorEvent(props.floor, selected.value), null);
     if (run === ticket && openedScope === hostScope()) {
-      showFeedback(
-        update || create
-          ? "事件已保存"
-          : "本楼已在事件链中，未调用模型更新概要",
-      );
       screen.value = "";
+      if (result) {
+        reviewError.value = "";
+        review.value = result;
+      } else
+        showFeedback(
+          update
+            ? "本楼已在事件链中，没有待更新内容，未调用模型"
+            : "本楼已在事件链中，未调用模型更新概要",
+        );
     }
   } catch (e) {
     if (run === ticket && openedScope === hostScope()) {
-      showFeedback(
-        (joined ? "本楼已入库，概要更新未完成。\n" : "") +
-          String((e as Error).message),
-        true,
-      );
+      showFeedback(String((e as Error).message), true);
       openedHost = hostVersion();
     }
   } finally {
     busy.value = false;
-    manualEventState.busy = false;
+    manualEventState.busy = !!review.value;
+  }
+}
+async function saveReviewed(text: string) {
+  if (busy.value || !review.value) return;
+  const result = review.value,
+    run = ticket;
+  const live = () =>
+    run === ticket && review.value === result && openedScope === hostScope();
+  busy.value = true;
+  reviewError.value = "";
+  try {
+    await result.confirm(text, live);
+    if (live()) {
+      review.value = null;
+      showFeedback("事件已保存");
+    }
+  } catch (error) {
+    if (live()) reviewError.value = (error as Error).message;
+  } finally {
+    busy.value = false;
+    manualEventState.busy = !!review.value;
   }
 }
 </script>
@@ -317,7 +332,7 @@ async function apply(create: boolean, update: boolean) {
           <template v-else
             ><p>
               立即更新会调用一次摘要
-              API，发送该链全部有效成员，为所有待更新内容生成概要。仅入库不调用模型；已经关联的本楼不会重复写入。
+              API，发送该链全部有效成员及本楼，为所有待更新内容生成概要；审阅确认后才保存本次关联和概要。仅入库不调用模型；已经关联的本楼不会重复写入。
             </p>
             <div class="mn-menu">
               <button
@@ -357,8 +372,16 @@ async function apply(create: boolean, update: boolean) {
       confirm-text="确认发送"
       @confirm="apply(true, true)"
       >发送本次摘要所需上下文、本楼正文和你的说明，调用一次 API
-      创建事件链，可能产生费用。是否继续？</ConfirmDialog
+      生成待审阅内容，可能产生费用。返回后可编辑，确认才会创建事件链。是否继续？</ConfirmDialog
     >
+    <EventResponseReview
+      v-if="review"
+      :review="review"
+      :busy="busy"
+      :save-error="reviewError"
+      @cancel="cancelReview"
+      @confirm="saveReviewed"
+    />
     <ModalMask :open="!!feedback" top-layer>
       <section
         class="mn-dialog mn-event-feedback"

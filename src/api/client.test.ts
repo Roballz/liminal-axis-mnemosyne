@@ -3,7 +3,7 @@ import type { ApiChannel } from '@/api/settings';
 import * as context from '@/st/context';
 import type { STContext } from '@/st/context';
 import { RESUMMARY_THINKING_CHECKLIST, RESUMMARY_THINKING_PREFILL } from '@/memory/prompts';
-import { buildRequestBody, requestCompletion } from './client';
+import { buildRequestBody, requestCompletion, requestViaMainApi } from './client';
 
 const channel: ApiChannel = {
   id: 'ch1',
@@ -124,5 +124,36 @@ describe('visible compression audit transport', () => {
     expect(body.messages[0]).toEqual(messages[0]);
     expect(body.messages).toContainEqual({ role: 'system', content: RESUMMARY_THINKING_CHECKLIST });
     expect(messages).toHaveLength(4);
+  });
+});
+
+
+describe('event response review transport', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  const messages = [{ role: 'user' as const, content: 'synthetic event only' }];
+  it.each([false, true])('retains malformed/empty response text with stream=%s and does not weaken default empty checks', async stream => {
+    vi.spyOn(context, 'getContext').mockReturnValue({ getRequestHeaders: () => ({}) } as STContext);
+    let raw = '  {"title":"unfinished';
+    vi.stubGlobal('fetch', vi.fn(async () => stream
+      // Deliberately no final newline: the last delta must not be discarded.
+      ? new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: raw } }] })}`)
+      : Response.json({ choices: [{ message: { content: raw } }] })));
+    expect(await requestCompletion({ ...channel, stream }, messages, { reviewResponse: true })).toBe(raw);
+    raw = '  ';
+    expect(await requestCompletion({ ...channel, stream }, messages, { reviewResponse: true })).toBe(raw);
+    await expect(requestCompletion({ ...channel, stream }, messages)).rejects.toThrow('空内容');
+  });
+  it('main API review retains empty text while default callers still reject it', async () => {
+    const generateRaw = vi.fn(async () => '');
+    vi.spyOn(context, 'getContext').mockReturnValue({ generateRaw } as unknown as STContext);
+    expect(await requestViaMainApi(messages, { reviewResponse: true })).toBe('');
+    await expect(requestViaMainApi(messages)).rejects.toThrow('空内容');
+    generateRaw.mockResolvedValue('  invalid  ');
+    expect(await requestViaMainApi(messages, { reviewResponse: true })).toBe('  invalid  ');
+  });
+  it('review does not disguise HTTP failure as a successful empty model response', async () => {
+    vi.spyOn(context, 'getContext').mockReturnValue({ getRequestHeaders: () => ({}) } as STContext);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('synthetic outage', { status: 503 })));
+    await expect(requestCompletion(channel, messages, { reviewResponse: true })).rejects.toThrow('503');
   });
 });

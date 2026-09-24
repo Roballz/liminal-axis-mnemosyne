@@ -13,7 +13,7 @@ chatMetadata:{},characters:[{name:'Synthetic',avatar:'synthetic.png'}],character
 getCurrentChatId:()=> 'synthetic-browser-smoke',saveChat:async()=>{},saveMetadata:async()=>{},saveMetadataDebounced:()=>{},
 eventTypes:{},eventSource:{on:()=>{},off:()=>{}},setExtensionPrompt:()=>{}};
 window.SillyTavern={getContext:()=>ctx};window.__smoke={ui,ctx};
-window.__smoke.mountFloor=async el=>{const Floor=(await import('/src/components/FloorPanel.vue')).default;createApp(Floor,{floor:1,sig:{tick:0}}).mount(el);};
+window.__smoke.mountFloor=async el=>{const Floor=(await import('/src/components/FloorPanel.vue')).default;const app=createApp(Floor,{floor:1,sig:{tick:0}});app.mount(el);return app;};
 bindDaily();const view=await syncDaily();await editEvent(await activeLibrary(),view,null,{title:'玉佩归还',status:'open',keywords:['约定']},{memory:view.memories[0].id,active:true,kind:'progress'});
 const transactions=[];const original=Library.prototype.transaction;Library.prototype.transaction=function(stores,...args){transactions.push([...stores]);return original.call(this,stores,...args)};window.__smoke.transactions=transactions;
 ui.open=true;ui.activePage='archive';ui.navTapClose=false;createApp(App).mount('#app');window.__smoke.ready=true;

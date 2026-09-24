@@ -204,15 +204,16 @@ try {
     window.__smoke.calls = [];
     window.__smoke.ctx.name1 = "User";
     window.__smoke.ctx.name2 = "Synthetic";
+    window.__smoke.eventReply = JSON.stringify({
+      title: "一日约会",
+      status: "open",
+      keywords: ["约会"],
+      overview: "早餐、花灯与灯会是一日约会的整体。",
+      progress: "约会开始。",
+    });
     window.__smoke.ctx.generateRaw = async ({ prompt }) => {
       window.__smoke.calls.push(prompt);
-      return JSON.stringify({
-        title: "一日约会",
-        status: "open",
-        keywords: ["约会"],
-        overview: "早餐、花灯与灯会是一日约会的整体。",
-        progress: "约会开始。",
-      });
+      return window.__smoke.eventReply;
     };
   });
   const floor = page.locator("#synthetic-floor");
@@ -363,6 +364,142 @@ try {
     ).includes(custom),
     "saved UI prompt reaches the event request",
   );
+  const review = page.getByRole("dialog", {
+    name: "审阅事件返回",
+    exact: true,
+  });
+  await review.waitFor();
+  const countEvents = () =>
+    page.evaluate(async () => {
+      const lib = await (await import("/src/mnemosyne/db.ts")).activeLibrary();
+      return (await lib.all("event_chains")).length;
+    });
+  assert.equal(await countEvents(), 1, "valid generation remains uncommitted");
+  assert.equal(
+    await page.evaluate(async () => {
+      const el = document.createElement("div");
+      const inactive = await window.__smoke.mountFloor(el);
+      inactive.unmount();
+      return (await import("/src/mnemosyne/manual-events.ts")).manualEventState
+        .busy;
+    }),
+    true,
+    "unmounting another floor cannot release the active review lock",
+  );
+  assert.equal(
+    await review.getByRole("button", { name: "确认写入" }).isEnabled(),
+    true,
+  );
+  await page.mouse.click(5, 5);
+  await page.keyboard.press("Escape");
+  assert.equal(
+    await review.isVisible(),
+    true,
+    "review is not lost by outside tap or Escape",
+  );
+  await review.getByRole("button", { name: "取消", exact: true }).click();
+  await review.waitFor({ state: "hidden" });
+  assert.equal(await countEvents(), 1, "cancel does not save");
+  async function generateForReview(raw) {
+    await page.evaluate((value) => {
+      window.__smoke.eventReply = value;
+    }, raw);
+    await trigger.click();
+    await page
+      .getByRole("menuitem", { name: "新建事件链", exact: true })
+      .click();
+    const form = page.getByRole("dialog", { name: "新建事件链", exact: true });
+    await form.getByLabel("事件链说明", { exact: true }).fill("整天约会");
+    await form.getByRole("button", { name: "新建", exact: true }).click();
+    await confirm.getByRole("button", { name: "确认发送" }).click();
+    await review.waitFor();
+  }
+  await generateForReview("");
+  await review
+    .getByRole("status")
+    .getByText(/返回正文为空/)
+    .waitFor();
+  assert.equal(
+    await review.getByRole("button", { name: "确认写入" }).isDisabled(),
+    true,
+  );
+  await review.getByRole("button", { name: "取消", exact: true }).click();
+  await review.waitFor({ state: "hidden" });
+  const truncated = '{"title":"一日约会",\n"overview":"未闭合的概要';
+  await generateForReview(truncated);
+  await review
+    .getByRole("status")
+    .getByText(/疑似输出截断/)
+    .waitFor();
+  await review.locator("summary").filter({ hasText: "AI 返回正文" }).click();
+  assert.equal(
+    await review.getByLabel("AI 原始返回", { exact: true }).textContent(),
+    truncated,
+  );
+  await review.locator("summary").filter({ hasText: "AI 返回正文" }).click();
+  const editor = review.getByLabel("待保存事件 JSON", { exact: true });
+  const corrected = {
+    title: "一日约会",
+    status: "open",
+    keywords: ["约会"],
+    overview: "早餐、花灯与灯会是一日约会的整体。",
+    progress: "约会开始。",
+  };
+  await editor.fill(
+    JSON.stringify({ ...corrected, keywords: "错误类型" }, null, 2),
+  );
+  await review
+    .getByRole("status")
+    .getByText(/keywords（关键词）必须是文本数组/)
+    .waitFor();
+  assert.equal(
+    await review.getByRole("button", { name: "确认写入" }).isDisabled(),
+    true,
+  );
+  assert.equal(await countEvents(), 1, "invalid review never writes");
+  await editor.evaluate((el) => el.blur());
+  await review.locator(".mn-dialog-body").evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await page.screenshot({
+    path: "/tmp/w01-event-review-invalid.png",
+    fullPage: true,
+  });
+  await editor.fill(JSON.stringify(corrected, null, 2));
+  await review
+    .getByRole("status")
+    .getByText("格式通过，等待确认", { exact: true })
+    .waitFor();
+  const reviewColors = await review.evaluate((el) =>
+    [...el.querySelectorAll("footer button")].map(
+      (b) => getComputedStyle(b).backgroundColor,
+    ),
+  );
+  assert.notEqual(
+    reviewColors[0],
+    reviewColors[1],
+    "review cancellation stays neutral",
+  );
+  const panel = await review.boundingBox();
+  assert.ok(
+    panel.x >= 0 &&
+      panel.x + panel.width <= 390 &&
+      panel.y + panel.height <= 844,
+    "review fits phone viewport",
+  );
+  await editor.evaluate((el) => el.blur());
+  await page.screenshot({
+    path: "/tmp/w01-event-review-valid.png",
+    fullPage: true,
+  });
+  await review.getByRole("button", { name: "确认写入", exact: true }).click();
+  await review.waitFor({ state: "hidden" });
+  assert.equal(await countEvents(), 2, "one corrected event committed");
+  assert.equal(
+    await page.evaluate(() => window.__smoke.calls.length),
+    3,
+    "editing and confirming do not call the API",
+  );
   const success = page.getByRole("alertdialog", { name: "操作完成" });
   await success.getByText("事件已保存", { exact: true }).waitFor();
   assert.equal(await success.locator("button").count(), 1);
@@ -388,7 +525,7 @@ try {
   );
   await dialog.getByRole("button", { name: "仅入库", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
-  assert.equal(await page.evaluate(() => window.__smoke.calls.length), 1);
+  assert.equal(await page.evaluate(() => window.__smoke.calls.length), 3);
   await success
     .getByText("本楼已在事件链中，未调用模型更新概要", { exact: true })
     .waitFor();
@@ -466,8 +603,86 @@ try {
     path: "/tmp/w01-event-archive-collapsed.png",
     fullPage: true,
   });
+  await eventTitle.click({ button: "right" });
+  const archiveButtonBox = await archiveAction
+    .getByRole("button", { name: "取消归档", exact: true })
+    .boundingBox();
+  const rewriteButtonBox = await archiveAction
+    .getByRole("button", { name: "重写概要", exact: true })
+    .boundingBox();
+  assert.ok(
+    rewriteButtonBox.y > archiveButtonBox.y,
+    "rewrite appears below archive action",
+  );
+  await archiveAction
+    .getByRole("button", { name: "重写概要", exact: true })
+    .click();
+  await archiveAction.waitFor({ state: "hidden" });
+  const rewriteForm = page.getByRole("dialog", {
+    name: "重写概要",
+    exact: true,
+  });
+  assert.equal(
+    await rewriteForm
+      .getByRole("button", { name: "重写", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await rewriteForm
+    .getByLabel("概要改写要求", { exact: true })
+    .fill("突出两人的承诺，不要逐站罗列行程");
+  await page.screenshot({
+    path: "/tmp/w01-event-rewrite-instructions.png",
+    fullPage: true,
+  });
+  await rewriteForm.getByRole("button", { name: "重写", exact: true }).click();
+  const rewriteConfirm = page.getByRole("dialog", {
+    name: "确认重写概要",
+    exact: true,
+  });
+  await rewriteConfirm
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
+  await rewriteConfirm.waitFor({ state: "hidden" });
+  assert.equal(
+    await page.evaluate(() => window.__smoke.calls.length),
+    3,
+    "rewrite waits for API confirmation",
+  );
+  await page.evaluate(() => {
+    window.__smoke.eventReply = JSON.stringify({
+      title: "一日约会",
+      status: "open",
+      keywords: ["约会", "承诺"],
+      overview: "重写后的概要：两人通过一日约会确认共同承诺。",
+      progress: "",
+    });
+  });
+  await rewriteForm.getByRole("button", { name: "重写", exact: true }).click();
+  await rewriteConfirm
+    .getByRole("button", { name: "确认发送", exact: true })
+    .click();
+  await review.waitFor();
+  assert.ok(
+    (
+      await page.evaluate(() => JSON.stringify(window.__smoke.calls[3]))
+    ).includes("突出两人的承诺"),
+  );
+  assert.equal(await countEvents(), 2, "rewrite never creates another chain");
+  await review.getByRole("button", { name: "确认写入", exact: true }).click();
+  await review.waitFor({ state: "hidden" });
+  assert.equal(await countEvents(), 2);
+  await event.waitFor();
+  assert.equal(
+    (await summary.innerText()).trim(),
+    "一日约会",
+    "rewritten archive stays title-only",
+  );
   await eventTitle.click();
   await event.getByText("事件概要：", { exact: true }).waitFor();
+  await event
+    .getByText("重写后的概要：两人通过一日约会确认共同承诺。", { exact: false })
+    .waitFor();
   await event.getByRole("button", { name: "编辑", exact: true }).click();
   const archivedEditor = page.getByRole("dialog", {
     name: "编辑事件",
@@ -492,8 +707,8 @@ try {
   await event.waitFor();
   assert.equal(
     await page.evaluate(() => window.__smoke.calls.length),
-    1,
-    "archiving never calls the model",
+    4,
+    "only the explicitly confirmed rewrite called the model",
   );
   assert.equal(await event.getByText("最新进展：", { exact: true }).count(), 0);
   await event.getByRole("button", { name: "编辑", exact: true }).click();
@@ -551,7 +766,7 @@ try {
   });
   await member.getByRole("button", { name: "移除关联", exact: true }).click();
   await changed.getByText("进行中 · 0 条关联", { exact: true }).waitFor();
-  assert.equal(await page.evaluate(() => window.__smoke.calls.length), 1);
+  assert.equal(await page.evaluate(() => window.__smoke.calls.length), 4);
   await changed.getByRole("button", { name: "删除", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "删除事件链", exact: true });
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
@@ -598,13 +813,13 @@ try {
     .getByRole("button", { name: "确认调用 API 补表", exact: true })
     .click();
   await dialog.waitFor({ state: "hidden" });
-  assert.equal(await page.evaluate(() => window.__smoke.calls.length), 2);
+  assert.equal(await page.evaluate(() => window.__smoke.calls.length), 5);
   await page.getByRole("button", { name: "批量补表", exact: true }).click();
   await dialog.getByText("#1 → #1 / 共2楼", { exact: true }).waitFor();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: custom prompt save/reset/rehydration and request integration; event long-press archive with movement cancellation, title-only archive list, expanded edit, unarchive, no API calls; clipped floor popup, acknowledged feedback, 500-character limit, event edit/delete, raw table backfill; no page errors or live API calls.",
+    "PASS: valid/empty/truncated event review, cancel, local correction and single commit; archived-chain rewrite instructions, API confirmation and reviewed save; custom prompt save/reset/rehydration and request integration; event long-press archive with movement cancellation, title-only archive list, expanded edit, unarchive, no API calls; clipped floor popup, acknowledged feedback, 500-character limit, event edit/delete, raw table backfill; no page errors or live API calls.",
   );
 } finally {
   await browser?.close();
