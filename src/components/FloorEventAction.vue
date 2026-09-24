@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from "vue";
+import {
+  computed,
+  ref,
+  shallowRef,
+  watch,
+  nextTick,
+  onBeforeUnmount,
+} from "vue";
+import { modalHost } from "@/state/ui";
 import Icon from "./Icon.vue";
 import ModalMask from "./ModalMask.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
@@ -39,16 +47,123 @@ watch(
   () => {
     ticket++;
     screen.value = "";
-    menu.value = false;
+    closeMenu();
     confirmNew.value = false;
   },
 );
 const blocked = computed(
   () => props.disabled || busy.value || jobState.busy || manualEventState.busy,
 );
+// The floor lives inside TT's message clipping/stacking contexts. Mount the menu
+// in the shared top-level shadow host; a larger z-index inside the card cannot fix clipping.
+const trigger = ref<HTMLButtonElement | null>(null);
+const menuElement = ref<HTMLElement | null>(null);
+const menuStyle = ref<Record<string, string>>({});
+function closeMenu(restoreFocus = false) {
+  menu.value = false;
+  document.removeEventListener("pointerdown", outsideMenu, true);
+  document.removeEventListener("keydown", menuKeydown, true);
+  document.removeEventListener("scroll", viewportChanged, true);
+  window.removeEventListener("resize", viewportChanged);
+  window.visualViewport?.removeEventListener("resize", viewportChanged);
+  window.visualViewport?.removeEventListener("scroll", viewportChanged);
+  if (restoreFocus && trigger.value?.isConnected)
+    trigger.value.focus({ preventScroll: true });
+}
+function outsideMenu(event: PointerEvent) {
+  const path = event.composedPath();
+  if (!path.includes(trigger.value!) && !path.includes(menuElement.value!))
+    closeMenu();
+}
+function viewportChanged(event: Event) {
+  if (event.composedPath().includes(menuElement.value!)) return;
+  closeMenu();
+}
+function menuKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeMenu(true);
+  } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const buttons = [
+      ...(menuElement.value?.querySelectorAll<HTMLButtonElement>("button") ??
+        []),
+    ];
+    const index = buttons.findIndex((button) =>
+      event.composedPath().includes(button),
+    );
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? buttons.length - 1
+          : (index + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) %
+            buttons.length;
+    buttons[next]?.focus({ preventScroll: true });
+  } else if (event.key === "Tab") closeMenu();
+}
+async function toggleMenu() {
+  if (menu.value) {
+    closeMenu(true);
+    return;
+  }
+  if (blocked.value) return;
+  if (!modalHost.value) {
+    error.value = "界面尚未就绪，请稍后重试";
+    return;
+  }
+  const anchor = trigger.value!.getBoundingClientRect();
+  const viewport = window.visualViewport;
+  const left = (viewport?.offsetLeft ?? 0) + 8,
+    top = (viewport?.offsetTop ?? 0) + 8;
+  const right = left + (viewport?.width ?? window.innerWidth) - 16;
+  const bottom = top + (viewport?.height ?? window.innerHeight) - 16;
+  menuStyle.value = {
+    width: `${Math.min(208, right - left)}px`,
+    visibility: "hidden",
+  };
+  menu.value = true;
+  await nextTick();
+  if (!menu.value || !menuElement.value) return;
+  const rect = menuElement.value.getBoundingClientRect();
+  const below = bottom - anchor.bottom - 6,
+    above = anchor.top - top - 6;
+  const upward = below < rect.height && above > below;
+  const height = Math.min(
+    rect.height,
+    Math.max(44, upward ? above : below),
+    bottom - top,
+  );
+  menuStyle.value = {
+    width: `${rect.width}px`,
+    maxHeight: `${height}px`,
+    left: `${Math.max(left, Math.min(anchor.right - rect.width, right - rect.width))}px`,
+    top: `${Math.max(top, Math.min(upward ? anchor.top - height - 6 : anchor.bottom + 6, bottom - height))}px`,
+  };
+  document.addEventListener("pointerdown", outsideMenu, true);
+  document.addEventListener("keydown", menuKeydown, true);
+  document.addEventListener("scroll", viewportChanged, true);
+  window.addEventListener("resize", viewportChanged);
+  window.visualViewport?.addEventListener("resize", viewportChanged);
+  window.visualViewport?.addEventListener("scroll", viewportChanged);
+  await nextTick(); // The measured menu must be visible before it can receive focus.
+  if (menu.value)
+    menuElement.value
+      ?.querySelector<HTMLButtonElement>("button")
+      ?.focus({ preventScroll: true });
+}
+watch(blocked, (value) => {
+  if (value) closeMenu();
+});
+onBeforeUnmount(() => {
+  ticket++;
+  closeMenu();
+});
 async function open(kind: "new" | "join") {
   const run = ++ticket;
-  menu.value = false;
+  closeMenu();
   error.value = "";
   notice.value = "";
   busy.value = true;
@@ -115,18 +230,35 @@ async function apply(create: boolean, update: boolean) {
 <template>
   <span class="mn-floor-event" @click.stop>
     <button
+      ref="trigger"
       class="bbs-btn bbs-btn-sm bbs-btn-primary"
+      aria-haspopup="menu"
+      :aria-expanded="menu"
       :disabled="blocked"
       title="添加事件链"
       aria-label="添加事件链"
-      @click="menu = !menu"
+      @click="toggleMenu"
     >
       <Icon name="events" :size="14" />
     </button>
-    <span v-if="menu" class="mn-floor-menu" role="menu">
-      <button role="menuitem" @click="open('new')">新建事件链</button>
-      <button role="menuitem" @click="open('join')">加入已有链</button>
-    </span>
+    <Teleport v-if="modalHost" :to="modalHost">
+      <div
+        v-if="menu"
+        ref="menuElement"
+        class="mn-floor-menu"
+        role="menu"
+        aria-label="事件链操作"
+        :style="menuStyle"
+        @click.stop
+      >
+        <button role="menuitem" @click="open('new')">
+          <Icon name="plus" :size="15" />新建事件链
+        </button>
+        <button role="menuitem" @click="open('join')">
+          <Icon name="events" :size="15" />加入已有链
+        </button>
+      </div>
+    </Teleport>
     <small v-if="notice" role="status">{{ notice }}</small>
     <small v-if="error && !screen" role="alert">{{ error }}</small>
     <ModalMask :open="!!screen" @close="!busy && (screen = '')">
@@ -169,6 +301,7 @@ async function apply(create: boolean, update: boolean) {
               <button
                 type="button"
                 :disabled="busy"
+                class="mn-primary"
                 @click="apply(false, true)"
               >
                 立刻更新概要</button
@@ -187,6 +320,7 @@ async function apply(create: boolean, update: boolean) {
           <button type="button" :disabled="busy" @click="screen = ''">
             取消</button
           ><button
+            class="mn-primary"
             v-if="screen !== 'mode'"
             :disabled="busy || (screen === 'new' ? !intent.trim() : !selected)"
           >
@@ -212,27 +346,40 @@ async function apply(create: boolean, update: boolean) {
   display: inline-block;
 }
 .mn-floor-menu {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  min-width: 140px;
-  z-index: 20;
+  position: fixed;
+  z-index: 10003;
+  box-sizing: border-box;
   padding: 6px;
-  border: 1px solid var(--bbs-line);
-  border-radius: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--bbs-line-strong);
+  border-radius: 12px;
   background: var(--bbs-surface);
+  color: var(--bbs-ink);
   box-shadow: var(--bbs-shadow);
 }
 .mn-floor-menu button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
+  min-height: 44px;
   text-align: left;
-  padding: 10px;
+  padding: 10px 12px;
   border: 0;
-  border-radius: 6px;
-  color: var(--bbs-accent);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 14px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.mn-floor-menu button:hover,
+.mn-floor-menu button:focus-visible {
   background: var(--bbs-accent-soft);
-  margin: 3px 0;
+  color: var(--bbs-accent);
+  outline: 2px solid var(--bbs-accent);
+  outline-offset: -2px;
 }
 .mn-floor-event small {
   font-size: 11px;

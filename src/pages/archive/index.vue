@@ -169,6 +169,7 @@ async function copyKnowledge() {
         >分叉点：继承开头多少条消息<input v-model.number="prefix" type="number" min="0" step="1" :max="selected?.suggested" :disabled="busy || !selected"
       /></label>
       <button
+        class="mn-primary"
         :disabled="busy || loadingChoices || !selected || !Number.isInteger(prefix) || prefix < 0 || prefix > selected.suggested"
         @click="
           run(async () => {

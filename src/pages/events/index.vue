@@ -168,7 +168,11 @@ onBeforeUnmount(() => {
         @click="jobState.busy ? stopDailyJob() : run(batch)"
       >
         {{ jobState.busy ? "停止" : "批量整理" }}</button
-      ><button :disabled="!view || busy || jobState.busy" @click="edit(null)">
+      ><button
+        class="mn-primary"
+        :disabled="!view || busy || jobState.busy"
+        @click="edit(null)"
+      >
         新建事件
       </button>
     </div>
@@ -247,6 +251,7 @@ onBeforeUnmount(() => {
         请求不代表另开一套召回注入。
       </p>
       <button
+        class="mn-primary"
         @click="
           run(async () => {
             await saveDailySettings();
@@ -310,19 +315,22 @@ onBeforeUnmount(() => {
           :key="member.id"
           class="mn-card"
         >
-          <p>{{ text(member.memory).slice(0, 100) }}</p>
-          <div class="mn-member-detail">
-            <details>
-              <summary>完整摘要</summary>
-              <p class="mn-pre">{{ text(member.memory) }}</p>
-            </details>
-            <button
-              :disabled="busy || jobState.busy"
-              @click="run(() => unlink(card, member.memory))"
-            >
-              移除关联
-            </button>
-          </div>
+          <p class="mn-member-preview">
+            {{ text(member.memory).slice(0, 100) }}
+          </p>
+          <details class="mn-member-detail">
+            <summary>
+              <span>完整摘要</span>
+              <button
+                class="mn-unlink"
+                :disabled="busy || jobState.busy"
+                @click.stop.prevent="run(() => unlink(card, member.memory))"
+              >
+                移除关联
+              </button>
+            </summary>
+            <p class="mn-pre">{{ text(member.memory) }}</p>
+          </details>
         </article>
         <div class="mn-actions">
           <button
@@ -369,7 +377,9 @@ onBeforeUnmount(() => {
         <footer>
           <button type="button" :disabled="busy" @click="editing = false">
             取消</button
-          ><button :disabled="busy || !title.trim()">保存</button>
+          ><button class="mn-primary" :disabled="busy || !title.trim()">
+            保存
+          </button>
         </footer>
       </form></ModalMask
     >
@@ -414,17 +424,43 @@ onBeforeUnmount(() => {
   background: linear-gradient(to right, var(--bbs-line-strong), transparent);
   margin: 12px 0;
 }
-.mn-member-detail {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  justify-content: space-between;
+.mn-member-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.mn-member-detail details {
-  flex: 1;
+.mn-member-detail {
   min-width: 0;
 }
-.mn-member-detail button {
+.mn-member-detail > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+.mn-member-detail > summary::-webkit-details-marker {
+  display: none;
+}
+.mn-member-detail > summary::before {
+  content: "▸";
+  color: var(--bbs-ink-soft);
+}
+.mn-member-detail[open] > summary::before {
+  content: "▾";
+}
+.mn-page .mn-unlink {
+  margin-left: auto;
   flex-shrink: 0;
+  font-size: 11px;
+  padding: 3px 8px;
+  min-height: 30px;
+  line-height: 1.5;
+  border-radius: 7px;
+  color: var(--bbs-ink-soft);
+}
+.mn-member-detail > .mn-pre {
+  width: 100%;
+  overflow-wrap: anywhere;
 }
 </style>

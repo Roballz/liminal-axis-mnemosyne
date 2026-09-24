@@ -154,7 +154,7 @@ async function submit() {
           @click="stopTableBackfill"
         >
           停止</button
-        ><button v-else :disabled="!choices.some((c) => c.selected)">
+        ><button class="mn-primary" v-else :disabled="!choices.some((c) => c.selected)">
           确认调用 API 补表
         </button>
       </footer>

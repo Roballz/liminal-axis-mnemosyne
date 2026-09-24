@@ -71,10 +71,21 @@ try {
   // Mount the real floor card next to the app with synthetic host data only.
   await page.evaluate(async () => {
     window.__smoke.ui.open = false;
+    window.__smoke.ctx.chat[1].extra.bbs_leaf.text =
+      "合成约会记录：早餐后一起逛街做花灯，晚间取灯继续游览。".repeat(16);
     const el = document.createElement("div");
     el.id = "synthetic-floor";
     document.body.prepend(el);
-    await window.__smoke.mountFloor(el);
+    // Match TT: the floor is in a shadow root beneath a clipping, transformed message.
+    el.style.cssText =
+      "position:fixed;left:0;top:150px;width:100%;height:84px;overflow:hidden;transform:translateZ(0)";
+    const shadow = el.attachShadow({ mode: "open" }),
+      content = document.createElement("div");
+    shadow.append(content);
+    await window.__smoke.mountFloor(content);
+    document.head
+      .querySelectorAll("style")
+      .forEach((style) => shadow.append(style.cloneNode(true)));
     window.__smoke.calls = [];
     window.__smoke.ctx.name1 = "User";
     window.__smoke.ctx.name2 = "Synthetic";
@@ -90,14 +101,105 @@ try {
     };
   });
   const floor = page.locator("#synthetic-floor");
+  await page.locator(".bbs-overlay").waitFor({ state: "hidden" });
+  const trigger = floor.getByRole("button", {
+    name: "添加事件链",
+    exact: true,
+  });
+  const popup = page.getByRole("menu", { name: "事件链操作", exact: true });
+  const assertPopup = async () => {
+    const bounds = await popup.boundingBox();
+    assert.ok(
+      bounds.x >= 7 &&
+        bounds.y >= 7 &&
+        bounds.x + bounds.width <= 391 &&
+        bounds.y + bounds.height <= 845,
+    );
+    assert.equal(await popup.locator("button").count(), 2);
+    assert.equal(
+      await popup.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return el.contains(
+          document.elementFromPoint(r.x + r.width / 2, r.bottom - 15),
+        );
+      }),
+      true,
+      "menu remains hit-testable outside clipped floor",
+    );
+    return bounds;
+  };
+  await trigger.click();
+  const below = await assertPopup(),
+    clipping = await floor.boundingBox();
+  assert.ok(
+    below.y + below.height > clipping.y + clipping.height,
+    "menu escapes message clipping",
+  );
+  await page.keyboard.press("Escape");
+  await popup.waitFor({ state: "hidden" });
+  assert.equal(
+    await trigger.evaluate((el) => el.getRootNode().activeElement === el),
+    true,
+  );
+  await floor.evaluate((el) => {
+    el.style.top = `${window.innerHeight - 110}px`;
+  });
+  await trigger.click();
+  const above = await assertPopup(),
+    anchor = await trigger.boundingBox();
+  assert.ok(
+    above.y + above.height <= anchor.y,
+    "bottom-edge popup opens upward",
+  );
+  await page.keyboard.press("ArrowDown");
+  assert.equal(
+    await popup
+      .getByRole("menuitem", { name: "加入已有链" })
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page.mouse.click(10, 10);
+  await popup.waitFor({ state: "hidden" });
+  await floor.evaluate((el) => {
+    el.style.top = "150px";
+  });
+  for (const theme of ["day", "night"]) {
+    await page.evaluate((theme) => {
+      window.__smoke.ui.theme = theme;
+    }, theme);
+    await trigger.click();
+    await assertPopup();
+    await page.screenshot({
+      path: `/tmp/w01-polish-menu-${theme}.png`,
+      fullPage: true,
+    });
+    await page.keyboard.press("Escape");
+  }
+  await trigger.click();
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await popup.waitFor({ state: "hidden" });
+  await trigger.click();
+  await floor.evaluate((el) => el.dispatchEvent(new Event("scroll")));
+  await popup.waitFor({ state: "hidden" });
+  await page.evaluate(() => {
+    window.__smoke.ui.theme = "day";
+  });
   await floor.getByRole("button", { name: "添加事件链", exact: true }).click();
-  await floor
-    .getByRole("menuitem", { name: "新建事件链", exact: true })
-    .click();
+  await page.getByRole("menuitem", { name: "新建事件链", exact: true }).click();
   let dialog = page.getByRole("dialog", { name: "新建事件链", exact: true });
   await dialog
     .getByLabel("事件链说明", { exact: true })
     .fill("把这一天的约会当成一个整体");
+  const colors = await dialog.evaluate((el) =>
+    [...el.querySelectorAll("footer button")].map(
+      (b) => getComputedStyle(b).backgroundColor,
+    ),
+  );
+  assert.notEqual(
+    colors[0],
+    colors[1],
+    "cancel stays neutral while create is primary",
+  );
   await dialog.getByRole("button", { name: "新建", exact: true }).click();
   assert.equal(await page.evaluate(() => window.__smoke.calls.length), 0);
   const confirm = page.getByRole("dialog", { name: "确认调用摘要 API" });
@@ -105,9 +207,7 @@ try {
   await dialog.waitFor({ state: "hidden" });
   assert.equal(await page.evaluate(() => window.__smoke.calls.length), 1);
   await floor.getByRole("button", { name: "添加事件链", exact: true }).click();
-  await floor
-    .getByRole("menuitem", { name: "加入已有链", exact: true })
-    .click();
+  await page.getByRole("menuitem", { name: "加入已有链", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "加入已有链", exact: true });
   await dialog.getByRole("button", { name: "已有事件链", exact: true }).click();
   await page.getByRole("option", { name: "一日约会", exact: true }).click();
@@ -135,12 +235,36 @@ try {
     .filter({ hasText: "整日约会" });
   await changed.locator(":scope > summary").click();
   await changed.getByText("人工修订概要", { exact: false }).waitFor();
+  await changed.getByText("完整追加史", { exact: true }).click();
+  const member = changed.locator(".mn-member-detail").first();
+  await member.getByText("完整摘要", { exact: true }).click();
+  const widths = await member.evaluate((el) => ({
+    container: el.getBoundingClientRect().width,
+    body: el.querySelector("p").getBoundingClientRect().width,
+    overflow:
+      el.querySelector("p").scrollWidth - el.querySelector("p").clientWidth,
+    button: el.querySelector("button").getBoundingClientRect().width,
+    buttonHeight: el.querySelector("button").getBoundingClientRect().height,
+  }));
+  assert.ok(
+    Math.abs(widths.container - widths.body) < 2,
+    "expanded summary gets full row width",
+  );
+  assert.ok(
+    widths.button < 85 && widths.buttonHeight <= 34,
+    "unlink is a compact secondary action",
+  );
+  const originalText = await member.locator("p").textContent();
+  assert.ok(originalText.length > 300);
   await changed.scrollIntoViewIfNeeded();
   await page.waitForTimeout(250); // settle theme/dialog transitions before visual capture
   await page.screenshot({
     path: "/tmp/w01-manual-events-mobile.png",
     fullPage: true,
   });
+  await member.getByRole("button", { name: "移除关联", exact: true }).click();
+  await changed.getByText("进行中 · 0 条关联", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.__smoke.calls.length), 1);
   await changed.getByRole("button", { name: "删除", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "删除事件链", exact: true });
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
@@ -193,7 +317,7 @@ try {
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: synthetic mobile floor menu, API confirmation, one-call creation, duplicate join with no API, event edit/delete confirmation, disabled-auto table raw backfill and durable last floor; no page errors.",
+    "PASS: synthetic mobile clipped shadow floor popup, edge flip/hit testing, Escape/outside/scroll/resize dismissal, day/night styling, full-width member summary, API confirmation, one-call creation, duplicate join with no API, event edit/delete confirmation, disabled-auto table raw backfill and durable last floor; no page errors.",
   );
 } finally {
   await browser?.close();

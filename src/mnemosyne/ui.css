@@ -472,9 +472,14 @@
     font-size: 19px;
   }
 }
-.mn-page button:not(.mn-card-open):not(.mn-back):not(.bbs-select-trigger):not(.mn-more),
-.mn-dialog button:not(.bbs-select-trigger):not(.mn-resize) {
-  background: var(--bbs-accent);
-  color: var(--bbs-accent-ink);
-  border-color: transparent;
+/* Secondary actions stay quieter than creation/commit buttons. */
+.mn-page button:not(:disabled):not(.mn-primary):not(.mn-card-open):not(.mn-back):not(.mn-more):hover,
+.mn-dialog button:not(:disabled):not(.mn-primary):not(.mn-resize):hover {
+  background: var(--bbs-surface-2);
+  border-color: var(--bbs-line-strong);
+}
+.mn-page button:focus-visible,
+.mn-dialog button:focus-visible {
+  outline: 2px solid var(--bbs-accent);
+  outline-offset: 2px;
 }
