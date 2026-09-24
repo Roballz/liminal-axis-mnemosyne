@@ -291,6 +291,7 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
         await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2, overview: patch.overview ?? existing?.meta.overview ?? existing?.progress.map(p => p.text).join('\n') ?? '', summarized: patch.summarized ?? existing?.meta.summarized ?? existing?.progress.flatMap(p => p.memories) ?? [], title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: patch.confirmOverview ? patch.summarized ?? [] : existing?.meta.refs ?? [], created: Date.now() } as EventRevision);
         if (member)
             await tx.add('event_memberships', { ...row('link'), ...base, ...member, locked: true, origin: 'manual' } as Membership);
+        check(guard(), '聊天已改变，编辑未提交');
         await tx.put('branches', branch);
         return key;
     });

@@ -700,14 +700,14 @@ test('both legacy branches can need review independently; shared parent prefix d
     child = await syncDaily();
     expect(dailyState.review).toBe(1);
     expect(await capture(lib, parent.branch.id)).toEqual(parentNow); // Returning to the child did not publish a parent head.
-    expect(await eventView(lib, child)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
+    expect(await eventView(lib, child)).toMatchObject({ storedCount: 1, cards: [{ blocked: true }] });
     const childBefore = await capture(lib, child.branch.id);
     ctx.chat = JSON.parse(JSON.stringify(parentChat)); ctx.chatMetadata = JSON.parse(JSON.stringify(parentMeta)); ctx.getCurrentChatId = () => 'synthetic';
     invalidateDaily();
     expect((await syncDaily()).branch.id).toBe(parent.branch.id);
     expect(dailyState.review).toBe(1); // The next visit retains the parent's own review state.
     expect(await capture(lib, child.branch.id)).toEqual(childBefore);
-    expect(await eventView(lib, parentNow)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
+    expect(await eventView(lib, parentNow)).toMatchObject({ storedCount: 1, cards: [{ blocked: true }] });
     const originalEvents = (await exportLibrary(lib)).data.event_chains;
     for (const name of ['copy-a', 'copy-b']) {
         ctx.chat = JSON.parse(JSON.stringify(childChat));

@@ -149,7 +149,7 @@ function trapFocus(event: KeyboardEvent) {
   font-size: 13px;
   color: var(--bbs-ink-soft);
 }
-.mn-event-review pre {
+.mn-event-review :deep(pre) {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: 12px/1.7 var(--bbs-font-mono);

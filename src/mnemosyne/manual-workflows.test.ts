@@ -8,7 +8,7 @@ import type { STContext } from "@/st/context";
 import { apiSettings } from "@/api/settings";
 import { buildEventInstruction, EVENT_OVERVIEW_PROMPT } from "./event-prompts";
 import { eventResponseError } from "./event-response";
-import { capture } from "./canonical";
+import { capture, statuses } from "./canonical";
 import { eventView, editEvent, deleteEvent, setEventArchived } from "./events";
 import {
   commitManualEvent,
@@ -562,7 +562,7 @@ test("bad model output and a switched chat leave overview pending", async () => 
     "状态",
   );
 });
-test("manual overview edits retain history; removing membership hides dependent overview; delete removes only selected chain", async () => {
+test("manual overview edits retain history; removing membership retains dependent overview for review; delete removes only selected chain", async () => {
   const id = await chain();
   let view = await syncDaily();
   const other = await editEvent(lib, view, null, {
@@ -591,7 +591,8 @@ test("manual overview edits retain history; removing membership hides dependent 
   expect(
     (await eventView(lib, view)).cards.find((c) => c.chain.id === id)!.meta
       .overview,
-  ).toBe("");
+  ).toBe(JSON.parse(answer).overview);
+  expect((await eventView(lib, view)).cards.find(c => c.chain.id === id)!.needsReview).toBe(true);
   await deleteEvent(lib, view, id);
   expect(await lib.all("event_revisions", "owner", id)).toHaveLength(0);
   expect(await lib.all("event_memberships", "owner", id)).toHaveLength(0);
@@ -771,7 +772,7 @@ test("a failed table batch does not undo a previously committed table or advance
     runTableBackfill(
       [
         { table: one.id, start: 0, end: 1 },
-        { table: two.id, start: 0, end: 1 },
+        { table: two.id, start: 2, end: 3 },
       ],
       96000,
       async () => {
@@ -785,4 +786,54 @@ test("a failed table batch does not undo a previously committed table or advance
   const progress = await tableLastFloors(lib, (await syncDaily()).branch);
   expect(progress.floors[one.id]).toBe(1);
   expect(progress.floors[two.id]).toBeUndefined();
+});
+
+test.each(['', '{"customTables":', '{"customTables":[]}'])('joint backfill retains invalid raw output (%s); hand correction commits both tables without another request', async raw => {
+  const one = await table(), two = await table();
+  const before = await syncDaily(), memories = await lib.all('memory_revisions');
+  const sender = vi.fn(async messages => {
+    const user = messages[1].content;
+    expect(user.split('正文细节0').length - 1).toBe(1);
+    expect(user).toContain(one.id); expect(user).toContain(two.id);
+    return raw;
+  });
+  await runTableBackfill([one,two].map(t => ({ table:t.id,start:0,end:1 })), 96000, sender, 2, () => true, async review => {
+    expect(review.raw).toBe(raw); expect(review.validate(raw)).not.toBe('');
+    expect(await lib.all('table_receipts')).toHaveLength(0);
+    const missing = JSON.stringify({ customTables:[{table_id:one.id,add:[{detail:'手工补充'}],update:[]}] });
+    await expect(review.confirm(missing)).rejects.toThrow('完整');
+    expect(await lib.all('custom_table_rows')).toHaveLength(0);
+    const fixed = JSON.stringify({ customTables:[one,two].map(t => ({table_id:t.id,add:[{detail:'手工补充'}],update:[]})) });
+    expect(review.validate(fixed)).toBe(''); await review.confirm(fixed);
+    await expect(review.confirm(fixed)).rejects.toThrow('已经保存');
+    return true;
+  });
+  expect(sender).toHaveBeenCalledTimes(1); expect(await lib.all('table_receipts')).toHaveLength(2); expect(await lib.all('custom_table_rows')).toHaveLength(2);
+  expect(await lib.all('memory_revisions')).toEqual(memories);
+  expect([...await statuses(lib, await capture(lib,before.branch.id))].every(([,s]) => s === 'valid')).toBe(true);
+});
+test('configured shared batches wait for valid confirmation too; cancelling later batch preserves both tables first batch', async () => {
+  const one = await table(), two = await table();
+  const raw = JSON.stringify({customTables:[one,two].map(t => ({table_id:t.id,add:[],update:[]}))});
+  const sender = vi.fn(async () => raw); let reviews = 0;
+  await runTableBackfill([one,two].map(t => ({table:t.id,start:0,end:5})), 96000, sender, 2, () => true, async review => {
+    expect(review.validate(review.raw)).toBe('');
+    if (++reviews === 2) { expect(await lib.all('table_receipts')).toHaveLength(2); return false; }
+    expect(await lib.all('table_receipts')).toHaveLength(0); await review.confirm(review.raw); return true;
+  });
+  expect(sender).toHaveBeenCalledTimes(2);
+  const progress = await tableLastFloors(lib,(await syncDaily()).branch);
+  expect(progress.floors[one.id]).toBe(1); expect(progress.floors[two.id]).toBe(1);
+  await expect(runTableBackfill([{table:one.id,start:0,end:1}],96000,sender,0)).rejects.toThrow('正整数');
+  expect(sender).toHaveBeenCalledTimes(2);
+});
+test('editing a table while reviewing its response rejects the old response without a second API call', async () => {
+  const def = await table(), raw = JSON.stringify({customTables:[{table_id:def.id,add:[],update:[]}]});
+  const sender = vi.fn(async () => raw);
+  await runTableBackfill([{table:def.id,start:0,end:1}],96000,sender,2,()=>true,async review => {
+    const latest = (await readTables(lib,(await syncDaily()).branch))[0].def;
+    await saveTable(lib,await syncDaily(),{...latest,name:'改名的自定义表'});
+    await expect(review.confirm(raw)).rejects.toThrow('迟到'); return false;
+  });
+  expect(sender).toHaveBeenCalledTimes(1); expect(await lib.all('table_receipts')).toHaveLength(0);
 });

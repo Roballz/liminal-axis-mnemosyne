@@ -384,7 +384,7 @@ async function copyKnowledge() {
         </div>
         <div class="mn-actions">
           <button
-            v-if="m.level === 0 && reviewStates.get(m.id) === 'needs_review'"
+            v-if="['needs_review', 'needs_rebuild'].includes(reviewStates.get(m.id) ?? '')"
             :disabled="busy"
             @click="run(() => review(m.id, 'keep'))"
           >
