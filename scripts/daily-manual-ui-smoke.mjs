@@ -203,20 +203,76 @@ try {
   await dialog.getByRole("button", { name: "新建", exact: true }).click();
   assert.equal(await page.evaluate(() => window.__smoke.calls.length), 0);
   const confirm = page.getByRole("dialog", { name: "确认调用摘要 API" });
+  // Budget rejection must remain visible until acknowledged, outside the clipped card.
+  await page.evaluate(async () => {
+    const { settings } = await import("/src/mnemosyne/jobs.ts");
+    window.__smoke.maxChars = settings.maxChars;
+    settings.maxChars = 1;
+  });
+  await confirm.getByRole("button", { name: "确认发送" }).click();
+  const failure = page.getByRole("alertdialog", { name: "操作未完成" });
+  await failure
+    .getByText("事件请求超过字符预算，未发送", { exact: true })
+    .waitFor();
+  assert.equal(await page.evaluate(() => window.__smoke.calls.length), 0);
+  await page.mouse.click(5, 5);
+  await page.keyboard.press("Escape");
+  assert.equal(
+    await failure.isVisible(),
+    true,
+    "feedback needs explicit acknowledgement",
+  );
+  assert.equal(await floor.locator(".mn-floor-event > small").count(), 0);
+  await page.waitForTimeout(250);
+  await page.screenshot({
+    path: "/tmp/w01-event-feedback-error.png",
+    fullPage: true,
+  });
+  await failure.getByRole("button", { name: "确定", exact: true }).click();
+  await failure.waitFor({ state: "hidden" });
+  assert.equal(
+    await dialog.getByLabel("事件链说明", { exact: true }).inputValue(),
+    "把这一天的约会当成一个整体",
+  );
+  await page.evaluate(async () => {
+    const { settings } = await import("/src/mnemosyne/jobs.ts");
+    settings.maxChars = window.__smoke.maxChars;
+  });
+  await dialog.getByRole("button", { name: "新建", exact: true }).click();
   await confirm.getByRole("button", { name: "确认发送" }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(await page.evaluate(() => window.__smoke.calls.length), 1);
+  const success = page.getByRole("alertdialog", { name: "操作完成" });
+  await success.getByText("事件已保存", { exact: true }).waitFor();
+  assert.equal(await success.locator("button").count(), 1);
+  assert.equal(await floor.locator(".mn-floor-event > small").count(), 0);
+  await page.waitForTimeout(250);
+  await page.screenshot({
+    path: "/tmp/w01-event-feedback-success.png",
+    fullPage: true,
+  });
+  await success.getByRole("button", { name: "确定", exact: true }).click();
+  await success.waitFor({ state: "hidden" });
   await floor.getByRole("button", { name: "添加事件链", exact: true }).click();
   await page.getByRole("menuitem", { name: "加入已有链", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "加入已有链", exact: true });
   await dialog.getByRole("button", { name: "已有事件链", exact: true }).click();
   await page.getByRole("option", { name: "一日约会", exact: true }).click();
   await dialog.getByRole("button", { name: "确认", exact: true }).click();
-  await dialog
-    .getByRole("button", { name: "不更新概要（仅入库）", exact: true })
-    .click();
+  assert.equal(
+    await dialog
+      .getByRole("button", { name: "立即更新", exact: true })
+      .isVisible(),
+    true,
+  );
+  await dialog.getByRole("button", { name: "仅入库", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(await page.evaluate(() => window.__smoke.calls.length), 1);
+  await success
+    .getByText("本楼已在事件链中，未调用模型更新概要", { exact: true })
+    .waitFor();
+  await success.getByRole("button", { name: "确定", exact: true }).click();
+  await success.waitFor({ state: "hidden" });
   await page.evaluate(() => {
     document.getElementById("synthetic-floor").style.display = "none";
     window.__smoke.ui.open = true;
@@ -224,9 +280,25 @@ try {
   });
   const event = page.locator(".mn-event-card").filter({ hasText: "一日约会" });
   await event.waitFor();
+  assert.equal(await event.getByText("最新进展：", { exact: true }).count(), 0);
   await event.getByRole("button", { name: "编辑", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "编辑事件", exact: true });
   await dialog.getByLabel("标题", { exact: true }).fill("整日约会");
+  await dialog.getByLabel("事件概要", { exact: true }).fill("核".repeat(501));
+  assert.equal(
+    await dialog
+      .getByRole("button", { name: "保存", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await dialog
+    .getByLabel("事件概要", { exact: true })
+    .fill("核".repeat(499) + "🌸");
+  await dialog.getByText("500 / 500 字", { exact: false }).waitFor();
+  assert.equal(
+    await dialog.getByRole("button", { name: "保存", exact: true }).isEnabled(),
+    true,
+  );
   await dialog.getByLabel("事件概要", { exact: true }).fill("人工修订概要");
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
@@ -317,7 +389,7 @@ try {
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: synthetic mobile clipped shadow floor popup, edge flip/hit testing, Escape/outside/scroll/resize dismissal, day/night styling, full-width member summary, API confirmation, one-call creation, duplicate join with no API, event edit/delete confirmation, disabled-auto table raw backfill and durable last floor; no page errors.",
+    "PASS: synthetic mobile clipped floor popup; acknowledged success/budget-error dialogs with no inline feedback; shortened join labels; no latest-progress card block; Unicode 500-character overview edit limit; full-width member summary; API confirmation, one-call creation, duplicate join with no API, event edit/delete confirmation, raw table backfill and durable last floor; no page errors.",
   );
 } finally {
   await browser?.close();

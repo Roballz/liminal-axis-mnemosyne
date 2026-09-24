@@ -123,6 +123,8 @@ test("manual chain holds three separate floors and joins never call a model or d
   expect(eventPending(card)).toBe(true);
   const sender = vi.fn(async (messages) => {
     const prompt = JSON.stringify(messages);
+    expect(prompt).toContain("不超过500字");
+    expect(prompt).toContain("主动舍弃琐碎小事");
     for (const text of [
       "摘要1",
       "摘要3",
@@ -173,12 +175,104 @@ test("manual create uses native summary materials without changing summaries", a
     const p = JSON.stringify(messages);
     expect(p).toContain("正文细节1");
     expect(p).toContain("把这一天当成一个整体");
+    expect(p).toContain("不超过500字");
+    expect(p).toContain("对人物关系或重要转变有实质影响");
     return answer;
   });
   await createFloorEvent(1, "把这一天当成一个整体", 200000, sender);
   expect(sender).toHaveBeenCalledTimes(1);
   expect(ctx.chat[1].extra!.bbs_leaf).toBe(before);
   expect(await lib.all("event_chains")).toHaveLength(1);
+});
+test("overview limit accepts 500 Unicode characters and rejects overlong creation/update without publishing", async () => {
+  const atLimit = "核".repeat(499) + "🌸";
+  const output = (overview: string) =>
+    JSON.stringify({ ...JSON.parse(answer), overview });
+  const view = await syncDaily();
+  await expect(
+    commitManualEvent(
+      lib,
+      view,
+      null,
+      [view.memories[0].id],
+      output(atLimit + "。"),
+      () => true,
+    ),
+  ).rejects.toThrow("500字");
+  expect(await lib.all("event_chains")).toHaveLength(0);
+  expect(await lib.all("event_revisions")).toHaveLength(0);
+  expect(parseManualEvent(output("  " + atLimit + "  ")).overview).toBe(
+    atLimit,
+  );
+  const id = await commitManualEvent(
+    lib,
+    view,
+    null,
+    [view.memories[0].id],
+    output(atLimit),
+    () => true,
+  );
+  await joinFloorEvent(3, id);
+  const pending = await syncDaily();
+  const before = await lib.all("event_revisions");
+  await expect(
+    updateEventOverview(lib, pending, id, 48000, async () =>
+      output(atLimit + "。"),
+    ),
+  ).rejects.toThrow("500字");
+  expect(await lib.all("event_revisions")).toEqual(before);
+  expect(await lib.all("event_progress")).toHaveLength(1);
+  let card = (await eventView(lib, await syncDaily())).cards[0];
+  expect(card.meta.overview).toBe(atLimit);
+  expect(card.members).toHaveLength(2);
+  expect(eventPending(card)).toBe(true);
+  await updateEventOverview(lib, pending, id, 48000, async () =>
+    output(atLimit),
+  );
+  card = (await eventView(lib, await syncDaily())).cards[0];
+  expect(eventPending(card)).toBe(false);
+  expect(card.meta.overview).toBe(atLimit);
+});
+test("manual overview edits enforce the limit while legacy long overviews still allow membership changes", async () => {
+  const view = await syncDaily();
+  await expect(
+    editEvent(lib, view, null, {
+      title: "过长",
+      status: "open",
+      keywords: [],
+      overview: "字".repeat(501),
+    }),
+  ).rejects.toThrow("500字");
+  const id = await chain();
+  // Simulate a pre-limit imported overview; there is no automatic migration/truncation.
+  const revision = (await lib.all("event_revisions", "owner", id))[0];
+  const legacy = { ...revision, overview: "旧".repeat(700) };
+  await lib.transaction(["event_revisions"], "readwrite", (tx) =>
+    tx.put("event_revisions", legacy),
+  );
+  await joinFloorEvent(3, id);
+  let current = await syncDaily();
+  let card = (await eventView(lib, current)).cards[0];
+  expect(card.meta.overview).toHaveLength(700);
+  await expect(
+    editEvent(lib, current, id, { ...card.meta, overview: "字".repeat(501) }),
+  ).rejects.toThrow("500字");
+  await editEvent(lib, current, id, card.meta, {
+    memory: card.members[1].memory,
+    active: false,
+    kind: "progress",
+  });
+  current = await syncDaily();
+  card = (await eventView(lib, current)).cards[0];
+  expect(card.members).toHaveLength(1);
+  expect(card.meta.overview).toHaveLength(700);
+  await editEvent(lib, current, id, {
+    ...card.meta,
+    overview: "核".repeat(500),
+  });
+  expect(
+    (await eventView(lib, await syncDaily())).cards[0].meta.overview,
+  ).toHaveLength(500);
 });
 test("bad model output and a switched chat leave overview pending", async () => {
   const id = await chain();

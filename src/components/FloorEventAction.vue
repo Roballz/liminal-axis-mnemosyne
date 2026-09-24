@@ -35,9 +35,17 @@ const menu = ref(false),
   intent = ref(""),
   selected = ref("");
 const busy = ref(false),
-  error = ref(""),
-  notice = ref(""),
+  feedback = ref<{ title: string; message: string } | null>(null),
   confirmNew = ref(false);
+const acknowledge = ref<HTMLButtonElement | null>(null);
+function showFeedback(message: string, failed = false) {
+  feedback.value = { title: failed ? "操作未完成" : "操作完成", message };
+}
+watch(feedback, async (value) => {
+  if (!value) return;
+  await nextTick();
+  acknowledge.value?.focus({ preventScroll: true });
+});
 const choices = shallowRef<{ value: string; label: string }[]>([]);
 let openedScope = "",
   openedHost = "",
@@ -49,6 +57,7 @@ watch(
     screen.value = "";
     closeMenu();
     confirmNew.value = false;
+    feedback.value = null;
   },
 );
 const blocked = computed(
@@ -111,7 +120,7 @@ async function toggleMenu() {
   }
   if (blocked.value) return;
   if (!modalHost.value) {
-    error.value = "界面尚未就绪，请稍后重试";
+    showFeedback("界面尚未就绪，请稍后重试", true);
     return;
   }
   const anchor = trigger.value!.getBoundingClientRect();
@@ -164,8 +173,7 @@ onBeforeUnmount(() => {
 async function open(kind: "new" | "join") {
   const run = ++ticket;
   closeMenu();
-  error.value = "";
-  notice.value = "";
+  feedback.value = null;
   busy.value = true;
   openedScope = hostScope();
   openedHost = hostVersion();
@@ -181,16 +189,19 @@ async function open(kind: "new" | "join") {
     intent.value = "";
     screen.value = kind;
   } catch (e) {
-    error.value = String((e as Error).message);
+    if (run === ticket && openedScope === hostScope())
+      showFeedback(String((e as Error).message), true);
   } finally {
     busy.value = false;
   }
 }
 async function apply(create: boolean, update: boolean) {
   if (busy.value || jobState.busy || manualEventState.busy) return;
+  const run = ++ticket;
+  let joined = false;
   busy.value = true;
   manualEventState.busy = true;
-  error.value = "";
+  feedback.value = null;
   confirmNew.value = false;
   try {
     check(
@@ -201,6 +212,7 @@ async function apply(create: boolean, update: boolean) {
       await createFloorEvent(props.floor, intent.value, settings.maxChars);
     else {
       await joinFloorEvent(props.floor, selected.value);
+      joined = true;
       if (update) {
         const view = await syncDaily(),
           lib = await activeLibrary(),
@@ -216,11 +228,23 @@ async function apply(create: boolean, update: boolean) {
         );
       }
     }
-    notice.value = update || create ? "事件已保存" : "已加入事件链，概要待更新";
-    screen.value = "";
+    if (run === ticket && openedScope === hostScope()) {
+      showFeedback(
+        update || create
+          ? "事件已保存"
+          : "本楼已在事件链中，未调用模型更新概要",
+      );
+      screen.value = "";
+    }
   } catch (e) {
-    error.value = String((e as Error).message);
-    openedHost = hostVersion();
+    if (run === ticket && openedScope === hostScope()) {
+      showFeedback(
+        (joined ? "本楼已入库，概要更新未完成。\n" : "") +
+          String((e as Error).message),
+        true,
+      );
+      openedHost = hostVersion();
+    }
   } finally {
     busy.value = false;
     manualEventState.busy = false;
@@ -259,8 +283,6 @@ async function apply(create: boolean, update: boolean) {
         </button>
       </div>
     </Teleport>
-    <small v-if="notice" role="status">{{ notice }}</small>
-    <small v-if="error && !screen" role="alert">{{ error }}</small>
     <ModalMask :open="!!screen" @close="!busy && (screen = '')">
       <form
         class="mn-dialog"
@@ -294,7 +316,7 @@ async function apply(create: boolean, update: boolean) {
           >
           <template v-else
             ><p>
-              立刻更新会调用一次摘要
+              立即更新会调用一次摘要
               API，发送该链全部有效成员，为所有待更新内容生成概要。仅入库不调用模型；已经关联的本楼不会重复写入。
             </p>
             <div class="mn-menu">
@@ -304,17 +326,16 @@ async function apply(create: boolean, update: boolean) {
                 class="mn-primary"
                 @click="apply(false, true)"
               >
-                立刻更新概要</button
+                立即更新</button
               ><button
                 type="button"
                 :disabled="busy"
                 @click="apply(false, false)"
               >
-                不更新概要（仅入库）
+                仅入库
               </button>
             </div></template
           >
-          <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
         </div>
         <footer>
           <button type="button" :disabled="busy" @click="screen = ''">
@@ -338,6 +359,28 @@ async function apply(create: boolean, update: boolean) {
       >发送本次摘要所需上下文、本楼正文和你的说明，调用一次 API
       创建事件链，可能产生费用。是否继续？</ConfirmDialog
     >
+    <ModalMask :open="!!feedback" top-layer>
+      <section
+        class="mn-dialog mn-event-feedback"
+        role="alertdialog"
+        aria-modal="true"
+        :aria-label="feedback?.title"
+        @keydown.esc.stop.prevent
+        @keydown.tab.prevent="acknowledge?.focus()"
+      >
+        <header>
+          <h3>{{ feedback?.title }}</h3>
+        </header>
+        <div class="mn-dialog-body">
+          <p>{{ feedback?.message }}</p>
+        </div>
+        <footer>
+          <button ref="acknowledge" class="mn-primary" @click="feedback = null">
+            确定
+          </button>
+        </footer>
+      </section>
+    </ModalMask>
   </span>
 </template>
 <style scoped>
@@ -381,7 +424,12 @@ async function apply(create: boolean, update: boolean) {
   outline: 2px solid var(--bbs-accent);
   outline-offset: -2px;
 }
-.mn-floor-event small {
-  font-size: 11px;
+.mn-event-feedback {
+  max-width: 380px;
+}
+.mn-event-feedback p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
 }
 </style>

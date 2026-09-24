@@ -215,6 +215,11 @@ export async function commitEventBatch(lib: Library, batch: EventBatch, output: 
         return receipt;
     });
 }
+export const EVENT_OVERVIEW_MAX_CHARS = 500;
+export const eventOverviewLength = (text: string) => Array.from(text.trim()).length;
+export function checkEventOverview(text: string) {
+    check(eventOverviewLength(text) <= EVENT_OVERVIEW_MAX_CHARS, `事件概要不能超过${EVENT_OVERVIEW_MAX_CHARS}字（含标点），未保存；请精简后重试`);
+}
 export async function editEvent(lib: Library, view: CapturedView, eventId: string | null, patch: {
     title: string;
     status: string;
@@ -229,6 +234,9 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
     check(patch.title.trim() && patch.title.length <= 300, '事件标题不能为空或过长');
     const { valid, cards } = await eventView(lib, view);
     const existing = cards.find(c => c.chain.id === eventId);
+    // Membership-only changes must still work for pre-limit overviews, without rewriting them.
+    if (patch.overview !== undefined && (!member || patch.overview !== existing?.meta.overview))
+        checkEventOverview(patch.overview);
     if (eventId)
         check(cards.some(c => c.chain.id === eventId), '事件不属于合法视图');
     if (member)

@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import {
+  computed,
+  onMounted,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
 import ModalMask from "@/components/ModalMask.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import BbsSelect from "@/components/BbsSelect.vue";
@@ -10,6 +17,8 @@ import {
   eventView,
   editEvent,
   deleteEvent,
+  EVENT_OVERVIEW_MAX_CHARS,
+  eventOverviewLength,
   type EventCard,
 } from "@/mnemosyne/events";
 import {
@@ -37,6 +46,7 @@ const editing = ref(false),
   status = ref("open"),
   overview = ref(""),
   keywords = ref("");
+const overviewChars = computed(() => eventOverviewLength(overview.value));
 const removing = shallowRef<EventCard | null>(null);
 const statusOptions = [
   { value: "open", label: "进行中" },
@@ -296,11 +306,8 @@ onBeforeUnmount(() => {
             </button></span
           >
         </div>
-        <hr />
-        <p>
-          <strong>最新进展：</strong>{{ card.progress.at(-1)?.text || "暂无" }}
-        </p>
       </summary>
+      <hr />
       <p class="mn-pre">
         <strong>事件概要：</strong
         >{{ eventOverview(card) || "暂无概要，可加入成员后更新" }}
@@ -368,7 +375,18 @@ onBeforeUnmount(() => {
               :options="statusOptions"
               aria-label="事件状态" /></label
           ><label
-            >概要<TableTextField v-model="overview" label="事件概要" /></label
+            >概要<TableTextField v-model="overview" label="事件概要" />
+            <small
+              :class="{
+                'mn-warning': overviewChars > EVENT_OVERVIEW_MAX_CHARS,
+              }"
+            >
+              {{ overviewChars }} /
+              {{
+                EVENT_OVERVIEW_MAX_CHARS
+              }}
+              字（含标点）。仅记录核心变化及影响关系或转变的重要细节。
+            </small></label
           ><label
             >关键词<input v-model="keywords" placeholder="用逗号或顿号分隔"
           /></label>
@@ -377,7 +395,12 @@ onBeforeUnmount(() => {
         <footer>
           <button type="button" :disabled="busy" @click="editing = false">
             取消</button
-          ><button class="mn-primary" :disabled="busy || !title.trim()">
+          ><button
+            class="mn-primary"
+            :disabled="
+              busy || !title.trim() || overviewChars > EVENT_OVERVIEW_MAX_CHARS
+            "
+          >
             保存
           </button>
         </footer>
