@@ -11,6 +11,7 @@ export interface EventCard {
 export interface EventView {
     cards: EventCard[];
     valid: MemoryRevision[];
+    storedCount: number;
 }
 export async function eventView(lib: Library, view: CapturedView): Promise<EventView> {
     const validStates = await statuses(lib, view);
@@ -62,7 +63,7 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
             if (meta.summarized?.some(id => !memberSet.has(id))) meta = { ...meta, overview: '', summarized: [] };
             cards.push({ chain, meta, members, progress });
         }
-        return { cards, valid };
+        return { cards, valid, storedCount: chains.length };
     });
 }
 export const EVENT_PROMPT = `你只整理事件，不重新生成摘要，不结算物品、人物、变量。

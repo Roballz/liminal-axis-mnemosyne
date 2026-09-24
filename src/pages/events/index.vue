@@ -17,6 +17,7 @@ import {
   hostScope,
   hostVersion,
   dailyState,
+  dailyCurrent,
 } from "@/mnemosyne/bridge";
 import { activeLibrary } from "@/mnemosyne/db";
 import {
@@ -48,6 +49,8 @@ const view = shallowRef<CapturedView | null>(null),
 const error = ref(""),
   notice = ref(""),
   busy = ref(false),
+  loading = ref(false),
+  storedCount = ref(0),
   pages = ref<Record<string, number>>({});
 const editing = ref(false),
   editId = ref<string | null>(null),
@@ -215,7 +218,19 @@ const statusOptions = [
 const statusName = (s: string) =>
   statusOptions.find((o) => o.value === s)?.label ?? s;
 let scope = "",
-  request = 0;
+  request = 0,
+  reloadQueued = false,
+  disposed = false;
+function queueRefresh() {
+  reloadQueued = true;
+  drainRefresh();
+}
+function drainRefresh() {
+  if (disposed || busy.value || loading.value || !reloadQueued) return;
+  reloadQueued = false;
+  void refresh();
+}
+watch(busy, (value) => { if (!value) drainRefresh(); });
 async function run(fn: () => Promise<unknown>) {
   if (busy.value) return;
   busy.value = true;
@@ -229,15 +244,31 @@ async function run(fn: () => Promise<unknown>) {
   }
 }
 async function refresh() {
-  const token = ++request,
-    observed = hostScope();
-  const captured = await syncDaily(),
-    data = await eventView(await activeLibrary(), captured);
-  if (token !== request || observed !== hostScope()) return;
-  view.value = captured;
-  cards.value = data.cards;
-  scope = observed;
+  if (loading.value) { reloadQueued = true; return; }
+  const token = ++request, observed = hostScope();
+  const live = () => !disposed && token === request && observed === hostScope();
+  loading.value = true;
+  error.value = "";
+  try {
+    const captured = await syncDaily(), lib = await activeLibrary();
+    const host = hostVersion(), generation = dailyState.generation;
+    const data = await eventView(lib, captured);
+    if (!live()) return;
+    const valid = await dailyCurrent(captured, host, generation) && lib === await activeLibrary();
+    if (!live()) return;
+    if (!valid || host !== hostVersion() || generation !== dailyState.generation) { reloadQueued = true; return; }
+    view.value = captured;
+    cards.value = data.cards;
+    storedCount.value = data.storedCount;
+    scope = observed;
+  } catch (e) {
+    if (live()) error.value = `事件读取未完成：${(e as Error).message}`;
+  } finally {
+    loading.value = false;
+    drainRefresh();
+  }
 }
+
 function edit(card: EventCard | null) {
   editId.value = card?.chain.id ?? null;
   title.value = card?.meta.title ?? "";
@@ -319,16 +350,24 @@ watch(
     request++;
     view.value = null;
     cards.value = [];
+    storedCount.value = 0;
+    pages.value = {};
+    error.value = "";
+    notice.value = "";
     editing.value = false;
     removing.value = null;
     archiveMenu.value = null;
     archiveMode.value = false;
     resetRewrite();
     cancelPress();
+    queueRefresh();
   },
+  { flush: "sync" },
 );
-onMounted(() => run(refresh));
+onMounted(queueRefresh);
 onBeforeUnmount(() => {
+  disposed = true;
+  reloadQueued = false;
   request++;
   resetRewrite();
   cancelPress();
@@ -343,7 +382,7 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <div class="mn-actions mn-event-toolbar">
-      <button :disabled="busy" @click="run(refresh)">刷新</button
+      <button :disabled="busy || loading" @click="queueRefresh">刷新</button
       ><button
         :disabled="manualEventState.busy"
         @click="jobState.busy ? stopDailyJob() : run(batch)"
@@ -449,7 +488,13 @@ onBeforeUnmount(() => {
       </button>
       <p role="status">{{ notice }}</p>
     </details>
-    <p v-if="!visibleCards.length" class="mn-empty">
+    <p v-if="loading" role="status" class="mn-muted">正在读取当前聊天的事件…</p>
+    <p v-else-if="!view && !error" role="status" class="mn-muted">事件列表尚未读取，请点击刷新。</p>
+    <p v-if="view && storedCount > cards.length" class="mn-warning" role="status">
+      当前分支已保存 {{ storedCount }} 条事件，其中 {{ storedCount - cards.length }} 条因来源或历史视图校验暂未显示。
+      请先导出核心包保留记录，再在档案 / 迁移页查看待审核项的来源差异，无需重复创建事件链。
+    </p>
+    <p v-if="view && !loading && !error && !visibleCards.length && storedCount === cards.length" class="mn-empty">
       {{
         archiveMode
           ? "暂无归档事件。"

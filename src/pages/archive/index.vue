@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { shallowRef, ref, watch, computed } from 'vue';
+import { shallowRef, ref, watch, computed, onBeforeUnmount } from 'vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import {
   dailyState,
@@ -8,15 +8,20 @@ import {
   chooseNewStory,
   confirmFork,
   invalidateDaily,
+  dailyBranch,
+  dailyCurrent,
+  hostScope,
+  hostVersion,
 } from '@/mnemosyne/bridge';
 import { activeLibrary } from '@/mnemosyne/db';
-import { statuses, keepSummary } from '@/mnemosyne/canonical';
+import { capture, statuses, keepSummary } from '@/mnemosyne/canonical';
+import { reviewDifference, type ReviewDifference } from '@/mnemosyne/review-diagnostics';
 import { exportLibrary, restoreLibrary } from '@/mnemosyne/migration';
 import { parseStrictJson } from '@/mnemosyne/json';
 import { regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
 import { copyLegacyKnowledge } from '@/memory/vector/knowledge';
 import { currentVectorDb } from '@/memory/vector/scope';
-import type { CapturedView } from '@/mnemosyne/model';
+import { check, type CapturedView } from '@/mnemosyne/model';
 const prefix = ref(0),
   branch = ref(''),
   error = ref(''),
@@ -50,6 +55,21 @@ watch(branch, () => { prefix.value = selected.value?.suggested ?? 0; });
 const reviewView = shallowRef<CapturedView | null>(null),
   reviewStates = shallowRef(new Map<string, string>());
 const reviewPage = ref(0);
+const pendingMemories = computed(() => reviewView.value?.memories.filter(m => ['needs_review', 'needs_rebuild'].includes(reviewStates.value.get(m.id)!)) ?? []);
+const difference = shallowRef<{ id: string; value: ReviewDifference } | null>(null);
+const roleNames = { user: '用户', assistant: 'AI', system: '系统' };
+let reviewRun = 0, disposed = false;
+let reviewStamp: { host: string; generation: number; scope: string; library: Awaited<ReturnType<typeof activeLibrary>> } | null = null;
+function clearReviews() {
+  reviewRun++;
+  reviewView.value = null;
+  reviewStates.value = new Map();
+  reviewStamp = null;
+  difference.value = null;
+  reviewPage.value = 0;
+}
+watch(() => dailyState.scope, () => { clearReviews(); error.value = ''; notice.value = ''; }, { flush: 'sync' });
+onBeforeUnmount(() => { disposed = true; clearReviews(); });
 async function run(fn: () => Promise<unknown>) {
   busy.value = true;
   error.value = '';
@@ -67,24 +87,47 @@ async function refresh() {
   notice.value = '当前聊天归档已完成。查看摘要请使用原生「摘要」页。';
 }
 async function loadReviews() {
-  const view = await syncDaily(),
-    states = await statuses(await activeLibrary(), view);
-  reviewView.value = {
-    ...view,
-    memories: view.memories.filter((m) => ['needs_review', 'needs_rebuild'].includes(states.get(m.id)!)),
-  };
+  clearReviews();
+  const ticket = reviewRun;
+  const stamp = { host: hostVersion(), generation: dailyState.generation, scope: hostScope(), library: await activeLibrary() };
+  check(!dailyState.pending && !dailyState.conflict, '请等当前聊天归档完成后再读取；本按钮不会触发归档');
+  const branch = await dailyBranch();
+  check(branch, '当前聊天尚未绑定已有档案');
+  const view = await capture(stamp.library, branch.id);
+  const states = await statuses(stamp.library, view);
+  const valid = await dailyCurrent(view, stamp.host, stamp.generation) && stamp.library === await activeLibrary();
+  if (disposed || ticket !== reviewRun) return;
+  check(valid && stamp.host === hostVersion() && stamp.generation === dailyState.generation, '聊天已改变，请重新加载待审核项');
+  reviewView.value = view;
   reviewStates.value = states;
+  reviewStamp = stamp;
   reviewPage.value = 0;
 }
+async function checkedReview() {
+  const view = reviewView.value, stamp = reviewStamp;
+  check(view && stamp, '请先加载待审核项');
+  const valid = await dailyCurrent(view, stamp.host, stamp.generation) && stamp.library === await activeLibrary();
+  const guard = () => !disposed && reviewView.value === view && reviewStamp === stamp && stamp.scope === hostScope() && stamp.host === hostVersion() && stamp.generation === dailyState.generation;
+  check(valid && guard(), '聊天或档案已改变，请重新加载待审核项');
+  return { view, stamp, guard };
+}
+async function inspectReview(id: string) {
+  const { view, stamp, guard } = await checkedReview();
+  const value = await reviewDifference(stamp.library, view, id);
+  const valid = await dailyCurrent(view, stamp.host, stamp.generation) && stamp.library === await activeLibrary();
+  check(valid && guard(), '聊天或档案已改变，请重新加载待审核项');
+  difference.value = { id, value };
+}
 async function review(id: string, action: 'keep' | 'rebuild') {
-  const view = reviewView.value!,
-    memory = view.memories.find((m) => m.id === id)!;
-  if (action === 'keep') await keepSummary(await activeLibrary(), view, id);
+  const { view, stamp, guard } = await checkedReview();
+  const memory = view.memories.find((m) => m.id === id)!;
+  if (action === 'keep') await keepSummary(stamp.library, view, id, guard);
   else if (memory.level) await regenerateHigherSummary(memory.hostId);
   else {
     const floor = view.refs.findIndex((r) => r.message === memory.anchor);
     if (floor >= 0) await regenerateFloor(floor);
   }
+  await syncDaily();
   await loadReviews();
 }
 async function download() {
@@ -218,15 +261,26 @@ async function copyKnowledge() {
     </details>
     <details v-if="dailyState.review || reviewView" class="mn-card">
       <summary>待审核摘要 · {{ dailyState.review }}</summary>
-      <p>正文编辑、删除或翻页后，相关旧摘要可能待审核。本区只在点击后加载待处理项，不显示全量摘要和正文。</p>
-      <button :disabled="busy" @click="run(loadReviews)">加载待审核项</button>
+      <p>正文、消息身份或角色分类变化后，相关旧摘要可能待审核；依赖它们的事件也可能暂不显示。这不表示摘要或事件已删除。</p>
+      <p class="mn-muted">加载和查看来源差异均只读，不归档、不调用模型、不修改审核结果。若突然出现大量待审核，请先导出核心包，再查看来源差异，不必逐条重新生成。</p>
+      <button :disabled="busy || dailyState.pending || dailyState.conflict" @click="run(loadReviews)">加载待审核项（只读）</button>
       <article
-        v-for="m in reviewView?.memories.slice(reviewPage * 10, reviewPage * 10 + 10)"
+        v-for="m in pendingMemories.slice(reviewPage * 10, reviewPage * 10 + 10)"
         :key="m.id"
         class="mn-card"
       >
         <p>L{{ m.level }} · {{ reviewStates.get(m.id) === 'needs_rebuild' ? '需要重建' : '需要审核' }}</p>
         <p>{{ m.content.slice(0, 180) }}</p>
+        <button :disabled="busy" @click="run(() => inspectReview(m.id))">查看来源差异</button>
+        <div v-if="difference?.id === m.id" class="mn-review-difference" role="status">
+          <strong>只读检查：{{ difference.value.floor !== undefined && difference.value.floor >= 0 ? `原来源楼层 #${difference.value.floor}` : '来源与依赖' }}</strong>
+          <p>{{ difference.value.explanation }}</p>
+          <template v-for="side in (['before', 'after'] as const)" :key="side">
+            <p v-if="difference.value[side]">{{ side === 'before' ? '原版本' : '当前对照' }} · {{ roleNames[difference.value[side]!.role] }} · {{ difference.value[side]!.length }} 字</p>
+            <pre v-if="difference.value[side]">{{ difference.value[side]!.excerpt }}</pre>
+          </template>
+          <small>片段仅在本机显示；引号和反斜线用于显示换行、空格等差异。这里只展示首处差异，没有自动确认兼容。</small>
+        </div>
         <div class="mn-actions">
           <button
             v-if="m.level === 0 && reviewStates.get(m.id) === 'needs_review'"
@@ -242,7 +296,7 @@ async function copyKnowledge() {
       <div v-if="reviewView" class="mn-actions">
         <button :disabled="reviewPage === 0" @click="reviewPage--">上一页</button
         ><span>{{ reviewPage + 1 }}</span
-        ><button :disabled="(reviewPage + 1) * 10 >= reviewView.memories.length" @click="reviewPage++">
+        ><button :disabled="(reviewPage + 1) * 10 >= pendingMemories.length" @click="reviewPage++">
           下一页
         </button>
       </div>
@@ -252,4 +306,6 @@ async function copyKnowledge() {
 
 <style scoped>
 .mn-branch-select { border: 0; padding: 0; margin: 0; min-width: 0; }
+.mn-review-difference { margin: 14px 0; padding: 14px; border-left: 3px solid var(--SmartThemeBorderColor, #6b9295); background: #ffffff06; border-radius: 8px; }
+.mn-review-difference pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85em; }
 </style>

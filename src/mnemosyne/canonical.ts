@@ -385,14 +385,14 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
         return result;
     });
 }
-export async function keepSummary(lib: Library, view: CapturedView, memoryId: string) {
+export async function keepSummary(lib: Library, view: CapturedView, memoryId: string, guard: () => boolean = () => true) {
     check(
         view.memories.some((m) => m.id === memoryId),
         '摘要不在当前视图',
     );
     await lib.transaction(['branches', 'reviews'], 'readwrite', async (tx) => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
-        check(branch && branch.epoch === view.branch.epoch, '视图已改变，请刷新');
+        check(guard() && branch && branch.epoch === view.branch.epoch, '视图已改变，请刷新');
         const review: Review = {
             ...row('review'),
             story: branch.story,
@@ -404,6 +404,7 @@ export async function keepSummary(lib: Library, view: CapturedView, memoryId: st
             created: Date.now(),
         };
         await tx.add('reviews', review);
+        check(guard(), '视图已改变，请刷新');
         branch.epoch++;
         await tx.put('branches', branch);
     });
