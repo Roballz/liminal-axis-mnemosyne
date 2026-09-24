@@ -685,16 +685,27 @@ test('both legacy branches can need review independently; shared parent prefix d
     const childChat = JSON.parse(JSON.stringify(ctx.chat));
     const childMeta = JSON.parse(JSON.stringify(ctx.chatMetadata));
     const parentBefore = await capture(lib, parent.branch.id);
-    dispose?.(); dispose = bindDaily();
-    child = await syncDaily();
-    expect(dailyState.review).toBe(1);
-    expect(await capture(lib, parent.branch.id)).toEqual(parentBefore); // Child sync did not publish a parent head.
-    expect(await eventView(lib, child)).toMatchObject({ storedCount: 1, cards: [] });
-    const childBefore = await capture(lib, child.branch.id);
-    ctx.chat = JSON.parse(JSON.stringify(parentChat)); ctx.chatMetadata = parentMeta; ctx.getCurrentChatId = () => 'synthetic';
+    child = await syncDaily(); // Staying on the child reuses its already archived, internally consistent view.
+    expect(dailyState.review).toBe(0);
+    expect((await eventView(lib, child)).cards[0].meta.title).toBe('子档案事件');
+    const warmChild = await capture(lib, child.branch.id);
+    ctx.chat = JSON.parse(JSON.stringify(parentChat)); ctx.chatMetadata = JSON.parse(JSON.stringify(parentMeta)); ctx.getCurrentChatId = () => 'synthetic';
     invalidateDaily();
     const parentNow = await syncDaily();
-    expect(dailyState.review).toBe(1); // Visiting the parent independently corrects its old system revision.
+    expect(dailyState.review).toBe(1);
+    expect(parentNow.refs[1].revision).not.toBe(parentBefore.refs[1].revision);
+    expect(await capture(lib, child.branch.id)).toEqual(warmChild); // Visiting the parent did not publish a child head.
+    ctx.chat = JSON.parse(JSON.stringify(childChat)); ctx.chatMetadata = JSON.parse(JSON.stringify(childMeta)); ctx.getCurrentChatId = () => 'original-child';
+    invalidateDaily();
+    child = await syncDaily();
+    expect(dailyState.review).toBe(1);
+    expect(await capture(lib, parent.branch.id)).toEqual(parentNow); // Returning to the child did not publish a parent head.
+    expect(await eventView(lib, child)).toMatchObject({ storedCount: 1, cards: [] });
+    const childBefore = await capture(lib, child.branch.id);
+    ctx.chat = JSON.parse(JSON.stringify(parentChat)); ctx.chatMetadata = JSON.parse(JSON.stringify(parentMeta)); ctx.getCurrentChatId = () => 'synthetic';
+    invalidateDaily();
+    expect((await syncDaily()).branch.id).toBe(parent.branch.id);
+    expect(dailyState.review).toBe(1); // The next visit retains the parent's own review state.
     expect(await capture(lib, child.branch.id)).toEqual(childBefore);
     expect(await eventView(lib, parentNow)).toMatchObject({ storedCount: 1, cards: [] });
     const originalEvents = (await exportLibrary(lib)).data.event_chains;
@@ -717,4 +728,29 @@ test('both legacy branches can need review independently; shared parent prefix d
     expect((await exportLibrary(lib)).data.event_chains).toEqual(originalEvents);
     expect(await capture(lib, parent.branch.id)).toEqual(parentNow);
     expect(await capture(lib, child.branch.id)).toEqual(childBefore);
+    for (const saved of [
+        { name: 'original-child', chat: childChat, metadata: childMeta, title: '子档案事件' },
+        { name: 'synthetic', chat: parentChat, metadata: parentMeta, title: '父档案事件' },
+    ]) {
+        ctx.chat = JSON.parse(JSON.stringify(saved.chat)); ctx.chatMetadata = JSON.parse(JSON.stringify(saved.metadata)); ctx.getCurrentChatId = () => saved.name;
+        invalidateDaily();
+        let view = await syncDaily();
+        const candidates = await previewRoleRepairs(lib, view, hiddenRoleRepairRefs(view));
+        expect(candidates).toHaveLength(1);
+        await confirmRoleRepairs(lib, view, candidates, () => true);
+        view = await syncDaily();
+        expect(dailyState.review).toBe(0);
+        expect((await eventView(lib, view)).cards[0].meta.title).toBe(saved.title);
+    }
+    for (const saved of [
+        { name: 'original-child', chat: childChat, metadata: childMeta, title: '子档案事件' },
+        { name: 'synthetic', chat: parentChat, metadata: parentMeta, title: '父档案事件' },
+    ]) {
+        ctx.chat = JSON.parse(JSON.stringify(saved.chat)); ctx.chatMetadata = JSON.parse(JSON.stringify(saved.metadata)); ctx.getCurrentChatId = () => saved.name;
+        invalidateDaily();
+        const view = await syncDaily();
+        expect(dailyState.review).toBe(0);
+        expect((await eventView(lib, view)).cards[0].meta.title).toBe(saved.title);
+    }
+    expect((await exportLibrary(lib)).data.event_chains).toEqual(originalEvents);
 });
