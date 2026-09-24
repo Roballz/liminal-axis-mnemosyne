@@ -53,6 +53,15 @@ let savedHost = '';
 const MESSAGE_KEY = 'mnemosyne_message_v1';
 const BINDING_KEY = 'mnemosyne_binding_v1';
 const EVIDENCE_KEY = 'mnemosyne_summary_evidence_v1';
+const MANUAL_KEY = 'mnemosyne_manual_summary_v1';
+export function markManualSummaryEdit(message: STMessage) {
+    if (!installed) return;
+    const leaf = getLeaf(message);
+    if (!leaf) return;
+    message.extra ??= {};
+    const previous = message.extra[MANUAL_KEY] as { generationKey?: number } | undefined;
+    message.extra[MANUAL_KEY] = { leaf: leaf.id, text: leaf.text, generationKey: Math.max(Date.now(), (previous?.generationKey ?? 0) + 1) };
+}
 /** Source authorship follows the engine's isRealAiReply rule, not context visibility.
  * ST /hide also sets is_system on real replies without adding bbs_hidden.
  * Keep native typed system messages and our internal notices as system sources.
@@ -84,6 +93,7 @@ export function hostVersion(): string {
             m.extra?.bbs_omit,
             m.extra?.bbs_leaf,
             m.extra?.[EVIDENCE_KEY],
+            m.extra?.[MANUAL_KEY],
             m.extra?.[TABLE_OUTPUT_KEY],
         ]),
         memory.summaries,
@@ -295,6 +305,7 @@ export async function syncDaily(): Promise<CapturedView> {
                           dependencies?: string[];
                           generatedContent?: string;
                           basis?: string;
+                          generationKey?: number;
                       }
                     | undefined;
                 const item: HostMemory = {
@@ -307,7 +318,12 @@ export async function syncDaily(): Promise<CapturedView> {
                     seed: !!leaf.seed,
                     enabled: leafValid(m) && !m.extra?.bbs_omit,
                 };
-                if (evidence?.leaf === leaf.id && evidence.text === leaf.text) {
+                const manual = m.extra?.[MANUAL_KEY] as { leaf: string; text: string; generationKey: number } | undefined;
+                if (manual?.leaf === leaf.id && manual.text === leaf.text) {
+                    item.manualEdit = true;
+                    item.generationKey = manual.generationKey;
+                } else if (evidence?.leaf === leaf.id && evidence.text === leaf.text) {
+                    if (evidence.generationKey !== undefined) item.generationKey = evidence.generationKey;
                     item.inputRefs = evidence.inputRefs;
                     item.coverage = evidence.coverage;
                     item.basisSnapshot = evidence.basis;
@@ -471,6 +487,7 @@ export async function chooseNewStory() {
         if (m.extra) {
             delete m.extra[MESSAGE_KEY];
             delete m.extra[EVIDENCE_KEY];
+            delete m.extra[MANUAL_KEY];
         }
     }
     await ctx.saveChat();
@@ -596,7 +613,10 @@ export function attachSummaryEvidence(
     if (!evidence) return;
     const leaf = getLeaf(chat[floor]);
     if (!leaf) return;
+    const previous = chat[floor].extra![EVIDENCE_KEY] as { generationKey?: number } | undefined;
+    delete chat[floor].extra![MANUAL_KEY];
     chat[floor].extra![EVIDENCE_KEY] = {
+        generationKey: Math.max(Date.now(), (previous?.generationKey ?? 0) + 1),
         leaf: leaf.id,
         text: leaf.text,
         inputRefs: evidence.inputRefs,

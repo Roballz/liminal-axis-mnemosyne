@@ -43,6 +43,17 @@ export interface HostMemory {
     generatedSidecar?: boolean;
     basisSnapshot?: string;
     generationKey?: number;
+    manualEdit?: boolean;
+}
+/** A high summary with recorded children depends on those children, not the entire chat tail. */
+export const dependencyOnly = (m: MemoryRevision) => m.level > 0 && !m.anchor && !m.inputRefs.length && !!m.dependencies.length;
+export async function summarySources(tx: Transaction, memory: MemoryRevision): Promise<SourceRef[]> {
+    if (memory.inputRefs.length) return memory.inputRefs;
+    if (dependencyOnly(memory)) return [];
+    const snapshot = await tx.get<Snapshot>('history_snapshots', memory.basis);
+    check(snapshot, '摘要基线缺失');
+    const refs = await snapshotRefs(tx, snapshot);
+    return memory.anchor ? refs.slice(0, refs.findIndex(r => r.message === memory.anchor) + 1) : refs;
 }
 export interface HostObservation {
     scope: string;
@@ -185,7 +196,9 @@ export async function synchronize(lib: Library, observation: HostObservation): P
             revision: MemoryRevision;
             host: HostMemory;
         }[] = [];
-        for (const [i, host] of observation.memories.entries()) {
+        const sidecars: { revision: MemoryRevision; host: HostMemory }[] = [];
+        for (const [i, item] of observation.memories.entries()) {
+            let host = item;
             let family = familyByHost.get(host.hostId);
             if (!family) {
                 family = { ...row('mem'), story: branch.story, owner: binding.id, hostId: host.hostId };
@@ -223,26 +236,27 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                     seed: host.seed,
                     hostId: host.hostId,
                 };
+                const prior = selectedMemories.get(family.id);
+                if (host.manualEdit && prior && !host.inputRefs) {
+                    const sources = await summarySources(tx, prior);
+                    const updated = sources.map(r => refs.find(v => v.message === r.message));
+                    if (updated.every((r): r is SourceRef => !!r)) {
+                        revision.inputRefs = updated;
+                        revision.coverage = prior.coverage.map(r => refs.find(v => v.message === r.message)!).filter(Boolean);
+                        revision.declaration = '人工修订摘要：以当前来源版本确认内容；原生成版本保留。';
+                        // Preserve recorded dependency identities, selecting their current version below.
+                        if (!host.children.length) host = { ...host, children: await Promise.all(prior.dependencies.map(async id => {
+                            const dependency = await tx.get<MemoryRevision>('memory_revisions', id);
+                            check(dependency, '原摘要依赖缺失');
+                            return dependency.hostId;
+                        })) };
+                    }
+                }
                 newRevisions.push({ revision, host });
             }
-            if (
-                host.generatedSidecar &&
-                host.inputRefs?.some((ref) => !refs.some((r) => equal(r, ref))) &&
-                host.inputRefs.every((ref) => ref.message === revision!.anchor || refs.some((r) => equal(r, ref)))
-            ) {
-                const reviews = await tx.all<Review>('reviews', 'owner', revision.id);
-                if (!reviews.some((r) => r.snapshot === branch.head))
-                    await tx.add('reviews', {
-                        ...row('review'),
-                        story: branch.story,
-                        branch: branch.id,
-                        owner: revision.id,
-                        snapshot: branch.head,
-                        decision: 'compatible',
-                        origin: 'generated_sidecar',
-                        created: Date.now(),
-                    } as Review);
-            }
+            if (host.generatedSidecar && host.inputRefs?.some(ref => !refs.some(r => equal(r, ref))) &&
+                host.inputRefs.every(ref => ref.message === revision!.anchor || refs.some(r => equal(r, ref))))
+                sidecars.push({ revision, host });
             selections[family.id] = revision.id;
             hostRevisions.set(host.hostId, revision.id);
         }
@@ -252,6 +266,15 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                 .filter((key): key is string => !!key);
             if (revision.dependencies.length !== host.children.length) revision.recall = false;
             await tx.add('memory_revisions', revision);
+        }
+        for (const { revision } of sidecars) {
+            const sourceRefs = revision.inputRefs.map(ref => refs.find(r => r.message === ref.message)!);
+            const coverage = revision.coverage.map(ref => refs.find(r => r.message === ref.message)!);
+            const reviews = await tx.all<Review>('reviews', 'owner', revision.id);
+            if (!reviews.some(r => r.reviewSchema === 2 && equal(r.sourceRefs, sourceRefs) && equal(r.dependencies, revision.dependencies)))
+                await tx.add('reviews', { ...row('review'), story: branch.story, branch: branch.id, owner: revision.id,
+                    snapshot: branch.head, decision: 'compatible', origin: 'generated_sidecar', created: Date.now(),
+                    reviewSchema: 2, sourceRefs, coverage, dependencies: revision.dependencies } as Review);
         }
         if (!previous || !equal(previous.selections, selections)) {
             const view: MemoryView = { ...row('mv'), branch: branch.id, selections };
@@ -335,7 +358,26 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
             }),
         );
         const reviews = await tx.all<Review>('reviews', 'branch', view.branch.id);
-        const compatible = new Set(reviews.filter((r) => r.snapshot === view.snapshot.id).map((r) => r.owner));
+        const compatible = new Map<string, Review>();
+        for (const review of reviews.sort((a,b) => a.created - b.created)) {
+            if (review.reviewSchema !== 2) {
+                if (review.snapshot === view.snapshot.id) compatible.set(review.owner, review);
+                continue;
+            }
+            const memory = view.memories.find(m => m.id === review.owner);
+            if (!memory) continue;
+            const approved = review.sourceRefs!;
+            const order = approved.map(r => positions.get(r.message) ?? -1);
+            if (approved.some(r => !sourceRefMatches(view.branch, r, refByMessage.get(r.message))) ||
+                order.some((n, i) => n < 0 || (i > 0 && n <= order[i - 1]))) continue;
+            // Legacy applicability remains an entire prefix; never turn it into a sparse guess.
+            if (!memory.inputRefs.length && !dependencyOnly(memory) &&
+                !sourceRefsMatch(view.branch, approved, view.refs.slice(0, approved.length))) continue;
+            const coverage = review.coverage!;
+            const start = positions.get(coverage[0]?.message) ?? -1;
+            if (coverage.length && (start < 0 || !sourceRefsMatch(view.branch, coverage, view.refs.slice(start, start + coverage.length)))) continue;
+            compatible.set(review.owner, review);
+        }
         const byId = new Map(view.memories.map((m) => [m.id, m]));
         const result = new Map<string, MemoryStatus>(),
             active = new Set<string>();
@@ -349,7 +391,7 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
             else if (memory.anchor && !positions.has(memory.anchor)) status = 'out_of_scope';
             else {
                 const basis = bases.get(memory.basis)!;
-                const requiredLength = memory.inputRefs.length
+                const requiredLength = memory.inputRefs.length || dependencyOnly(memory)
                     ? 0
                     : memory.anchor
                       ? (basis.positions.get(memory.anchor) ?? -1) + 1
@@ -366,7 +408,7 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
                     if (first < 0 || !sourceRefsMatch(view.branch, memory.coverage, view.refs.slice(first, first + memory.coverage.length)))
                         status = 'needs_review';
                 }
-                for (const dependency of memory.dependencies) {
+                for (const dependency of compatible.get(memory.id)?.dependencies ?? memory.dependencies) {
                     const child = byId.get(dependency);
                     if (!child) {
                         status = 'needs_rebuild';
@@ -386,24 +428,48 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
     });
 }
 export async function keepSummary(lib: Library, view: CapturedView, memoryId: string, guard: () => boolean = () => true) {
-    check(
-        view.memories.some((m) => m.id === memoryId),
-        '摘要不在当前视图',
-    );
-    await lib.transaction(['branches', 'reviews'], 'readwrite', async (tx) => {
+    return keepSummaries(lib, view, [memoryId], guard);
+}
+/** Explicit approval; immutable generation provenance is never rewritten. */
+export async function keepSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true) {
+    check(view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length, '只能审核当前完整档案');
+    const requested = new Set(memoryIds), states = await statuses(lib, view);
+    check(requested.size && requested.size === memoryIds.length, '请选择不重复的摘要');
+    check([...requested].every(id => view.memories.some(m => m.id === id && m.recall && m.visibility === 'public')), '摘要不在当前有效范围');
+    await lib.transaction(STORES, 'readwrite', async tx => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
-        check(guard() && branch && branch.epoch === view.branch.epoch, '视图已改变，请刷新');
-        const review: Review = {
-            ...row('review'),
-            story: branch.story,
-            branch: branch.id,
-            owner: memoryId,
-            snapshot: view.snapshot.id,
-            decision: 'compatible',
-            origin: 'manual',
-            created: Date.now(),
-        };
-        await tx.add('reviews', review);
+        check(guard() && branch && branch.epoch === view.branch.epoch && branch.head === view.snapshot.id && branch.view === view.selection.id, '视图已改变，请刷新');
+        const positions = new Map(view.refs.map((r,i) => [r.message,i]));
+        const currentByOwner = new Map(view.memories.map(m => [m.owner,m]));
+        const plans = new Map<string, Review>();
+        for (const id of requested) {
+            const memory = view.memories.find(m => m.id === id)!;
+            const source = await summarySources(tx, memory);
+            const order = source.map(r => positions.get(r.message) ?? -1);
+            check(order.every((p,i) => p >= 0 && (!i || p > order[i-1])), '来源已删除或重排，不能直接保留；请手改或重新生成摘要');
+            const sourceRefs = order.map(i => view.refs[i]);
+            if (!memory.inputRefs.length && !dependencyOnly(memory))
+                check(equal(sourceRefs, view.refs.slice(0, sourceRefs.length)), '来源前缀身份已改变，请手改或重新生成摘要');
+            check(!memory.anchor || positions.has(memory.anchor), '摘要来源楼层已删除');
+            const coverage = memory.coverage.map(r => view.refs[positions.get(r.message) ?? -1]);
+            check(coverage.every(Boolean) && (!coverage.length || equal(coverage, view.refs.slice(positions.get(coverage[0].message)!, positions.get(coverage[0].message)! + coverage.length))), '摘要覆盖范围已改变');
+            const dependencies: string[] = [];
+            for (const oldId of memory.dependencies) {
+                const prior = await tx.get<MemoryRevision>('memory_revisions', oldId);
+                const selected = prior && currentByOwner.get(prior.owner);
+                check(selected && selected.id !== memory.id, '依赖摘要已删除或无法匹配，请手改或重新生成摘要');
+                dependencies.push(selected.id);
+            }
+            plans.set(id, { ...row('review'), story: branch.story, branch: branch.id, owner: id,
+                snapshot: view.snapshot.id, decision: 'compatible', origin: 'manual', created: Date.now(),
+                reviewSchema: 2, sourceRefs, coverage, dependencies });
+        }
+        const pending = new Map(plans), accepted = new Set<string>();
+        while (pending.size) {
+            const ready = [...pending.values()].filter(r => r.dependencies!.every(id => accepted.has(id) || (!pending.has(id) && states.get(id) === 'valid')));
+            check(ready.length, '请先审核或修复依赖摘要；不存在的来源不能直接保留');
+            for (const review of ready) { await tx.add('reviews', review); accepted.add(review.owner); pending.delete(review.owner); }
+        }
         check(guard(), '视图已改变，请刷新');
         branch.epoch++;
         await tx.put('branches', branch);

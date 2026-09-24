@@ -49,7 +49,7 @@ test('v4 archive flags round-trip, old v3 is readable, invalid archive metadata 
   const view = await capture(lib, branch.id), card = (await eventView(lib, view)).cards[0];
   await setEventArchived(lib, view, card.chain.id, true);
   const pack = await exportLibrary(lib);
-  expect(pack.version).toBe(5);
+  expect(pack.version).toBe(6);
   const restored = await restoreLibrary(pack, false);
   expect(restored.db.version).toBe(1);
   expect((await exportLibrary(restored)).data).toEqual(pack.data);

@@ -42,7 +42,7 @@ test('confirmed exact roles recover explicit inputs, coverage, event progress an
     current = await capture(lib, (await synchronize(lib, input)).id);
     expect((await statuses(lib, current)).get(view.memories[1].id)).toBe('needs_review');
     expect(await reviewDifference(lib, current, view.memories[1].id)).toMatchObject({ kind: 'text', floor: 3 });
-    expect((await eventView(lib, current)).cards).toEqual([]);
+    expect((await eventView(lib, current)).cards).toMatchObject([{ needsReview: true, blocked: true }]);
     expect(sourceContent(await capture(lib, view.branch.id, 1), candidates[0].before)).toBeUndefined();
     lib.close();
 });
@@ -89,10 +89,10 @@ test('repair cannot merge a same-text new message or approve reordered source pr
     input.messages[1].key = 'unrelated-identical-reply';
     let current = await capture(lib, (await synchronize(lib, input)).id);
     expect(await previewRoleRepairs(lib, current, [current.refs[1]])).toEqual([]);
-    expect((await eventView(lib, current)).cards).toEqual([]);
+    expect((await eventView(lib, current)).cards).toMatchObject([{ needsReview: true, blocked: true }]);
     input.messages[1].key = view.sources.get(view.refs[1].revision)!.provenance.hostKey;
     [input.messages[0], input.messages[1]] = [input.messages[1], input.messages[0]];
     current = await capture(lib, (await synchronize(lib, input)).id);
-    expect((await eventView(lib, current)).cards).toEqual([]);
+    expect((await eventView(lib, current)).cards).toMatchObject([{ needsReview: true, blocked: true }]);
     lib.close();
 });

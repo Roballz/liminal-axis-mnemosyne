@@ -9,7 +9,7 @@ import { syncDaily, dailyState, hostVersion, dailyCurrent } from './bridge';
 import { eventView } from './events';
 import { manualEventState, eventPending, updateEventOverview } from './manual-events';
 import { check } from './model';
-export const settings = reactive({ eventsEnabled: false, interval: 40, delay: 0, batchSize: 20, maxChars: 48000,
+export const settings = reactive({ eventsEnabled: false, interval: 40, delay: 0, batchSize: 20, backfillBatchSize: 20, maxChars: 48000,
     chains: 2, excerptChars: 500, totalChars: 1600, extra: 1 });
 export const jobState = reactive({ busy: false, status: '未运行', chars: 0, completed: 0, stopped: false });
 let stop = false;
@@ -19,8 +19,8 @@ export async function loadDailySettings() {
         Object.assign(settings, stored.value);
 }
 export async function saveDailySettings() {
-    for (const key of ['interval', 'batchSize', 'maxChars'] as const)
-        check(Number.isInteger(settings[key]) && settings[key] > 0, '间隔/批量/预算必须为正整数');
+    for (const key of ['interval', 'batchSize', 'backfillBatchSize', 'maxChars'] as const)
+        check(Number.isSafeInteger(settings[key]) && settings[key] > 0, '间隔/批量/预算必须为正整数');
     for (const key of ['delay', 'chains', 'excerptChars', 'totalChars'] as const)
         check(Number.isInteger(settings[key]) && settings[key] >= 0, '延迟/额度不能为负');
     check(settings.batchSize <= 200 && [0,1].includes(settings.extra), '批量最多200；每链额外进展最多1');
@@ -50,7 +50,7 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
         const cards = (await eventView(lib, initial)).cards;
         const last = Math.max(0, ...cards.flatMap(c => c.progress.map(p => p.cutoff)));
         if (!manual && target - last < settings.interval) return;
-        const pending = cards.filter(eventPending).map(c => c.chain.id);
+        const pending = cards.filter(c => !c.blocked && (manual || !c.needsReview) && eventPending(c)).map(c => c.chain.id);
         for (const id of pending) {
             if (stop) break;
             check(guard(), '聊天改变，事件任务停止');

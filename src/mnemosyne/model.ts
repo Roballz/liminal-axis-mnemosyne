@@ -113,6 +113,10 @@ export interface MemoryView extends Row {
     selections: Record<string, string>;
 }
 export interface Review extends Row {
+    reviewSchema?: 2;
+    sourceRefs?: SourceRef[];
+    coverage?: SourceRef[];
+    dependencies?: string[];
     story: string;
     branch: string;
     owner: string;

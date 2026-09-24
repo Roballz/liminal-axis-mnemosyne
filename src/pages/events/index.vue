@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import {
   computed,
   onMounted,
@@ -33,6 +34,7 @@ import {
   manualEventState,
   eventOverview,
   eventPending,
+  keepEventOverview,
   prepareEventRewrite,
   type EventReview,
 } from "@/mnemosyne/manual-events";
@@ -144,11 +146,11 @@ function resetRewrite() {
   confirmRewrite.value = false;
   cancelReview();
 }
-function openRewrite() {
+function openRewrite(card?: EventCard) {
   if (busy.value || manualEventState.busy || jobState.busy) return;
-  rewriteCard.value = archiveMenu.value;
+  rewriteCard.value = card ?? archiveMenu.value;
   archiveMenu.value = null;
-  rewriteInstructions.value = "";
+  rewriteInstructions.value = card ? "根据当前成员摘要更新事件概要，保留仍成立的事实，修正已变化的内容。" : "";
   rewriteHost = hostVersion();
   error.value = "";
 }
@@ -217,6 +219,7 @@ const statusOptions = [
 ];
 const statusName = (s: string) =>
   statusOptions.find((o) => o.value === s)?.label ?? s;
+let viewHost = "", viewGeneration = 0, formView: CapturedView | null = null, formHost = "", formGeneration = 0;
 let scope = "",
   request = 0,
   reloadQueued = false,
@@ -257,6 +260,7 @@ async function refresh() {
     const valid = await dailyCurrent(captured, host, generation) && lib === await activeLibrary();
     if (!live()) return;
     if (!valid || host !== hostVersion() || generation !== dailyState.generation) { reloadQueued = true; return; }
+    viewHost = host; viewGeneration = generation;
     view.value = captured;
     cards.value = data.cards;
     storedCount.value = data.storedCount;
@@ -270,6 +274,7 @@ async function refresh() {
 }
 
 function edit(card: EventCard | null) {
+  formView = view.value; formHost = viewHost; formGeneration = viewGeneration;
   editId.value = card?.chain.id ?? null;
   title.value = card?.meta.title ?? "";
   status.value = card?.meta.status ?? "open";
@@ -278,14 +283,15 @@ function edit(card: EventCard | null) {
   editing.value = true;
 }
 function validView() {
-  check(view.value && scope === hostScope(), "聊天已切换，请刷新");
+  check(view.value && scope === hostScope() && viewHost === hostVersion() && viewGeneration === dailyState.generation, "聊天或摘要已改变，请刷新");
   return view.value;
 }
-async function save() {
+async function save(confirmOverview = true) {
+  check(formView && formHost === hostVersion() && formGeneration === dailyState.generation, "编辑期间聊天或摘要已改变，请复制草稿后重新打开");
   const card = cards.value.find((c) => c.chain.id === editId.value);
   await editEvent(
     await activeLibrary(),
-    validView(),
+    formView,
     editId.value,
     {
       title: title.value,
@@ -295,13 +301,11 @@ async function save() {
         .map((s) => s.trim())
         .filter(Boolean),
       overview: overview.value,
-      summarized:
-        card?.meta.summarized ??
-        card?.progress.flatMap((p) => p.memories) ??
-        [],
+      confirmOverview,
+      summarized: confirmOverview ? card?.members.map(m => m.memory) ?? [] : card?.meta.summarized ?? card?.progress.flatMap(p => p.memories) ?? [],
     },
     undefined,
-    () => scope === hostScope(),
+    () => scope === hostScope() && formHost === hostVersion() && formGeneration === dailyState.generation,
   );
   editing.value = false;
   if (!editId.value) showArchives(false);
@@ -343,7 +347,8 @@ const members = (card: EventCard) =>
     ((pages.value[card.chain.id] ?? 0) + 1) * 10,
   );
 const text = (id: string) =>
-  view.value?.memories.find((m) => m.id === id)?.content ?? "";
+  view.value?.memories.find((m) => m.id === id)?.content ?? cards.value.flatMap(c => c.memberDetails ?? []).find(m => m.id === id)?.content ?? "";
+watch(() => dailyState.revision, queueRefresh);
 watch(
   () => dailyState.scope,
   () => {
@@ -375,6 +380,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <section class="mn-page">
+    <SummaryReviewPanel />
     <div class="mn-event-heading">
       <h2>{{ archiveMode ? "归档事件" : "事件" }}</h2>
       <button v-if="archiveMode" class="mn-back" @click="showArchives(false)">
@@ -546,6 +552,15 @@ onBeforeUnmount(() => {
         </div>
       </summary>
       <hr />
+      <div v-if="eventPending(card)" class="mn-card">
+        <p v-if="card.blocked">关联摘要待审核或来源已删除。先处理上方摘要审核；已删除来源可展开成员解除关联。</p>
+        <p v-else>概要待更新。可以保留原概要、手动补充，或让模型更新；事件关联仍保留。</p>
+        <div class="mn-actions">
+          <button :disabled="busy || jobState.busy || card.blocked" @click="run(async () => { await keepEventOverview(await activeLibrary(), validView(), card.chain.id, () => viewHost === hostVersion() && viewGeneration === dailyState.generation); await refresh(); })">保留现有事件概要</button>
+          <button :disabled="busy || jobState.busy" @click="edit(card)">手动更新概要</button>
+          <button :disabled="busy || jobState.busy || card.blocked || manualEventState.busy" @click="openRewrite(card)">模型更新概要</button>
+        </div>
+      </div>
       <p class="mn-pre">
         <strong>事件概要：</strong
         >{{ eventOverview(card) || "暂无概要，可加入成员后更新" }}
@@ -622,7 +637,7 @@ onBeforeUnmount(() => {
           </button>
           <button
             :disabled="busy || manualEventState.busy || jobState.busy"
-            @click="openRewrite"
+            @click="openRewrite()"
           >
             重写概要
           </button>
@@ -699,7 +714,7 @@ onBeforeUnmount(() => {
         class="mn-dialog"
         role="dialog"
         aria-label="编辑事件"
-        @submit.prevent="run(save)"
+        @submit.prevent="run(() => save(true))"
       >
         <header>
           <h3>{{ editId ? "编辑事件" : "新建事件" }}</h3>
@@ -730,13 +745,13 @@ onBeforeUnmount(() => {
         <footer>
           <button type="button" :disabled="busy" @click="editing = false">
             取消</button
-          ><button
+          ><button v-if="editId" type="button" :disabled="busy" @click="run(() => save(false))">只保存编辑，稍后确认</button><button
             class="mn-primary"
             :disabled="
               busy || !title.trim() || overviewChars > EVENT_OVERVIEW_MAX_CHARS
             "
           >
-            保存
+            保存并确认概要
           </button>
         </footer>
       </form></ModalMask

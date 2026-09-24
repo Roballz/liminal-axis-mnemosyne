@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import { shallowRef, ref, watch, computed, onBeforeUnmount } from 'vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import {
@@ -222,6 +223,7 @@ async function copyKnowledge() {
 </script>
 <template>
   <section class="mn-page">
+    <SummaryReviewPanel />
     <h2>Mnemosyne 档案 / 迁移</h2>
     <p class="mn-muted">查看归档状态，备份或恢复本机资料。日常阅读和编辑摘要，请用原生摘要页。</p>
     <div class="mn-card mn-status" role="status">

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import Icon from '@/components/Icon.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import ModalMask from '@/components/ModalMask.vue';
@@ -792,6 +793,7 @@ provide(SUMMARY_CTX, {
 
 <template>
   <section class="bbs-page">
+    <SummaryReviewPanel />
     <!-- ===== 眼下局势卡:当前场面快照(覆盖型;省略=不动,清空=落幕) ===== -->
     <div class="bbs-fold-section">
       <div class="bbs-section-head">

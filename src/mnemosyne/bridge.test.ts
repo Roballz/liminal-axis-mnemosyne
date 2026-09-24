@@ -291,7 +291,7 @@ test('legacy hidden-role misclassification recovers child events and highest sum
     await canonical.synchronize(lib, legacyObservation);
     const broken = await capture(lib, view.branch.id);
     expect([...(await statuses(lib, broken)).values()]).toEqual(Array(4).fill('needs_review'));
-    expect(await eventView(lib, broken)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(await eventView(lib, broken)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
     const revisionCount = (await lib.all('source_revisions')).length;
     dispose?.(); dispose = bindDaily();
     const recovered = await syncDaily();
@@ -316,7 +316,7 @@ test('legacy hidden-role misclassification recovers child events and highest sum
     invalidateDaily();
     const edited = await syncDaily();
     expect(dailyState.review).toBe(4);
-    expect(await eventView(lib, edited)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(await eventView(lib, edited)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
     expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
 });
 
@@ -347,7 +347,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     dispose?.(); dispose = bindDaily();
     view = await syncDaily();
     expect(dailyState.review).toBe(4);
-    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
     expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
     const before = await Promise.all(unchangedStores.map(s => lib.all(s)));
     const transactions = vi.spyOn(lib, 'transaction');
@@ -369,7 +369,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect((await syncDaily()).branch.sourceRoleRepairs).toHaveLength(1);
     expect(dailyState.review).toBe(0);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(5);
+    expect(pack.version).toBe(6);
     const restored = await restoreLibrary(pack);
     lib = restored;
     dispose?.(); dispose = bindDaily();
@@ -380,7 +380,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     ctx.chat[1].mes += '真正改写';
     invalidateDaily(); view = await syncDaily();
     expect(dailyState.review).toBe(4);
-    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
     expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
 });
 
@@ -700,14 +700,14 @@ test('both legacy branches can need review independently; shared parent prefix d
     child = await syncDaily();
     expect(dailyState.review).toBe(1);
     expect(await capture(lib, parent.branch.id)).toEqual(parentNow); // Returning to the child did not publish a parent head.
-    expect(await eventView(lib, child)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(await eventView(lib, child)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
     const childBefore = await capture(lib, child.branch.id);
     ctx.chat = JSON.parse(JSON.stringify(parentChat)); ctx.chatMetadata = JSON.parse(JSON.stringify(parentMeta)); ctx.getCurrentChatId = () => 'synthetic';
     invalidateDaily();
     expect((await syncDaily()).branch.id).toBe(parent.branch.id);
     expect(dailyState.review).toBe(1); // The next visit retains the parent's own review state.
     expect(await capture(lib, child.branch.id)).toEqual(childBefore);
-    expect(await eventView(lib, parentNow)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(await eventView(lib, parentNow)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
     const originalEvents = (await exportLibrary(lib)).data.event_chains;
     for (const name of ['copy-a', 'copy-b']) {
         ctx.chat = JSON.parse(JSON.stringify(childChat));

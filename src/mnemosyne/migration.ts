@@ -4,7 +4,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5;
+    version: 1 | 2 | 3 | 4 | 5 | 6;
     schema: 1;
     created: number;
     excluded: string[];
@@ -21,7 +21,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta is restricted to non-secret daily feature settings, not upstream API configuration.
-    const base = { format: 'mnemosyne-daily' as const, version: 5 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 6 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     validateData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -41,7 +41,7 @@ const FIELDS: Record<Store, string[]> = {
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     check(pack.data && Object.keys(pack.data).length === STORES.length, '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
@@ -55,6 +55,7 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             if (pack.version >= 4 && store === 'event_chains') optional.push('archiveSchema', 'archived');
             if (pack.version >= 5 && store === 'host_bindings') optional.push('rebindSchema', 'detached');
             if (pack.version >= 5 && store === 'branches') optional.push('sourceRoleRepairSchema', 'sourceRoleRepairs');
+            if (pack.version >= 6 && store === 'reviews') optional.push('reviewSchema', 'sourceRefs', 'coverage', 'dependencies');
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && FIELDS[store].every(k => k in r), `字段不合法 ${store}`);
             maps[store].set(r.id, r);
@@ -197,7 +198,35 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
         }
     for (const r of maps.reviews.values()) {
         memoryRefs(r, [r.owner]);
-        check(get('history_snapshots', r.snapshot).branch === r.branch, '审核跨分支');
+        const snapshot = get('history_snapshots', r.snapshot);
+        check(snapshot.branch === r.branch, '审核跨分支');
+        check(r.decision === 'compatible' && ['manual', 'generated_sidecar'].includes(r.origin) && Number.isSafeInteger(r.created), '审核结构非法');
+        if (['reviewSchema','sourceRefs','coverage','dependencies'].some(k => k in r)) {
+            check(r.reviewSchema === 2 && Array.isArray(r.sourceRefs) && Array.isArray(r.coverage) && Array.isArray(r.dependencies), '审核版本非法');
+            const memory = get('memory_revisions', r.owner), currentRefs = refs(snapshot);
+            const dependencyOnly = memory.level > 0 && !memory.anchor && !memory.inputRefs.length && memory.dependencies.length;
+            const basis = refs(get('history_snapshots', memory.basis));
+            const original = memory.inputRefs.length ? memory.inputRefs : dependencyOnly ? [] : memory.anchor ? basis.slice(0, basis.findIndex(v => v.message === memory.anchor) + 1) : basis;
+            const validateSources = (approved: any[], expected: any[]) => {
+                check(JSON.stringify(approved.map(v => v.message)) === JSON.stringify(expected.map(v => v.message)), '审核来源身份不匹配');
+                let last = -1;
+                for (const v of approved) {
+                    ref(v, r.story);
+                    const pos = currentRefs.findIndex(c => c.message === v.message && c.revision === v.revision);
+                    check(pos > last, '审核来源顺序或版本不匹配'); last = pos;
+                }
+            };
+            validateSources(r.sourceRefs, original);
+            validateSources(r.coverage, memory.coverage);
+            if (!memory.inputRefs.length && !dependencyOnly) check(JSON.stringify(r.sourceRefs) === JSON.stringify(currentRefs.slice(0, r.sourceRefs.length)), '审核前缀不匹配');
+            if (r.coverage.length) {
+                const first = currentRefs.findIndex(v => v.message === r.coverage[0].message);
+                check(JSON.stringify(r.coverage) === JSON.stringify(currentRefs.slice(first, first + r.coverage.length)), '审核覆盖不连续');
+            }
+            memoryRefs(r, r.dependencies);
+            check(!r.dependencies.includes(r.owner) && r.dependencies.length === memory.dependencies.length && r.dependencies.every((id: string, i: number) =>
+                get('memory_revisions', id).owner === get('memory_revisions', memory.dependencies[i]).owner), '审核依赖身份不匹配');
+        }
     }
     for (const r of maps.event_processing_receipts.values()) {
         memoryRefs(r, r.memories);
@@ -229,6 +258,8 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
     for (const r of maps.library_meta.values()) {
         check(r.id === 'daily-settings' && r.value && typeof r.value === 'object', '不允许导出任意设置或密钥');
         const keys = ['eventsEnabled', 'interval', 'delay', 'batchSize', 'maxChars', 'chains', 'excerptChars', 'totalChars', 'extra'];
+        if (pack.version >= 6) keys.push('backfillBatchSize');
+        if (r.value.backfillBatchSize !== undefined) check(Number.isSafeInteger(r.value.backfillBatchSize) && r.value.backfillBatchSize > 0, '补表批量必须为正整数');
         check(Object.keys(r.value).every(k => keys.includes(k)) && Object.values(r.value).every(v => typeof v === 'number' || typeof v === 'boolean'), '设置白名单拒绝');
     }
 }

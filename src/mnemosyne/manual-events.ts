@@ -9,7 +9,7 @@ import {
 import { getChannelForTask } from "@/api/settings";
 import { eventCreationContext } from "@/memory/engine";
 import { activeLibrary, type Library } from "./db";
-import { current } from "./canonical";
+import { current, statuses } from "./canonical";
 import { syncDaily, hostVersion, dailyState, dailyCurrent } from "./bridge";
 import { eventView, editEvent, type EventCard } from "./events";
 import { buildEventInstruction } from "./event-prompts";
@@ -24,6 +24,7 @@ import {
   type EventRevision,
   type Membership,
   type Progress,
+  type MemoryRevision,
 } from "./model";
 export const manualEventState = reactive({ busy: false });
 export type EventSender = (messages: ChatMsg[]) => Promise<string>;
@@ -40,7 +41,7 @@ export function eventPending(card: EventCard) {
   const done = new Set(
     card.meta.summarized ?? card.progress.flatMap((p) => p.memories),
   );
-  return card.members.some((m) => !done.has(m.memory));
+  return !!card.needsReview || !!card.blocked || card.members.some((m) => !done.has(m.memory));
 }
 export async function commitManualEvent(
   lib: Library,
@@ -59,7 +60,8 @@ export async function commitManualEvent(
   );
   const summarized =
     card?.meta.summarized ?? card?.progress.flatMap((p) => p.memories) ?? [];
-  const added = memories.filter((id) => !summarized.includes(id));
+  const priorFamilies = new Set((await Promise.all(summarized.map(id => lib.get<MemoryRevision>('memory_revisions', id)))).filter(Boolean).map(m => m!.owner));
+  const added = memories.filter(id => !priorFamilies.has(view.memories.find(m => m.id === id)!.owner));
   return lib.transaction(STORES, "readwrite", async (tx) => {
     const branch = await tx.get<Branch>("branches", view.branch.id);
     check(
@@ -233,10 +235,12 @@ async function requestEventOverview(
   lib: Library,
   rewriteInstructions?: string,
 ) {
+  const validity = await statuses(lib, view);
+  check(!card.blocked && memories.every(id => validity.get(id) === 'valid'), '请先审核来源摘要，或解除已删除来源的关联');
   const materials = memories.map((id) => {
     const m = view.memories.find((m) => m.id === id)!;
     const refs = [
-      ...m.inputRefs,
+      ...m.inputRefs.map(r => view.refs.find(v => v.message === r.message) ?? r),
       ...view.refs.filter((r) => r.message === m.anchor),
     ];
     return {
@@ -270,6 +274,7 @@ async function requestEventOverview(
           ? { rewriteInstructions, keywords: card.meta.keywords }
           : {}),
         overview: eventOverview(card),
+        overviewNeedsReview: !!card.needsReview,
         summarized:
           card.meta.summarized ?? card.progress.flatMap((p) => p.memories),
         materials,
@@ -286,7 +291,7 @@ async function requestEventOverview(
 }
 
 /** Floor calls retain empty/invalid content for review. Batch calls keep their strict path. */
-const sendReviewEvent: EventSender = (messages) => {
+export const sendReviewEvent: EventSender = (messages) => {
   const channel = getChannelForTask("summary"),
     options = { reviewResponse: true };
   return channel
@@ -397,4 +402,12 @@ export async function prepareEventRewrite(
     instructions.trim(),
   );
   return makeEventReview(lib, view, card, memories, raw, host, generation);
+}
+
+/** Explicit human confirmation creates a new overview revision without calling a model. */
+export async function keepEventOverview(lib: Library, view: CapturedView, eventId: string, guard: () => boolean = () => true) {
+  const card = (await eventView(lib, view)).cards.find(c => c.chain.id === eventId);
+  check(card, '事件不存在或不属于当前分支');
+  return editEvent(lib, view, eventId, { ...card.meta, overview: eventOverview(card),
+    summarized: card.members.map(m => m.memory), confirmOverview: true }, undefined, guard);
 }

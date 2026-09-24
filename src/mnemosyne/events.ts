@@ -8,6 +8,9 @@ export interface EventCard {
     meta: EventRevision;
     members: Membership[];
     progress: Progress[];
+    needsReview?: boolean;
+    blocked?: boolean;
+    memberDetails?: MemoryRevision[];
 }
 export interface EventView {
     cards: EventCard[];
@@ -18,6 +21,8 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
     const validStates = await statuses(lib, view);
     const valid = view.memories.filter(m => validStates.get(m.id) === 'valid');
     const permitted = new Set(valid.map(m => m.id));
+    const live = view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length;
+    const selected = new Map(view.memories.map(m => [m.owner, m]));
     return lib.transaction(STORES, 'readonly', async (tx) => {
         const chains = await tx.all<EventChain>('event_chains', 'branch', view.branch.id);
         const cache = new Map<string, boolean>();
@@ -36,7 +41,7 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
             const revisions = await tx.all<EventRevision>('event_revisions', 'owner', chain.id);
             let meta: EventRevision | undefined;
             for (const r of revisions.sort((a, b) => b.epoch - a.epoch)) {
-                if (r.refs.every(id => permitted.has(id)) && await within(r.snapshot, r.cutoff)) {
+                if (live || (r.refs.every(id => permitted.has(id)) && await within(r.snapshot, r.cutoff))) {
                     meta = r;
                     break;
                 }
@@ -45,24 +50,36 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
                 continue;
             const memberships = await tx.all<Membership>('event_memberships', 'owner', chain.id);
             const latest = new Map<string, Membership>();
+            const memberDetails = new Map<string, MemoryRevision>();
             for (const m of memberships.sort((a, b) => a.epoch - b.epoch)) {
-                if (permitted.has(m.memory) && await within(m.snapshot, m.cutoff))
-                    latest.set(m.memory, m);
+                if (live) {
+                    const previous = await tx.get<MemoryRevision>('memory_revisions', m.memory);
+                    if (!previous) continue;
+                    const memory = selected.get(previous.owner) ?? previous;
+                    latest.set(previous.owner, { ...m, memory: memory.id });
+                    memberDetails.set(memory.id, memory);
+                } else if (permitted.has(m.memory) && await within(m.snapshot, m.cutoff)) latest.set(m.memory, m);
             }
             const members = [...latest.values()].filter(m => m.active).sort((a, b) => {
-                const anchor = (key: string) => view.refs.findIndex(r => r.message === valid.find(v => v.id === key)?.anchor);
+                const anchor = (key: string) => view.refs.findIndex(r => r.message === (memberDetails.get(key) ?? valid.find(v => v.id === key))?.anchor);
                 return anchor(a.memory) - anchor(b.memory);
             });
             const memberSet = new Set(members.map(m => m.memory));
             const progress: Progress[] = [];
-            for (const p of await tx.all<Progress>('event_progress', 'owner', chain.id)) {
-                // Removed/reviewed/private members invalidate dependent narrative; never send a partial paragraph.
-                if (p.memories.every(m => memberSet.has(m)) && await within(p.snapshot, p.cutoff))
-                    progress.push(p);
+            const allProgress = await tx.all<Progress>('event_progress', 'owner', chain.id);
+            for (const p of allProgress) {
+                // Current workbench retains historical text locally; recall still requires every dependency.
+                if (p.memories.every(m => memberSet.has(m) && permitted.has(m)) && (live || await within(p.snapshot, p.cutoff))) progress.push(p);
             }
-            progress.sort((a, b) => a.cutoff - b.cutoff || a.epoch - b.epoch);
-            if (meta.summarized?.some(id => !memberSet.has(id))) meta = { ...meta, overview: '', summarized: [] };
-            cards.push({ chain, meta, members, progress });
+            progress.sort((a,b) => a.cutoff - b.cutoff || a.epoch - b.epoch);
+            if (live && meta.overview === undefined) {
+                const history = allProgress.sort((a,b) => a.cutoff - b.cutoff || a.epoch - b.epoch);
+                meta = { ...meta, overview: history.map(p => p.text).join('\n'), summarized: [...new Set(history.flatMap(p => p.memories))] };
+            }
+            const blocked = live && members.some(m => !permitted.has(m.memory));
+            const needsReview = live && (meta.refs.some(id => !permitted.has(id)) || !!meta.summarized?.some(id => !memberSet.has(id) || !permitted.has(id)));
+            if (!live && meta.summarized?.some(id => !memberSet.has(id))) meta = { ...meta, overview: '', summarized: [] };
+            cards.push({ chain, meta, members, progress, needsReview, blocked, memberDetails: [...memberDetails.values()] });
         }
         return { cards, valid, storedCount: chains.length };
     });
@@ -127,7 +144,8 @@ export async function prepareEventBatch(lib: Library, view: CapturedView, maxMem
     view = await capture(lib, view.branch.id, Math.min(view.cutoff, end || view.cutoff), view.snapshot.id);
     check(view.branch.epoch===expectedEpoch,'事件准备期间视图已改变');
     const { cards } = await eventView(lib, view);
-    const catalog = cards.map(c => ({ event_id: c.chain.id, title: c.meta.title, status: c.meta.status,
+    const safeCards = cards.filter(c => !c.needsReview && !c.blocked);
+    const catalog = safeCards.map(c => ({ event_id: c.chain.id, title: c.meta.title, status: c.meta.status,
         keywords: c.meta.keywords, overview: c.progress.map(p => p.text) }));
     const directory = JSON.stringify(catalog);
     check(directory.length + EVENT_PROMPT.length <= maxChars, '事件目录过大/任务暂停：全量目录超出预算，未裁剪任何事件');
@@ -138,7 +156,7 @@ export async function prepareEventBatch(lib: Library, view: CapturedView, maxMem
     check(prompt.length <= maxChars, '本批材料超过预算，请缩小摘要批量上限');
     check(await current(lib,view),'事件准备期间视图已改变');
     const digest = await fingerprint([view.branch.id, view.snapshot.id, view.selection.id, view.branch.epoch, memories.map(m => m.id), directory]);
-    return { operation: `op_${digest}`, view, memories, catalog: cards, fingerprint: digest, prompt, chars: prompt.length };
+    return { operation: `op_${digest}`, view, memories, catalog: safeCards, fingerprint: digest, prompt, chars: prompt.length };
 }
 export function parseEventOutput(raw: string, batch: EventBatch): EventOutput {
     const output = parseStrictJson(raw.replace(/^```(?:json)?\s*|\s*```$/g, '')) as EventOutput;
@@ -239,6 +257,7 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
     keywords: string[];
     overview?: string;
     summarized?: string[];
+    confirmOverview?: boolean;
 }, member?: {
     memory: string;
     active: boolean;
@@ -248,12 +267,16 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
     const { valid, cards } = await eventView(lib, view);
     const existing = cards.find(c => c.chain.id === eventId);
     // Membership-only changes must still work for pre-limit overviews, without rewriting them.
-    if (patch.overview !== undefined && (!member || patch.overview !== existing?.meta.overview))
+    if (patch.overview !== undefined && patch.overview !== existing?.meta.overview)
         checkEventOverview(patch.overview);
     if (eventId)
         check(cards.some(c => c.chain.id === eventId), '事件不属于合法视图');
     if (member)
-        check(valid.some(m => m.id === member.memory), '摘要无效或不属于当前范围');
+        check(valid.some(m => m.id === member.memory) || (!member.active && existing?.members.some(m => m.memory === member.memory)), '摘要无效或不属于当前范围');
+    if (patch.confirmOverview) {
+        check(!existing?.blocked, '请先审核来源摘要，或解除已删除来源的关联');
+        check(equal([...(patch.summarized ?? [])].sort(), (existing?.members.map(m => m.memory) ?? []).sort()), '确认范围必须包含当前全部关联摘要');
+    }
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
         check(guard() && branch && branch.epoch === view.branch.epoch, '视图已改变，请刷新');
@@ -265,7 +288,7 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
             key = chain.id;
         }
         const base = { story: branch.story, branch: branch.id, owner: key, snapshot: view.snapshot.id, cutoff: view.cutoff, epoch: branch.epoch };
-        await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2, overview: patch.overview ?? existing?.meta.overview ?? existing?.progress.map(p => p.text).join('\n') ?? '', summarized: patch.summarized ?? existing?.meta.summarized ?? existing?.progress.flatMap(p => p.memories) ?? [], title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: [], created: Date.now() } as EventRevision);
+        await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2, overview: patch.overview ?? existing?.meta.overview ?? existing?.progress.map(p => p.text).join('\n') ?? '', summarized: patch.summarized ?? existing?.meta.summarized ?? existing?.progress.flatMap(p => p.memories) ?? [], title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: patch.confirmOverview ? patch.summarized ?? [] : existing?.meta.refs ?? [], created: Date.now() } as EventRevision);
         if (member)
             await tx.add('event_memberships', { ...row('link'), ...base, ...member, locked: true, origin: 'manual' } as Membership);
         await tx.put('branches', branch);
@@ -285,12 +308,13 @@ export function wrapEvents(cards: EventCard[], view: CapturedView, selected: str
     let remaining = Math.max(0, budget.totalChars);
     let count = 0;
     for (const card of cards) {
+        if (card.needsReview || card.blocked) continue;
         const matched = card.members.filter(m => hits.has(m.memory));
         if (!matched.length || count >= Math.max(0, budget.chains))
             continue;
         const relevant = [card.progress[0], ...card.progress.filter(p => p.memories.some(m => hits.has(m))), card.progress.at(-1)]
             .filter((p): p is Progress => !!p);
-        const excerpts = [...new Map(relevant.map(p => [p.id, p])).values()].map(p => p.text).join('\n').slice(0, Math.max(0, budget.excerptChars));
+        const excerpts = (card.meta.overview ?? [...new Map(relevant.map(p => [p.id, p])).values()].map(p => p.text).join('\n')).slice(0, Math.max(0, budget.excerptChars));
         const positions = matched.map(m => card.members.indexOf(m) + 1).join(',');
         let text = `[事件：${card.meta.title} · ${card.meta.status} · 位置 ${positions}/${card.members.length}]\n事件概述节选：${excerpts}`;
         const latest = [...card.members].reverse().find(m => m.kind === 'progress');

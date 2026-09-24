@@ -1,4 +1,4 @@
-import { dailyInstalled } from '@/mnemosyne/bridge';
+import { dailyInstalled, markManualSummaryEdit } from '@/mnemosyne/bridge';
 import { apiSettings } from '@/api/settings';
 import { getContext, setMessageText, type STMessage } from '@/st/context';
 import { fmtItemLogInline } from './prompts';
@@ -2179,6 +2179,7 @@ export function editLeafAt(index: number, text: string, timeStart: string, timeE
   else if (s) leaf.delta.time = s;
   else delete leaf.delta.time;
   chat[index].extra = { ...(chat[index].extra ?? {}), bbs_leaf: leaf };
+  markManualSummaryEdit(chat[index]);
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要变了 → 召回结果会变,先失效再重算
@@ -2215,6 +2216,7 @@ export function editLeafFull(
   // 编辑改了 delta → 同步重写该楼正文的 <bbs_items>/<bbs_vars> 旁注(否则旁注停留在上次摘要的旧值),
   // 与 applyLeafForFloor 落叶时同口径:物品净变动以「本楼之前状态」为基准算 from→to,变量直接渲染命令。
   rewriteFloorTags(chat, index, delta);
+  markManualSummaryEdit(chat[index]);
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要正文/时间变了 → 失效旧召回
@@ -2285,6 +2287,7 @@ export function editSummary(id: string, text: string): boolean {
   const comp = memory.summaries.find(s => s.id === id);
   if (!comp) return false;
   comp.text = text.trim();
+  comp.createdAt = Math.max(Date.now(), (comp.createdAt ?? 0) + 1);
   saveMemory();
   return true;
 }
