@@ -1,6 +1,7 @@
+import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import type { Library } from './db';
 import { snapshotRefs } from './canonical';
-import { check, equal, type CapturedView, type Revision, type Snapshot } from './model';
+import { check, type CapturedView, type Revision, type Snapshot } from './model';
 
 export interface ReviewDifference {
     kind: 'identity' | 'role' | 'text' | 'coverage' | 'dependency' | 'unknown';
@@ -26,7 +27,7 @@ export async function reviewDifference(lib: Library, view: CapturedView, memoryI
         for (const [index, oldRef] of required.entries()) {
             const position = explicit ? positions.get(oldRef.message) : index;
             const nextRef = position === undefined ? undefined : view.refs[position];
-            if (equal(oldRef, nextRef)) continue;
+            if (sourceRefMatches(view.branch, oldRef, nextRef)) continue;
             const before = await tx.get<Revision>('source_revisions', oldRef.revision);
             check(before, '原正文版本缺失');
             const after = nextRef ? view.sources.get(nextRef.revision) : undefined;
@@ -46,7 +47,7 @@ export async function reviewDifference(lib: Library, view: CapturedView, memoryI
         }
         if (memory.coverage.length) {
             const first = positions.get(memory.coverage[0].message) ?? -1;
-            if (first < 0 || !equal(view.refs.slice(first, first + memory.coverage.length), memory.coverage))
+            if (first < 0 || !sourceRefsMatch(view.branch, memory.coverage, view.refs.slice(first, first + memory.coverage.length)))
                 return { kind: 'coverage', explanation: '原摘要覆盖的连续消息范围已改变，可能插入、删除或重排了消息。不能仅凭摘要文字自动放行。' };
         }
         return { kind: 'unknown', explanation: '未找到直接正文差异。仍需核对摘要依赖和来源声明；本次检查不会修改审核状态或事件。' };

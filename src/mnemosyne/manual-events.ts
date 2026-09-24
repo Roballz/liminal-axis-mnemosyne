@@ -1,4 +1,5 @@
 /** Human-selected membership; models can only describe the selected chain. */
+import { sourceContent } from './source-equivalence';
 import { reactive } from "vue";
 import {
   requestCompletion,
@@ -245,7 +246,7 @@ async function requestEventOverview(
         ...new Map(
           refs.map((r) => [
             r.revision,
-            { ...r, body: view.sources.get(r.revision)?.content },
+            { ...r, body: sourceContent(view, r) },
           ]),
         ).values(),
       ],

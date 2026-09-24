@@ -1,3 +1,4 @@
+import { sourceContent, sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { parseStrictJson } from './json';
 import { Library } from './db';
 import { snapshotRefs, statuses, capture, current } from './canonical';
@@ -26,7 +27,7 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
                 return cache.get(key)!;
             const snapshot = await tx.get<Snapshot>('history_snapshots', snapshotId);
             const ok = !!snapshot && snapshot.branch === view.branch.id && cutoff <= view.cutoff &&
-                equal((await snapshotRefs(tx, snapshot)).slice(0, cutoff), view.refs.slice(0, cutoff));
+                sourceRefsMatch(view.branch, (await snapshotRefs(tx, snapshot)).slice(0, cutoff), view.refs.slice(0, cutoff));
             cache.set(key, ok);
             return ok;
         };
@@ -111,7 +112,7 @@ export async function prepareEventBatch(lib: Library, view: CapturedView, maxMem
     for (const receipt of receipts) {
         const legal = await lib.transaction(['history_snapshots', 'manifest_blocks'], 'readonly', async (tx) => {
             const snapshot = await tx.get<Snapshot>('history_snapshots', receipt.snapshot);
-            return snapshot && equal((await snapshotRefs(tx, snapshot)).slice(0, receipt.cutoff), view.refs.slice(0, receipt.cutoff));
+            return snapshot && snapshot.branch === view.branch.id && receipt.cutoff <= view.cutoff && sourceRefsMatch(view.branch, (await snapshotRefs(tx, snapshot)).slice(0, receipt.cutoff), view.refs.slice(0, receipt.cutoff));
         });
         // needs_review is held for human resolution, never an automatic paid retry loop.
         if (legal)
@@ -121,7 +122,7 @@ export async function prepareEventBatch(lib: Library, view: CapturedView, maxMem
     const memories = valid.filter(m => m.level === 0 && !m.seed && !processed.has(m.id)).slice(0, maxMemories);
     if (!memories.length)
         return null;
-    const end = Math.max(...memories.map(m => Math.max(view.refs.findIndex(r => r.message === m.anchor) + 1, ...m.inputRefs.map(ref => view.refs.findIndex(r => equal(r, ref)) + 1))));
+    const end = Math.max(...memories.map(m => Math.max(view.refs.findIndex(r => r.message === m.anchor) + 1, ...m.inputRefs.map(ref => view.refs.findIndex(r => sourceRefMatches(view.branch, ref, r)) + 1))));
     const expectedEpoch=view.branch.epoch;
     view = await capture(lib, view.branch.id, Math.min(view.cutoff, end || view.cutoff), view.snapshot.id);
     check(view.branch.epoch===expectedEpoch,'事件准备期间视图已改变');
@@ -131,7 +132,7 @@ export async function prepareEventBatch(lib: Library, view: CapturedView, maxMem
     const directory = JSON.stringify(catalog);
     check(directory.length + EVENT_PROMPT.length <= maxChars, '事件目录过大/任务暂停：全量目录超出预算，未裁剪任何事件');
     const input = memories.map(m => ({ memory_revision_id: m.id, text: m.content, source_declaration: m.declaration,
-        sources: m.inputRefs.map(r => ({ ...r, content: view.sources.get(r.revision)?.content })),
+        sources: m.inputRefs.map(r => ({ ...r, content: sourceContent(view, r) })),
         current_anchor_body: view.sources.get(view.refs.find(r => r.message === m.anchor)?.revision ?? '')?.content ?? null }));
     const prompt = `${EVENT_PROMPT}\n全量合法事件目录：${directory}\n本批材料：${JSON.stringify(input)}`;
     check(prompt.length <= maxChars, '本批材料超过预算，请缩小摘要批量上限');
@@ -319,7 +320,7 @@ export async function eventProgressState(lib: Library, view: CapturedView) {
     for (const receipt of receipts) {
         const legal = await lib.transaction(['history_snapshots', 'manifest_blocks'], 'readonly', async (tx) => {
             const snapshot = await tx.get<Snapshot>('history_snapshots', receipt.snapshot);
-            return snapshot && equal((await snapshotRefs(tx, snapshot)).slice(0, receipt.cutoff), view.refs.slice(0, receipt.cutoff));
+            return snapshot && snapshot.branch === view.branch.id && receipt.cutoff <= view.cutoff && sourceRefsMatch(view.branch, (await snapshotRefs(tx, snapshot)).slice(0, receipt.cutoff), view.refs.slice(0, receipt.cutoff));
         });
         for (const key of receipt.memories) {
             if (!legal || validity.get(key) !== 'valid')

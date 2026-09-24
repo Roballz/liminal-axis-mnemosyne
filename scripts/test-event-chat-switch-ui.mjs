@@ -127,6 +127,105 @@ try {
   await page.evaluate(() => window.__smoke.switchChat('B'));
   await page.getByText('只读检查：原来源楼层 #0', { exact: true }).waitFor({ state: 'hidden' });
   assert.equal(await page.getByRole('button', { name: '保留摘要（仅当前版本）', exact: true }).count(), 0, 'old review actions cleared on scope change');
+  // Build a separate legacy archive whose first source observation was already misclassified.
+  await page.evaluate(async () => {
+    const s = window.__smoke;
+    const bridge = await import('/src/mnemosyne/bridge.ts');
+    const canonical = await import('/src/mnemosyne/canonical.ts');
+    const { activeLibrary } = await import('/src/mnemosyne/db.ts');
+    const { editEvent } = await import('/src/mnemosyne/events.ts');
+    s.ctx.chat = [
+      { name: 'User', is_user: true, is_system: true, mes: '合成隐藏问题', extra: { mnemosyne_message_v1: 'repair-user' } },
+      { name: 'Character', is_user: false, is_system: true, mes: '合成隐藏回复', extra: { mnemosyne_message_v1: 'repair-ai', bbs_leaf: { id: 'repair-leaf', text: '隐藏楼的旧摘要', delta: {}, createdAt: 1, swipe: 0, v: 1 } } },
+    ];
+    s.ctx.chatMetadata = {};
+    s.ctx.getCurrentChatId = () => 'legacy-hidden-ui';
+    bridge.invalidateDaily();
+    const lib = await activeLibrary();
+    const old = await canonical.synchronize(lib, {
+      scope: bridge.hostScope(),
+      messages: s.ctx.chat.map(m => ({ key: m.extra.mnemosyne_message_v1, role: m.is_user ? 'user' : 'system', content: m.mes, swipe: 0 })),
+      memories: [{ hostId: 'repair-leaf', content: '隐藏楼的旧摘要', level: 0, anchorKey: 'repair-ai', children: [], storyTime: '', seed: false, enabled: true }],
+    });
+    const view = await canonical.capture(lib, old.id);
+    await editEvent(lib, view, null, { title: '旧系统来源事件', overview: '原概要保持', summarized: [view.memories[0].id], status: 'open', keywords: [] }, { memory: view.memories[0].id, active: true, kind: 'progress' });
+    await bridge.syncDaily();
+    s.ui.activePage = 'archive';
+    s.reviewWrites = 0;
+  });
+  const reviewPanel = page.locator('details').filter({ has: page.locator('summary', { hasText: '待审核摘要' }) });
+  if (!(await reviewPanel.evaluate(el => el.open))) await reviewPanel.locator('summary').click();
+  await page.getByText('当前聊天与档案标识（只读）', { exact: true }).click();
+  await page.getByText('当前聊天：legacy-hidden-ui', { exact: true }).waitFor();
+  assert.match(await page.getByText('分支档案：', { exact: false }).innerText(), /br_/);
+  await page.getByRole('button', { name: '加载待审核项（只读）', exact: true }).click();
+  await page.getByRole('button', { name: '预览隐藏来源修复（只读）', exact: true }).click();
+  await page.getByText('发现 1 处旧「系统」', { exact: false }).waitFor();
+  assert.equal(await page.evaluate(() => window.__smoke.reviewWrites), 0, 'repair preview has zero writes');
+  await page.screenshot({ path: '/tmp/w01-role-preview.png', fullPage: true });
+  // Cancellation must preserve the blocked state and every row.
+  const cancelled = new Promise(resolve => page.once('dialog', async dialog => { await dialog.dismiss(); resolve(); }));
+  await page.getByRole('button', { name: '确认这些楼层原本是 AI，修复来源', exact: true }).click();
+  await cancelled;
+  assert.equal(await page.evaluate(() => window.__smoke.reviewWrites), 0);
+  const confirmed = new Promise(resolve => page.once('dialog', async dialog => { await dialog.accept(); resolve(); }));
+  await page.getByRole('button', { name: '确认这些楼层原本是 AI，修复来源', exact: true }).click();
+  await confirmed;
+  await page.getByText('已记录隐藏来源修复；当前仍有 0 条待审核。请到事件页查看恢复结果。', { exact: true }).waitFor();
+  await page.evaluate(() => { window.__smoke.ui.activePage = 'events'; });
+  await page.locator('.mn-event-card').filter({ hasText: '旧系统来源事件' }).waitFor();
+  // A rename used to send users down the fork path; reconnect must preserve both archives.
+  await page.evaluate(async () => {
+    const s = window.__smoke, bridge = await import('/src/mnemosyne/bridge.ts');
+    s.renameOriginal = (await bridge.syncDaily()).branch.id;
+    s.ctx.getCurrentChatId = () => 'renamed-ui-chat';
+    bridge.invalidateDaily();
+    try { await bridge.syncDaily(); } catch {}
+    s.ui.activePage = 'archive';
+  });
+  await page.getByRole('button', { name: '继承档案', exact: true }).click();
+  await page.waitForFunction(async () => {
+    const { dailyState } = await import('/src/mnemosyne/bridge.ts');
+    return !dailyState.pending && !dailyState.conflict && !!dailyState.branch && dailyState.branch !== window.__smoke.renameOriginal && dailyState.scope.includes('renamed-ui-chat');
+  });
+  await page.evaluate(async () => {
+    const { syncDaily } = await import('/src/mnemosyne/bridge.ts');
+    const { activeLibrary } = await import('/src/mnemosyne/db.ts');
+    const { eventView } = await import('/src/mnemosyne/events.ts');
+    const lib = await activeLibrary();
+    const view = await syncDaily();
+    window.__smoke.renameEmpty = view.branch.id;
+    window.__smoke.renameBeforeEvents = JSON.stringify(await lib.all('event_chains'));
+    if ((await eventView(lib, view)).storedCount !== 0) throw new Error('wrong fork must have no events');
+    window.__smoke.reviewWrites = 0;
+  });
+  await page.getByText('聊天改名 / 接回已有档案', { exact: true }).click();
+  await page.getByRole('button', { name: '查找原档案（只读）', exact: true }).click();
+  const reconnectSelect = page.getByRole('button', { name: '改名前的原档案', exact: true });
+  await reconnectSelect.evaluate(el => el.scrollIntoView({ block: 'center' }));
+  await reconnectSelect.click();
+  await page.getByRole('option').filter({ hasText: 'legacy-hidden-ui' }).click();
+  await page.getByRole('button', { name: '预览接回（只读）', exact: true }).click();
+  await page.getByText('原档案保存：2 条正文 · 1 条摘要 · 1 条事件链 · 0 张表。', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.__smoke.reviewWrites), 0, 'reconnect preview is read only');
+  const renameCancelled = new Promise(resolve => page.once('dialog', async dialog => { await dialog.dismiss(); resolve(); }));
+  await page.getByRole('button', { name: '确认是同一聊天，接回原档案', exact: true }).click();
+  await renameCancelled;
+  assert.equal(await page.evaluate(() => window.__smoke.reviewWrites), 0, 'cancel reconnect is read only');
+  const renameConfirmed = new Promise(resolve => page.once('dialog', async dialog => { await dialog.accept(); resolve(); }));
+  await page.getByRole('button', { name: '确认是同一聊天，接回原档案', exact: true }).click();
+  await renameConfirmed;
+  await page.getByText('已接回原档案。库内原有 1 条事件链；仍有 0 条摘要待审核。若事件未显示，请继续检查隐藏来源差异。', { exact: true }).waitFor();
+  await page.evaluate(async () => {
+    const { activeLibrary } = await import('/src/mnemosyne/db.ts');
+    const { syncDaily } = await import('/src/mnemosyne/bridge.ts');
+    const s = window.__smoke, lib = await activeLibrary();
+    if ((await syncDaily()).branch.id !== s.renameOriginal) throw new Error('did not restore original branch');
+    if (!(await lib.all('host_bindings', 'branch', s.renameEmpty))[0].detached) throw new Error('wrong fork not retained detached');
+    if (JSON.stringify(await lib.all('event_chains')) !== s.renameBeforeEvents) throw new Error('event record changed');
+    s.ui.activePage = 'events';
+  });
+  await page.locator('.mn-event-card').filter({ hasText: '旧系统来源事件' }).waitFor();
   assert.deepEqual(errors, []);
-  console.log('PASS: identical parent/child round trip; delayed reads and rapid switches; read failures; persisted-but-filtered events; readonly source diagnosis with zero IDB/host writes; review scope isolation. No model calls.');
+  console.log('PASS: identical parent/child round trip; delayed reads and rapid switches; read failures; persisted-but-filtered events; readonly source diagnosis with zero IDB/host writes; review scope isolation. Explicit legacy role repair preview, cancel, confirmation and event recovery. Rename/mistaken-fork/read-only-preview/cancel/reconnect preserves original events and detached archives. No model calls.');
 } finally { await browser?.close(); server.kill(); }

@@ -1,9 +1,10 @@
+import { isRoleOnlyPair } from './source-equivalence';
 import { Library, freshLibraryName, activateLibrary } from './db';
 import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4;
+    version: 1 | 2 | 3 | 4 | 5;
     schema: 1;
     created: number;
     excluded: string[];
@@ -20,7 +21,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta is restricted to non-secret daily feature settings, not upstream API configuration.
-    const base = { format: 'mnemosyne-daily' as const, version: 4 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 5 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     validateData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -40,7 +41,7 @@ const FIELDS: Record<Store, string[]> = {
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     check(pack.data && Object.keys(pack.data).length === STORES.length, '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
@@ -52,6 +53,8 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             const optional = pack.version === 1 ? [] : store === 'custom_table_defs' ? ['tableSchema', 'dataVersion'] : store === 'custom_table_rows' ? ['hidden'] : [];
             if (pack.version >= 3) optional.push(...(store === 'event_revisions' ? ['eventSchema', 'overview', 'summarized'] : store === 'custom_table_rows' ? ['bodySources'] : store === 'table_receipts' ? ['backfillSchema', 'bodySources', 'start', 'end'] : []));
             if (pack.version >= 4 && store === 'event_chains') optional.push('archiveSchema', 'archived');
+            if (pack.version >= 5 && store === 'host_bindings') optional.push('rebindSchema', 'detached');
+            if (pack.version >= 5 && store === 'branches') optional.push('sourceRoleRepairSchema', 'sourceRoleRepairs');
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && FIELDS[store].every(k => k in r), `字段不合法 ${store}`);
             maps[store].set(r.id, r);
@@ -109,6 +112,19 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             cursor = cursor.previous ? get('history_snapshots', cursor.previous) : null;
         }
         check([...maps.history_snapshots.values()].filter(s => s.branch === b.id).every(s => reachable.has(s.id)), '未提交孤立快照');
+        if (b.sourceRoleRepairSchema !== undefined || b.sourceRoleRepairs !== undefined) {
+            check(b.sourceRoleRepairSchema === 1 && Array.isArray(b.sourceRoleRepairs), '来源角色修复格式非法');
+            const historical = new Set([...maps.history_snapshots.values()].filter(s => s.branch === b.id).flatMap(s => refs(s).map(r => r.revision)));
+            const pairs = new Set<string>();
+            for (const pair of b.sourceRoleRepairs) {
+                check(pair && Object.keys(pair).length === 3 && Number.isSafeInteger(pair.confirmedAt) && pair.confirmedAt >= 0, '来源角色修复回执非法');
+                ref(pair.before, b.story); ref(pair.after, b.story);
+                const key = JSON.stringify([pair.before, pair.after]);
+                check(!pairs.has(key) && historical.has(pair.before.revision) && historical.has(pair.after.revision) &&
+                    isRoleOnlyPair(get('source_revisions', pair.before.revision), get('source_revisions', pair.after.revision)), '来源角色修复跨身份、正文或分支');
+                pairs.add(key);
+            }
+        }
         if (b.fork) {
             const source = get('history_snapshots', b.fork.snapshot);
             check(source.branch === b.fork.branch && source.story === b.story && b.fork.length <= source.length, 'fork范围非法');
@@ -116,9 +132,12 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             check(JSON.stringify(prefix.at(-1) ?? null) === JSON.stringify(b.fork.anchor), 'fork锚错误');
         }
     }
-    for (const binding of maps.host_bindings.values())
+    for (const binding of maps.host_bindings.values()) {
         check(get('branches', binding.branch).story === binding.story, '绑定跨故事');
-    const scopes = [...maps.host_bindings.values()].map(b => b.scope);
+        if (binding.rebindSchema !== undefined || binding.detached !== undefined)
+            check(binding.rebindSchema === 1 && typeof binding.detached === 'boolean', '重新绑定字段非法');
+    }
+    const scopes = [...maps.host_bindings.values()].filter(b => !b.detached).map(b => b.scope);
     check(new Set(scopes).size === scopes.length, '重复宿主绑定');
     const mappingKeys = new Set();
     for (const m of maps.message_mappings.values()) {

@@ -1,3 +1,4 @@
+import { previewReconnect, commitReconnect } from './binding-recovery';
 import { readTables, renderTableState, commitSummaryTables, type SummaryTablePlan } from './tables';
 import { TABLE_OUTPUT_KEY } from './summary-tables';
 /** The only daily-library module that observes the ST host. */
@@ -88,11 +89,24 @@ export function hostVersion(): string {
         memory.summaries,
     ]);
 }
+/** Separate from source identity: hide/unhide can revoke a pending repair preview. */
+export function hiddenRoleRepairRefs(view: CapturedView): SourceRef[] {
+    const chat = getContext()?.chat ?? [];
+    return view.refs.filter((ref, i) => {
+        const message = chat[i], source = view.sources.get(ref.revision);
+        return message && message.is_system && !message.is_user && !message.extra?.type &&
+            !message.extra?.bbs_internal_notice && source?.role === 'assistant' &&
+            source.content === message.mes && source.provenance.hostKey === message.extra?.[MESSAGE_KEY] &&
+            source.provenance.swipe === (message.swipe_id ?? 0);
+    });
+}
 export function invalidateDaily() {
     const scope = hostScope();
     if (dailyState.scope !== scope)
         Object.assign(dailyState, {
             scope,
+            status: '等待当前聊天归档',
+            error: '',
             branch: '',
             archived: 0,
             summaries: 0,
@@ -232,11 +246,16 @@ export async function syncDaily(): Promise<CapturedView> {
             const inherited = ctx.chatMetadata[BINDING_KEY] as
                 | {
                       scope?: string;
+                      branch?: string;
                   }
                 | undefined;
-            if (inherited?.scope && inherited.scope !== scope) {
+            const bindings = inherited?.branch || inherited?.scope ? await lib.all<Binding>('host_bindings') : [];
+            const activeBinding = bindings.find(b => !b.detached && b.scope === scope);
+            if ((inherited?.scope && inherited.scope !== scope && activeBinding?.branch !== inherited.branch) ||
+                (inherited?.branch && !activeBinding) ||
+                (inherited?.branch && activeBinding?.branch !== inherited.branch && !bindings.some(b => b.detached && b.scope === scope && b.branch === inherited.branch))) {
                 dailyState.conflict = true;
-                throw new Error('聊天继承了另一绑定：请在档案页明确选择新故事或继承，不自动猜测分支');
+                throw new Error('聊天名称或绑定已改变：若只是改名，请接回原档案；若创建了新分支，请明确选择新故事或继承。不自动猜测分支。');
             }
             dailyState.conflict = false;
             let dirty = false;
@@ -479,14 +498,14 @@ export async function dailyBranchChoices() {
         const result: { value: string; label: string; inherited: boolean; length: number; suggested: number }[] = [];
         for (const binding of bindings) {
             const [owner, name] = parseScope(binding.scope);
-            if (owner !== character || !name || binding.scope === scope || seen.has(binding.branch)) continue;
+            if (owner !== character || !name || (!binding.detached && binding.scope === scope) || seen.has(binding.branch)) continue;
             const branch = await tx.get<Branch>('branches', binding.branch);
             if (!branch) continue;
             const snapshot = await tx.get<import('./model').Snapshot>('history_snapshots', branch.head);
             if (!snapshot) continue;
             seen.add(branch.id);
             const source = inherited?.branch === branch.id;
-            result.push({ value: branch.id, label: `${name} · ${snapshot.length} 条消息${source ? ' · 当前聊天的来源' : ''}`,
+            result.push({ value: branch.id, label: `${name} · ${snapshot.length} 条消息${binding.detached ? ' · 未连接，档案保留' : ''}${source ? ' · 当前聊天的来源' : ''}`,
                 inherited: source, length: snapshot.length, suggested: Math.min(snapshot.length, ctx.chat.length) });
         }
         return result.sort((a, b) => Number(b.inherited) - Number(a.inherited) || a.label.localeCompare(b.label));
@@ -494,34 +513,37 @@ export async function dailyBranchChoices() {
     check(scope === hostScope() && generation === dailyState.generation && lib === await activeLibrary(), '聊天已切换，请重新加载列表');
     return choices;
 }
-export async function confirmBinding(branchId: string) {
+export async function previewArchiveReconnect(branchId: string) {
+    const ctx = getContext(), scope = hostScope(), host = hostVersion(), generation = dailyState.generation;
+    check(ctx && scope, '请先打开改名后的聊天');
     const lib = await activeLibrary();
-    const ctx = getContext();
-    check(ctx, '无聊天');
-    const scope = hostScope();
-    await lib.transaction(['host_bindings', 'branches'], 'readwrite', async (tx) => {
-        const branch = await tx.get<Branch>('branches', branchId);
-        check(branch, '分支不存在');
-        const bindings = await tx.all<Binding>('host_bindings');
-        check(!bindings.some((b) => b.scope === scope), '当前聊天已绑定');
-        const binding = bindings.find((b) => b.branch === branchId);
-        check(binding, '绑定不存在');
-        // A continuation must preserve all host message markers; otherwise manual source alignment is required.
-        check(
-            ctx.chat.every((m) => typeof m.extra?.[MESSAGE_KEY] === 'string'),
-            '缺少原消息身份，不能直接续接',
-        );
-        binding.scope = scope;
-        binding.generation++;
-        binding.intent = 'carryover';
-        await tx.put('host_bindings', binding);
-        branch.epoch++;
-        await tx.put('branches', branch);
+    const plan = await previewReconnect(lib, branchId, scope, ctx.chat.map(m => ({
+        key: String(m.extra?.[MESSAGE_KEY] ?? ''), role: sourceRole(m), content: m.mes, swipe: m.swipe_id ?? 0,
+    })));
+    check(host === hostVersion() && generation === dailyState.generation && lib === await activeLibrary(), '聊天已改变，请重新预览接回');
+    return { lib, plan, host, generation };
+}
+export async function reconnectArchive(preview: Awaited<ReturnType<typeof previewArchiveReconnect>>, isCurrent: () => boolean = () => true) {
+    const job = serial.catch(() => {}).then(async () => {
+        const { lib, plan, host, generation } = preview, ctx = getContext();
+        const guard = () => isCurrent() && host === hostVersion() && generation === dailyState.generation;
+        check(ctx && guard() && lib === await activeLibrary(), '聊天已改变，请重新预览接回');
+        await commitReconnect(lib, plan, guard);
+        cache = null;
+        lastCache = null;
+        check(guard(), '档案连接已保存；聊天已切换，请返回后刷新');
+        // Durable binding is committed first; a failed metadata save can retry the same binding.
+        ctx.chatMetadata[BINDING_KEY] = { scope: plan.scope, branch: plan.branch.id };
+        invalidateDaily();
+        await ctx.saveMetadata();
     });
-    ctx.chatMetadata[BINDING_KEY] = { scope, branch: branchId };
-    await ctx.saveMetadata();
-    invalidateDaily();
+    serial = job;
+    await job;
     return syncDaily();
+}
+/** Compatibility wrapper: the caller must have obtained explicit rename/reconnect consent. */
+export async function confirmBinding(branchId: string) {
+    return reconnectArchive(await previewArchiveReconnect(branchId));
 }
 export function bindDaily() {
     installed = true;
@@ -598,27 +620,33 @@ export function assertSummaryEvidence(evidence: Awaited<ReturnType<typeof captur
         );
 }
 export async function confirmFork(parentId: string, prefixLength: number) {
-    const ctx = getContext();
-    check(ctx, '无聊天');
-    const lib = await activeLibrary();
-    const parent = await capture(lib, parentId, prefixLength);
-    const bindings = await lib.all<Binding>('host_bindings', 'branch', parentId);
-    const mappings = (await Promise.all(bindings.map((b) => lib.all<any>('message_mappings', 'owner', b.id)))).flat();
-    check(prefixLength <= ctx.chat.length, '分叉前缀超过聊天长度');
-    for (let i = 0; i < prefixLength; i++) {
-        const host = ctx.chat[i],
-            ref = parent.refs[i],
-            source = parent.sources.get(ref.revision)!;
-        check(
-            mappings.some((m) => m.message === ref.message && m.hostKey === host.extra?.[MESSAGE_KEY]) &&
-                source.content === host.mes,
-            '分叉前缀身份或正文不匹配，请选择准确的父快照前缀',
-        );
-    }
-    const scope = hostScope();
-    const branch = await forkBranch(lib, parent, scope);
-    ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
-    await ctx.saveMetadata();
-    invalidateDaily();
+    const ctx = getContext(), scope = hostScope(), host = hostVersion(), generation = dailyState.generation;
+    check(ctx && scope, '无聊天');
+    const job = serial.catch(() => {}).then(async () => {
+        const guard = () => scope === hostScope() && host === hostVersion() && generation === dailyState.generation;
+        check(guard(), '聊天已改变，请重新选择分支');
+        const lib = await activeLibrary();
+        const parent = await capture(lib, parentId, prefixLength);
+        const bindings = await lib.all<Binding>('host_bindings', 'branch', parentId);
+        const mappings = (await Promise.all(bindings.map((b) => lib.all<any>('message_mappings', 'owner', b.id)))).flat();
+        check(guard() && prefixLength <= ctx.chat.length, '聊天已改变或分叉前缀超过聊天长度');
+        for (let i = 0; i < prefixLength; i++) {
+            const message = ctx.chat[i], ref = parent.refs[i], source = parent.sources.get(ref.revision)!;
+            const identityMatches = mappings.some(m => m.message === ref.message && m.hostKey === message.extra?.[MESSAGE_KEY]);
+            const bodyMatches = source.content === message.mes;
+            const difference = [!identityMatches && '消息身份不同或缺失', !bodyMatches && '正文不同'].filter(Boolean).join('、');
+            check(identityMatches && bodyMatches,
+                `#${i} 分叉前缀身份或正文不匹配：${difference}；前 ${i} 条已匹配，未建立分支。若要找回原事件，请使用“聊天改名 / 接回已有档案”，不要通过缩短前缀新建分支来恢复。`);
+        }
+        const branch = await forkBranch(lib, parent, scope, guard);
+        cache = null;
+        lastCache = null;
+        check(guard(), '分支已保存；聊天已切换，请返回后刷新');
+        ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
+        await ctx.saveMetadata();
+        invalidateDaily();
+    });
+    serial = job;
+    await job;
     return syncDaily();
 }

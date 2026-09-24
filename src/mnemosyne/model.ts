@@ -23,6 +23,9 @@ export interface Story extends Row {
     created: number;
 }
 export interface Branch extends Row {
+    /** Explicit, branch-local confirmation; historical records remain immutable. */
+    sourceRoleRepairSchema?: 1;
+    sourceRoleRepairs?: SourceRoleRepair[];
     story: string;
     head: string;
     view: string;
@@ -33,6 +36,11 @@ export interface Branch extends Row {
         length: number;
         anchor: SourceRef | null;
     };
+}
+export interface SourceRoleRepair {
+    before: SourceRef;
+    after: SourceRef;
+    confirmedAt: number;
 }
 export interface Message extends Row {
     story: string;
@@ -62,6 +70,9 @@ export interface Snapshot extends Row {
     created: number;
 }
 export interface Binding extends Row {
+    /** Detached bindings keep their original mappings and archive; they cannot receive automatic sync. */
+    rebindSchema?: 1;
+    detached?: boolean;
     story: string;
     branch: string;
     scope: string;

@@ -1,3 +1,4 @@
+import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { Library, Transaction } from './db';
 import {
     STORES,
@@ -94,7 +95,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
     const memoryHashes = await Promise.all(observation.memories.map((m) => fingerprint(m)));
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const bindings = await tx.all<Binding>('host_bindings');
-        let binding = bindings.find((b) => b.scope === observation.scope);
+        let binding = bindings.find((b) => !b.detached && b.scope === observation.scope);
         let branch: Branch;
         if (!binding) {
             const story = { ...row('st'), created: Date.now() };
@@ -316,7 +317,7 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
         check(blocks.every(Boolean), '缺少历史清单块');
         const blockMap = new Map(blocks.map((b) => [b!.id, b!]));
         const positions = new Map(view.refs.map((r, i) => [r.message, i]));
-        const revisionByMessage = new Map(view.refs.map((r) => [r.message, r.revision]));
+        const refByMessage = new Map(view.refs.map((r) => [r.message, r]));
         const bases = new Map(
             legacySnapshots.map((snapshot) => {
                 const refs = snapshot!.blocks.flatMap((key) => blockMap.get(key)!.entries);
@@ -324,8 +325,7 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
                 let prefix = 0;
                 while (
                     prefix < refs.length &&
-                    refs[prefix].message === view.refs[prefix]?.message &&
-                    refs[prefix].revision === view.refs[prefix]?.revision
+                    sourceRefMatches(view.branch, refs[prefix], view.refs[prefix])
                 )
                     prefix++;
                 return [
@@ -357,13 +357,13 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
                 if (
                     !compatible.has(memory.id) &&
                     (memory.inputRefs.length
-                        ? memory.inputRefs.some((r) => revisionByMessage.get(r.message) !== r.revision)
+                        ? memory.inputRefs.some((r) => !sourceRefMatches(view.branch, r, refByMessage.get(r.message)))
                         : basis.prefix < requiredLength)
                 )
                     status = 'needs_review';
                 if (memory.coverage.length && !compatible.has(memory.id)) {
                     const first = positions.get(memory.coverage[0].message) ?? -1;
-                    if (first < 0 || !equal(view.refs.slice(first, first + memory.coverage.length), memory.coverage))
+                    if (first < 0 || !sourceRefsMatch(view.branch, memory.coverage, view.refs.slice(first, first + memory.coverage.length)))
                         status = 'needs_review';
                 }
                 for (const dependency of memory.dependencies) {
@@ -410,9 +410,10 @@ export async function keepSummary(lib: Library, view: CapturedView, memoryId: st
     });
 }
 /** Explicit fixed-parent fork; bindings are never inferred from matching content. */
-export async function forkBranch(lib: Library, parent: CapturedView, scope: string): Promise<Branch> {
+export async function forkBranch(lib: Library, parent: CapturedView, scope: string, guard: () => boolean = () => true): Promise<Branch> {
     return lib.transaction(STORES, 'readwrite', async (tx) => {
-        check(!(await tx.all<Binding>('host_bindings')).some((b) => b.scope === scope), '目标聊天已绑定');
+        check(guard(), '聊天已改变，请重新选择分支');
+        check(!(await tx.all<Binding>('host_bindings')).some((b) => !b.detached && b.scope === scope), '目标聊天已绑定');
         const branch: Branch = {
             ...row('br'),
             story: parent.branch.story,
@@ -452,6 +453,7 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
             }
         }
         await tx.add('branches', branch);
+        check(guard(), '聊天已改变，本次分叉已撤销');
         return branch;
     });
 }

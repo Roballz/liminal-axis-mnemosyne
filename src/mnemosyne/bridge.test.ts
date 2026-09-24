@@ -1,3 +1,7 @@
+import { fingerprint } from './model';
+import { commitReconnect } from './binding-recovery';
+import { previewRoleRepairs, confirmRoleRepairs } from './source-role-repair';
+import { exportLibrary, restoreLibrary } from './migration';
 import * as client from '@/api/client';
 import * as api from '@/api/settings';
 import { regenerateHigherSummary } from '@/memory/engine';
@@ -5,7 +9,7 @@ import { invalidateSummaryAncestors } from '@/memory/apply';
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import { Library, activateLibrary, freshLibraryName } from './db';
-import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices } from './bridge';
+import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices, hiddenRoleRepairRefs, dailyBranch, previewArchiveReconnect, reconnectArchive } from './bridge';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
 import { type STContext, type STMessage } from '@/st/context';
@@ -41,6 +45,199 @@ test('real bridge archives once, persists independent host IDs, and exposes cano
     expect(leaves[0].mesFull).toBe('合成答复');
     expect((ctx.chatMetadata.mnemosyne_archive_v1 as any).status).toBe('saved');
     expect(dailyState.pending).toBe(false);
+});
+
+
+test('never-opened chat auto-archives into its own story even with copied text and message keys', async () => {
+    const first = await syncDaily();
+    await editEvent(lib, first, null, { title: '只属于原聊天', status: 'open', keywords: [] }, { memory: first.memories[0].id, active: true, kind: 'progress' });
+    const saved = { chat: JSON.parse(JSON.stringify(ctx.chat)), meta: JSON.parse(JSON.stringify(ctx.chatMetadata)) };
+    ctx.chat = JSON.parse(JSON.stringify(saved.chat));
+    ctx.chatMetadata = {}; // An older chat with no Mnemosyne metadata, even if text is identical.
+    ctx.getCurrentChatId = () => 'never-opened-older-chat';
+    Object.assign(memory, createEmptyMemory());
+    invalidateDaily();
+    expect(canonicalLeaves()).toEqual([]);
+    expect(dailyState.status).toBe('等待当前聊天归档');
+    expect(dailyState.branch).toBe('');
+    const second = await syncDaily();
+    expect(dailyState.status).toBe('已归档'); // This is automatic archive, not inheritance.
+    expect(second.branch.story).not.toBe(first.branch.story);
+    expect(second.branch.id).not.toBe(first.branch.id);
+    expect(second.refs.every(ref => !first.refs.some(old => old.message === ref.message))).toBe(true);
+    expect(second.memories.every(m => !first.memories.some(old => old.id === m.id))).toBe(true);
+    expect(await eventView(lib, second)).toMatchObject({ storedCount: 0, cards: [] });
+    expect(canonicalLeaves().map(m => m.leafId)).toEqual(second.memories.map(m => m.id));
+    ctx.chat = saved.chat; ctx.chatMetadata = saved.meta; ctx.getCurrentChatId = () => 'synthetic';
+    invalidateDaily();
+    const back = await syncDaily();
+    expect(back.branch.id).toBe(first.branch.id);
+    expect((await eventView(lib, back)).cards[0].meta.title).toBe('只属于原聊天');
+    expect((await dailyBranch())?.id).toBe(first.branch.id);
+    expect(await lib.all('stories')).toHaveLength(2);
+});
+
+test('copied parent binding still pauses a new child before any canonical writes', async () => {
+    const parent = await syncDaily();
+    const before = await lib.all('branches');
+    ctx.getCurrentChatId = () => 'unconfirmed-child';
+    invalidateDaily();
+    expect(dailyState.branch).toBe('');
+    expect(canonicalLeaves()).toEqual([]);
+    expect(await dailyBranch()).toBeNull();
+    await expect(syncDaily()).rejects.toThrow('明确选择新故事或继承');
+    expect(dailyState.conflict).toBe(true);
+    expect(await lib.all('branches')).toEqual(before);
+    expect((await capture(lib, parent.branch.id)).refs).toEqual(parent.refs);
+});
+
+
+test('rename then mistaken inheritance preserves original events; explicit reconnect restores original IDs', async () => {
+    const original = await syncDaily();
+    const eventId = await editEvent(lib, original, null, { title: '改名前的原事件', overview: '原概要', summarized: [original.memories[0].id], status: 'open', keywords: [] }, { memory: original.memories[0].id, active: true, kind: 'progress' });
+    const before = await exportLibrary(lib);
+    ctx.getCurrentChatId = () => 'renamed-chat';
+    invalidateDaily();
+    await expect(syncDaily()).rejects.toThrow('改名');
+    const mistaken = await confirmFork(original.branch.id, ctx.chat.length);
+    expect(dailyState.review).toBe(0);
+    expect(await eventView(lib, mistaken)).toMatchObject({ storedCount: 0, cards: [] });
+    expect((await exportLibrary(lib)).data.event_chains).toEqual(before.data.event_chains);
+    const readonly = vi.spyOn(lib, 'transaction');
+    const preview = await previewArchiveReconnect(original.branch.id);
+    expect(preview.plan).toMatchObject({ events: 1, messages: 2, summaries: 1, displaced: { branch: { id: mistaken.branch.id } } });
+    expect(readonly.mock.calls.every(([, mode]) => mode === 'readonly')).toBe(true);
+    readonly.mockRestore();
+    const recovered = await reconnectArchive(preview);
+    expect(recovered.branch.id).toBe(original.branch.id);
+    expect(recovered.refs).toEqual(original.refs);
+    expect(recovered.memories.map(m => m.id)).toEqual(original.memories.map(m => m.id));
+    expect((await eventView(lib, recovered)).cards[0]).toMatchObject({ chain: { id: eventId }, meta: { overview: '原概要' } });
+    expect((await lib.all<any>('host_bindings', 'branch', mistaken.branch.id))[0]).toMatchObject({ detached: true, rebindSchema: 1 });
+    expect(await lib.get('branches', mistaken.branch.id)).toBeDefined();
+    expect((await dailyBranchChoices()).find(c => c.value === mistaken.branch.id)?.label).toContain('未连接');
+    const after = await exportLibrary(lib);
+    for (const store of ['event_chains', 'event_revisions', 'event_memberships', 'event_progress'] as const)
+        expect(after.data[store]).toEqual(before.data[store]);
+    dispose?.(); dispose = bindDaily();
+    expect((await syncDaily()).branch.id).toBe(original.branch.id); // Cache cannot revive the detached branch.
+    const restored = await restoreLibrary(after);
+    lib = restored;
+    dispose?.(); dispose = bindDaily();
+    expect((await syncDaily()).branch.id).toBe(original.branch.id);
+    expect((await eventView(lib, await syncDaily())).cards[0].chain.id).toBe(eventId);
+});
+
+test('backup taken before rename can be restored then reconnected without creating another empty archive', async () => {
+    const original = await syncDaily();
+    await editEvent(lib, original, null, { title: '备份中的事件', status: 'open', keywords: [] });
+    const pack = await exportLibrary(lib);
+    pack.version = 4; // User's actual pre-repair package format.
+    const { checksum, ...base } = pack;
+    pack.checksum = await fingerprint(base);
+    ctx.getCurrentChatId = () => 'rename-after-backup';
+    invalidateDaily();
+    await confirmFork(original.branch.id, ctx.chat.length);
+    lib = await restoreLibrary(pack);
+    dispose?.(); dispose = bindDaily();
+    await expect(syncDaily()).rejects.toThrow('接回原档案');
+    expect(await lib.all('branches')).toHaveLength(1);
+    const recovered = await reconnectArchive(await previewArchiveReconnect(original.branch.id));
+    expect(recovered.branch.id).toBe(original.branch.id);
+    expect((await eventView(lib, recovered)).cards[0].meta.title).toBe('备份中的事件');
+});
+
+test('reconnect rolls back a mid-transaction host change; detached binding schema rejects tampered exports', async () => {
+    const original = await syncDaily();
+    ctx.getCurrentChatId = () => 'renamed-chat';
+    invalidateDaily();
+    await confirmFork(original.branch.id, ctx.chat.length);
+    const preview = await previewArchiveReconnect(original.branch.id);
+    const before = await exportLibrary(lib);
+    let checks = 0;
+    await expect(commitReconnect(lib, preview.plan, () => ++checks === 1)).rejects.toThrow('已撤销');
+    expect((await exportLibrary(lib)).data).toEqual(before.data);
+    await reconnectArchive(preview);
+    const after = await exportLibrary(lib);
+    const detached = after.data.host_bindings.find((b: any) => b.detached) as any;
+    detached.detached = 'true';
+    await expect(restoreLibrary(after, false)).rejects.toThrow('重新绑定字段非法');
+    detached.detached = false;
+    await expect(restoreLibrary(after, false)).rejects.toThrow('重复宿主绑定');
+});
+
+test.each(['new-key', 'body', 'shorter', 'other-character'])('rename recovery rejects %s without changing any saved data', async kind => {
+    const original = await syncDaily();
+    ctx.getCurrentChatId = () => 'renamed-chat';
+    invalidateDaily();
+    if (kind === 'new-key') ctx.chat[0].extra!.mnemosyne_message_v1 = 'same-text-different-identity';
+    if (kind === 'body') ctx.chat[1].mes += '正文不同';
+    if (kind === 'shorter') ctx.chat.pop();
+    if (kind === 'other-character') ctx.characters![0].avatar = 'other.png';
+    const before = await exportLibrary(lib);
+    await expect(previewArchiveReconnect(original.branch.id)).rejects.toThrow();
+    expect((await exportLibrary(lib)).data).toEqual(before.data);
+});
+
+test('rename reconnect refuses a changed host or original branch after its read-only preview', async () => {
+    const original = await syncDaily();
+    ctx.getCurrentChatId = () => 'renamed-chat';
+    invalidateDaily();
+    let preview = await previewArchiveReconnect(original.branch.id);
+    ctx.getCurrentChatId = () => 'another-chat';
+    invalidateDaily();
+    await expect(reconnectArchive(preview)).rejects.toThrow('聊天已改变');
+    expect((await lib.all<any>('host_bindings'))[0].scope).toContain('synthetic');
+    ctx.getCurrentChatId = () => 'renamed-chat';
+    invalidateDaily();
+    preview = await previewArchiveReconnect(original.branch.id);
+    await editEvent(lib, original, null, { title: '预览后新事件', status: 'open', keywords: [] });
+    await expect(reconnectArchive(preview)).rejects.toThrow('档案已改变');
+    expect((await lib.all<any>('host_bindings'))[0].scope).toContain('synthetic');
+});
+
+test('background archive waits for a user-confirmed fork instead of observing half a binding', async () => {
+    const parent = await syncDaily();
+    ctx.getCurrentChatId = () => 'fork-with-background-sync';
+    invalidateDaily();
+    let release!: () => void, entered!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const fork = canonical.forkBranch;
+    vi.spyOn(canonical, 'forkBranch').mockImplementationOnce(async (...args) => {
+        entered(); await held; return fork(...args);
+    });
+    const choosing = confirmFork(parent.branch.id, ctx.chat.length);
+    await started;
+    const background = syncDaily();
+    release();
+    const [chosen, observed] = await Promise.all([choosing, background]);
+    expect(observed.branch.id).toBe(chosen.branch.id);
+    expect(observed.branch.id).not.toBe(parent.branch.id);
+    expect((await dailyBranch())?.id).toBe(chosen.branch.id);
+    expect(dailyState.conflict).toBe(false);
+});
+
+test('metadata save failure after reconnect retries the durable binding and preserves a real child', async () => {
+    const original = await syncDaily();
+    await editEvent(lib, original, null, { title: '原分支事件', status: 'open', keywords: [] });
+    ctx.getCurrentChatId = () => 'actual-child';
+    invalidateDaily();
+    const child = await confirmFork(original.branch.id, ctx.chat.length);
+    await editEvent(lib, child, null, { title: '子分支独有事件', status: 'open', keywords: [] });
+    const childState = { chat: JSON.parse(JSON.stringify(ctx.chat)), metadata: JSON.parse(JSON.stringify(ctx.chatMetadata)) };
+    ctx.getCurrentChatId = () => 'child-renamed';
+    invalidateDaily();
+    const preview = await previewArchiveReconnect(child.branch.id);
+    vi.mocked(ctx.saveMetadata).mockRejectedValueOnce(new Error('合成宿主保存失败'));
+    await expect(reconnectArchive(preview)).rejects.toThrow('宿主保存失败');
+    ctx.chatMetadata = childState.metadata; // Reload from the unsaved old host file.
+    dispose?.(); dispose = bindDaily();
+    const recovered = await syncDaily();
+    expect(recovered.branch.id).toBe(child.branch.id);
+    expect((await eventView(lib, recovered)).cards.map(c => c.meta.title)).toEqual(['子分支独有事件']);
+    expect((await eventView(lib, await capture(lib, original.branch.id))).cards.map(c => c.meta.title)).toEqual(['原分支事件']);
+    expect(await lib.all('branches')).toHaveLength(2);
 });
 
 test.each([false, true])('hide/unhide preserves source identity after reload (plugin marker=%s)', async pluginHidden => {
@@ -121,6 +318,84 @@ test('legacy hidden-role misclassification recovers child events and highest sum
     expect(dailyState.review).toBe(4);
     expect(await eventView(lib, edited)).toMatchObject({ storedCount: 1, cards: [] });
     expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
+});
+
+
+test('legacy first archive as system requires explicit repair and restores original events and L2 across reload', async () => {
+    ctx.chat.push(message(true, '第二问'), message(false, '第二段正文'));
+    ctx.chat[3].extra!.bbs_leaf = { id: 'second-leaf', text: '第二条摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+    memory.summaries.push(
+        { id: 'level-1', text: '一级压缩', level: 1, createdAt: 3, auto: true, childIds: ['legacy-leaf', 'second-leaf'] },
+        { id: 'level-2', text: '最高层剧情总结', level: 2, createdAt: 4, auto: true, childIds: ['level-1'] },
+    );
+    ctx.chat.forEach(m => { m.is_system = true; });
+    const synchronize = canonical.synchronize;
+    vi.spyOn(canonical, 'synchronize').mockImplementationOnce((library, observation) => synchronize(library, {
+        ...observation, messages: observation.messages.map((m, i) => i === 1 ? { ...m, role: 'system' } : m),
+    }));
+    const parent = await syncDaily();
+    ctx.getCurrentChatId = () => 'legacy-hidden-child';
+    vi.spyOn(canonical, 'synchronize').mockImplementationOnce((library, observation) => synchronize(library, {
+        ...observation, messages: observation.messages.map((m, i) => i === 1 ? { ...m, role: 'system' } : m),
+    }));
+    let view = await confirmFork(parent.branch.id, ctx.chat.length);
+    const leaf = view.memories.find(m => m.hostId === 'second-leaf')!;
+    const eventId = await editEvent(lib, view, null, {
+        title: '起初已误判的事件', status: 'open', keywords: ['约定'], overview: '手工整理好的概要', summarized: [leaf.id],
+    }, { memory: leaf.id, active: true, kind: 'progress' });
+    const unchangedStores = ['source_revisions', 'memory_revisions', 'event_chains', 'event_revisions', 'event_memberships', 'event_progress', 'reviews'] as const;
+    dispose?.(); dispose = bindDaily();
+    view = await syncDaily();
+    expect(dailyState.review).toBe(4);
+    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
+    const before = await Promise.all(unchangedStores.map(s => lib.all(s)));
+    const transactions = vi.spyOn(lib, 'transaction');
+    const candidates = await previewRoleRepairs(lib, view, hiddenRoleRepairRefs(view));
+    expect(candidates.map(c => c.floor)).toEqual([1]);
+    expect(transactions.mock.calls.every(([, mode]) => mode === 'readonly')).toBe(true);
+    transactions.mockRestore();
+    expect(dailyState.review).toBe(4); // A preview cannot approve anything.
+    await confirmRoleRepairs(lib, view, candidates, () => true);
+    view = await syncDaily();
+    expect(dailyState.review).toBe(0);
+    expect((await eventView(lib, view)).cards[0]).toMatchObject({ chain: { id: eventId }, meta: { overview: '手工整理好的概要' }, members: [{ memory: leaf.id }] });
+    expect(selectInjectionNodes(memory.summaries, ctx.chat).map(n => n.id)).toEqual(['level-2']);
+    expect(buildHistoryInjectionText()).toContain('最高层剧情总结');
+    expect(await Promise.all(unchangedStores.map(s => lib.all(s)))).toEqual(before);
+    expect(await capture(lib, parent.branch.id)).toEqual(parent);
+    expect(await previewRoleRepairs(lib, view, hiddenRoleRepairRefs(view))).toEqual([]);
+    dispose?.(); dispose = bindDaily();
+    expect((await syncDaily()).branch.sourceRoleRepairs).toHaveLength(1);
+    expect(dailyState.review).toBe(0);
+    const pack = await exportLibrary(lib);
+    expect(pack.version).toBe(5);
+    const restored = await restoreLibrary(pack);
+    lib = restored;
+    dispose?.(); dispose = bindDaily();
+    view = await syncDaily();
+    expect(dailyState.review).toBe(0);
+    expect((await eventView(lib, view)).cards[0].chain.id).toBe(eventId);
+    expect(selectInjectionNodes(memory.summaries, ctx.chat).map(n => n.id)).toEqual(['level-2']);
+    ctx.chat[1].mes += '真正改写';
+    invalidateDaily(); view = await syncDaily();
+    expect(dailyState.review).toBe(4);
+    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
+});
+
+test('repair host eligibility excludes native system, internal notices, users and changed visibility', async () => {
+    const view = await syncDaily();
+    ctx.chat.forEach(m => { m.is_system = true; });
+    expect(hiddenRoleRepairRefs(view)).toEqual([view.refs[1]]);
+    ctx.chat[1].extra!.type = 'narrator';
+    expect(hiddenRoleRepairRefs(view)).toEqual([]);
+    delete ctx.chat[1].extra!.type;
+    ctx.chat[1].extra!.bbs_internal_notice = 'backlog';
+    expect(hiddenRoleRepairRefs(view)).toEqual([]);
+    delete ctx.chat[1].extra!.bbs_internal_notice;
+    ctx.chat[1].is_system = false;
+    expect(hiddenRoleRepairRefs(view)).toEqual([]);
 });
 
 test.each(['native', 'notice'])('real system-source changes invalidate the warm cache and in-flight evidence (%s)', async kind => {
@@ -382,10 +657,64 @@ test('named fork rejects changed text or missing identity without altering paren
     invalidateDaily();
     const option = (await dailyBranchChoices())[0];
     ctx.chat[1].mes = '不同正文';
-    await expect(confirmFork(option.value, 2)).rejects.toThrow('身份或正文不匹配');
+    await expect(confirmFork(option.value, 2)).rejects.toThrow('#1 分叉前缀身份或正文不匹配：正文不同；前 1 条已匹配');
     ctx.chat[1].mes = '合成答复';
     delete ctx.chat[1].extra!.mnemosyne_message_v1;
-    await expect(confirmFork(option.value, 2)).rejects.toThrow('身份或正文不匹配');
+    await expect(confirmFork(option.value, 2)).rejects.toThrow('#1 分叉前缀身份或正文不匹配：消息身份不同或缺失；前 1 条已匹配');
     expect((await capture(lib, parent.branch.id)).refs).toEqual(parent.refs);
     expect(await lib.all('branches')).toHaveLength(1);
+});
+
+test('both legacy branches can need review independently; shared parent prefix does not establish child archive identity', async () => {
+    ctx.chat[1].is_system = true;
+    const synchronize = canonical.synchronize;
+    const legacyOnce = () => vi.spyOn(canonical, 'synchronize').mockImplementationOnce((library, observation) => synchronize(library, {
+        ...observation, messages: observation.messages.map((m, i) => i === 1 ? { ...m, role: 'system' } : m),
+    }));
+    legacyOnce();
+    const parent = await syncDaily();
+    await editEvent(lib, parent, null, { title: '父档案事件', status: 'open', keywords: [] }, { memory: parent.memories[0].id, active: true, kind: 'progress' });
+    const parentChat = JSON.parse(JSON.stringify(ctx.chat));
+    const parentMeta = JSON.parse(JSON.stringify(ctx.chatMetadata));
+    ctx.getCurrentChatId = () => 'original-child';
+    ctx.chat.push(message(true, '子路线问题'), message(false, '子路线答复'));
+    invalidateDaily();
+    legacyOnce();
+    let child = await confirmFork(parent.branch.id, 2);
+    await editEvent(lib, child, null, { title: '子档案事件', status: 'open', keywords: [] }, { memory: child.memories[0].id, active: true, kind: 'progress' });
+    const childChat = JSON.parse(JSON.stringify(ctx.chat));
+    const childMeta = JSON.parse(JSON.stringify(ctx.chatMetadata));
+    const parentBefore = await capture(lib, parent.branch.id);
+    dispose?.(); dispose = bindDaily();
+    child = await syncDaily();
+    expect(dailyState.review).toBe(1);
+    expect(await capture(lib, parent.branch.id)).toEqual(parentBefore); // Child sync did not publish a parent head.
+    expect(await eventView(lib, child)).toMatchObject({ storedCount: 1, cards: [] });
+    const childBefore = await capture(lib, child.branch.id);
+    ctx.chat = JSON.parse(JSON.stringify(parentChat)); ctx.chatMetadata = parentMeta; ctx.getCurrentChatId = () => 'synthetic';
+    invalidateDaily();
+    const parentNow = await syncDaily();
+    expect(dailyState.review).toBe(1); // Visiting the parent independently corrects its old system revision.
+    expect(await capture(lib, child.branch.id)).toEqual(childBefore);
+    expect(await eventView(lib, parentNow)).toMatchObject({ storedCount: 1, cards: [] });
+    const originalEvents = (await exportLibrary(lib)).data.event_chains;
+    for (const name of ['copy-a', 'copy-b']) {
+        ctx.chat = JSON.parse(JSON.stringify(childChat));
+        ctx.chatMetadata = JSON.parse(JSON.stringify(childMeta));
+        ctx.getCurrentChatId = () => name;
+        // The divergent suffix has identical text but different host identity.
+        ctx.chat[2].extra!.mnemosyne_message_v1 = `${name}-different-message`;
+        invalidateDaily();
+        const before = (await exportLibrary(lib)).data;
+        await expect(confirmFork(child.branch.id, 4)).rejects.toThrow('#2 分叉前缀身份或正文不匹配：消息身份不同或缺失；前 2 条已匹配');
+        await expect(previewArchiveReconnect(child.branch.id)).rejects.toThrow('#2 消息身份或正文与原档案不一致：消息身份不同或缺失');
+        expect((await exportLibrary(lib)).data).toEqual(before);
+        const copy = await confirmFork(parent.branch.id, 2);
+        expect(copy.branch.id).not.toBe(parent.branch.id);
+        expect(copy.branch.id).not.toBe(child.branch.id);
+        expect(await eventView(lib, copy)).toMatchObject({ storedCount: 0, cards: [] });
+    }
+    expect((await exportLibrary(lib)).data.event_chains).toEqual(originalEvents);
+    expect(await capture(lib, parent.branch.id)).toEqual(parentNow);
+    expect(await capture(lib, child.branch.id)).toEqual(childBefore);
 });
