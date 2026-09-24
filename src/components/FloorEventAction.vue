@@ -227,12 +227,7 @@ async function apply(create: boolean, update: boolean) {
       if (result) {
         reviewError.value = "";
         review.value = result;
-      } else
-        showFeedback(
-          update
-            ? "本楼已在事件链中，没有待更新内容，未调用模型"
-            : "本楼已在事件链中，未调用模型更新概要",
-        );
+      } else showFeedback("已加入事件链");
     }
   } catch (e) {
     if (run === ticket && openedScope === hostScope()) {
@@ -334,7 +329,7 @@ async function saveReviewed(text: string) {
               立即更新会调用一次摘要
               API，发送该链全部有效成员及本楼，为所有待更新内容生成概要；审阅确认后才保存本次关联和概要。仅入库不调用模型；已经关联的本楼不会重复写入。
             </p>
-            <div class="mn-menu">
+            <div class="mn-event-join-actions">
               <button
                 type="button"
                 :disabled="busy"
@@ -407,6 +402,17 @@ async function saveReviewed(text: string) {
   </span>
 </template>
 <style scoped>
+.mn-event-join-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+.mn-event-join-actions > button {
+  min-height: 46px;
+  padding: 12px 8px;
+  text-align: center;
+}
 .mn-floor-event {
   position: relative;
   display: inline-block;

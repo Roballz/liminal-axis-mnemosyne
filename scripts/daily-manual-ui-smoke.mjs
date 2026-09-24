@@ -523,15 +523,21 @@ try {
       .isVisible(),
     true,
   );
+  await page.evaluate(() => { window.__smoke.ui.theme = "night"; });
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: "/tmp/w01-event-join-actions.png", fullPage: true });
   await dialog.getByRole("button", { name: "仅入库", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(await page.evaluate(() => window.__smoke.calls.length), 3);
   await success
-    .getByText("本楼已在事件链中，未调用模型更新概要", { exact: true })
+    .getByText("已加入事件链", { exact: true })
     .waitFor();
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: "/tmp/w01-event-joined-feedback.png", fullPage: true });
   await success.getByRole("button", { name: "确定", exact: true }).click();
   await success.waitFor({ state: "hidden" });
   await page.evaluate(() => {
+    window.__smoke.ui.theme = "day";
     document.getElementById("synthetic-floor").style.display = "none";
     window.__smoke.ui.open = true;
     window.__smoke.ui.activePage = "events";
