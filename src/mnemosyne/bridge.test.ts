@@ -10,6 +10,9 @@ import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
 import { type STContext, type STMessage } from '@/st/context';
 import { capture, statuses } from './canonical';
+import * as canonical from './canonical';
+import { editEvent, eventView } from './events';
+import { buildHistoryInjectionText, selectInjectionNodes } from '@/memory/inject';
 let lib: Library, ctx: STContext, dispose: (() => void) | undefined;
 const message = (user: boolean, text: string): STMessage => ({ name: user ? 'User' : 'Character', is_user: user, is_system: false, mes: text, extra: {} });
 beforeEach(async () => {
@@ -38,6 +41,102 @@ test('real bridge archives once, persists independent host IDs, and exposes cano
     expect(leaves[0].mesFull).toBe('合成答复');
     expect((ctx.chatMetadata.mnemosyne_archive_v1 as any).status).toBe('saved');
     expect(dailyState.pending).toBe(false);
+});
+
+test.each([false, true])('hide/unhide preserves source identity after reload (plugin marker=%s)', async pluginHidden => {
+    const first = await syncDaily(), version = hostVersion();
+    ctx.chat[0].is_system = true; // a hidden user message is still a user source
+    ctx.chat[1].is_system = true;
+    if (pluginHidden) ctx.chat[1].extra!.bbs_hidden = true;
+    expect(hostVersion()).toBe(version);
+    // A warm cache used to mask the role bug until switching chats or reloading.
+    dispose?.(); dispose = bindDaily();
+    let next = await syncDaily();
+    expect(next.refs).toEqual(first.refs);
+    expect(next.memories.map(m => m.id)).toEqual(first.memories.map(m => m.id));
+    expect(dailyState.review).toBe(0);
+    expect(selectInjectionNodes([], ctx.chat).map(n => n.id)).toEqual(['legacy-leaf']);
+    ctx.chat.forEach(m => { m.is_system = false; delete m.extra!.bbs_hidden; });
+    dispose?.(); dispose = bindDaily();
+    next = await syncDaily();
+    expect(next.refs).toEqual(first.refs);
+    expect(selectInjectionNodes([], ctx.chat)).toEqual([]);
+    expect(await lib.all('source_revisions')).toHaveLength(2);
+});
+
+test('legacy hidden-role misclassification recovers child events and highest summary without rewriting records', async () => {
+    ctx.chat.push(message(true, '第二问'), message(false, '第二段正文'));
+    ctx.chat[3].extra!.bbs_leaf = { id: 'second-leaf', text: '第二条摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+    memory.summaries.push(
+        { id: 'level-1', text: '一级压缩', level: 1, createdAt: 3, auto: true, childIds: ['legacy-leaf', 'second-leaf'] },
+        { id: 'level-2', text: '最高层剧情总结', level: 2, createdAt: 4, auto: true, childIds: ['level-1'] },
+    );
+    for (const m of ctx.chat.filter(m => !m.is_user)) {
+        m.is_system = true;
+        m.extra!.bbs_hidden = true;
+    }
+    const parent = await syncDaily();
+    ctx.getCurrentChatId = () => 'hidden-child';
+    const observe = vi.spyOn(canonical, 'synchronize');
+    let view = await confirmFork(parent.branch.id, ctx.chat.length);
+    const legacyObservation: canonical.HostObservation = JSON.parse(JSON.stringify(observe.mock.calls.at(-1)![1]));
+    const leaf = view.memories.find(m => m.hostId === 'second-leaf')!;
+    const eventId = await editEvent(lib, view, null, {
+        title: '合成子分支事件', status: 'open', keywords: ['约定'], overview: '已整理的概要', summarized: [leaf.id],
+    }, { memory: leaf.id, active: true, kind: 'progress' });
+    view = await syncDaily();
+    const eventRows = () => Promise.all((['event_chains', 'event_revisions', 'event_memberships', 'event_progress'] as const).map(s => lib.all(s)));
+    const recordsBefore = await eventRows(), memoriesBefore = await lib.all('memory_revisions');
+    expect(buildHistoryInjectionText()).toContain('最高层剧情总结');
+    // Persist the previous adapter's wrong observation, as an already affected installation would.
+    delete ctx.chat[1].extra!.bbs_hidden;
+    legacyObservation.messages[1].role = 'system';
+    await canonical.synchronize(lib, legacyObservation);
+    const broken = await capture(lib, view.branch.id);
+    expect([...(await statuses(lib, broken)).values()]).toEqual(Array(4).fill('needs_review'));
+    expect(await eventView(lib, broken)).toMatchObject({ storedCount: 1, cards: [] });
+    const revisionCount = (await lib.all('source_revisions')).length;
+    dispose?.(); dispose = bindDaily();
+    const recovered = await syncDaily();
+    expect(recovered.branch.id).toBe(view.branch.id);
+    expect(recovered.refs).toEqual(view.refs); // reselect original revisions; never forge compatibility
+    expect(dailyState.review).toBe(0);
+    const events = await eventView(lib, recovered);
+    expect(events.cards).toHaveLength(1);
+    expect(events.cards[0]).toMatchObject({ chain: { id: eventId }, meta: { overview: '已整理的概要' }, members: [{ memory: leaf.id }] });
+    expect(selectInjectionNodes(memory.summaries, ctx.chat).map(n => n.id)).toEqual(['level-2']);
+    const history = buildHistoryInjectionText();
+    expect(history).toContain('最高层剧情总结');
+    expect(history).not.toContain('第二条摘要');
+    expect(history).not.toContain('一级压缩');
+    expect(await eventRows()).toEqual(recordsBefore);
+    expect(await lib.all('memory_revisions')).toEqual(memoriesBefore);
+    expect(await lib.all('source_revisions')).toHaveLength(revisionCount);
+    expect(await lib.all('reviews')).toEqual([]);
+    expect(await capture(lib, parent.branch.id)).toEqual(parent);
+    // Fixing visibility must still reject an actual later source edit.
+    ctx.chat[1].mes += '真正改写剧情';
+    invalidateDaily();
+    const edited = await syncDaily();
+    expect(dailyState.review).toBe(4);
+    expect(await eventView(lib, edited)).toMatchObject({ storedCount: 1, cards: [] });
+    expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
+});
+
+test.each(['native', 'notice'])('real system-source changes invalidate the warm cache and in-flight evidence (%s)', async kind => {
+    const view = await syncDaily(), host = hostVersion(), generation = dailyState.generation;
+    const evidence = await captureSummaryEvidence([0, 1]);
+    ctx.chat[1].is_system = true;
+    if (kind === 'native') ctx.chat[1].extra!.type = 'narrator';
+    else ctx.chat[1].extra!.bbs_internal_notice = 'backlog';
+    expect(hostVersion()).not.toBe(host);
+    expect(canonicalLeaves()).toEqual([]);
+    expect(await dailyCurrent(view, host, generation)).toBe(false);
+    expect(() => assertSummaryEvidence(evidence)).toThrow();
+    const next = await syncDaily();
+    expect(next.sources.get(next.refs[1].revision)?.role).toBe('system');
+    expect(dailyState.review).toBe(1);
+    expect(await lib.all('reviews')).toEqual([]);
 });
 test('host write failure stays pending and retries the unsaved message markers', async () => {
     vi.mocked(ctx.saveChat).mockRejectedValueOnce(new Error('host save failed'));

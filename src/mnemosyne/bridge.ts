@@ -52,6 +52,18 @@ let savedHost = '';
 const MESSAGE_KEY = 'mnemosyne_message_v1';
 const BINDING_KEY = 'mnemosyne_binding_v1';
 const EVIDENCE_KEY = 'mnemosyne_summary_evidence_v1';
+/** Source authorship follows the engine's isRealAiReply rule, not context visibility.
+ * ST /hide also sets is_system on real replies without adding bbs_hidden.
+ * Keep native typed system messages and our internal notices as system sources.
+ */
+function sourceRole(message: STMessage): 'user' | 'assistant' | 'system' {
+    if (message.is_user) return 'user';
+    if (
+        message.extra?.bbs_internal_notice ||
+        (message.is_system && message.extra?.type && !message.extra?.bbs_hidden)
+    ) return 'system';
+    return 'assistant';
+}
 export function hostScope(): string {
     const ctx = getContext();
     const chat = ctx?.getCurrentChatId?.();
@@ -65,7 +77,7 @@ export function hostVersion(): string {
         hostScope(),
         (ctx?.chat ?? []).map((m) => [
             m.extra?.[MESSAGE_KEY],
-            m.is_user,
+            sourceRole(m),
             m.mes,
             m.swipe_id,
             m.extra?.bbs_omit,
@@ -246,11 +258,7 @@ export async function syncDaily(): Promise<CapturedView> {
                 scope,
                 messages: ctx.chat.map((m) => ({
                     key: String(m.extra![MESSAGE_KEY]),
-                    role: m.is_user
-                        ? 'user'
-                        : m.extra?.bbs_internal_notice || (m.is_system && !m.extra?.bbs_hidden)
-                          ? 'system'
-                          : 'assistant',
+                    role: sourceRole(m),
                     content: m.mes,
                     swipe: m.swipe_id ?? 0,
                 })),
