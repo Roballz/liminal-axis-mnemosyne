@@ -1,4 +1,20 @@
-# W-01 最终回执：事件返回审阅与按要求重写概要
+# W-01 最终回执：加入事件按钮布局与成功提示
+
+日期：2026-09-24。状态：**implemented_unverified**。本节为最新回执，下方保留历史证据。
+
+- 开工分支 `work/daily-memory-mvp-baibai`，HEAD `4f190d2faaf87e93946ac2f9cf1935d042eb0616`；工作树干净，fetch 与远端一致。固定柏宝书基线再次核对为 `393873acd27906a09308ae65fe7e636a3d3941ab`。沿用 W-01 用户施工授权与 AGENTS 单线要求，无子代理、无新任务卡。
+- 提示词核对：`prepareEventRewrite → requestEventOverview → buildEventInstruction` 读取已保存的 `apiSettings.prompts.eventOverview`（空值用内置），再附固定输出协议、重写要求及事件材料。本次无需改请求逻辑；使用说明补上“重写概要”也从下一次请求读取设置。已有合成测试仍覆盖自定义提示词与改写要求实际进入请求。
+- 图一问题来自 `.mn-menu` 虽设 gap，却没有启用 flex/grid；其固定宽度/内边距也不适合嵌入该表单。楼层动作使用独立双列 grid，两按钮等宽、间距12px、上间距20px、高度至少46px，居中显示。立即更新保持主色，仅入库与取消保持次要配色，其他菜单不变。
+- 图二成功提示统一为“已加入事件链”，省去“已在事件链中”和未调用模型的说明。关联去重、仅入库无API、立即更新需审阅等行为保持。
+- 实现源码 +13 / −7行；现有浏览器检查与截图记录 +7 / −1行。未新增单元测试或无关场景。实现估计约20行，实际更少；文档、构建和截图不计入源码行数。
+- 本地实现 `f95ba2add1d3baa4950e05bd9cba79443d9495d8`；GitHub 实现 `e18f9d540d8d59a0d6398845126c435ea792bf31`；共同树 `2d2a00918a16bdb616271338e98f5e2e5282e5a1`，9个blob与整树核对。本回执另作纯文档提交后，一起非强制更新原分支。
+- 最终一次 `npm test`：23文件367/367通过，既有脚本810/12/53断言通过（`/tmp/w01-join-test.log`）。`npx vue-tsc --noEmit` 通过（`/tmp/w01-join-types.log`）；`npm run build` 通过，CSS105.54kB / gzip16.07kB，JS756.95kB / gzip263.48kB（`/tmp/w01-join-build.log`），保留既有单包>500kB提示。`git diff --check` 通过。
+- 复用现有浏览器烟测：`MN_CHROMIUM_PATH=/tmp/w01-join-chromium/chromium MN_TEST_FONT_CSS=/tmp/w01-join-tools/node_modules/@fontsource/noto-sans-sc/400.css node scripts/daily-manual-ui-smoke.mjs` 通过，日志 `/tmp/w01-join-ui.log`。Chromium153、390×844，检查现有加入动作/提示断言、无额外stub调用，并人工查看暗色合成截图：[双按钮布局](w-01-ui/event-join-actions.png)、[加入成功](w-01-ui/event-joined-feedback.png)。无pageerror，未调用真实模型或使用真实聊天/用户截图做夹具。临时浏览器/字体已重建在/tmp，项目依赖未变。
+- 无库格式、数据、迁移或请求语义变化。TT手机尚未实测；更新并重载扩展后，楼层卡片“加入已有链”选中一条链，确认双按钮间距，点仅入库检查新提示即可。可回退至开工提交 `4f190d2` 恢复旧布局和文案，无需回退数据。继续交 Chat review 与 TT 手机实测，状态仅 implemented_unverified。
+
+---
+
+# W-01 历史回执：事件返回审阅与按要求重写概要
 
 日期：2026-09-24。状态：**implemented_unverified**。本节为最新回执；下方是历史记录。
 
