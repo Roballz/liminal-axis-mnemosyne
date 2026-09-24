@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { shallowRef, ref } from 'vue';
+import { shallowRef, ref, watch, computed } from 'vue';
+import BbsSelect from '@/components/BbsSelect.vue';
 import {
   dailyState,
+  dailyBranchChoices,
   syncDaily,
   chooseNewStory,
   confirmBinding,
@@ -22,6 +24,31 @@ const prefix = ref(0),
   error = ref(''),
   notice = ref(''),
   busy = ref(false);
+const choices = shallowRef<Awaited<ReturnType<typeof dailyBranchChoices>>>([]);
+const loadingChoices = ref(false);
+const selected = computed(() => choices.value.find(c => c.value === branch.value));
+const choiceOptions = computed(() => [{ value: '', label: '请选择来源聊天' }, ...choices.value]);
+let choiceRun = 0;
+watch(() => [dailyState.conflict, dailyState.scope, dailyState.generation], async (_, __, cleanup) => {
+  const runId = ++choiceRun;
+  let active = true;
+  cleanup(() => { active = false; });
+  choices.value = [];
+  branch.value = '';
+  loadingChoices.value = dailyState.conflict;
+  if (!dailyState.conflict) return;
+  try {
+    const result = await dailyBranchChoices();
+    if (!active || runId !== choiceRun) return;
+    choices.value = result;
+    branch.value = result.find(c => c.inherited)?.value ?? '';
+  } catch (e) {
+    if (active && runId === choiceRun) error.value = String((e as Error).message);
+  } finally {
+    if (active && runId === choiceRun) loadingChoices.value = false;
+  }
+}, { immediate: true });
+watch(branch, () => { prefix.value = selected.value?.suggested ?? 0; });
 const reviewView = shallowRef<CapturedView | null>(null),
   reviewStates = shallowRef(new Map<string, string>());
 const reviewPage = ref(0);
@@ -124,7 +151,7 @@ async function copyKnowledge() {
       </ol>
     </details>
     <div v-if="dailyState.conflict" class="mn-card">
-      <p>当前聊天带有另一聊天的绑定，请明确它是新故事、原分支续聊还是分叉。</p>
+      <p>这个聊天复制了另一聊天的归档信息。如果你刚在原会话点击了“创建分支”，请选择来源聊天，再点击“从所选聊天分叉”。</p>
       <button
         :disabled="busy"
         @click="
@@ -136,9 +163,14 @@ async function copyKnowledge() {
       >
         作为独立新故事
       </button>
-      <label>已有分支 ID<input v-model="branch" /></label>
+      <p>来源聊天（当前角色 / 群组已归档的聊天）</p>
+      <fieldset :disabled="busy || loadingChoices" class="mn-branch-select">
+        <BbsSelect v-model="branch" :options="choiceOptions" aria-label="来源聊天" />
+      </fieldset>
+      <p v-if="loadingChoices" class="mn-muted">正在读取聊天名称…</p>
+      <p v-else-if="!choices.length" class="mn-muted">没有可选来源。请先回到原聊天完成归档，再回来选择；无需查找内部 ID。</p>
       <button
-        :disabled="busy"
+        :disabled="busy || loadingChoices || !selected"
         @click="
           run(async () => {
             await confirmBinding(branch);
@@ -146,13 +178,13 @@ async function copyKnowledge() {
           })
         "
       >
-        确认原分支换聊天继续
+        沿用所选分支继续（不新建支线）
       </button>
       <label
-        >分叉继承前缀条数（含 User / Assistant）<input v-model.number="prefix" type="number" min="0"
+        >分叉点：继承开头多少条消息<input v-model.number="prefix" type="number" min="0" step="1" :max="selected?.suggested" :disabled="busy || !selected"
       /></label>
       <button
-        :disabled="busy"
+        :disabled="busy || loadingChoices || !selected || !Number.isInteger(prefix) || prefix < 0 || prefix > selected.suggested"
         @click="
           run(async () => {
             await confirmFork(branch, prefix);
@@ -160,10 +192,18 @@ async function copyKnowledge() {
           })
         "
       >
-        从父分支前缀创建分叉
+        从所选聊天分叉（原聊天保留）
       </button>
       <p class="mn-muted">
-        续聊需要原消息身份；分叉还会验证前缀正文完全匹配，父分支不变。独立新故事不继承旧分支身份。
+        “分叉”会继承开头指定条数的消息，之后两条路线独立发展，原聊天不变。你的消息、AI 回复和开场白各算一条，不是按对话轮数计算。
+      </p>
+      <p class="mn-muted">
+        数量默认填两边聊天较短的长度，仅是建议值；若分叉后已聊了新内容，请改为分叉时保留的消息数。
+        确认时仍会逐条核对消息身份和正文，不匹配就停止，不会靠同样的文字猜测来源。
+      </p>
+      <p class="mn-muted">
+        “沿用所选分支继续”用于同一路线更换聊天文件，仍共用原分支身份；另开支线请用“分叉”。
+        “独立新故事”则不继承原分支身份。分叉不会复制原分支的事件链和自定义表。
       </p>
     </div>
     <details class="mn-card">
@@ -223,3 +263,7 @@ async function copyKnowledge() {
     </details>
   </section>
 </template>
+
+<style scoped>
+.mn-branch-select { border: 0; padding: 0; margin: 0; min-width: 0; }
+</style>

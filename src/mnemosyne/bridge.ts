@@ -452,6 +452,40 @@ export async function chooseNewStory() {
     return syncDaily();
 }
 /** Explicitly reuse a known binding after host rename; no content-based identity guess. */
+/** Dropdown metadata only: never load source bodies or summaries here. */
+export async function dailyBranchChoices() {
+    const ctx = getContext(), scope = hostScope(), generation = dailyState.generation;
+    check(ctx && scope, '请先打开聊天');
+    const inherited = ctx.chatMetadata[BINDING_KEY] as { branch?: string } | undefined;
+    const parseScope = (value: string): string[] => {
+        try {
+            const parts = JSON.parse(value);
+            return Array.isArray(parts) && parts.length === 2 && parts.every(p => typeof p === 'string') ? parts : [];
+        } catch { return []; }
+    };
+    const character = parseScope(scope)[0];
+    const lib = await activeLibrary();
+    const choices = await lib.transaction(['host_bindings', 'branches', 'history_snapshots'], 'readonly', async tx => {
+        const bindings = await tx.all<Binding>('host_bindings');
+        const seen = new Set<string>();
+        const result: { value: string; label: string; inherited: boolean; length: number; suggested: number }[] = [];
+        for (const binding of bindings) {
+            const [owner, name] = parseScope(binding.scope);
+            if (owner !== character || !name || binding.scope === scope || seen.has(binding.branch)) continue;
+            const branch = await tx.get<Branch>('branches', binding.branch);
+            if (!branch) continue;
+            const snapshot = await tx.get<import('./model').Snapshot>('history_snapshots', branch.head);
+            if (!snapshot) continue;
+            seen.add(branch.id);
+            const source = inherited?.branch === branch.id;
+            result.push({ value: branch.id, label: `${name} · ${snapshot.length} 条消息${source ? ' · 当前聊天的来源' : ''}`,
+                inherited: source, length: snapshot.length, suggested: Math.min(snapshot.length, ctx.chat.length) });
+        }
+        return result.sort((a, b) => Number(b.inherited) - Number(a.inherited) || a.label.localeCompare(b.label));
+    });
+    check(scope === hostScope() && generation === dailyState.generation && lib === await activeLibrary(), '聊天已切换，请重新加载列表');
+    return choices;
+}
 export async function confirmBinding(branchId: string) {
     const lib = await activeLibrary();
     const ctx = getContext();

@@ -5,7 +5,7 @@ import { invalidateSummaryAncestors } from '@/memory/apply';
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import { Library, activateLibrary, freshLibraryName } from './db';
-import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork } from './bridge';
+import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices } from './bridge';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
 import { type STContext, type STMessage } from '@/st/context';
@@ -248,4 +248,45 @@ test('regenerating a historical leaf clears its superseded failed table request,
  attachTableResult(ctx.chat,1,null); // Same-text historical regeneration has no current table request.
  await syncDaily();expect(dailyState.tableError).toBe('');expect(ctx.chat[1].extra?.[TABLE_OUTPUT_KEY]).toBeUndefined();
  expect(await lib.all('table_receipts')).toEqual(receipts);expect((await lib.all<any>('custom_table_rows'))[0].values.v).toBe('后续人工值');
+});
+
+test('branch dropdown uses archived chat names, prioritizes source and reads metadata only', async () => {
+    const parent = await syncDaily();
+    ctx.getCurrentChatId = () => 'forked-chat';
+    invalidateDaily();
+    const bindings = await lib.all<any>('host_bindings');
+    await lib.transaction(['host_bindings'], 'readwrite', async tx => {
+        await tx.put('host_bindings', { ...bindings[0], id: 'foreign', scope: JSON.stringify(['other.png', '其他角色']) });
+        await tx.put('host_bindings', { ...bindings[0], id: 'broken', branch: 'missing', scope: JSON.stringify(['synthetic.png', '失效聊天']) });
+        await tx.put('host_bindings', { ...bindings[0], id: 'malformed', scope: 'not-json' });
+    });
+    const spy = vi.spyOn(lib, 'transaction');
+    const options = await dailyBranchChoices();
+    expect(options).toEqual([{ value: parent.branch.id, label: 'synthetic · 2 条消息 · 当前聊天的来源', inherited: true, length: 2, suggested: 2 }]);
+    expect(spy.mock.calls.every(([stores, mode]) => mode === 'readonly' && stores.every(s => ['host_bindings', 'branches', 'history_snapshots'].includes(s)))).toBe(true);
+});
+test('branch dropdown discards results when chat switches during read', async () => {
+    await syncDaily();
+    ctx.getCurrentChatId = () => 'forked-chat';
+    invalidateDaily();
+    const original = lib.transaction.bind(lib);
+    vi.spyOn(lib, 'transaction').mockImplementationOnce(async (...args) => {
+        const result = await original(...args);
+        ctx.getCurrentChatId = () => 'another-chat';
+        return result;
+    });
+    await expect(dailyBranchChoices()).rejects.toThrow('聊天已切换');
+});
+test('named fork rejects changed text or missing identity without altering parent', async () => {
+    const parent = await syncDaily();
+    ctx.getCurrentChatId = () => 'forked-chat';
+    invalidateDaily();
+    const option = (await dailyBranchChoices())[0];
+    ctx.chat[1].mes = '不同正文';
+    await expect(confirmFork(option.value, 2)).rejects.toThrow('身份或正文不匹配');
+    ctx.chat[1].mes = '合成答复';
+    delete ctx.chat[1].extra!.mnemosyne_message_v1;
+    await expect(confirmFork(option.value, 2)).rejects.toThrow('身份或正文不匹配');
+    expect((await capture(lib, parent.branch.id)).refs).toEqual(parent.refs);
+    expect(await lib.all('branches')).toHaveLength(1);
 });
