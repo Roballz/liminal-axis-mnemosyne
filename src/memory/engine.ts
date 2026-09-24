@@ -1130,21 +1130,9 @@ function applyLeafForFloor(
  * **不管理 busy / 不做守卫 / 不触发 checkResummary**——由调用方(runSummaryInner 或批量回退)负责。
  * 失败(请求报错 / JSON 无效)直接抛出,调用方决定如何处理。
  */
-async function summarizeFloorWork(
-  chat: STMessage[],
-  aiFloor: number,
-  sender: { send: (messages: ChatMsg[]) => Promise<string>; label: string },
-  options: Pick<RunSummaryOptions, 'replaceLeaf' | 'onRequestStart'> = {},
-): Promise<void> {
+async function floorSummaryContext(chat: STMessage[], aiFloor: number, targets: number[]) {
   const ctx = getContext();
   if (!ctx) throw new Error('无 ST 上下文');
-  if (!chat[aiFloor]) {
-    throw new Error(`摘要失败:楼层 #${aiFloor} 已不存在(可能在请求期间被删除)`);
-  }
-
-  const covered = options.replaceLeaf ? coveredBeforeFloor(chat, aiFloor) : coveredSet(chat);
-  const targets = floorTargets(chat, aiFloor, covered);
-  const mnEvidence = await captureSummaryEvidence(targets, selectHistoryNodesBefore(memory.summaries, chat, targets[0]).map(n=>n.id));
   const content = renderMessages(chat, targets, ctx.name1, ctx.name2);
 
   // 两端标签齐才算「有标签」,提示词据此免去 AI 算时间。
@@ -1186,6 +1174,42 @@ async function summarizeFloorWork(
     varsMeaning: (['global', 'char', 'chat'] as const).map(t => memory.varTemplates[t].meaning.trim()).filter(Boolean).join('\n\n'),
     varsRule: (['global', 'char', 'chat'] as const).map(t => memory.varTemplates[t].rule.trim()).filter(Boolean).join('\n\n'),
   });
+
+  return { prompt, charCard, persona, worldInfo, stateBefore };
+}
+/** Same native summary materials, repurposed by explicit event creation; no summary writes. */
+export async function eventCreationContext(floor: number, view?: import('@/mnemosyne/model').CapturedView): Promise<ChatMsg[]> {
+  const chat = getContext()?.chat;
+  if (!chat?.[floor]) throw new Error('楼层已不存在');
+  const targets = floorTargets(chat, floor, coveredBeforeFloor(chat, floor));
+  const { prompt, charCard, persona, worldInfo } = await floorSummaryContext(chat, floor, targets);
+  const tables = await prepareSummaryTables(view, chat, [floor]);
+  if (tables) { prompt.system += tables.system; prompt.user += tables.user; }
+  const messages: ChatMsg[] = [];
+  const jb = apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT;
+  if (jb) messages.push({ role: 'system', content: jb });
+  if (charCard) messages.push({ role: 'system', content: buildCharCardSystem(charCard) });
+  if (persona) messages.push({ role: 'system', content: buildPersonaSystem(persona) });
+  if (worldInfo) messages.push({ role: 'system', content: buildWorldInfoSystem(worldInfo) });
+  messages.push({ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user });
+  return messages;
+}
+async function summarizeFloorWork(
+  chat: STMessage[],
+  aiFloor: number,
+  sender: { send: (messages: ChatMsg[]) => Promise<string>; label: string },
+  options: Pick<RunSummaryOptions, 'replaceLeaf' | 'onRequestStart'> = {},
+): Promise<void> {
+  const ctx = getContext();
+  if (!ctx) throw new Error('无 ST 上下文');
+  if (!chat[aiFloor]) {
+    throw new Error(`摘要失败:楼层 #${aiFloor} 已不存在(可能在请求期间被删除)`);
+  }
+
+  const covered = options.replaceLeaf ? coveredBeforeFloor(chat, aiFloor) : coveredSet(chat);
+  const targets = floorTargets(chat, aiFloor, covered);
+  const mnEvidence = await captureSummaryEvidence(targets, selectHistoryNodesBefore(memory.summaries, chat, targets[0]).map(n=>n.id));
+  const { prompt, charCard, persona, worldInfo, stateBefore } = await floorSummaryContext(chat, aiFloor, targets);
 
   const tableRequest = await prepareSummaryTables(mnEvidence?.view, chat, [aiFloor]);
   if (tableRequest) { prompt.system += tableRequest.system; prompt.user += tableRequest.user; }

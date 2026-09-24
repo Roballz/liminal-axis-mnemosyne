@@ -6,7 +6,6 @@ import {
   dailyBranchChoices,
   syncDaily,
   chooseNewStory,
-  confirmBinding,
   confirmFork,
   invalidateDaily,
 } from '@/mnemosyne/bridge';
@@ -17,7 +16,6 @@ import { parseStrictJson } from '@/mnemosyne/json';
 import { regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
 import { copyLegacyKnowledge } from '@/memory/vector/knowledge';
 import { currentVectorDb } from '@/memory/vector/scope';
-import { ui } from '@/state/ui';
 import type { CapturedView } from '@/mnemosyne/model';
 const prefix = ref(0),
   branch = ref(''),
@@ -94,7 +92,7 @@ async function download() {
   const url = URL.createObjectURL(new Blob([JSON.stringify(pack)], { type: 'application/json' }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'mnemosyne-daily-v2.json';
+  a.download = 'mnemosyne-daily-v3.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   notice.value = '核心包已生成，请确认浏览器已保存下载文件。';
@@ -132,9 +130,7 @@ async function copyKnowledge() {
     <p v-if="notice" role="status">{{ notice }}</p>
     <div class="mn-actions">
       <button :disabled="busy" @click="run(refresh)">{{ busy ? '处理中…' : '刷新 / 重试归档' }}</button
-      ><button @click="ui.activePage = 'summary'">打开摘要页</button
-      ><button @click="ui.activePage = 'events'">事件</button
-      ><button @click="ui.activePage = 'tables'">自定义表</button>
+      >
     </div>
     <p class="mn-muted">
       刷新 / 重试归档：检查当前聊天变化，补交失败的归档；不调用模型。平时显示“已归档”即可，无需反复点击。
@@ -151,7 +147,7 @@ async function copyKnowledge() {
       </ol>
     </details>
     <div v-if="dailyState.conflict" class="mn-card">
-      <p>这个聊天复制了另一聊天的归档信息。如果你刚在原会话点击了“创建分支”，请选择来源聊天，再点击“从所选聊天分叉”。</p>
+      <p>这个聊天复制了另一聊天的归档信息。如果你刚在原会话点击了“创建分支”，请选择来源聊天，再点击“继承档案”。</p>
       <button
         :disabled="busy"
         @click="
@@ -169,17 +165,6 @@ async function copyKnowledge() {
       </fieldset>
       <p v-if="loadingChoices" class="mn-muted">正在读取聊天名称…</p>
       <p v-else-if="!choices.length" class="mn-muted">没有可选来源。请先回到原聊天完成归档，再回来选择；无需查找内部 ID。</p>
-      <button
-        :disabled="busy || loadingChoices || !selected"
-        @click="
-          run(async () => {
-            await confirmBinding(branch);
-            await refresh();
-          })
-        "
-      >
-        沿用所选分支继续（不新建支线）
-      </button>
       <label
         >分叉点：继承开头多少条消息<input v-model.number="prefix" type="number" min="0" step="1" :max="selected?.suggested" :disabled="busy || !selected"
       /></label>
@@ -192,7 +177,7 @@ async function copyKnowledge() {
           })
         "
       >
-        从所选聊天分叉（原聊天保留）
+        继承档案
       </button>
       <p class="mn-muted">
         “分叉”会继承开头指定条数的消息，之后两条路线独立发展，原聊天不变。你的消息、AI 回复和开场白各算一条，不是按对话轮数计算。
@@ -202,7 +187,7 @@ async function copyKnowledge() {
         确认时仍会逐条核对消息身份和正文，不匹配就停止，不会靠同样的文字猜测来源。
       </p>
       <p class="mn-muted">
-        “沿用所选分支继续”用于同一路线更换聊天文件，仍共用原分支身份；另开支线请用“分叉”。
+        “继承档案”会建立独立分支。
         “独立新故事”则不继承原分支身份。分叉不会复制原分支的事件链和自定义表。
       </p>
     </div>

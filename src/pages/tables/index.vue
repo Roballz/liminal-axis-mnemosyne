@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import TableBackfillAction from '@/components/TableBackfillAction.vue';
 import ModalMask from '@/components/ModalMask.vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import TableTextField from '@/components/TableTextField.vue';
@@ -338,6 +339,7 @@ onBeforeUnmount(() => {
           }}
         </h2>
       </div>
+      <TableBackfillAction v-if="screen === 'list'" :tables="tables" :disabled="busy || !branch" @done="refresh" />
       <button
         v-if="screen === 'list'"
         class="mn-primary"

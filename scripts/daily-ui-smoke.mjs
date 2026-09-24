@@ -60,7 +60,7 @@ try {
     .filter({ has: page.locator('summary strong', { hasText: '玉佩归还' }) });
   assert.equal(await event.getAttribute('open'), null);
   await event.locator(':scope > summary').click();
-  await event.getByText('progress 人工锁定', { exact: true }).waitFor();
+  await event.getByText('事件概要：', { exact: true }).waitFor();
   await page.getByRole('button', { name: '表格', exact: true }).click();
   await page.getByRole('heading', { name: '本地自定义表' }).waitFor();
   assert.equal(await page.locator('select').count(), 0);

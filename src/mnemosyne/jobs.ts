@@ -6,7 +6,8 @@ import { getContext } from '@/st/context';
 import { activeLibrary } from './db';
 import { capture, current } from './canonical';
 import { syncDaily, dailyState, hostVersion, dailyCurrent } from './bridge';
-import { prepareEventBatch, parseEventOutput, commitEventBatch } from './events';
+import { eventView } from './events';
+import { manualEventState, eventPending, updateEventOverview } from './manual-events';
 import { check } from './model';
 export const settings = reactive({ eventsEnabled: false, interval: 40, delay: 0, batchSize: 20, maxChars: 48000,
     chains: 2, excerptChars: 500, totalChars: 1600, extra: 1 });
@@ -33,7 +34,7 @@ export const sendDaily: Sender = async (prompt) => {
 };
 export function stopDailyJob() { stop = true; jobState.stopped = true; jobState.status = '正在停止：等待当前请求返回，不再提交或发起下一批'; }
 export async function runEvents(manual = true, sender: Sender = sendDaily) {
-    if (jobState.busy)
+    if (jobState.busy || manualEventState.busy)
         return;
     jobState.busy = true;
     stop = false;
@@ -43,43 +44,25 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
         const initial = await syncDaily();
         const lib = await activeLibrary();
         const branchId = initial.branch.id;
-        const target = Math.max(0, initial.cutoff - (manual ? 0 : settings.delay));
-        const host = hostVersion();
-        const generation = dailyState.generation;
-        const receipts = await lib.all<any>('event_processing_receipts', 'branch', branchId);
-        const last = Math.max(0, ...receipts.filter(r => r.result === 'success').map(r => r.cutoff));
-        if (!manual && target - last < settings.interval)
-            return;
-        while (!stop) {
-            check(host === hostVersion() && generation === dailyState.generation, '聊天改变，事件任务停止');
+        const target = initial.cutoff;
+        const host = hostVersion(), generation = dailyState.generation;
+        const guard = () => !stop && host === hostVersion() && generation === dailyState.generation;
+        const cards = (await eventView(lib, initial)).cards;
+        const last = Math.max(0, ...cards.flatMap(c => c.progress.map(p => p.cutoff)));
+        if (!manual && target - last < settings.interval) return;
+        const pending = cards.filter(eventPending).map(c => c.chain.id);
+        for (const id of pending) {
+            if (stop) break;
+            check(guard(), '聊天改变，事件任务停止');
             const view = await capture(lib, branchId, target);
-            // Fixed target for this action; subsequent batches see preceding committed directory.
-            const batch = await prepareEventBatch(lib, view, settings.batchSize, settings.maxChars);
-            if (!batch) {
-                jobState.status = '该固定范围已整理完成';
-                break;
-            }
-            jobState.chars = batch.chars;
-            jobState.status = `整理 ${batch.memories.length} 条摘要 · 输入 ${batch.chars} 字符`;
-            check(await dailyCurrent(batch.view,host,generation),'事件材料在发送前已改变');
-            const raw = await sender(batch.prompt);
-            if (stop)
-                break;
-            check(await dailyCurrent(batch.view, host, generation), '迟到事件结果已拒绝');
-            const output = parseEventOutput(raw, batch);
-            const receipt = await commitEventBatch(lib, batch, output, () => !stop && host === hostVersion() && generation === dailyState.generation);
-            jobState.completed += batch.memories.length;
-            if (receipt.result === 'needs_review') {
-                jobState.status = '有待确认材料，已保留回执；请人工整理后再补齐';
-                break;
-            }
-            if (!manual) {
-                jobState.status = '本次自动批次已保存';
-                break;
-            }
+            jobState.status = `更新概要 ${jobState.completed + 1} / ${pending.length}`;
+            const updated = await updateEventOverview(lib, view, id, settings.maxChars,
+                messages => { jobState.chars = JSON.stringify(messages).length; return sender(messages.map(m => m.content).join('\n')); }, guard);
+            if (updated) jobState.completed++;
         }
+        if (!stop) jobState.status = `批量整理完成：更新 ${jobState.completed} 条事件链`;
         if (stop)
-            jobState.status = '已停止；已提交批次保留，重开可继续补齐';
+            jobState.status = '已停止；已保存概要保留，其余仍待更新';
     }
     catch (error) {
         jobState.status = String((error as Error).message);

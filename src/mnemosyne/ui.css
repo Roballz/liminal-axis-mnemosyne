@@ -472,3 +472,9 @@
     font-size: 19px;
   }
 }
+.mn-page button:not(.mn-card-open):not(.mn-back):not(.bbs-select-trigger):not(.mn-more),
+.mn-dialog button:not(.bbs-select-trigger):not(.mn-resize) {
+  background: var(--bbs-accent);
+  color: var(--bbs-accent-ink);
+  border-color: transparent;
+}

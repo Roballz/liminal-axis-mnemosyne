@@ -67,7 +67,7 @@ try {
   await select.evaluate(el => el.scrollIntoView({block: 'center'}));
   await select.click();
   await page.getByRole('option', { name: '请选择来源聊天', exact: true }).click();
-  const fork = page.getByRole('button', { name: '从所选聊天分叉（原聊天保留）', exact: true });
+  const fork = page.getByRole('button', { name: '继承档案', exact: true });
   assert.equal(await fork.isDisabled(), true);
   await select.evaluate(el => el.scrollIntoView({block: 'center'}));
   await select.click();

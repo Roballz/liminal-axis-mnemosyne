@@ -125,6 +125,9 @@ export interface EventChain extends Row {
     created: number;
 }
 export interface EventRevision extends Row {
+    eventSchema?: 2;
+    overview?: string;
+    summarized?: string[];
     story: string;
     branch: string;
     owner: string;
@@ -197,6 +200,7 @@ export interface TableDef extends Row {
     deleted: boolean;
 }
 export interface TableRow extends Row {
+    bodySources?: SourceRef[];
     hidden?: boolean;
     story: string;
     branch: string;

@@ -1,124 +1,231 @@
 <script setup lang="ts">
-import { onMounted, ref, shallowRef } from 'vue';
-import { syncDaily } from '@/mnemosyne/bridge';
-import { activeLibrary } from '@/mnemosyne/db';
+import { onMounted, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import ModalMask from "@/components/ModalMask.vue";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
+import BbsSelect from "@/components/BbsSelect.vue";
+import TableTextField from "@/components/TableTextField.vue";
+import { syncDaily, hostScope, dailyState } from "@/mnemosyne/bridge";
+import { activeLibrary } from "@/mnemosyne/db";
 import {
   eventView,
   editEvent,
-  eventProgressState,
-  resolveEventReceipt,
+  deleteEvent,
   type EventCard,
-} from '@/mnemosyne/events';
-import { settings, jobState, saveDailySettings, runEvents, stopDailyJob } from '@/mnemosyne/jobs';
-import type { CapturedView } from '@/mnemosyne/model';
-const notice = ref('');
-const confirmAction = (text: string) => window.confirm(text);
-const progress = ref<Awaited<ReturnType<typeof eventProgressState>> | null>(null);
+} from "@/mnemosyne/events";
+import {
+  manualEventState,
+  eventOverview,
+  eventPending,
+} from "@/mnemosyne/manual-events";
+import {
+  settings,
+  jobState,
+  saveDailySettings,
+  runEvents,
+  stopDailyJob,
+} from "@/mnemosyne/jobs";
+import { check, type CapturedView } from "@/mnemosyne/model";
 const view = shallowRef<CapturedView | null>(null),
-  cards = shallowRef<EventCard[]>([]),
-  error = ref(''),
-  pages = ref<Record<string, number>>({}),
-  selected = ref<Record<string, string>>({});
+  cards = shallowRef<EventCard[]>([]);
+const error = ref(""),
+  notice = ref(""),
+  busy = ref(false),
+  pages = ref<Record<string, number>>({});
+const editing = ref(false),
+  editId = ref<string | null>(null),
+  title = ref(""),
+  status = ref("open"),
+  overview = ref(""),
+  keywords = ref("");
+const removing = shallowRef<EventCard | null>(null);
+const statusOptions = [
+  { value: "open", label: "进行中" },
+  { value: "resolved", label: "已结束" },
+  { value: "dormant", label: "暂搁" },
+];
+const statusName = (s: string) =>
+  statusOptions.find((o) => o.value === s)?.label ?? s;
+let scope = "",
+  request = 0;
 async function run(fn: () => Promise<unknown>) {
-  error.value = '';
+  if (busy.value) return;
+  busy.value = true;
+  error.value = "";
   try {
     await fn();
   } catch (e) {
     error.value = String((e as Error).message);
+  } finally {
+    busy.value = false;
   }
 }
 async function refresh() {
-  view.value = await syncDaily();
-  cards.value = (await eventView(await activeLibrary(), view.value)).cards;
-  progress.value = await eventProgressState(await activeLibrary(), view.value);
+  const token = ++request,
+    observed = hostScope();
+  const captured = await syncDaily(),
+    data = await eventView(await activeLibrary(), captured);
+  if (token !== request || observed !== hostScope()) return;
+  view.value = captured;
+  cards.value = data.cards;
+  scope = observed;
 }
-async function edit(card: EventCard | null) {
-  const title = prompt('事件标题', card?.meta.title ?? '');
-  if (!title) return;
-  const status = prompt('状态', card?.meta.status ?? 'open');
-  if (status === null) return;
-  const keywords = prompt('关键词（逗号分隔）', card?.meta.keywords.join(',') ?? '');
-  if (keywords === null) return;
-  await editEvent(await activeLibrary(), view.value!, card?.chain.id ?? null, {
-    title,
-    status,
-    keywords: keywords
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  });
-  await refresh();
+function edit(card: EventCard | null) {
+  editId.value = card?.chain.id ?? null;
+  title.value = card?.meta.title ?? "";
+  status.value = card?.meta.status ?? "open";
+  overview.value = card ? eventOverview(card) : "";
+  keywords.value = card?.meta.keywords.join("、") ?? "";
+  editing.value = true;
 }
-async function link(card: EventCard, memory: string, active: boolean) {
-  if (!memory) return;
-  await editEvent(await activeLibrary(), view.value!, card.chain.id, card.meta, {
-    memory,
-    active,
-    kind: 'progress',
-  });
-  await refresh();
+function validView() {
+  check(view.value && scope === hostScope(), "聊天已切换，请刷新");
+  return view.value;
 }
-function members(card: EventCard) {
-  const p = pages.value[card.chain.id] ?? 0;
-  return card.members.slice(p * 10, p * 10 + 10);
-}
-function text(id: string) {
-  return view.value?.memories.find((m) => m.id === id)?.content ?? '';
-}
-function sources(id: string) {
-  const m = view.value?.memories.find((m) => m.id === id);
-  return (
-    m?.inputRefs.map((r) => view.value?.sources.get(r.revision)?.content ?? '历史版本').join('\n\n') ||
-    m?.declaration
+async function save() {
+  const card = cards.value.find((c) => c.chain.id === editId.value);
+  await editEvent(
+    await activeLibrary(),
+    validView(),
+    editId.value,
+    {
+      title: title.value,
+      status: status.value,
+      keywords: keywords.value
+        .split(/[,，、\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+      overview: overview.value,
+      summarized:
+        card?.meta.summarized ??
+        card?.progress.flatMap((p) => p.memories) ??
+        [],
+    },
+    undefined,
+    () => scope === hostScope(),
   );
+  editing.value = false;
+  await refresh();
 }
+async function remove() {
+  check(removing.value, "未选择事件");
+  await deleteEvent(
+    await activeLibrary(),
+    validView(),
+    removing.value.chain.id,
+    () => scope === hostScope(),
+  );
+  removing.value = null;
+  await refresh();
+}
+async function unlink(card: EventCard, memory: string) {
+  await editEvent(
+    await activeLibrary(),
+    validView(),
+    card.chain.id,
+    card.meta,
+    { memory, active: false, kind: "progress" },
+    () => scope === hostScope(),
+  );
+  await refresh();
+}
+async function batch() {
+  if (jobState.busy) {
+    stopDailyJob();
+    return;
+  }
+  await runEvents();
+  await refresh();
+}
+const members = (card: EventCard) =>
+  card.members.slice(
+    (pages.value[card.chain.id] ?? 0) * 10,
+    ((pages.value[card.chain.id] ?? 0) + 1) * 10,
+  );
+const text = (id: string) =>
+  view.value?.memories.find((m) => m.id === id)?.content ?? "";
+watch(
+  () => dailyState.scope,
+  () => {
+    request++;
+    view.value = null;
+    cards.value = [];
+    editing.value = false;
+    removing.value = null;
+  },
+);
 onMounted(() => run(refresh));
+onBeforeUnmount(() => {
+  request++;
+});
 </script>
 <template>
   <section class="mn-page">
     <h2>事件</h2>
+    <div class="mn-actions mn-event-toolbar">
+      <button :disabled="busy" @click="run(refresh)">刷新</button
+      ><button
+        :disabled="manualEventState.busy"
+        @click="jobState.busy ? stopDailyJob() : run(batch)"
+      >
+        {{ jobState.busy ? "停止" : "批量整理" }}</button
+      ><button :disabled="!view || busy || jobState.busy" @click="edit(null)">
+        新建事件
+      </button>
+    </div>
+    <p class="mn-muted">
+      在聊天楼层卡片上指定事件链。AI
+      只更新你已归链内容的概要和关键词，不再自动拆分或创建事件。
+    </p>
+    <p role="status">{{ jobState.status }}</p>
+    <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
     <details class="mn-card">
-      <summary>独立事件任务与召回设置</summary>
+      <summary>事件概要自动更新与召回设置</summary>
       <p>
-        事件请求仅发送本批材料及当前合法范围全量事件目录；不重新总结或结算状态。开启后使用摘要渠道（未指定则主
-        API），会产生模型费用。
+        自动和批量整理仅更新已有链的待处理成员，每条待更新链一次摘要 API
+        请求；会产生模型费用。关闭自动更新时可使用“批量整理”。
       </p>
-      <label><input v-model="settings.eventsEnabled" type="checkbox" />启用自动事件整理</label>
       <label
-        >自动整理触发间隔（消息楼数）<input v-model.number="settings.interval" type="number" min="1" /></label
-      ><small
-        >距离上次成功整理范围新增多少楼，才启动自动任务。User 和 Assistant 各算一楼；40 楼通常约 20
-        轮。</small
-      >
-      <label>最近多少楼暂不自动整理<input v-model.number="settings.delay" type="number" min="0" /></label
-      ><small
-        >只延后事件整理，不隐藏或删除正文/摘要。例如设 6，就暂不处理最后 6 楼；0
-        表示整理到当前。手动补齐不受此延迟限制。</small
+        ><input
+          v-model="settings.eventsEnabled"
+          type="checkbox"
+        />自动更新事件概要和关键词</label
       >
       <label
-        >一次事件请求最多处理的摘要条数<input
-          v-model.number="settings.batchSize"
+        >更新间隔（消息楼数）<input
+          v-model.number="settings.interval"
           type="number"
           min="1"
-          max="200" /></label
-      ><small
-        >按有效、尚未整理的 L0
-        摘要计数，不含高层摘要。触发间隔负责“何时启动”，批量上限负责“单次发多少”；旧资料积压、缺摘要和重摘会让条数不等于间隔÷2。手动补齐连续分批；自动每次最多一批。</small
+      /></label>
+      <small
+        >距最近已保存进展新增多少楼后，检查并更新概要待处理的事件链。User 和
+        Assistant 各算一楼。</small
       >
       <label
-        >完整请求预算（字符，保守计量）<input v-model.number="settings.maxChars" type="number" min="1000"
+        >完整请求预算（字符）<input
+          v-model.number="settings.maxChars"
+          type="number"
+          min="1000"
       /></label>
       <h3>召回后的事件补充</h3>
       <p>
         先按原有向量 / BM25 / RRF / rerank
         选出摘要或原文，再为命中所属事件补上有界概述。同链只包装一次；不会独立检索所有事件，也不替换原本命中。
       </p>
-      <label>一次召回最多补充几条事件链<input v-model.number="settings.chains" type="number" min="0" /></label
+      <label
+        >一次召回最多补充几条事件链<input
+          v-model.number="settings.chains"
+          type="number"
+          min="0" /></label
       ><small
         >例如设 2，即便命中了 5 条链，也最多给 2 条链补充链名、概述节选等。0
         关闭事件补充，原召回继续工作。</small
       >
-      <label>每链概述节选字符数<input v-model.number="settings.excerptChars" type="number" min="0" /></label>
+      <label
+        >每链概述节选字符数<input
+          v-model.number="settings.excerptChars"
+          type="number"
+          min="0"
+      /></label>
       <label
         >事件总注入预算（字符，额外计入上下文）<input
           v-model.number="settings.totalChars"
@@ -136,7 +243,8 @@ onMounted(() => run(refresh));
       >
       <p class="mn-muted">
         事件与原摘要 / 原文召回合并到同一个系统提示，使用“混合召回 →
-        注入深度”设置的位置；知识库内容也在此召回块中。事件整理的单独 API 请求不代表另开一套召回注入。
+        注入深度”设置的位置；知识库内容也在此召回块中。事件整理的单独 API
+        请求不代表另开一套召回注入。
       </p>
       <button
         @click="
@@ -150,98 +258,173 @@ onMounted(() => run(refresh));
       </button>
       <p role="status">{{ notice }}</p>
     </details>
-    <div class="mn-actions">
-      <button @click="run(refresh)">刷新</button
-      ><button
-        :disabled="jobState.busy"
-        @click="
-          run(async () => {
-            await runEvents();
-            await refresh();
-          })
-        "
-      >
-        补齐未整理范围（调用模型）</button
-      ><button :disabled="!jobState.busy" @click="stopDailyJob">停止</button
-      ><button :disabled="!view" @click="run(() => edit(null))">手动新建事件</button>
-    </div>
-    <p role="status">
-      {{ jobState.status }} · 已处理 {{ jobState.completed }} 条 · 请求 {{ jobState.chars }} 字符
+    <p v-if="!cards.length" class="mn-empty">
+      还没有事件链。可从聊天楼层创建，也可先在这里新建空链。
     </p>
-    <p v-if="progress">
-      持久进度：共 {{ progress.total }} 条 · 完成 {{ progress.completed }} · 待确认
-      {{ progress.needsReview }} · 来源变化待复查 {{ progress.needsRecheck }}
-    </p>
-    <details v-if="progress?.receipts.length" class="mn-card">
-      <summary>待确认批次（不会自动反复调用模型）</summary>
-      <p>请先用下方事件卡人工关联；确认后，尚未关联的材料记为无事件。原 AI 回执保留。</p>
-      <button
-        v-for="receipt in progress.receipts"
-        :key="receipt.id"
-        @click="
-          run(async () => {
-            if (confirmAction('确认这批已人工整理，未关联部分为无事件？')) {
-              await resolveEventReceipt(await activeLibrary(), view!, receipt.id);
-              await refresh();
-            }
-          })
-        "
-      >
-        确认已人工整理 {{ receipt.memories.length }} 条
-      </button>
-    </details>
-    <p>补齐固定为点击时的截止范围，逐批保存。目录过大会暂停；关闭页面不承诺后台执行。</p>
-    <p v-if="error" role="alert" class="mn-warning">{{ error }}</p>
-    <details v-for="card in cards" :key="card.chain.id" class="mn-card">
+    <details
+      v-for="card in cards"
+      :key="card.chain.id"
+      class="mn-card mn-event-card"
+    >
       <summary>
-        <strong>{{ card.meta.title }}</strong> · {{ card.meta.status }} ·
-        {{ card.members.length }} 条关联<br />{{
-          card.progress
-            .map((p) => p.text)
-            .join(' ')
-            .slice(0, 100)
-        }}<br />最近进展：{{ card.progress.at(-1)?.text.slice(0, 80) || '暂无' }}
-      </summary>
-      <button @click="run(() => edit(card))">修改标题 / 状态 / 关键词</button>
-      <p>关键词：{{ card.meta.keywords.join('、') }}</p>
-      <small>{{ card.chain.id }}</small>
-      <details>
-        <summary>完整追加简史</summary>
-        <p v-for="p in card.progress" :key="p.id" class="mn-pre">{{ p.text }}</p>
-        <p>来源失效或人工移除关联后，受影响段不进入有效简史/召回；历史记录仍保留。</p>
-      </details>
-      <article v-for="member in members(card)" :key="member.id" class="mn-card">
-        <p>
-          {{ text(member.memory).slice(0, 80) }}
-          <small>{{ member.kind }} {{ member.locked ? '人工锁定' : '' }}</small>
+        <strong class="mn-event-title">{{ card.meta.title }}</strong>
+        <p class="mn-muted mn-event-keywords">
+          {{ card.meta.keywords.join(" · ") || "暂无关键词" }}
         </p>
-        <details>
-          <summary>完整摘要 / 来源</summary>
-          <small>{{ member.memory }}</small>
-          <p class="mn-pre">{{ text(member.memory) }}</p>
-          <p class="mn-pre">{{ sources(member.memory) }}</p>
-        </details>
-        <button @click="run(() => link(card, member.memory, false))">移除关联（保留历史）</button>
-      </article>
-      <div class="mn-actions">
-        <button :disabled="!(pages[card.chain.id] ?? 0)" @click="pages[card.chain.id]--">上一页</button
-        ><span>{{ (pages[card.chain.id] ?? 0) + 1 }}</span
-        ><button
-          :disabled="((pages[card.chain.id] ?? 0) + 1) * 10 >= card.members.length"
-          @click="pages[card.chain.id] = (pages[card.chain.id] ?? 0) + 1"
+        <div class="mn-event-meta">
+          <span
+            >{{ statusName(card.meta.status) }} ·
+            {{ card.members.length }} 条关联<span v-if="eventPending(card)">
+              · 概要待更新</span
+            ></span
+          ><span class="mn-actions"
+            ><button
+              :disabled="busy || jobState.busy"
+              @click.stop.prevent="edit(card)"
+            >
+              编辑</button
+            ><button
+              :disabled="busy || jobState.busy"
+              @click.stop.prevent="removing = card"
+            >
+              删除
+            </button></span
+          >
+        </div>
+        <hr />
+        <p>
+          <strong>最新进展：</strong>{{ card.progress.at(-1)?.text || "暂无" }}
+        </p>
+      </summary>
+      <p class="mn-pre">
+        <strong>事件概要：</strong
+        >{{ eventOverview(card) || "暂无概要，可加入成员后更新" }}
+      </p>
+      <hr />
+      <details>
+        <summary>
+          <strong><u>完整追加史</u></strong>
+        </summary>
+        <article
+          v-for="member in members(card)"
+          :key="member.id"
+          class="mn-card"
         >
-          下一页
-        </button>
-      </div>
-      <label
-        >手动关联摘要版本<select v-model="selected[card.chain.id]">
-          <option value="">选择摘要</option>
-          <option v-for="m in view?.memories" :key="m.id" :value="m.id">
-            L{{ m.level }} {{ m.content.slice(0, 50) }}
-          </option>
-        </select></label
-      >
-      <button @click="run(() => link(card, selected[card.chain.id], true))">添加并人工锁定</button>
+          <p>{{ text(member.memory).slice(0, 100) }}</p>
+          <div class="mn-member-detail">
+            <details>
+              <summary>完整摘要</summary>
+              <p class="mn-pre">{{ text(member.memory) }}</p>
+            </details>
+            <button
+              :disabled="busy || jobState.busy"
+              @click="run(() => unlink(card, member.memory))"
+            >
+              移除关联
+            </button>
+          </div>
+        </article>
+        <div class="mn-actions">
+          <button
+            :disabled="!(pages[card.chain.id] ?? 0)"
+            @click="pages[card.chain.id]--"
+          >
+            上一页</button
+          ><span>{{ (pages[card.chain.id] ?? 0) + 1 }}</span
+          ><button
+            :disabled="
+              ((pages[card.chain.id] ?? 0) + 1) * 10 >= card.members.length
+            "
+            @click="pages[card.chain.id] = (pages[card.chain.id] ?? 0) + 1"
+          >
+            下一页
+          </button>
+        </div>
+      </details>
     </details>
+    <ModalMask :open="editing" @close="!busy && (editing = false)"
+      ><form
+        class="mn-dialog"
+        role="dialog"
+        aria-label="编辑事件"
+        @submit.prevent="run(save)"
+      >
+        <header>
+          <h3>{{ editId ? "编辑事件" : "新建事件" }}</h3>
+        </header>
+        <div class="mn-dialog-body">
+          <label>标题<input v-model="title" required maxlength="300" /></label
+          ><label
+            >状态<BbsSelect
+              v-model="status"
+              :options="statusOptions"
+              aria-label="事件状态" /></label
+          ><label
+            >概要<TableTextField v-model="overview" label="事件概要" /></label
+          ><label
+            >关键词<input v-model="keywords" placeholder="用逗号或顿号分隔"
+          /></label>
+          <p v-if="error" class="mn-warning">{{ error }}</p>
+        </div>
+        <footer>
+          <button type="button" :disabled="busy" @click="editing = false">
+            取消</button
+          ><button :disabled="busy || !title.trim()">保存</button>
+        </footer>
+      </form></ModalMask
+    >
+    <ConfirmDialog
+      :open="!!removing"
+      title="删除事件链"
+      confirm-text="确认删除"
+      :busy="busy"
+      @cancel="removing = null"
+      @confirm="run(remove)"
+      >将完整删除“{{
+        removing?.meta.title
+      }}”及其概要、关联和进展记录，无法撤销；聊天正文和摘要保留。</ConfirmDialog
+    >
   </section>
 </template>
+<style scoped>
+.mn-event-toolbar {
+  flex-wrap: nowrap;
+}
+.mn-event-title {
+  display: inline;
+  font-size: 16px;
+}
+.mn-event-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.mn-event-meta .mn-actions {
+  flex-wrap: nowrap;
+  margin: 0;
+}
+.mn-event-meta button {
+  padding: 5px 9px;
+}
+.mn-event-card hr {
+  border: 0;
+  height: 1px;
+  background: linear-gradient(to right, var(--bbs-line-strong), transparent);
+  margin: 12px 0;
+}
+.mn-member-detail {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  justify-content: space-between;
+}
+.mn-member-detail details {
+  flex: 1;
+  min-width: 0;
+}
+.mn-member-detail button {
+  flex-shrink: 0;
+}
+</style>

@@ -59,6 +59,7 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
                     progress.push(p);
             }
             progress.sort((a, b) => a.cutoff - b.cutoff || a.epoch - b.epoch);
+            if (meta.summarized?.some(id => !memberSet.has(id))) meta = { ...meta, overview: '', summarized: [] };
             cards.push({ chain, meta, members, progress });
         }
         return { cards, valid };
@@ -218,20 +219,23 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
     title: string;
     status: string;
     keywords: string[];
+    overview?: string;
+    summarized?: string[];
 }, member?: {
     memory: string;
     active: boolean;
     kind: 'progress' | 'reference';
-}) {
+}, guard: () => boolean = () => true) {
     check(patch.title.trim() && patch.title.length <= 300, '事件标题不能为空或过长');
     const { valid, cards } = await eventView(lib, view);
+    const existing = cards.find(c => c.chain.id === eventId);
     if (eventId)
         check(cards.some(c => c.chain.id === eventId), '事件不属于合法视图');
     if (member)
         check(valid.some(m => m.id === member.memory), '摘要无效或不属于当前范围');
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
-        check(branch && branch.epoch === view.branch.epoch, '视图已改变，请刷新');
+        check(guard() && branch && branch.epoch === view.branch.epoch, '视图已改变，请刷新');
         branch.epoch++;
         let key = eventId;
         if (!key) {
@@ -240,7 +244,7 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
             key = chain.id;
         }
         const base = { story: branch.story, branch: branch.id, owner: key, snapshot: view.snapshot.id, cutoff: view.cutoff, epoch: branch.epoch };
-        await tx.add('event_revisions', { ...row('er'), ...base, title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: [], created: Date.now() } as EventRevision);
+        await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2, overview: patch.overview ?? existing?.meta.overview ?? existing?.progress.map(p => p.text).join('\n') ?? '', summarized: patch.summarized ?? existing?.meta.summarized ?? existing?.progress.flatMap(p => p.memories) ?? [], title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: [], created: Date.now() } as EventRevision);
         if (member)
             await tx.add('event_memberships', { ...row('link'), ...base, ...member, locked: true, origin: 'manual' } as Membership);
         await tx.put('branches', branch);
@@ -324,6 +328,25 @@ export async function resolveEventReceipt(lib: Library, view: CapturedView, rece
         const receipt: EventReceipt = { ...source, ...row('op'), snapshot: view.snapshot.id, cutoff: view.cutoff, view: view.selection.id,
             result: 'success', output: { manual_resolution_of: receiptId, decisions: output.decisions }, created: Date.now() };
         await tx.add('event_processing_receipts', receipt);
+        branch.epoch++;
+        await tx.put('branches', branch);
+    });
+}
+
+/** Explicit user deletion: scoped transaction removes this chain, never source memories. */
+export async function deleteEvent(lib: Library, view: CapturedView, eventId: string, guard: () => boolean = () => true) {
+    await lib.transaction(STORES, 'readwrite', async tx => {
+        const branch = await tx.get<Branch>('branches', view.branch.id);
+        const chain = await tx.get<EventChain>('event_chains', eventId);
+        check(guard() && branch && branch.epoch === view.branch.epoch && chain?.branch === branch.id, '事件已改变，请刷新');
+        const operations = new Set((await tx.all<Progress>('event_progress', 'owner', eventId)).map(p => p.operation));
+        for (const store of ['event_revisions', 'event_memberships', 'event_progress'] as const)
+            for (const record of await tx.all(store, 'owner', eventId)) await tx.delete(store, record.id);
+        for (const receipt of await tx.all<EventReceipt>('event_processing_receipts', 'branch', branch.id)) {
+            const output = receipt.output as EventOutput;
+            if (operations.has(receipt.id) || output?.events?.some(e => e.event_id === eventId)) await tx.delete('event_processing_receipts', receipt.id);
+        }
+        await tx.delete('event_chains', eventId);
         branch.epoch++;
         await tx.put('branches', branch);
     });

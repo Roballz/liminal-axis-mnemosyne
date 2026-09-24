@@ -3,7 +3,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2;
+    version: 1 | 2 | 3;
     schema: 1;
     created: number;
     excluded: string[];
@@ -20,7 +20,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta is restricted to non-secret daily feature settings, not upstream API configuration.
-    const base = { format: 'mnemosyne-daily' as const, version: 2 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 3 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     validateData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -40,7 +40,7 @@ const FIELDS: Record<Store, string[]> = {
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     check(pack.data && Object.keys(pack.data).length === STORES.length, '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
@@ -50,6 +50,7 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
         for (const r of rows) {
             check(r && r.schema === 1 && typeof r.id === 'string' && r.id && !maps[store].has(r.id), `非法或重复ID ${store}`);
             const optional = pack.version === 1 ? [] : store === 'custom_table_defs' ? ['tableSchema', 'dataVersion'] : store === 'custom_table_rows' ? ['hidden'] : [];
+            if (pack.version >= 3) optional.push(...(store === 'event_revisions' ? ['eventSchema', 'overview', 'summarized'] : store === 'custom_table_rows' ? ['bodySources'] : store === 'table_receipts' ? ['backfillSchema', 'bodySources', 'start', 'end'] : []));
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && FIELDS[store].every(k => k in r), `字段不合法 ${store}`);
             maps[store].set(r.id, r);
@@ -163,6 +164,10 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
                 check(['progress', 'reference'].includes(r.kind) && ['ai', 'manual'].includes(r.origin) && typeof r.active === 'boolean' && typeof r.locked === 'boolean', '关联字段非法');
             if (store === 'event_progress')
                 check(typeof r.text === 'string' && r.text.trim(), '追加概述缺失');
+            if (store === 'event_revisions' && r.eventSchema !== undefined) {
+                check(r.eventSchema === 2 && typeof r.overview === 'string' && Array.isArray(r.summarized), '事件概要版本非法');
+                memoryRefs(r, r.summarized);
+            }
             memoryRefs(r, store === 'event_memberships' ? [r.memory] : store === 'event_progress' ? r.memories : r.refs);
         }
     for (const r of maps.reviews.values()) {
@@ -184,11 +189,17 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
         check(get('custom_table_defs', r.owner).branch === r.branch, '表行跨范围');
         check(r.hidden === undefined || typeof r.hidden === 'boolean', '隐藏行标记错误');
         memoryRefs(r, r.sources);
+        if (r.bodySources !== undefined) { check(Array.isArray(r.bodySources), '表格正文来源非法'); for (const source of r.bodySources) ref(source, r.story); }
     }
     for (const r of maps.table_receipts.values()) {
         check(get('custom_table_defs', r.owner).branch === r.branch, '表回执跨范围');
         memoryRefs(r, r.sources);
-        get('history_snapshots', r.snapshot);
+        const snapshot = get('history_snapshots', r.snapshot);
+        check(snapshot.branch === r.branch, '补表回执跨分支');
+        if (r.backfillSchema !== undefined || r.bodySources !== undefined) {
+            check(r.backfillSchema === 1 && Array.isArray(r.bodySources) && Number.isInteger(r.start) && Number.isInteger(r.end) && r.start >= 0 && r.end >= r.start && r.end < snapshot.length, '补表回执范围非法');
+            check(JSON.stringify(r.bodySources) === JSON.stringify(refs(snapshot).slice(r.start, r.end + 1)), '补表回执正文不匹配');
+        }
     }
     for (const r of maps.library_meta.values()) {
         check(r.id === 'daily-settings' && r.value && typeof r.value === 'object', '不允许导出任意设置或密钥');

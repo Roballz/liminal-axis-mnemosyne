@@ -16,6 +16,7 @@
  */
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import Icon from '@/components/Icon.vue';
+import FloorEventAction from '@/components/FloorEventAction.vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import { NPC_AFFINITY_FIELDS, affinityLevelFromInput, fmtNpcAffinity } from '@/memory/npcRelations';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
@@ -697,6 +698,7 @@ const groups = computed(() => [
           <span v-if="summarizingHere" class="bbs-fp-spinner"></span>
           <Icon v-else name="search" />
         </button>
+        <FloorEventAction :floor="floor" :disabled="busy || engineState.running || omit || !valid" />
       </header>
 
       <!-- 卡片体 = 抽屉(grid 高度过渡) -->

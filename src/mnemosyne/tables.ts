@@ -1,6 +1,6 @@
 import { parseStrictJson } from './json';
 import { Library, type Transaction } from './db';
-import { current, statuses } from './canonical';
+import { current, statuses, snapshotRefs } from './canonical';
 import {
     row,
     check,
@@ -10,6 +10,8 @@ import {
     type Column,
     type CapturedView,
     type Branch,
+    type SourceRef,
+    type Snapshot,
 } from './model';
 export function validateColumns(columns: Column[]) {
     check(
@@ -154,7 +156,8 @@ export async function applyRows(
                     hidden: op.hidden ?? record.hidden ?? false,
                     deleted: !!op.delete,
                     version: record.version + 1,
-                    sources: ai ? [...new Set([...record.sources, ...sources])] : sources,
+                    sources: ai ? [...new Set([...record.sources, ...sources])] : Object.keys(op.values).length ? sources : record.sources,
+                    ...(!ai && Object.keys(op.values).length && record.bodySources ? {bodySources: []} : {}),
                 } as TableRow);
             }
             await tx.add('table_receipts', {
@@ -235,16 +238,16 @@ export interface SummaryTablePlan {
     tables: { id: string; version: number; dataVersion: number; operations: TableOperation[] }[];
 }
 export async function readTables(lib: Library, branch: Branch): Promise<TableInput[]> {
-    return lib.transaction(['custom_table_defs', 'custom_table_rows'], 'readonly', async (tx) => {
-        const defs = (await tx.all<TableDef>('custom_table_defs', 'branch', branch.id)).filter((d) => !d.deleted);
-        return Promise.all(
-            defs.map(async (def) => ({
-                def,
-                rows: (await tx.all<TableRow>('custom_table_rows', 'owner', def.id)).filter(
-                    (r) => !r.deleted && !r.hidden,
-                ),
-            })),
-        );
+    return lib.transaction(['custom_table_defs', 'custom_table_rows', 'history_snapshots', 'manifest_blocks'], 'readonly', async tx => {
+        const defs = (await tx.all<TableDef>('custom_table_defs', 'branch', branch.id)).filter(d => !d.deleted);
+        const inputs = await Promise.all(defs.map(async def => ({def, rows: (await tx.all<TableRow>('custom_table_rows', 'owner', def.id)).filter(r => !r.deleted && !r.hidden)})));
+        if (inputs.some(t => t.rows.some(r => r.bodySources?.length))) {
+            const snapshot = await tx.get<Snapshot>('history_snapshots', branch.head);
+            check(snapshot, '表格来源快照不存在');
+            const refs = new Map((await snapshotRefs(tx, snapshot)).map(r => [r.message, r.revision]));
+            for (const input of inputs) input.rows = input.rows.filter(r => !r.bodySources?.some(ref => refs.get(ref.message) !== ref.revision));
+        }
+        return inputs;
     });
 }
 export function visibleCells(def: TableDef, record: TableRow) {
@@ -321,14 +324,14 @@ export function parseSummaryTables(value: unknown, inputs: TableInput[], branch:
     });
     return { version: 2, operation: row('tableop').id, branch, tables };
 }
-export async function assertTablePlan(tx: Transaction, plan: SummaryTablePlan) {
+export async function assertTablePlan(tx: Transaction, plan: SummaryTablePlan, manual = false) {
     check(plan.version === 2 && Array.isArray(plan.tables), '填表回执版本错误');
     for (const item of plan.tables) {
         const def = await tx.get<TableDef>('custom_table_defs', item.id);
         check(
             def &&
                 !def.deleted &&
-                def.ai &&
+                (manual || def.ai) &&
                 def.branch === plan.branch &&
                 def.version === item.version &&
                 (def.dataVersion ?? 0) === item.dataVersion,
@@ -343,8 +346,10 @@ export async function commitSummaryTables(
     plan: SummaryTablePlan,
     sources: string[],
     guard: () => boolean = () => true,
+    body?: { start: number; end: number; refs: SourceRef[] },
 ) {
-    const digest = await fingerprint(plan);
+    const digest = await fingerprint(body ? [plan, body] : plan);
+    if (body) check(Number.isInteger(body.start) && Number.isInteger(body.end) && body.start >= 0 && body.end < view.cutoff && body.start <= body.end && JSON.stringify(body.refs) === JSON.stringify(view.refs.slice(body.start, body.end + 1)), '补表正文范围无效');
     await lib.transaction(
         ['branches', 'custom_table_defs', 'custom_table_rows', 'table_receipts'],
         'readwrite',
@@ -365,8 +370,8 @@ export async function commitSummaryTables(
             );
             const branch = await tx.get<Branch>('branches', plan.branch);
             check(branch && branch.id === view.branch.id && branch.epoch === view.branch.epoch, '迟到填表结果已拒绝');
-            check(sources.length > 0 && sources.every((id) => view.memories.some((m) => m.id === id)), '填表来源缺失');
-            await assertTablePlan(tx, plan);
+            check((sources.length > 0 || !!body) && sources.every((id) => view.memories.some((m) => m.id === id)), '填表来源缺失');
+            await assertTablePlan(tx, plan, !!body);
             check(guard(), '聊天已改变，填表结果未应用');
             for (const item of plan.tables) {
                 const def = (await tx.get<TableDef>('custom_table_defs', item.id))!;
@@ -392,6 +397,7 @@ export async function commitSummaryTables(
                         values,
                         version: record.version + 1,
                         sources: [...new Set([...record.sources, ...sources])],
+                        ...(body ? { bodySources: [...new Map([...(record.bodySources ?? []), ...body.refs].map(r => [r.message, r])).values()] } : {}),
                     } as TableRow);
                 }
                 await tx.put('custom_table_defs', { ...def, dataVersion: (def.dataVersion ?? 0) + 1 } as TableDef);
@@ -406,6 +412,7 @@ export async function commitSummaryTables(
                     result: 'success',
                     count: item.operations.length,
                     fingerprint: digest,
+                    ...(body ? { backfillSchema: 1, bodySources: body.refs, start: body.start, end: body.end } : {}),
                 } as any);
             }
             check(guard(), '聊天已改变，填表结果未应用');

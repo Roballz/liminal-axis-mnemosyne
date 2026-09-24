@@ -15,6 +15,7 @@ export class Transaction {
         return request(index ? s.index(index).getAll(key) : s.getAll());
     }
     put(store: Store, value: Row): Promise<IDBValidKey> { return request(this.native.objectStore(store).put(value)); }
+    delete(store: Store, key: string): Promise<undefined> { return request(this.native.objectStore(store).delete(key)); }
     add(store: Store, value: Row): Promise<IDBValidKey> { return request(this.native.objectStore(store).add(value)); }
 }
 export class Library {
