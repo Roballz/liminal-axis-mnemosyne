@@ -3,7 +3,7 @@ import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import Icon from '@/components/Icon.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import ModalMask from '@/components/ModalMask.vue';
-import { addSummary, appendOpToLatestLeaf, deleteLeafAt, deleteSummary, deleteSummarySubtrees, editLeafAt, editPlan, editSummary, invalidateSummaryAncestors } from '@/memory/apply';
+import { addSummary, appendOpToLatestLeaf, deleteLeafAt, deleteSummary, deleteSummarySubtrees, editLeafAt, editLeafTagsBatch, getLeaf, editPlan, editSummary, invalidateSummaryAncestors } from '@/memory/apply';
 import { apiSettings } from '@/api/settings';
 import { batchBackfill, batchState, cancelBatchBackfill, engineState, floorBackfillState, isAiFloor, resummarizeNow, summarizeFloor, summarizeSelected, syncHiddenNow } from '@/memory/engine';
 import { estimateInjectionTokenBreakdown, refreshInjection, selectViewNodes, type ViewNode } from '@/memory/inject';
@@ -13,16 +13,22 @@ import { derivedMeta, memory, recomputeDerived } from '@/memory/store';
 import type { SceneFocus } from '@/memory/types';
 import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
-import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue';
 import SummaryNode from './SummaryNode.vue';
 import SummaryTags from './SummaryTags.vue';
-import { planTitle } from '@/memory/contextTags';
+import { normalizeTags, shortText } from '@/memory/contextTags';
+import { currentEventHints, dailyInstalled, dailyState, hostVersion, syncDaily } from '@/mnemosyne/bridge';
 import type { MemPlan } from '@/memory/types';
 import { SUMMARY_CTX, type SummaryRow } from './ctx';
 
 // 打开摘要页时强制重算一次派生:未摘要楼层等派生缓存只在特定事件刷新,
 // 边聊边攒的新 AI 楼可能没触发刷新,进页先对齐一次,避免列表漏楼。
 onMounted(() => recomputeDerived());
+
+const events = computed(() => {
+  void derivedMeta.rev; void dailyState.revision; void dailyState.generation;
+  return currentEventHints();
+});
 
 // 切聊天:重置临时视图态(展开/搜索/选择),避免上个聊天的残留跨聊天带过来。
 const resetViewStates = () => {
@@ -31,6 +37,8 @@ const resetViewStates = () => {
   searchOpen.value = false;
   closeImportHistory();
   exitSelectMode();
+  publicOpen.value = false;
+  visibleLimit.value = 40;
 };
 let offChatChanged: (() => void) | null = null;
 onMounted(() => {
@@ -147,7 +155,7 @@ function jumpToSummary(floor: number) {
 }
 
 function addPlan() {
-  const content = newContent.value.trim();
+  const content = shortText(newContent.value, 50);
   if (!content) return;
   // 创建时间用当前已知故事时间(没有就留空);目标时间仅计划可填,用户填了才带上
   const createdTime = memory.state.time?.trim() || undefined;
@@ -180,12 +188,12 @@ function savePlanEdit() {
   const e = editingPlan.value;
   if (!e || !e.content.trim()) return;
   editPlan(e.id, {
-    content: e.content,
+    content: shortText(e.content, 50),
     createdTime: e.createdTime,
     // 目标时间仅计划有意义;悬念保持空
     targetTime: e.kind === 'plan' ? e.targetTime : '',
   });
-  appendOpToLatestLeaf({ plans: { update: [{ id: e.id, title: e.title ?? '', currentProgress: e.currentProgress ?? '', remaining: e.remaining ?? '' }] } });
+  appendOpToLatestLeaf({ plans: { update: [{ id: e.id, currentProgress: e.currentProgress ?? '', remaining: e.remaining ?? '' }] } });
   refreshInjection();
   editingPlan.value = null;
 }
@@ -795,9 +803,58 @@ function saveEdit() {
   editing.value = null;
 }
 
+// Bound the mounted card count; search and select-all still use the complete forest.
+const visibleLimit = ref(40);
+watch([searchQuery, selectMode], () => { visibleLimit.value = 40; });
+const displayedCount = computed(() => searching.value || selectMode.value ? visibleRows.value.length : rootNodes.value.length);
+
+// Compressed roots include their valid leaf descendants in bulk publication.
+const publicLeaves = computed(() => {
+  const leaves: { index: number; expectedId: string }[] = [];
+  const seen = new Set<string>();
+  const walk = (id: string) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    const node = byId.value.get(id);
+    if (!node) return;
+    if (node.kind === 'leaf') leaves.push({ index: node.msgIndex, expectedId: node.id });
+    else if (!node.atomic) node.childIds.forEach(walk);
+  };
+  selectedIds.value.forEach(walk);
+  return leaves;
+});
+const publicOpen = ref(false), publishing = ref(false), publicReason = ref('');
+let publicHost = '';
+let publicTargets: { index: number; expectedId: string }[] = [];
+function openPublic() {
+  publicHost = hostVersion();
+  publicTargets = [...publicLeaves.value];
+  publicReason.value = '早期摘要，由用户手动设为公开';
+  publicOpen.value = true;
+}
+async function publishSelected() {
+  publishing.value = true;
+  try {
+    if (publicHost !== hostVersion()) throw new Error('聊天或摘要已改变，请重新选择');
+    const reason = shortText(publicReason.value, 200);
+    if (!reason) return;
+    const chat = getContext()?.chat;
+    const edits = publicTargets.map(target => ({ ...target, tags: {
+      ...(normalizeTags(getLeaf(chat?.[target.index])?.tags) ?? { version: 1 as const, planIds: [], eventIds: [] }),
+      public: { reason },
+    } }));
+    if (!editLeafTagsBatch(edits)) throw new Error('所选摘要已改变，请重新选择');
+    publicOpen.value = false;
+    refreshInjection();
+    if (dailyInstalled()) await syncDaily();
+    toast(`已公开 ${edits.length} 条摘要`, 'success');
+  } catch (error) { toast((error as Error).message, 'warning'); }
+  finally { publishing.value = false; }
+}
+
 // 注入递归卡片(SummaryNode)所需的状态、helper 与动作,免逐层 props 透传
 provide(SUMMARY_CTX, {
-  byId, expanded, selectMode, searching, selectedIds,
+  events, byId, expanded, selectMode, searching, selectedIds,
   toggleExpand, toggleSelect, openEdit, onDelete,
   nodeFloors, toRow, levelLabel, floorLabel, rowTime, rowRelative, highlightParts,
 });
@@ -941,9 +998,8 @@ provide(SUMMARY_CTX, {
                   <button class="bbs-plan-act bbs-plan-del" type="button" title="删除" @click="removePlan(p.id)"><Icon name="close" /></button>
                 </span>
               </div>
-              <strong>{{ planTitle(p) }}</strong>
-              <small class="bbs-plan-id" :title="p.id">{{ p.id }}</small>
               <p class="bbs-plan-content">{{ p.content }}</p>
+              <small v-if="apiSettings.ui.showInternalIds" class="bbs-plan-id">{{ p.id }}</small>
               <p v-if="p.currentProgress" class="bbs-plan-progress">当前进展：{{ p.currentProgress }}</p>
               <p v-if="p.remaining" class="bbs-plan-progress">仍待解决：{{ p.remaining }}</p>
               <!-- 故事内时间:立于(创建时间)/ 目标(目标时间),任一存在才显示 -->
@@ -1118,7 +1174,7 @@ provide(SUMMARY_CTX, {
 
     <!-- 默认视图:根倒序,逐层展开由 SummaryNode 递归承载(grid 高度过渡,不脱流、无闪烁) -->
     <div v-if="!searching && !selectMode && rootNodes.length" class="bbs-summary-list">
-      <SummaryNode v-for="n in rootNodes" :key="`${n.kind}:${n.id}`" :node="n" :depth="0" />
+      <SummaryNode v-for="n in rootNodes.slice(0, visibleLimit)" :key="`${n.kind}:${n.id}`" :node="n" :depth="0" />
     </div>
 
     <!-- 搜索 / 选择视图:平铺列表(无逐层展开)。搜索命中含已压缩的深层节点 -->
@@ -1128,7 +1184,7 @@ provide(SUMMARY_CTX, {
       :class="{ 'is-selecting': selectMode }"
     >
       <article
-        v-for="r in visibleRows"
+        v-for="r in visibleRows.slice(0, visibleLimit)"
         :key="r.key"
         class="bbs-summary-card"
         :class="{ 'is-deep': r.level > 0, 'is-stale': r.stale, 'is-child': r.isChild, 'is-selected': selectMode && selectedIds.has(r.id) }"
@@ -1207,6 +1263,19 @@ provide(SUMMARY_CTX, {
       <p>还没有摘要。对话累积到设定楼层后会自动生成,也可在「未摘要楼层」里点楼层号单独补摘。</p>
     </div>
 
+    <button v-if="visibleLimit < displayedCount" class="bbs-btn" type="button" @click="visibleLimit += 40">
+      显示更多（已显示 {{ visibleLimit }} / {{ displayedCount }}）
+    </button>
+
+    <ModalMask :open="publicOpen" @close="!publishing && (publicOpen = false)">
+      <div class="bbs-modal" role="dialog" aria-modal="true" aria-label="公开所选摘要">
+        <header class="bbs-modal-head"><strong>公开所选摘要</strong></header>
+        <p>将公开 {{ publicLeaves.length }} 条逐楼摘要，包含所选总结下的摘要。公开后可通过人物筛选。</p>
+        <label class="bbs-modal-field"><span>公开理由（可修改）</span><textarea v-model="publicReason" class="bbs-input" rows="3" maxlength="200" /></label>
+        <footer class="bbs-modal-foot"><button class="bbs-btn" :disabled="publishing" @click="publicOpen = false">取消</button><button class="bbs-btn bbs-btn-primary" :disabled="publishing || !publicReason.trim()" @click="publishSelected">{{ publishing ? '保存中…' : '确认公开' }}</button></footer>
+      </div>
+    </ModalMask>
+
     <!-- 选择模式底部操作条:显示已选统计 + 全选/删除/合并。sticky 在页面底部 -->
     <div v-if="selectMode" class="bbs-select-bar">
       <span class="bbs-select-info">
@@ -1217,7 +1286,7 @@ provide(SUMMARY_CTX, {
           </template>
           · 生成 {{ levelLabel(selectionSummary.level) }}
         </template>
-        <template v-else>勾选连续的多条摘要合并</template>
+        <template v-else>勾选摘要以公开、删除或合并</template>
       </span>
       <span v-if="selectionSummary.count >= 2 && !canMerge" class="bbs-select-warn">需选连续的摘要</span>
       <!-- 全选/取消全选:列表长时免逐条点;文案随 allSelected 切换 -->
@@ -1241,6 +1310,7 @@ provide(SUMMARY_CTX, {
         <Icon v-else name="trash" />
         删除所选
       </button>
+      <button class="bbs-btn bbs-btn-sm" type="button" :disabled="!publicLeaves.length || publishing || deleting || merging || engineState.running" @click="openPublic">公开摘要</button>
       <button
         class="bbs-btn bbs-btn-sm bbs-btn-primary"
         type="button"
@@ -1335,10 +1405,11 @@ provide(SUMMARY_CTX, {
           </div>
         </div>
         <label class="bbs-modal-field">
-          <span class="bbs-modal-label">内容</span>
+          <span class="bbs-modal-label">内容（50字内）</span>
           <textarea
             ref="contentInput"
             v-model="newContent"
+            maxlength="50"
             class="bbs-input bbs-modal-textarea"
             rows="3"
             placeholder="描述这条计划或悬念…"
@@ -1370,12 +1441,8 @@ provide(SUMMARY_CTX, {
           <button class="bbs-summary-act" type="button" title="关闭" @click="cancelPlanEdit"><Icon name="close" /></button>
         </header>
         <label class="bbs-modal-field">
-          <span class="bbs-modal-label">内容</span>
-          <textarea v-model="editingPlan.content" class="bbs-input bbs-modal-textarea" rows="3"></textarea>
-        </label>
-        <label class="bbs-modal-field">
-          <span class="bbs-modal-label">短标题（30字内）</span>
-          <input v-model="editingPlan.title" class="bbs-input" maxlength="30" />
+          <span class="bbs-modal-label">内容（50字内）</span>
+          <textarea v-model="editingPlan.content" maxlength="50" class="bbs-input bbs-modal-textarea" rows="3"></textarea>
         </label>
         <label class="bbs-modal-field"><span class="bbs-modal-label">当前进展（50字内）</span><textarea v-model="editingPlan.currentProgress" class="bbs-input" maxlength="50" rows="2" /></label>
         <label class="bbs-modal-field"><span class="bbs-modal-label">仍待解决（50字内）</span><textarea v-model="editingPlan.remaining" class="bbs-input" maxlength="50" rows="2" /></label>

@@ -280,6 +280,7 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
     status: string;
     keywords: string[];
     overview?: string;
+    latestProgress?: EventRevision['latestProgress'];
     summarized?: string[];
     confirmOverview?: boolean;
 }, member?: {
@@ -297,6 +298,12 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
         check(cards.some(c => c.chain.id === eventId), '事件不属于合法视图');
     if (member)
         check(valid.some(m => m.id === member.memory) || (!member.active && existing?.members.some(m => m.memory === member.memory)), '摘要无效或不属于当前范围');
+    const progressChanged = patch.latestProgress !== undefined && !equal(patch.latestProgress, existing?.meta.latestProgress);
+    if (progressChanged && patch.latestProgress) {
+        const progress = patch.latestProgress;
+        check(progress.version === 1 && progress.text.trim() && Array.from(progress.text.trim()).length <= 30, '最新进展需为1至30字');
+        check(valid.some(m => m.id === progress.memory) && existing?.members.some(m => m.memory === progress.memory), '最新进展须引用当前事件的有效关联摘要');
+    }
     if (patch.confirmOverview) {
         check(!existing?.blocked, '请先审核来源摘要，或解除已删除来源的关联');
         check(equal([...(patch.summarized ?? [])].sort(), (existing?.members.map(m => m.memory) ?? []).sort()), '确认范围必须包含当前全部关联摘要');
@@ -312,7 +319,14 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
             key = chain.id;
         }
         const base = { story: branch.story, branch: branch.id, owner: key, snapshot: view.snapshot.id, cutoff: view.cutoff, epoch: branch.epoch };
-        await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2, ...(existing?.meta.latestProgress !== undefined ? { latestProgress: existing.meta.latestProgress } : {}), overview: patch.overview ?? existing?.meta.overview ?? existing?.progress.map(p => p.text).join('\n') ?? '', summarized: patch.summarized ?? existing?.meta.summarized ?? existing?.progress.flatMap(p => p.memories) ?? [], title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: patch.confirmOverview ? patch.summarized ?? [] : existing?.meta.refs ?? [], created: Date.now() } as EventRevision);
+        const latestProgress = patch.latestProgress === undefined ? existing?.meta.latestProgress : patch.latestProgress;
+        const progressSource = progressChanged && patch.latestProgress && valid.find(m => m.id === patch.latestProgress!.memory);
+        await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2,
+            ...(latestProgress !== undefined ? { latestProgress: latestProgress && progressSource ? {
+                ...latestProgress, text: latestProgress.text.trim(),
+                time: splitTimeLabel(progressSource.storyTime).end || progressSource.storyTime,
+            } : latestProgress } : {}),
+            overview: patch.overview ?? existing?.meta.overview ?? existing?.progress.map(p => p.text).join('\n') ?? '', summarized: patch.summarized ?? existing?.meta.summarized ?? existing?.progress.flatMap(p => p.memories) ?? [], title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: patch.confirmOverview ? patch.summarized ?? [] : existing?.meta.refs ?? [], created: Date.now() } as EventRevision);
         if (member)
             await tx.add('event_memberships', { ...row('link'), ...base, ...member, locked: true, origin: 'manual' } as Membership);
         check(guard(), '聊天已改变，编辑未提交');
@@ -424,12 +438,13 @@ export async function deleteEvent(lib: Library, view: CapturedView, eventId: str
 
 /** Compact, persistent state; the detailed event wrapper remains recall-only. */
 export function renderPersistentEvents(cards: EventCard[]): string {
+    let index = 0;
     return ([['open', '进行中的事件链'], ['dormant', '暂搁的事件链']] as const).flatMap(([status, label]) => {
         const group = cards.filter(c => c.meta.status === status && !c.blocked && !c.needsReview);
         if (!group.length) return [];
         return [`${label}:\n${group.map(c => {
             const p = c.meta.latestProgress;
-            return `[${c.chain.id}] ${c.meta.title} · ${p ? `${p.time} ${p.text}`.trim() : c.meta.latestProgress === null ? '暂无明确进展' : '待生成最新进展'}`;
+            return `e${++index}. [事件] ${c.meta.title} · ${p ? `${p.time} ${p.text}`.trim() : c.meta.latestProgress === null ? '暂无明确进展' : '尚未填写最新进展'}`;
         }).join('\n')}`];
     }).join('\n\n');
 }

@@ -42,7 +42,7 @@ export function eventPending(card: EventCard) {
   const done = new Set(
     card.meta.summarized ?? card.progress.flatMap((p) => p.memories),
   );
-  return card.meta.latestProgress === undefined || !!card.needsReview || !!card.blocked || card.members.some((m) => !done.has(m.memory));
+  return !!card.needsReview || !!card.blocked || card.members.some((m) => !done.has(m.memory));
 }
 export async function commitManualEvent(
   lib: Library,

@@ -624,12 +624,12 @@ export function buildStateInjectionText(): string {
   const openPlans = memory.plans
     .filter(p => p.status === 'open')
 ;
-  st.push(`未了结的计划/悬念:\n${fmtPlans(openPlans)}`);
+  st.push(`未了结的计划/悬念:\n${fmtPlans(openPlans, false)}`);
 
   // 近期已完成的计划/悬念:防 AI 把刚了结的当未完成又去推进。与副API摘要同口径,只差截止点
   // (这里用全量 memory.plans;副API用 deriveMemory(chat, beforeIndex).plans)。
   const recentResolved = selectRecentResolvedPlans(memory.plans, apiSettings.recentResolvedPlansCount);
-  if (recentResolved.length) st.push(`近期已了结(已结案,含了结方式/原因;勿当未完成再推进/重复记录):\n${fmtResolvedPlans(recentResolved)}`);
+  if (recentResolved.length) st.push(`近期已了结(已结案,含了结方式/原因;勿当未完成再推进/重复记录):\n${fmtResolvedPlans(recentResolved, false)}`);
 
   const eventText = persistentEventText();
   if (eventText) st.push(eventText);

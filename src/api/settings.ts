@@ -155,6 +155,8 @@ export interface UiPrefs {
   navPosition: string;
   /** 移动端:再点当前页导航按钮即关闭整窗。默认开;怕误触的用户可关。 */
   navTapClose: boolean;
+  /** Only show stable record IDs on cards when debugging. */
+  showInternalIds: boolean;
   /** 在 ST 顶栏注入一个快速打开按钮(魔杖菜单入口照旧保留)。默认关。 */
   showTopBar: boolean;
   /** 在聊天框上方注入「快速回复」式按钮,点击打开柏宝书。默认关。 */
@@ -333,6 +335,7 @@ function defaults(): ApiSettings {
       theme: 'day',
       navPosition: 'auto',
       navTapClose: true,
+      showInternalIds: false,
       showTopBar: false,
       showQuickReply: false,
       showFloorPanel: false,
@@ -415,6 +418,7 @@ function normalize(raw: unknown): ApiSettings {
     theme: typeof ru.theme === 'string' ? ru.theme : d.ui.theme,
     navPosition: typeof ru.navPosition === 'string' ? ru.navPosition : d.ui.navPosition,
     navTapClose: typeof ru.navTapClose === 'boolean' ? ru.navTapClose : d.ui.navTapClose,
+    showInternalIds: ru.showInternalIds === true,
     showTopBar: typeof ru.showTopBar === 'boolean' ? ru.showTopBar : d.ui.showTopBar,
     showQuickReply: typeof ru.showQuickReply === 'boolean' ? ru.showQuickReply : d.ui.showQuickReply,
     showFloorPanel: typeof ru.showFloorPanel === 'boolean' ? ru.showFloorPanel : d.ui.showFloorPanel,

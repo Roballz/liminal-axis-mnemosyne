@@ -276,6 +276,7 @@ export type PlanResolveItem = string | PlanResolveEntry;
  * id 确定性:`plan:${产生它的叶子id}#${在该叶子 add 数组里的序号}`。
  */
 export interface PlanProgress {
+  /** Legacy data only; presentation and new outputs use content. */
   title?: string;
   currentProgress?: string;
   remaining?: string;

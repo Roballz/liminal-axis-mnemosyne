@@ -5,6 +5,7 @@
  */
 import type { ComputedRef, InjectionKey, Ref } from 'vue';
 import type { ViewNode } from '@/memory/inject';
+import type { EventHint } from '@/memory/contextTags';
 
 /** 一个森林节点在列表里的展示字段(toRow 的产物),供 helper 计算标签/时间用。 */
 export interface SummaryRow {
@@ -24,6 +25,7 @@ export interface SummaryRow {
 }
 
 export interface SummaryCtx {
+  events: ComputedRef<EventHint[]>;
   byId: ComputedRef<Map<string, ViewNode>>;
   expanded: Ref<Set<string>>;
   selectMode: Ref<boolean>;

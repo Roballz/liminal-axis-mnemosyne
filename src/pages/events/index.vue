@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
+import { apiSettings } from "@/api/settings";
 import {
   computed,
   onMounted,
@@ -59,7 +60,18 @@ const editing = ref(false),
   title = ref(""),
   status = ref("open"),
   overview = ref(""),
+  latestText = ref(""),
+  latestMemory = ref(""),
   keywords = ref("");
+const progressSources = computed(() => {
+  const card = cards.value.find(c => c.chain.id === editId.value);
+  return (card?.members ?? []).flatMap(member => {
+    const source = formView?.memories.find(m => m.id === member.memory);
+    if (!source) return [];
+    const floor = formView!.refs.findIndex(r => r.message === source.anchor);
+    return [{ value: source.id, label: `#${floor} ${source.storyTime} ${source.content.slice(0, 40)}` }];
+  });
+});
 const overviewChars = computed(() => eventOverviewLength(overview.value));
 const removing = shallowRef<EventCard | null>(null);
 const archiveMode = ref(false),
@@ -279,6 +291,8 @@ function edit(card: EventCard | null) {
   title.value = card?.meta.title ?? "";
   status.value = card?.meta.status ?? "open";
   overview.value = card ? eventOverview(card) : "";
+  latestText.value = card?.meta.latestProgress?.text ?? "";
+  latestMemory.value = card?.meta.latestProgress?.memory ?? card?.members.at(-1)?.memory ?? "";
   keywords.value = card?.meta.keywords.join("、") ?? "";
   editing.value = true;
 }
@@ -301,6 +315,12 @@ async function save(confirmOverview = true) {
         .map((s) => s.trim())
         .filter(Boolean),
       overview: overview.value,
+      // Preserve an untouched legacy/invalid field while editing other metadata.
+      ...(latestText.value.trim() === (card?.meta.latestProgress?.text ?? '') &&
+          (!latestText.value.trim() || latestMemory.value === card?.meta.latestProgress?.memory)
+        ? {} : { latestProgress: latestText.value.trim() ? {
+          version: 1 as const, text: latestText.value.trim(), memory: latestMemory.value, time: '',
+        } : null }),
       confirmOverview,
       summarized: confirmOverview ? card?.members.map(m => m.memory) ?? [] : card?.meta.summarized ?? card?.progress.flatMap(p => p.memories) ?? [],
     },
@@ -527,7 +547,7 @@ onBeforeUnmount(() => {
         @keydown.esc="cancelPress"
       >
         <strong class="mn-event-title">{{ card.meta.title }}</strong>
-        <p v-if="card.meta.latestProgress" class="mn-muted">{{ card.meta.latestProgress.time }} · {{ card.meta.latestProgress.text }}</p>
+        <small v-if="apiSettings.ui.showInternalIds" class="mn-muted">{{ card.chain.id }}</small>
         <p class="mn-muted mn-event-keywords">
           {{ card.meta.keywords.join(" · ") || "暂无关键词" }}
         </p>
@@ -566,6 +586,7 @@ onBeforeUnmount(() => {
         <strong>事件概要：</strong
         >{{ eventOverview(card) || "暂无概要，可加入成员后更新" }}
       </p>
+      <p class="mn-pre"><strong>最新进展：</strong>{{ card.meta.latestProgress ? [card.meta.latestProgress.time, card.meta.latestProgress.text].filter(Boolean).join(' · ') : card.meta.latestProgress === null ? '暂无明确进展' : '尚未填写，可在编辑中补充' }}</p>
       <hr />
       <details>
         <summary>
@@ -738,7 +759,10 @@ onBeforeUnmount(() => {
               {{ EVENT_OVERVIEW_MAX_CHARS }}
               字（含标点）。仅记录核心变化及影响关系或转变的重要细节。
             </small></label
-          ><label
+          ><label>最新进展（30字内）<textarea v-model="latestText" rows="2" maxlength="30" :disabled="!progressSources.length" placeholder="简述最近一次实质进展" /></label>
+          <label v-if="progressSources.length">进展对应摘要<BbsSelect v-model="latestMemory" :options="progressSources" aria-label="进展对应摘要" /><small>进展时间取自所选摘要。</small></label>
+          <small v-else>加入关联摘要后，可填写最新进展。</small>
+          <label
             >关键词<input v-model="keywords" placeholder="用逗号或顿号分隔"
           /></label>
           <p v-if="error" class="mn-warning">{{ error }}</p>

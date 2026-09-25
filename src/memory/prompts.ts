@@ -473,7 +473,7 @@ ${RULE_LONGTERM_DB}
     "remove": ["永久退场的已有NPC名"]
   },
   "plans": {
-    "add": [{ "kind": "plan", "content": "新出现的计划/目标", "title": "短标题", "currentProgress": "当前进展，50字内", "remaining": "仍待解决，50字内", "createdTime": "立计划时的故事内时间", "targetTime": "打算完成的目标时间(见下)" }, { "kind": "suspense", "content": "正文明确留下的待揭晓事实,或已经启动且等待结果的外部事件", "createdTime": "悬念出现时的故事内时间" }],
+    "add": [{ "kind": "plan", "content": "新出现的计划/目标，50字内", "currentProgress": "当前进展，50字内", "remaining": "仍待解决，50字内", "createdTime": "立计划时的故事内时间", "targetTime": "打算完成的目标时间(见下)" }, { "kind": "suspense", "content": "正文明确留下的待揭晓事实,或已经启动且等待结果的外部事件", "createdTime": "悬念出现时的故事内时间" }],
     "update": [{ "id": "p1", "currentProgress": "当前进展，50字内", "remaining": "仍待解决，50字内" }],
     "resolve": [{ "id": "p1", "outcome": "done|cancelled|failed", "reason": "一句话:为什么/如何了结(见下方【核销/了结】)" }]
   }{{lifedetails_field}}{{vars_field}}
@@ -952,7 +952,7 @@ export function outcomeLabel(kind: MemPlan['kind'], outcome?: PlanOutcome): stri
  * 每条:[计划·已取消] 内容 —— 了结原因 (立于 X · 目标 Y)。了结方式与原因是关键:告诉主模型
  * 「这事怎么下架的、为什么」,消除「已完成却还反复提」的困惑。空则「(无)」。
  */
-export function fmtResolvedPlans(plans: MemPlan[]): string {
+export function fmtResolvedPlans(plans: MemPlan[], stableIds = true): string {
   if (!plans.length) return '  (无)';
   return plans
     .map(p => {
@@ -962,12 +962,12 @@ export function fmtResolvedPlans(plans: MemPlan[]): string {
       const time = parts.length ? `(${parts.join(' · ')})` : '';
       const tag = `${p.kind === 'suspense' ? '悬念' : '计划'}·${outcomeLabel(p.kind, p.outcome)}`;
       const reason = oneLine(p.resolvedReason) ? ` —— ${oneLine(p.resolvedReason)}` : '';
-      return `  - [${p.id}] [${tag}] ${oneLine(p.content)}${reason}${time}`;
+      return `  - ${stableIds ? `[${p.id}] ` : ''}[${tag}] ${planTitle(p)}${reason}${time}`;
     })
     .join('\n');
 }
 
-export function fmtPlans(plans: BuildArgs['openPlans']): string {
+export function fmtPlans(plans: BuildArgs['openPlans'], stableIds = true): string {
   if (!plans.length) return '  (无)';
   return plans
     .map((p, idx) => {
@@ -977,7 +977,7 @@ export function fmtPlans(plans: BuildArgs['openPlans']): string {
       if (p.targetTime?.trim()) parts.push(`目标 ${p.targetTime.trim()}`);
       const time = parts.length ? `(${parts.join(' · ')})` : '';
       const progress = [p.currentProgress ? `当前进展：${oneLine(p.currentProgress)}` : '', p.remaining ? `仍待解决：${oneLine(p.remaining)}` : ''].filter(Boolean).join('；');
-      return `  p${idx + 1}. ${p.id ? `[${p.id}] ` : ''}[${p.kind === 'suspense' ? '悬念' : '计划'}] ${progress ? planTitle(p) : oneLine(p.content)}${time}${progress ? `；${progress}` : ''}`;
+      return `  p${idx + 1}. ${stableIds && p.id ? `[${p.id}] ` : ''}[${p.kind === 'suspense' ? '悬念' : '计划'}] ${planTitle(p)}${time}${progress ? `；${progress}` : ''}`;
     })
     .join('\n');
 }
@@ -1545,6 +1545,6 @@ export const SUMMARY_TAG_PROTOCOL = `【摘要标签协议】
 计划/悬念和事件只引用提供目录中的 ID；只有正文明确相关才标记，允许空数组。相同人物或地点不等于同一事件。eventIds 仅表示检索相关，不创建、合并或更改人工事件成员。
 不要输出 public，公开状态仅由用户手动设置。标签不写进 summary 正文。`;
 export const PLAN_PROGRESS_PROTOCOL = `【计划/悬念持续更新协议】
-本协议补充旧模板：plans.add 可带 title（30字内短标题）、currentProgress（当前进展）、remaining（仍待解决）。currentProgress 与 remaining 各不超过50字，输入输出均精简，不抄整段摘要。
+本协议补充旧模板：plans.add 使用 content（内容）、currentProgress（当前进展）、remaining（仍待解决），三者各不超过50字。不要生成 title 短标题；内容直接用于展示和注入，不抄整段摘要。
 每次逐条核对现有计划/悬念：正文出现阶段进展、新证据、目标变化但尚未结束时，输出 plans.update:[{"id":"目录中的稳定ID或p1","currentProgress":"更新后的当前进展","remaining":"仍未解决的具体事项"}]。有变化才写，不凭时间流逝、推测或再次提及改写；已知解决部分必须从 remaining 移除。
 无进展省略 update；真正结束仍用 resolve。关联到本段的旧计划/悬念同时写 tags.planIds；本段新建项由程序自动关联，无需编造 ID。`;

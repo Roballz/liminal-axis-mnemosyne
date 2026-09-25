@@ -538,7 +538,7 @@ function buildRecallText(
     tiers.set(h.leafId, tier);
     let chunk = fmtChunk(h, body, !!full, selfScope, now);
     const plans = memory.plans.filter(p => h.tags?.planIds.includes(p.id));
-    if (plans.length) chunk += `\n关联悬念/计划：${plans.map(p => `${p.kind === 'suspense' ? '悬念' : '计划'}[${p.id}] ${planTitle(p)}`).join('；')}`;
+    if (plans.length) chunk += `\n关联悬念/计划：${plans.map(p => `[${p.kind === 'suspense' ? '悬念' : '计划'}] ${planTitle(p)}`).join('；')}`;
     if (h.tags?.public) chunk += `\n公开理由：${h.tags.public.reason}`;
     chunks.push(chunk);
   }

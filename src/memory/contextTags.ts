@@ -49,7 +49,7 @@ export function resolvePlanRef(id: string, plans: { id: string }[]): string | un
   return index ? plans[Number(index[1]) - 1]?.id : undefined;
 }
 export function planTitle(plan: { title?: string; content: string }): string {
-  return plan.title?.trim() || shortText(plan.content, 30);
+  return shortText(plan.content, 50);
 }
 export const nameKey = (s: string) => s.normalize('NFKC').trim().toLocaleLowerCase();
 

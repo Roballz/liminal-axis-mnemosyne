@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
+import { SUMMARY_CTX } from './ctx';
 import ModalMask from '@/components/ModalMask.vue';
 import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
 import { getLeaf, editLeafTags } from '@/memory/apply';
 import { derivedMeta, memory } from '@/memory/store';
 import { normalizeTags, planTitle, type SummaryTags } from '@/memory/contextTags';
-import { currentEventHints, dailyInstalled, dailyState, hostVersion, syncDaily } from '@/mnemosyne/bridge';
+import { dailyInstalled, hostVersion, syncDaily } from '@/mnemosyne/bridge';
 import { refreshInjection } from '@/memory/inject';
 
 const props = defineProps<{ floor: number; leafId: string }>();
@@ -15,10 +16,11 @@ const tags = computed(() => {
   const leaf = getLeaf(getContext()?.chat?.[props.floor]);
   return leaf?.id === props.leafId ? normalizeTags(leaf.tags) : undefined;
 });
-const events = computed(() => { void dailyState.revision; return currentEventHints(); });
+// One validated directory per page revision, never one full chat serialization per card.
+const events = inject(SUMMARY_CTX)!.events;
 const links = computed(() => [
   ...memory.plans.filter(p => tags.value?.planIds.includes(p.id)).map(p => `${p.kind === 'suspense' ? '悬念' : '计划'} · ${planTitle(p)}`),
-  ...events.value.filter(e => tags.value?.eventIds.includes(e.id)).map(e => `事件 · ${e.title}`),
+  ...(tags.value?.eventIds.length ? events.value.filter(e => tags.value!.eventIds.includes(e.id)).map(e => `事件 · ${e.title}`) : []),
 ]);
 const opened = ref(false), busy = ref(false), publicOnly = ref(false);
 const participants = ref(''), reason = ref(''), planIds = ref<string[]>([]), eventIds = ref<string[]>([]);

@@ -78,7 +78,9 @@ export default defineConfig(({ mode }) => ({
     },
     outDir: 'dist',
     emptyOutDir: false,
-    sourcemap: mode === 'production' ? true : 'inline',
+    // Keep production packages small enough for the connected GitHub upload path.
+    // Development watch builds retain inline maps for local debugging.
+    sourcemap: mode === 'production' ? false : 'inline',
     minify: mode === 'production',
     target: 'esnext',
   },

@@ -289,8 +289,8 @@ function cleanProtagonistDelta(raw: unknown): ProtagonistDelta | null {
 
 function cleanPlanProgress(raw: Record<string, unknown>) {
   const out: Omit<PlanUpdate, 'id'> = {};
-  for (const key of ['title', 'currentProgress', 'remaining'] as const)
-    if (typeof raw[key] === 'string') out[key] = shortText(raw[key], key === 'title' ? 30 : 50);
+  for (const key of ['currentProgress', 'remaining'] as const)
+    if (typeof raw[key] === 'string') out[key] = shortText(raw[key], 50);
   return out;
 }
 function cleanPlanUpdates(v: unknown): PlanUpdate[] {
@@ -1678,7 +1678,7 @@ export function finalizeDelta(delta: SummaryDelta, openPlansOrdered: { id: strin
 
   if (isRecord(delta.plans)) {
     const plans: NonNullable<StoredDelta['plans']> = {};
-    const add = cleanPlanAddList(delta.plans.add);
+    const add = cleanPlanAddList(delta.plans.add).map(p => ({ ...p, content: shortText(p.content, 50) }));
     const update = cleanPlanUpdates(delta.plans.update).flatMap(p => {
       const id = resolvePlanRef(p.id, openPlansOrdered);
       return id ? [{ ...p, id }] : [];
@@ -2222,11 +2222,19 @@ export function editLeafAt(index: number, text: string, timeStart: string, timeE
 
 /** Metadata follows this leaf/swipe and its canonical revision. */
 export function editLeafTags(index: number, expectedId: string, tags: SummaryTags): boolean {
+  return editLeafTagsBatch([{ index, expectedId, tags }]);
+}
+
+/** Validate the whole selection before changing anything; replay/flush/index once. */
+export function editLeafTagsBatch(edits: { index: number; expectedId: string; tags: SummaryTags }[]): boolean {
   const chat = getContext()?.chat;
-  const leaf = getLeaf(chat?.[index]);
-  if (!chat || !leaf || leaf.id !== expectedId || !leafValid(chat[index])) return false;
-  leaf.tags = normalizeTags(tags);
-  chat[index].extra = { ...chat[index].extra, bbs_leaf: leaf };
+  if (!chat || !edits.length) return false;
+  const changes = edits.map(e => ({ ...e, leaf: getLeaf(chat[e.index]) }));
+  if (changes.some(e => !e.leaf || e.leaf.id !== e.expectedId || !leafValid(chat[e.index]))) return false;
+  for (const { index, leaf, tags } of changes) {
+    leaf!.tags = normalizeTags(tags);
+    chat[index].extra = { ...chat[index].extra, bbs_leaf: leaf! };
+  }
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache();

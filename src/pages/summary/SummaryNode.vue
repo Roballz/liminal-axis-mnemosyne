@@ -2,7 +2,7 @@
 /**
  * 摘要森林的一个节点(递归)。默认视图用:一张卡片 + 底部展开条,
  * 展开时下方 grid(0fr↔1fr)容器平滑撑开,内部递归渲染子节点 + 组尾收起条。
- * 高度过渡与 Collapsible.vue / 悬念簿同款——内容常驻 DOM,不脱流,故无闪烁。
+ * 折叠分支按需挂载，避免隐藏的历史摘要也创建标签/弹窗组件。
  */
 import SummaryTags from './SummaryTags.vue';
 import Icon from '@/components/Icon.vue';
@@ -73,8 +73,8 @@ const isChild = computed(() => props.depth > 0);
       </div>
     </article>
 
-    <!-- 下层:grid 0fr↔1fr 高度过渡(内容常驻、不脱流,无闪烁);缩进一档标示归属 -->
-    <div v-if="expandable" class="bbs-node-children" :class="{ 'is-open': isExpanded }">
+    <!-- 只挂载已展开分支，缩进一档标示归属。 -->
+    <div v-if="expandable && isExpanded" class="bbs-node-children is-open">
       <div class="bbs-node-children-inner">
         <div class="bbs-node-children-body">
           <SummaryNode v-for="c in children" :key="`${c.kind}:${c.id}`" :node="c" :depth="depth + 1" />

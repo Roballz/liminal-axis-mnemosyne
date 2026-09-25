@@ -43,3 +43,49 @@ it('Query 的标识不混入查询，六条Q之后的CONTEXT仍解析，坏标�
   expect(result.context?.planIds).toEqual(['P']);
   expect(parseResponse('INTENT: 找线索\nQ: 旧线索\nCONTEXT: 坏JSON')).toEqual({ intent: '找线索', queries: ['旧线索'] });
 });
+
+it('正文注入使用50字内容和短序号，内部整理仍能识别稳定ID', async () => {
+  const { buildStateInjectionText } = await import('./inject');
+  const { memory } = await import('./store');
+  const { createEmptyMemory } = await import('./types');
+  const { apiSettings } = await import('@/api/settings');
+  const delta = finalizeDelta({ plans: { add: [{ kind: 'suspense', content: '内容'.repeat(40), title: '不能替代内容', currentProgress: '找到证据' }] } }, []);
+  expect(delta.plans?.add?.[0].content).toHaveLength(50);
+  expect(delta.plans?.add?.[0].title).toBeUndefined();
+  const plan = { id: 'plan:old#0', kind: 'suspense' as const, status: 'open' as const, content: '查明玉佩来源及失主身份', title: '旧短标题', currentProgress: '找到证据', createdAt: 1 };
+  Object.assign(memory, createEmptyMemory(), { plans: [plan] });
+  expect(fmtPlans([plan])).toContain('[plan:old#0]');
+  for (const debug of [false, true]) {
+    apiSettings.ui.showInternalIds = debug;
+    const text = buildStateInjectionText();
+    expect(text).toContain('p1. [悬念] 查明玉佩来源及失主身份');
+    expect(text).not.toContain('plan:old#0');
+    expect(text).not.toContain('旧短标题');
+  }
+  apiSettings.ui.showInternalIds = false;
+  Object.assign(memory, createEmptyMemory());
+});
+
+it('批量公开一次重算并保留标签，任一摘要改变时整批不写入', async () => {
+  const { editLeafTagsBatch, getLeaf } = await import('./apply');
+  const { derivedMeta } = await import('./store');
+  const context = await import('@/st/context');
+  const chat = Array.from({ length: 80 }, (_, i) => ({ name: '合成角色', is_user: false, is_system: false, mes: `合成正文${i}`,
+    extra: { bbs_leaf: { id: `bulk-${i}`, text: `合成摘要${i}`, delta: {}, v: 1 as const, swipe: 0, createdAt: 1,
+      tags: normalizeTags({ participants: ['甲'], planIds: ['plan:test#0'], eventIds: ['ev_test'] }) } },
+  }));
+  vi.useFakeTimers();
+  vi.spyOn(context, 'getContext').mockReturnValue({ chat, chatMetadata: {}, getCurrentChatId: () => 'synthetic-bulk' } as any);
+  try {
+    const edits = chat.map((m, index) => ({ index, expectedId: m.extra.bbs_leaf.id,
+      tags: { ...m.extra.bbs_leaf.tags!, public: { reason: '人工批量公开' } } }));
+    const rev = derivedMeta.rev;
+    expect(editLeafTagsBatch([...edits.slice(0, -1), { ...edits.at(-1)!, expectedId: 'changed' }])).toBe(false);
+    expect(chat.every(m => !getLeaf(m)?.tags?.public)).toBe(true);
+    expect(derivedMeta.rev).toBe(rev);
+    expect(editLeafTagsBatch(edits)).toBe(true);
+    expect(derivedMeta.rev).toBe(rev + 1);
+    expect(chat.every(m => getLeaf(m)?.tags?.public?.reason === '人工批量公开')).toBe(true);
+    expect(getLeaf(chat[0])?.tags).toMatchObject({ participants: ['甲'], planIds: ['plan:test#0'], eventIds: ['ev_test'] });
+  } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+});
