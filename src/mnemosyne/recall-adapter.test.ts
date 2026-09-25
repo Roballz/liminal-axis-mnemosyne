@@ -76,11 +76,29 @@ test('late rerank result after host edit is never injected', async () => {
     vi.mocked(embed.rerankDocuments).mockImplementation(async () => { host = 'changed'; return [{ index: 0, score: .99 }]; });
     await runVectorRecall();
     expect(text()).toBe('');
+    expect(recallDebug.status).toContain('召回失败');
 });
 test('an event edit during rerank advances DB epoch and blocks obsolete recall publication', async () => {
     vi.mocked(embed.rerankDocuments).mockImplementation(async () => { await editEvent(lib, view, null, { title: '人工变化', status: 'open', keywords: [] }); return [{ index: 0, score: .99 }]; });
     await runVectorRecall();
     expect(text()).toBe('');
+    expect(recallDebug.status).toContain('召回失败');
+});
+
+test('同步档案还未结束时取消也释放召回，迟到的档案不启动旧请求', async () => {
+    let release!: (value: typeof view) => void;
+    vi.mocked(bridge.syncDaily).mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+    const first = runVectorRecall();
+    await vi.waitFor(() => expect(bridge.syncDaily).toHaveBeenCalledTimes(1));
+    clearRecallInjection();
+    await first;
+    await runVectorRecall();
+    expect(recallDebug.status).toBe('召回完成');
+    const completed = JSON.stringify(recallDebug);
+    release(view);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(recallDebug)).toBe(completed);
 });
 test('canonical unavailable still permits independently budgeted knowledge recall', async () => {
     vi.mocked(bridge.syncDaily).mockRejectedValue(new Error('canonical blocked'));

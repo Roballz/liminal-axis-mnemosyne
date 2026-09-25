@@ -131,13 +131,15 @@ export function eligibleKnowledge(files: KnowledgeFile[], config: KnowledgeConfi
     ? files.filter(file => file.enabled && file.embedding === embeddingIdentity()) : [];
 }
 
-export async function recallKnowledge(database: string, files: KnowledgeFile[], queryVectors: string[], config: KnowledgeConfig): Promise<string> {
+export async function recallKnowledge(database: string, files: KnowledgeFile[], queryVectors: string[], config: KnowledgeConfig, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const cfg = normalizeKnowledgeConfig(config);
   const selected = eligibleKnowledge(files, cfg);
   knowledgeDebug.hits = [];
   if (!selected.length) { knowledgeDebug.status = '未启用知识库或没有与当前 Embedding 配置匹配的文件'; return ''; }
   const byScope = new Map(selected.map(file => [knowledgeScope(file), file]));
   const { results } = await localStore.search(database, [...byScope.keys()], queryVectors, { topK: 1000 });
+  signal?.throwIfAborted();
   const blocks: string[] = [];
   let length = 0;
   const seen = new Set<string>();

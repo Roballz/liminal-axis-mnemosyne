@@ -11,6 +11,7 @@
 
 import type { VectorEndpoint } from '@/api/settings';
 import { resolveVectorModel } from '@/api/settings';
+import { abortable } from './abort';
 
 export class EmbedError extends Error {}
 
@@ -25,7 +26,7 @@ const RETRY_BACKOFF_MS = 800;
  *  - 内部超时 / 网络异常 / 服务端 5xx / 限流 429 → 重试(还有次数时);
  *  - 4xx(鉴权/格式错等)→ 直接返回 resp,由调用方走既有 !resp.ok 抛错分支(重试无意义);
  *  - 外部 signal(用户取消生成)触发的中断 → 立即抛出,绝不重试(重试是浪费额度与时间)。
- * 返回 Response(可能 4xx,交调用方处理);重试耗尽仍失败则抛最后一次错误。
+ * 读完响应体才解除超时，返回缓冲后的 Response；重试耗尽仍失败则抛最后一次错误。
  */
 export async function fetchWithTimeoutRetry(
   url: string,
@@ -41,17 +42,22 @@ export async function fetchWithTimeoutRetry(
     if (externalSignal?.aborted) throw new EmbedError(`${label}已取消`);
 
     const ctrl = new AbortController();
-    let timedOut = false;
     const timer = setTimeout(() => {
-      timedOut = true;
-      ctrl.abort();
+      ctrl.abort(new EmbedError(`${label}超时(>${timeoutSec}s)`));
     }, Math.max(1000, timeoutSec * 1000));
     // 外部取消转发到内部 controller(fetch 只认一个 signal)
-    const onExternalAbort = () => ctrl.abort();
+    const onExternalAbort = () => ctrl.abort(new EmbedError(`${label}已取消`));
     externalSignal?.addEventListener('abort', onExternalAbort);
 
     try {
-      const resp = await fetch(url, { ...init, signal: ctrl.signal });
+      const resp = await abortable((async () => {
+        const response = await fetch(url, { ...init, signal: ctrl.signal });
+        // fetch 在响应头到达就完成；上游不结束 JSON 正文时仍须受同一超时控制。
+        const body = await response.arrayBuffer();
+        return new Response([204, 205, 304].includes(response.status) ? null : body, {
+          status: response.status, statusText: response.statusText, headers: response.headers,
+        });
+      })(), ctrl.signal);
       // 5xx / 429 且还有重试机会 → 重试;其余(含 4xx)交调用方处理
       if ((resp.status >= 500 || resp.status === 429) && attempt < maxAttempts - 1) {
         lastErr = new EmbedError(`${label} API ${resp.status}`);
@@ -60,9 +66,9 @@ export async function fetchWithTimeoutRetry(
       }
     } catch (e) {
       // 外部取消触发的 abort:立即抛,不重试
-      if (externalSignal?.aborted && !timedOut) throw new EmbedError(`${label}已取消`);
-      lastErr = timedOut
-        ? new EmbedError(`${label}超时(>${timeoutSec}s)`)
+      if (externalSignal?.aborted) throw new EmbedError(`${label}已取消`);
+      lastErr = ctrl.signal.aborted
+        ? ctrl.signal.reason
         : new EmbedError(`${label}网络异常:${e instanceof Error ? e.message : String(e)}`);
     } finally {
       clearTimeout(timer);
@@ -71,7 +77,10 @@ export async function fetchWithTimeoutRetry(
 
     // 到这说明本次要重试:还有次数则退避后再来
     if (attempt < maxAttempts - 1) {
-      await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));
+      let delay: ReturnType<typeof setTimeout> | undefined;
+      const backoff = new Promise<void>(resolve => { delay = setTimeout(resolve, RETRY_BACKOFF_MS); });
+      try { await (externalSignal ? abortable(backoff, externalSignal) : backoff); }
+      finally { clearTimeout(delay); }
     }
   }
   throw lastErr instanceof Error ? lastErr : new EmbedError(`${label}请求失败`);
@@ -179,7 +188,8 @@ async function embedBatch(ep: VectorEndpoint, model: string, texts: string[], si
   }
   const json = await resp.json();
   const vectors = req.parse(json);
-  if (!Array.isArray(vectors) || vectors.some((v) => !Array.isArray(v))) {
+  if (!Array.isArray(vectors) || vectors.length !== texts.length ||
+    vectors.some(v => !Array.isArray(v) || !v.length || v.some(n => !Number.isFinite(n)))) {
     throw new EmbedError('embedding 返回的向量数据无效');
   }
   return vectors.map((v) => Float32Array.from(v));
@@ -313,8 +323,12 @@ async function rerankBatch(
   }
   const json = await resp.json();
   const results = json?.results ?? json?.data;
-  if (!Array.isArray(results)) throw new EmbedError('rerank 返回缺少 results 数组');
-  return results.map((r: any) => ({ index: r.index, score: r.relevance_score ?? r.score ?? 0 }));
+  if (!Array.isArray(results) || !results.length) throw new EmbedError('rerank 返回为空或缺少 results 数组');
+  const order = results.map((r: any) => ({ index: r?.index, score: r?.relevance_score ?? r?.score }));
+  if (order.some(r => !Number.isInteger(r.index) || r.index < 0 || r.index >= documents.length || !Number.isFinite(r.score))) {
+    throw new EmbedError('rerank 返回的下标或分数无效');
+  }
+  return order;
 }
 
 /**
@@ -338,16 +352,21 @@ export async function rerankDocuments(
   const batches = buildRerankBatches(query, documents);
   const key = ep.key || '';
   const model = ep.model;
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(signal?.reason);
+  signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) onAbort();
 
   // worker 池并发:批次再多也只同时打 RERANK_BATCH_CONCURRENCY 个请求,各批结果按全局下标合并。
   const merged: RerankResult[] = [];
   let next = 0;
   const worker = async () => {
     while (true) {
+      controller.signal.throwIfAborted();
       const bi = next++;
       if (bi >= batches.length) break;
       const batch = batches[bi];
-      const local = await rerankBatch(endpoint, model, key, query, batch.documents, ep.timeoutSec, ep.retries, signal);
+      const local = await rerankBatch(endpoint, model, key, query, batch.documents, ep.timeoutSec, ep.retries, controller.signal);
       for (const r of local) {
         const globalIndex = batch.indices[r.index];
         if (globalIndex === undefined) continue;
@@ -356,7 +375,11 @@ export async function rerankDocuments(
     }
   };
   const poolSize = Math.min(RERANK_BATCH_CONCURRENCY, batches.length);
-  await Promise.all(Array.from({ length: poolSize }, () => worker()));
+  try { await Promise.all(Array.from({ length: poolSize }, () => worker())); }
+  finally {
+    controller.abort(); // 一个批次失败后，不让其他批次在后台继续请求。
+    signal?.removeEventListener('abort', onAbort);
+  }
 
   return merged.sort((a, b) => b.score - a.score);
 }

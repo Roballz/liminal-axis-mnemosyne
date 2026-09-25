@@ -54,7 +54,7 @@ afterEach(() => { Object.assign(settings.apiSettings.vector, JSON.parse(JSON.str
 
 it('真实 BM25 候选 A 升原文，独立榜 B/C 补齐，D 向量补位；原始 User 精确词保留', async () => {
   await runVectorRecall();
-  expect(embed.rerankDocuments).toHaveBeenCalledWith('回忆徽章', ['A 原文'], 1, undefined);
+  expect(embed.rerankDocuments).toHaveBeenCalledWith('回忆徽章', ['A 原文'], 1, expect.any(AbortSignal));
   expect(finalText()).toContain('A 原文'); expect(finalText()).not.toContain('A 摘要');
   for (const id of ['B', 'C', 'D']) expect(finalText()).toContain(`${id} 摘要`);
   expect(finalText()).not.toContain('B 原文'); expect(recallDebug.bm25).toHaveLength(4);
@@ -95,7 +95,7 @@ it('人物规则仅改变RRF摘要：原始Top1仍送rerank，BM25与向量继�
   vi.mocked(rewrite.rewriteQuery).mockResolvedValue({ intent: '回忆徽章', queries: ['徽章'],
     context: { participants: ['甲'], planIds: [], eventIds: [] } });
   await runVectorRecall();
-  expect(embed.rerankDocuments).toHaveBeenCalledWith('回忆徽章', ['A 原文'], 1, undefined);
+  expect(embed.rerankDocuments).toHaveBeenCalledWith('回忆徽章', ['A 原文'], 1, expect.any(AbortSignal));
   expect(recallDebug.contextRanked?.[0]).toMatchObject({ leafId: 'C', reason: '在场人物' });
   expect(finalText()).toContain('A 原文');
   for (const id of ['B', 'C', 'D']) expect(finalText()).toContain(`${id} 摘要`);
@@ -113,7 +113,7 @@ it('rerank 失败保留原生向量回退，BM25 独有项不借分升原文，�
 it('关闭 BM25 保留原生向量候选路线；BM25 故障不阻断向量注入', async () => {
   settings.apiSettings.vector.recall.bm25Candidates = 0;
   await runVectorRecall(); expect(bm25.searchBm25).not.toHaveBeenCalled();
-  expect(embed.rerankDocuments).toHaveBeenCalledWith('回忆徽章', ['A 原文', 'D 原文'], 2, undefined);
+  expect(embed.rerankDocuments).toHaveBeenCalledWith('回忆徽章', ['A 原文', 'D 原文'], 2, expect.any(AbortSignal));
   settings.apiSettings.vector.recall.bm25Candidates = 5;
   vi.mocked(bm25.searchBm25).mockRejectedValue(new Error('worker blocked'));
   await runVectorRecall(); expect(finalText()).toContain('A 原文');
@@ -130,6 +130,100 @@ it('删除/改摘要使缓存失效并重建候选；重排途中编辑或切聊
     return [{ index: 0, score: 0.99 }];
   });
   await runVectorRecall(); expect(finalText()).toBe('');
+  expect(recallDebug.status).toContain('召回失败');
   vi.mocked(bm25.searchBm25).mockImplementationOnce(async () => { chatId = 'B'; return { hits: [], persistent: true }; });
   await runVectorRecall(); expect(finalText()).toBe('');
+  expect(recallDebug.status).toContain('召回失败');
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+it('重复进入同一轮召回时等待已有请求，不提前放行生成', async () => {
+  const pending = deferred<Float32Array[]>();
+  vi.mocked(embed.embedTexts).mockReturnValueOnce(pending.promise);
+  const first = runVectorRecall();
+  await vi.waitFor(() => expect(embed.embedTexts).toHaveBeenCalledTimes(1));
+  expect(recallDebug.status).toContain('查询向量化');
+  let released = false;
+  const second = runVectorRecall().then(() => { released = true; });
+  await Promise.resolve(); await Promise.resolve();
+  expect(released).toBe(false);
+  pending.resolve([new Float32Array([1, 0])]);
+  await Promise.all([first, second]);
+  expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(1);
+  expect(recallDebug.status).toBe('召回完成');
+});
+
+it('embedding 超时结束为失败，下一轮可以再次召回', async () => {
+  vi.mocked(embed.embedTexts).mockRejectedValueOnce(new Error('embedding超时(>10s)'));
+  await runVectorRecall();
+  expect(recallDebug.status).toContain('召回失败:embedding超时');
+  expect(finalText()).toBe('');
+  await runVectorRecall();
+  expect(recallDebug.status).toBe('召回完成');
+  expect(finalText()).toContain('A 原文');
+});
+
+it('rerank 超时有明确降级结果，不缓存失败，下一轮重新请求', async () => {
+  vi.mocked(embed.rerankDocuments).mockRejectedValueOnce(new Error('rerank超时(>20s)'));
+  await runVectorRecall();
+  expect(recallDebug.status).toContain('召回完成（降级）');
+  expect(recallDebug.status).toContain('rerank超时');
+  await runVectorRecall();
+  expect(embed.rerankDocuments).toHaveBeenCalledTimes(2);
+  expect(recallDebug.status).toBe('召回完成');
+});
+
+it.each(['resolve', 'reject'] as const)('取消后立即释放锁，旧重排迟到 %s 不覆盖下一轮', async end => {
+  const pending = deferred<embed.RerankResult[]>();
+  vi.mocked(embed.rerankDocuments).mockReturnValueOnce(pending.promise);
+  const first = runVectorRecall();
+  await vi.waitFor(() => expect(embed.rerankDocuments).toHaveBeenCalledTimes(1));
+  const oldSignal = vi.mocked(embed.rerankDocuments).mock.calls[0][3]!;
+  clearRecallInjection();
+  await first;
+  expect(oldSignal.aborted).toBe(true);
+  expect(recallDebug.status).toContain('召回失败');
+  await runVectorRecall();
+  const completed = JSON.stringify(recallDebug);
+  const calls = inject.mock.calls.length;
+  if (end === 'resolve') pending.resolve([{ index: 0, score: 1 }]);
+  else pending.reject(new Error('old request failed'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(JSON.stringify(recallDebug)).toBe(completed);
+  expect(inject).toHaveBeenCalledTimes(calls);
+});
+
+it('新一轮输入会替换悬挂的旧任务，不被旧锁跳过', async () => {
+  const pending = deferred<Float32Array[]>();
+  vi.mocked(embed.embedTexts).mockReturnValueOnce(pending.promise);
+  const first = runVectorRecall();
+  await vi.waitFor(() => expect(embed.embedTexts).toHaveBeenCalledTimes(1));
+  context.getContext()!.chat.push({ is_user: true, mes: '新的输入' } as STMessage);
+  await runVectorRecall();
+  await first;
+  expect(embed.embedTexts).toHaveBeenCalledTimes(2);
+  expect(recallDebug.status).toBe('召回完成');
+  pending.resolve([new Float32Array([1, 0])]);
+});
+
+it('写入宿主注入槽异常也释放锁，下一轮仍能召回', async () => {
+  inject.mockImplementationOnce(() => { throw new Error('prompt unavailable'); });
+  await runVectorRecall();
+  expect(recallDebug.status).toContain('召回失败:prompt unavailable');
+  await runVectorRecall();
+  expect(finalText()).toContain('A 原文');
+  expect(recallDebug.status).toBe('召回完成');
+});
+
+it('索引维护失败向调用方报错，释放索引锁后可重新补齐', async () => {
+  vi.spyOn(store, 'vecReconcile').mockRejectedValueOnce(new Error('index unavailable'))
+    .mockResolvedValue({ deleted: 0, missing: [], stalePayload: [] });
+  await expect(indexing.syncVectorIndex()).rejects.toThrow('index unavailable');
+  await expect(indexing.syncVectorIndex()).resolves.toEqual({ embedded: 0, payloadUpdated: 0 });
 });

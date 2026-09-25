@@ -179,6 +179,7 @@ export async function syncVectorIndex(signal?: AbortSignal): Promise<VectorSyncR
       } while (passRevision !== mutationRevision);
     } catch (e) {
       console.warn('[柏宝书向量] 索引同步失败(不影响摘要):', e);
+      throw e; // 手动维护与召回都需要知道失败，不能把失败显示为「已是最新」。
     }
     return total;
   };
@@ -267,6 +268,6 @@ export function scheduleVectorIndex(): void {
   }
   timer = setTimeout(() => {
     timer = null;
-    void syncVectorIndex();
+    void syncVectorIndex().catch(() => {}); // 后台失败已记录，下次继续补齐。
   }, 2500);
 }
