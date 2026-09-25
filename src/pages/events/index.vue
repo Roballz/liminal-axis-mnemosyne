@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import { apiSettings } from "@/api/settings";
 import {
@@ -759,8 +760,8 @@ onBeforeUnmount(() => {
               {{ EVENT_OVERVIEW_MAX_CHARS }}
               字（含标点）。仅记录核心变化及影响关系或转变的重要细节。
             </small></label
-          ><label>最新进展（30字内）<textarea v-model="latestText" rows="2" maxlength="30" :disabled="!progressSources.length" placeholder="简述最近一次实质进展" /></label>
-          <label v-if="progressSources.length">进展对应摘要<BbsSelect v-model="latestMemory" :options="progressSources" aria-label="进展对应摘要" /><small>进展时间取自所选摘要。</small></label>
+          ><label>最新进展（{{ EVENT_PROGRESS_MAX_CHARS }}字内）<textarea v-model="latestText" rows="2" :maxlength="EVENT_PROGRESS_MAX_CHARS" :disabled="!progressSources.length" placeholder="简述最近一次实质进展" /></label>
+          <label v-if="progressSources.length">进展对应摘要<BbsSelect v-model="latestMemory" :options="progressSources" aria-label="进展对应摘要" /><small>进展时间取自所选摘要，单独显示，不占进展小结字数。</small></label>
           <small v-else>加入关联摘要后，可填写最新进展。</small>
           <label
             >关键词<input v-model="keywords" placeholder="用逗号或顿号分隔"

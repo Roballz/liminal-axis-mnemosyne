@@ -65,6 +65,8 @@ export interface CustomPrompts {
   resummary2: string;
   /** 事件概要:控制新建及更新事件的概括重点/风格,与摘要提示词独立。 */
   eventOverview: string;
+  /** 事件最新进展:与概要独立编辑,控制进展小结的写法和取舍。 */
+  eventLatestProgress: string;
   /** 破限提示词:附加在摘要/总结请求里;空串=不附加。 */
   jailbreak: string;
   /** 固定提示词(时间标签):注入**主对话**模型,要求每条正文前后输出时间标签;空=用内置默认。 */
@@ -345,7 +347,7 @@ function defaults(): ApiSettings {
       orbOpacity: 62,
       orbSize: 48,
     },
-    prompts: { summary: '', resummary: '', resummary2: '', eventOverview: '', jailbreak: '', timeTag: '' },
+    prompts: { summary: '', resummary: '', resummary2: '', eventOverview: '', eventLatestProgress: '', jailbreak: '', timeTag: '' },
     verbosity: 'detailed',
     vector: {
       knowledge: { enabled: false, count: 3, threshold: 0.8, maxChars: 6000 },
@@ -411,6 +413,7 @@ function normalize(raw: unknown): ApiSettings {
   // prompts 是嵌套对象,展开合并不会补全缺字段,单独兜底(老数据没有 prompts 键时回退默认)
   merged.prompts = { ...d.prompts, ...((raw as Partial<ApiSettings>).prompts ?? {}) };
   merged.prompts.eventOverview = typeof merged.prompts.eventOverview === 'string' ? merged.prompts.eventOverview : '';
+  merged.prompts.eventLatestProgress = typeof merged.prompts.eventLatestProgress === 'string' ? merged.prompts.eventLatestProgress : '';
   // ui 同为嵌套对象,逐字段兜底(老数据没有 ui 键时回退默认,值非字符串时丢弃)
   merged.autoHideEnabled = typeof merged.autoHideEnabled === 'boolean' ? merged.autoHideEnabled : true;
   const ru = ((raw as Partial<ApiSettings>).ui ?? {}) as Partial<UiPrefs>;

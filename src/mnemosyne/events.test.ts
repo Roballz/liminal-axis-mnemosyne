@@ -6,6 +6,10 @@ import { type Branch, type EventReceipt, type Progress } from './model';
 test('five summaries publish five memberships and exactly one append-only progress', async () => {
     const { lib, batch, branch } = await batchFixture();
     const out = output(batch);
+    out.events[0].latestProgress = { memory: batch.memories[0].id, text: '已找到玉佩'.padEnd(100, '续') };
+    expect(batch.prompt).toContain('100字内小结');
+    const oversized = structuredClone(out); oversized.events[0].latestProgress!.text += '超';
+    expect(() => parseEventOutput(JSON.stringify(oversized), batch)).toThrow('不超过100字');
     await commitEventBatch(lib, batch, out);
     expect(await lib.all('event_memberships')).toHaveLength(5);
     expect(await lib.all('event_progress')).toHaveLength(1);
@@ -13,6 +17,7 @@ test('five summaries publish five memberships and exactly one append-only progre
     expect(cards).toHaveLength(1);
     expect(cards[0].members).toHaveLength(5);
     expect(cards[0].progress[0].text).toBe(out.events[0].progress);
+    expect(cards[0].meta.latestProgress?.text).toBe(out.events[0].latestProgress.text);
     lib.close();
 });
 test('explicit none persists success and is not offered for repeated paid processing', async () => {

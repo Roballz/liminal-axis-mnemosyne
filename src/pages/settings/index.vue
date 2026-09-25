@@ -19,7 +19,8 @@ import {
   type PromptMacro,
 } from '@/memory/prompts';
 import { TIME_TAG_PROMPT } from '@/memory/timeTag';
-import { EVENT_OVERVIEW_PROMPT } from '@/mnemosyne/event-prompts';
+import { EVENT_OVERVIEW_PROMPT, EVENT_LATEST_PROGRESS_PROMPT, EVENT_OUTPUT_PROTOCOL } from '@/mnemosyne/event-prompts';
+import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
 import { clearVectorIndex, syncVectorIndex } from '@/memory/vector';
 import { resetVectorStoreProbe, vectorBackendKind } from '@/memory/vector/store';
 import { checkForUpdate, performUpdate, updateState } from '@/memory/update';
@@ -278,8 +279,15 @@ const PROMPT_METAS: PromptMeta[] = [
   {
     key: 'eventOverview',
     label: '事件概要提示词',
-    hint: '自定义事件概括的重点、取舍和写法。用于新建事件、立即更新、批量及自动更新；保存后从下一次请求生效。概要仍限500字，所需 JSON 格式由程序附加，无需填写材料宏。留空或恢复默认后点击完成，使用内置提示词。',
+    hint: '自定义事件概要的重点、取舍和写法。用于新建事件、立即更新、批量及自动更新；保存后从下一次请求生效。概要限500字；最新进展的写法在“事件最新进展提示词”中独立编辑。下方可查看随请求附加的格式与来源规则。留空或恢复默认后点击完成，使用内置提示词。',
     builtin: EVENT_OVERVIEW_PROMPT,
+    macros: [],
+  },
+  {
+    key: 'eventLatestProgress',
+    label: '事件最新进展提示词',
+    hint: `自定义“最新进展”的写法、重点和取舍，与事件概要提示词一起发送给 AI。新建、AI更新、批量及自动更新都使用这里的内容，保存后从下一次请求生效。小结限${EVENT_PROGRESS_MAX_CHARS}字，剧情时间由程序单独附加，不占小结字数。留空或恢复默认后点击完成，使用内置提示词。`,
+    builtin: EVENT_LATEST_PROGRESS_PROMPT,
     macros: [],
   },
   {
@@ -1925,6 +1933,12 @@ function exportPublicApiDocument() {
           rows="16"
         ></textarea>
 
+        <details v-if="editingPrompt.key === 'eventOverview' || editingPrompt.key === 'eventLatestProgress'" class="bbs-event-protocol">
+          <summary>随请求附加的输出约定（含最新进展）</summary>
+          <p class="bbs-field-hint">以下内容随每次事件请求自动发送。写法可在上方编辑，字段格式、来源和字数上限由程序统一校验。</p>
+          <pre>{{ EVENT_OUTPUT_PROTOCOL }}</pre>
+        </details>
+
         <footer class="bbs-modal-foot">
           <button class="bbs-btn bbs-btn-danger" type="button" @click="resetPrompt">
             <Icon name="refresh" /> 恢复默认
@@ -3216,6 +3230,20 @@ function exportPublicApiDocument() {
 .bbs-exclude-count {
   font-size: 12px;
   color: var(--bbs-ink-muted);
+}
+
+.bbs-event-protocol {
+  min-width: 0;
+  font-size: 12px;
+}
+.bbs-event-protocol > summary {
+  cursor: pointer;
+}
+.bbs-event-protocol pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 /* ============ 移动端:折叠区内部正文整体收一号,与窄屏标题节奏统一 ============ */

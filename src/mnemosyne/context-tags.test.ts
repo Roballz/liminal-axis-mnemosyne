@@ -17,7 +17,7 @@ it('标签随摘要版本导出恢复，纯标签编辑不破坏上层总结和�
     let view = await capture(lib, branch.id);
     const sources = view.memories.filter(m => m.level === 0);
     const output = { title: '玉佩归还', status: 'open', keywords: ['玉佩'], overview: '找到线索，尚待归还。', progress: '确认主人。',
-      latestProgress: { memory: sources[1].id, text: '已确认主人，等待归还' } };
+      latestProgress: { memory: sources[1].id, text: '已确认主人，等待归还'.padEnd(100, '续') } };
     await commitManualEvent(lib, view, null, sources.map(m => m.id), JSON.stringify(output), () => true);
     input.memories[0].tags = normalizeTags({ participants: ['甲'], public: { reason: '现场直播' } });
     await synchronize(lib, input);
@@ -75,7 +75,7 @@ it('事件常驻按进行中/暂搁分组，结束不注入，重复提及和改
     card = (await eventView(lib, current)).cards[0];
     expect(card.meta.latestProgress).toEqual(latest);
     expect(renderPersistentEvents([card])).toBe('');
-    expect(() => parseManualEvent(JSON.stringify({ ...JSON.parse(raw), latestProgress: { memory: view.memories[0].id, text: '长'.repeat(31) } }))).toThrow('30字');
+    expect(() => parseManualEvent(JSON.stringify({ ...JSON.parse(raw), latestProgress: { memory: view.memories[0].id, text: '长'.repeat(101) } }))).toThrow('100字');
     await expect(commitManualEvent(lib, current, card, [view.memories[0].id], JSON.stringify({ ...JSON.parse(raw), latestProgress: { memory: 'wrong', text: '伪进展' } }), () => true)).rejects.toThrow('本次事件材料');
   } finally { lib.close(); }
 });
@@ -92,9 +92,9 @@ it('旧概要不因缺短进展而待更新，手改进展验证成员、时间�
     let card = (await eventView(lib, view)).cards[0];
     expect(card.meta.latestProgress).toBeUndefined();
     expect(eventPending(card)).toBe(false);
-    const patch = { ...card.meta, latestProgress: { version: 1 as const, text: '已确认归还时间', memory, time: '不可信时间' } };
+    const patch = { ...card.meta, latestProgress: { version: 1 as const, text: '2026/9/25 10:30 已确认归还时间'.padEnd(100, '续'), memory, time: '不可信时间' } };
     await expect(editEvent(lib, view, id, { ...patch, latestProgress: { ...patch.latestProgress, memory: other } })).rejects.toThrow('有效关联摘要');
-    await expect(editEvent(lib, view, id, { ...patch, latestProgress: { ...patch.latestProgress, text: '长'.repeat(31) } })).rejects.toThrow('30字');
+    await expect(editEvent(lib, view, id, { ...patch, latestProgress: { ...patch.latestProgress, text: '长'.repeat(101) } })).rejects.toThrow('100字');
     await editEvent(lib, view, id, patch);
     view = await capture(lib, branch.id);
     card = (await eventView(lib, view)).cards[0];
@@ -105,6 +105,7 @@ it('旧概要不因缺短进展而待更新，手改进展验证成员、时间�
     expect(text).toContain('e2. [事件] 暂搁事件');
     expect(text).not.toContain(id);
     expect(text).not.toContain('ev_other');
+    expect(text).toContain(patch.latestProgress.text);
     const restored = await restoreLibrary(await exportLibrary(lib), false);
     try { expect((await eventView(restored, await capture(restored, branch.id))).cards[0].meta.latestProgress).toEqual(card.meta.latestProgress); }
     finally { restored.close(); }

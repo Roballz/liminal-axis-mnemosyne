@@ -1,3 +1,4 @@
+import { PLAN_TEXT_MAX_CHARS } from './limits';
 import { normalizeTags, shortText, resolvePlanRef, type SummaryTags } from './contextTags';
 import { dailyInstalled, markManualSummaryEdit } from '@/mnemosyne/bridge';
 import { apiSettings } from '@/api/settings';
@@ -290,7 +291,7 @@ function cleanProtagonistDelta(raw: unknown): ProtagonistDelta | null {
 function cleanPlanProgress(raw: Record<string, unknown>) {
   const out: Omit<PlanUpdate, 'id'> = {};
   for (const key of ['currentProgress', 'remaining'] as const)
-    if (typeof raw[key] === 'string') out[key] = shortText(raw[key], 50);
+    if (typeof raw[key] === 'string') out[key] = shortText(raw[key], PLAN_TEXT_MAX_CHARS);
   return out;
 }
 function cleanPlanUpdates(v: unknown): PlanUpdate[] {
@@ -1678,7 +1679,7 @@ export function finalizeDelta(delta: SummaryDelta, openPlansOrdered: { id: strin
 
   if (isRecord(delta.plans)) {
     const plans: NonNullable<StoredDelta['plans']> = {};
-    const add = cleanPlanAddList(delta.plans.add).map(p => ({ ...p, content: shortText(p.content, 50) }));
+    const add = cleanPlanAddList(delta.plans.add).map(p => ({ ...p, content: shortText(p.content, PLAN_TEXT_MAX_CHARS) }));
     const update = cleanPlanUpdates(delta.plans.update).flatMap(p => {
       const id = resolvePlanRef(p.id, openPlansOrdered);
       return id ? [{ ...p, id }] : [];

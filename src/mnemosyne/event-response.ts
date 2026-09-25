@@ -1,3 +1,4 @@
+import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
 /** Event-only diagnostics; archive/import JSON rules remain unchanged. */
 import { check } from "./model";
 import { parseStrictJson } from "./json";
@@ -61,8 +62,8 @@ export function parseManualEvent(raw: string) {
   );
   if (v.latestProgress !== undefined && v.latestProgress !== null) {
     check(typeof v.latestProgress === 'object' && typeof v.latestProgress.text === 'string' && v.latestProgress.text.trim()
-      && Array.from(v.latestProgress.text.trim()).length <= 30 && typeof v.latestProgress.memory === 'string' && v.latestProgress.memory,
-      'latestProgress 必须含 memory（实际进展来源摘要ID）和 text（30字内小结）。');
+      && Array.from(v.latestProgress.text.trim()).length <= EVENT_PROGRESS_MAX_CHARS && typeof v.latestProgress.memory === 'string' && v.latestProgress.memory,
+      `latestProgress 必须含 memory（实际进展来源摘要ID）和 text（${EVENT_PROGRESS_MAX_CHARS}字内小结）。`);
   }
   return {
     latestProgress: v.latestProgress ? { text: v.latestProgress.text.trim() as string, memory: v.latestProgress.memory as string } : undefined,

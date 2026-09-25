@@ -1,22 +1,34 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { generatedTags, normalizeTags, validTags } from './contextTags';
+import { generatedTags, normalizeTags, validTags, planTitle } from './contextTags';
 import { deriveMemory, finalizeDelta } from './apply';
 import { fmtPlans } from './prompts';
 import type { STMessage } from '@/st/context';
 import { parseResponse } from './vector/rewrite';
 afterEach(() => vi.restoreAllMocks());
 
-it('计划中途更新按稳定ID回放，50字限长、清空未决项、保留关联来源和历史截止', () => {
+it.each(['plan', 'suspense'] as const)('%s 的三个字段保留100字，超长截到100字，重放和展示不退回50字', (kind) => {
+  const text = '2026/9/25 10:30 已找到线索，等待归还。'.padEnd(100, '续');
+  const delta = finalizeDelta({ plans: { add: [{ kind, content: text, currentProgress: text, remaining: text + '超出' }] } }, []);
+  expect(delta.plans?.add?.[0]).toMatchObject({ content: text, currentProgress: text, remaining: text });
+  const [plan] = deriveMemory([{ mes: '合成正文', extra: { bbs_leaf: { id: 'long-plan', v: 1, createdAt: 1, delta } } }] as unknown as STMessage[]).plans;
+  expect(plan).toMatchObject({ content: text, currentProgress: text, remaining: text });
+  expect(planTitle(plan)).toBe(text);
+  expect(fmtPlans([plan])).toContain(text);
+  const update = finalizeDelta({ plans: { update: [{ id: plan.id, currentProgress: text + '超出', remaining: text }] } }, [plan]);
+  expect(update.plans?.update?.[0]).toMatchObject({ currentProgress: text, remaining: text });
+});
+
+it('计划中途更新按稳定ID回放，100字限长、清空未决项、保留关联来源和历史截止', () => {
   const id = 'plan:origin#0';
   const first = { id: 'origin', v: 1, createdAt: 1, delta: { plans: { add: [{ kind: 'suspense', content: '查明玉佩来源', title: '玉佩来源', currentProgress: '发现玉佩', remaining: '主人是谁' }] } } };
-  const delta = finalizeDelta({ plans: { update: [{ id, currentProgress: '新线索'.repeat(30), remaining: '' }] } }, [{ id }]);
+  const delta = finalizeDelta({ plans: { update: [{ id, currentProgress: '新线索'.repeat(40), remaining: '' }] } }, [{ id }]);
   const chat = [
     { mes: '正文1', extra: { bbs_leaf: first } },
     { mes: '正文2', extra: { bbs_leaf: { id: 'next', v: 1, createdAt: 2, timeEnd: '2026/9/25 12:00', delta, tags: normalizeTags({ planIds: [id] }) } } },
   ] as unknown as STMessage[];
   const before = deriveMemory(chat, 1).plans[0], after = deriveMemory(chat).plans[0];
   expect(before.currentProgress).toBe('发现玉佩');
-  expect(after.currentProgress).toHaveLength(50);
+  expect(after.currentProgress).toHaveLength(100);
   expect(after.remaining).toBe('');
   expect(after.progressTime).toBe('2026/9/25 12:00');
   expect(after.relatedLeafIds).toEqual(['origin', 'next']);
@@ -44,13 +56,13 @@ it('Query 的标识不混入查询，六条Q之后的CONTEXT仍解析，坏标�
   expect(parseResponse('INTENT: 找线索\nQ: 旧线索\nCONTEXT: 坏JSON')).toEqual({ intent: '找线索', queries: ['旧线索'] });
 });
 
-it('正文注入使用50字内容和短序号，内部整理仍能识别稳定ID', async () => {
+it('正文注入使用100字内容和短序号，内部整理仍能识别稳定ID', async () => {
   const { buildStateInjectionText } = await import('./inject');
   const { memory } = await import('./store');
   const { createEmptyMemory } = await import('./types');
   const { apiSettings } = await import('@/api/settings');
-  const delta = finalizeDelta({ plans: { add: [{ kind: 'suspense', content: '内容'.repeat(40), title: '不能替代内容', currentProgress: '找到证据' }] } }, []);
-  expect(delta.plans?.add?.[0].content).toHaveLength(50);
+  const delta = finalizeDelta({ plans: { add: [{ kind: 'suspense', content: '内容'.repeat(60), title: '不能替代内容', currentProgress: '找到证据' }] } }, []);
+  expect(delta.plans?.add?.[0].content).toHaveLength(100);
   expect(delta.plans?.add?.[0].title).toBeUndefined();
   const plan = { id: 'plan:old#0', kind: 'suspense' as const, status: 'open' as const, content: '查明玉佩来源及失主身份', title: '旧短标题', currentProgress: '找到证据', createdAt: 1 };
   Object.assign(memory, createEmptyMemory(), { plans: [plan] });

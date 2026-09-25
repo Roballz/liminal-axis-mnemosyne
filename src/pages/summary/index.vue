@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { PLAN_TEXT_MAX_CHARS } from '@/memory/limits';
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import Icon from '@/components/Icon.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
@@ -155,7 +156,7 @@ function jumpToSummary(floor: number) {
 }
 
 function addPlan() {
-  const content = shortText(newContent.value, 50);
+  const content = shortText(newContent.value, PLAN_TEXT_MAX_CHARS);
   if (!content) return;
   // 创建时间用当前已知故事时间(没有就留空);目标时间仅计划可填,用户填了才带上
   const createdTime = memory.state.time?.trim() || undefined;
@@ -188,7 +189,7 @@ function savePlanEdit() {
   const e = editingPlan.value;
   if (!e || !e.content.trim()) return;
   editPlan(e.id, {
-    content: shortText(e.content, 50),
+    content: shortText(e.content, PLAN_TEXT_MAX_CHARS),
     createdTime: e.createdTime,
     // 目标时间仅计划有意义;悬念保持空
     targetTime: e.kind === 'plan' ? e.targetTime : '',
@@ -1405,11 +1406,11 @@ provide(SUMMARY_CTX, {
           </div>
         </div>
         <label class="bbs-modal-field">
-          <span class="bbs-modal-label">内容（50字内）</span>
+          <span class="bbs-modal-label">内容（{{ PLAN_TEXT_MAX_CHARS }}字内）</span>
           <textarea
             ref="contentInput"
             v-model="newContent"
-            maxlength="50"
+            :maxlength="PLAN_TEXT_MAX_CHARS"
             class="bbs-input bbs-modal-textarea"
             rows="3"
             placeholder="描述这条计划或悬念…"
@@ -1441,11 +1442,11 @@ provide(SUMMARY_CTX, {
           <button class="bbs-summary-act" type="button" title="关闭" @click="cancelPlanEdit"><Icon name="close" /></button>
         </header>
         <label class="bbs-modal-field">
-          <span class="bbs-modal-label">内容（50字内）</span>
-          <textarea v-model="editingPlan.content" maxlength="50" class="bbs-input bbs-modal-textarea" rows="3"></textarea>
+          <span class="bbs-modal-label">内容（{{ PLAN_TEXT_MAX_CHARS }}字内）</span>
+          <textarea v-model="editingPlan.content" :maxlength="PLAN_TEXT_MAX_CHARS" class="bbs-input bbs-modal-textarea" rows="3"></textarea>
         </label>
-        <label class="bbs-modal-field"><span class="bbs-modal-label">当前进展（50字内）</span><textarea v-model="editingPlan.currentProgress" class="bbs-input" maxlength="50" rows="2" /></label>
-        <label class="bbs-modal-field"><span class="bbs-modal-label">仍待解决（50字内）</span><textarea v-model="editingPlan.remaining" class="bbs-input" maxlength="50" rows="2" /></label>
+        <label class="bbs-modal-field"><span class="bbs-modal-label">当前进展（{{ PLAN_TEXT_MAX_CHARS }}字内）</span><textarea v-model="editingPlan.currentProgress" class="bbs-input" :maxlength="PLAN_TEXT_MAX_CHARS" rows="2" /></label>
+        <label class="bbs-modal-field"><span class="bbs-modal-label">仍待解决（{{ PLAN_TEXT_MAX_CHARS }}字内）</span><textarea v-model="editingPlan.remaining" class="bbs-input" :maxlength="PLAN_TEXT_MAX_CHARS" rows="2" /></label>
         <label class="bbs-modal-field">
           <span class="bbs-modal-label">创建时间(可选)</span>
           <input v-model="editingPlan.createdTime" class="bbs-input" type="text" placeholder="故事内时间,如 1988/9/29" />

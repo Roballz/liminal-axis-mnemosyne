@@ -1,3 +1,4 @@
+import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
 import { validTags } from '@/memory/contextTags';
 import { isRoleOnlyPair } from './source-equivalence';
 import { Library, freshLibraryName, activateLibrary } from './db';
@@ -198,7 +199,7 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
                 check(typeof r.text === 'string' && r.text.trim(), '追加概述缺失');
             if (store === 'event_revisions' && r.latestProgress != null) {
                 const p = r.latestProgress;
-                check(p.version === 1 && typeof p.text === 'string' && Array.from(p.text).length <= 30 && typeof p.time === 'string' && typeof p.memory === 'string', '最新进展格式非法');
+                check(p.version === 1 && typeof p.text === 'string' && Array.from(p.text).length <= EVENT_PROGRESS_MAX_CHARS && typeof p.time === 'string' && typeof p.memory === 'string', '最新进展格式非法');
                 check(get('memory_revisions', p.memory).branch === r.branch, '最新进展来源跨分支');
             }
             if (store === 'event_revisions' && r.eventSchema !== undefined) {

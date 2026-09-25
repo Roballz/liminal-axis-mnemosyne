@@ -1,3 +1,4 @@
+import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
 import { splitTimeLabel } from '@/memory/timeTag';
 import type { EventHint } from '@/memory/contextTags';
 import { sourceContent, sourceRefMatches, sourceRefsMatch } from './source-equivalence';
@@ -110,7 +111,7 @@ export const EVENT_PROMPT = `你只整理事件，不重新生成摘要，不结
 每个输入摘要必须恰有一个 decisions 项，可在多个 events 中关联。none 和 needs_review 不得同时关联。
 严格 JSON：{"decisions":[{"memory":"mr_...","result":"linked|none|needs_review"}],
 "events":[{"event_id":null,"title":"事项","status":"open","keywords":[],
-"members":[{"memory":"mr_...","kind":"progress|reference"}],"progress":"本批新增进展；仅reference则空字符串","latestProgress":{"memory":"实际最近进展的摘要ID","text":"30字内小结"}}]}。
+"members":[{"memory":"mr_...","kind":"progress|reference"}],"progress":"本批新增进展；仅reference则空字符串","latestProgress":{"memory":"实际最近进展的摘要ID","text":"${EVENT_PROGRESS_MAX_CHARS}字内小结"}}]}。
 latestProgress 只在本批有 progress 成员时填写，不能使用 reference；时间由来源摘要确定，重复提及不刷新进展。`;
 export interface EventOutput {
     decisions: {
@@ -202,7 +203,7 @@ export function parseEventOutput(raw: string, batch: EventBatch): EventOutput {
             members.add(m.memory);
             linked.add(m.memory);
         }
-        if (e.latestProgress) check(typeof e.latestProgress.text === 'string' && e.latestProgress.text.trim() && Array.from(e.latestProgress.text.trim()).length <= 30 && e.members.some(m => m.memory === e.latestProgress!.memory && m.kind === 'progress'), '最新进展必须引用真实进展成员且不超过30字');
+        if (e.latestProgress) check(typeof e.latestProgress.text === 'string' && e.latestProgress.text.trim() && Array.from(e.latestProgress.text.trim()).length <= EVENT_PROGRESS_MAX_CHARS && e.members.some(m => m.memory === e.latestProgress!.memory && m.kind === 'progress'), `最新进展必须引用真实进展成员且不超过${EVENT_PROGRESS_MAX_CHARS}字`);
         check(e.members.some(m => m.kind === 'progress') ? !!e.progress.trim() : !e.progress.trim(), 'progress/reference 与概述不一致');
     }
     for (const d of output.decisions)
@@ -310,7 +311,7 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
     const progressChanged = patch.latestProgress !== undefined && !equal(patch.latestProgress, existing?.meta.latestProgress);
     if (progressChanged && patch.latestProgress) {
         const progress = patch.latestProgress;
-        check(progress.version === 1 && progress.text.trim() && Array.from(progress.text.trim()).length <= 30, '最新进展需为1至30字');
+        check(progress.version === 1 && progress.text.trim() && Array.from(progress.text.trim()).length <= EVENT_PROGRESS_MAX_CHARS, `最新进展需为1至${EVENT_PROGRESS_MAX_CHARS}字`);
         check(valid.some(m => m.id === progress.memory) && existing?.members.some(m => m.memory === progress.memory), '最新进展须引用当前事件的有效关联摘要');
     }
     if (patch.confirmOverview) {

@@ -1,3 +1,4 @@
+import { PLAN_TEXT_MAX_CHARS } from './limits';
 /** Versioned metadata; never appended to embedding/BM25 document text. */
 export interface SummaryTags {
   version: 1;
@@ -49,7 +50,7 @@ export function resolvePlanRef(id: string, plans: { id: string }[]): string | un
   return index ? plans[Number(index[1]) - 1]?.id : undefined;
 }
 export function planTitle(plan: { title?: string; content: string }): string {
-  return shortText(plan.content, 50);
+  return shortText(plan.content, PLAN_TEXT_MAX_CHARS);
 }
 export const nameKey = (s: string) => s.normalize('NFKC').trim().toLocaleLowerCase();
 

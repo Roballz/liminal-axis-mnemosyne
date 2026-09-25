@@ -1,3 +1,4 @@
+import { PLAN_TEXT_MAX_CHARS } from './limits';
 import { planTitle } from './contextTags';
 import type { PlanAdd } from './types';
 /**
@@ -473,8 +474,8 @@ ${RULE_LONGTERM_DB}
     "remove": ["永久退场的已有NPC名"]
   },
   "plans": {
-    "add": [{ "kind": "plan", "content": "新出现的计划/目标，50字内", "currentProgress": "当前进展，50字内", "remaining": "仍待解决，50字内", "createdTime": "立计划时的故事内时间", "targetTime": "打算完成的目标时间(见下)" }, { "kind": "suspense", "content": "正文明确留下的待揭晓事实,或已经启动且等待结果的外部事件", "createdTime": "悬念出现时的故事内时间" }],
-    "update": [{ "id": "p1", "currentProgress": "当前进展，50字内", "remaining": "仍待解决，50字内" }],
+    "add": [{ "kind": "plan", "content": "新出现的计划/目标，${PLAN_TEXT_MAX_CHARS}字内", "currentProgress": "当前进展，${PLAN_TEXT_MAX_CHARS}字内", "remaining": "仍待解决，${PLAN_TEXT_MAX_CHARS}字内", "createdTime": "立计划时的故事内时间", "targetTime": "打算完成的目标时间(见下)" }, { "kind": "suspense", "content": "正文明确留下的待揭晓事实,或已经启动且等待结果的外部事件", "createdTime": "悬念出现时的故事内时间" }],
+    "update": [{ "id": "p1", "currentProgress": "当前进展，${PLAN_TEXT_MAX_CHARS}字内", "remaining": "仍待解决，${PLAN_TEXT_MAX_CHARS}字内" }],
     "resolve": [{ "id": "p1", "outcome": "done|cancelled|failed", "reason": "一句话:为什么/如何了结(见下方【核销/了结】)" }]
   }{{lifedetails_field}}{{vars_field}}
 }
@@ -1372,7 +1373,7 @@ ${SUMMARY_OUTPUT_PROTOCOL}
      B. 已启动外部事件:外部进程已实际开始并朝具体结果推进,后续只待客观结果。
    - 若只是已知设定、能力代价、伤势/诅咒/灵魂绑定、无法下手、人物两难、身份职责冲突、关系张力、存在弱点或潜在危险 → 它是状态/信息,只进 summary 或对应字段,不写 suspense。
    - 禁止用"会不会……""将如何收场""可能造成什么后果"把状态强行改写成问题。预想其未来核销句:能写"答案揭晓为……"或"已启动事件结果为……"才保留;只能写"状态后来改变了"则丢弃。
-   - 已有事项有中途进展：plans.update 更新 currentProgress、remaining，各50字内；tags.planIds 记录关联ID。无实质变化不改。
+   - 已有事项有中途进展：plans.update 更新 currentProgress、remaining，各${PLAN_TEXT_MAX_CHARS}字内；tags.planIds 记录关联ID。无实质变化不改。
    - 查重:将每条候选归一为【未知答案】或【待决外部事件】,逐条对照未了结和近期已了结条目。答案相同/同一事件 → 不 add;新线索、阶段进展写 summary 并更新原事项的 plans.update；规则细节、人物反应没有实质进展时只写 summary。根源相同但答案确实不同、可独立揭晓时才允许分开。
    - suspense.content 只含已知事实与具体未决点，不写剧情评论。
 
@@ -1545,6 +1546,6 @@ export const SUMMARY_TAG_PROTOCOL = `【摘要标签协议】
 计划/悬念和事件只引用提供目录中的 ID；只有正文明确相关才标记，允许空数组。相同人物或地点不等于同一事件。eventIds 仅表示检索相关，不创建、合并或更改人工事件成员。
 不要输出 public，公开状态仅由用户手动设置。标签不写进 summary 正文。`;
 export const PLAN_PROGRESS_PROTOCOL = `【计划/悬念持续更新协议】
-本协议补充旧模板：plans.add 使用 content（内容）、currentProgress（当前进展）、remaining（仍待解决），三者各不超过50字。不要生成 title 短标题；内容直接用于展示和注入，不抄整段摘要。
+本协议更新旧模板中的计划/悬念字数要求，相关上限以本协议为准：plans.add 使用 content（内容）、currentProgress（当前进展）、remaining（仍待解决），三者各不超过${PLAN_TEXT_MAX_CHARS}字。不要生成 title 短标题；内容直接用于展示和注入，不抄整段摘要。
 每次逐条核对现有计划/悬念：正文出现阶段进展、新证据、目标变化但尚未结束时，输出 plans.update:[{"id":"目录中的稳定ID或p1","currentProgress":"更新后的当前进展","remaining":"仍未解决的具体事项"}]。有变化才写，不凭时间流逝、推测或再次提及改写；已知解决部分必须从 remaining 移除。
 无进展省略 update；真正结束仍用 resolve。关联到本段的旧计划/悬念同时写 tags.planIds；本段新建项由程序自动关联，无需编造 ID。`;

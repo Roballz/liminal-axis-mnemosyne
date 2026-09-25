@@ -6,7 +6,7 @@ import { memory } from "@/memory/store";
 import { createEmptyMemory } from "@/memory/types";
 import type { STContext } from "@/st/context";
 import { apiSettings } from "@/api/settings";
-import { buildEventInstruction, EVENT_OVERVIEW_PROMPT } from "./event-prompts";
+import { buildEventInstruction, EVENT_OVERVIEW_PROMPT, EVENT_LATEST_PROGRESS_PROMPT, EVENT_OUTPUT_PROTOCOL } from "./event-prompts";
 import { eventResponseError } from "./event-response";
 import { capture, statuses } from "./canonical";
 import { eventView, editEvent, deleteEvent, setEventArchived } from "./events";
@@ -38,9 +38,11 @@ const answer = JSON.stringify({
 });
 let lib: Library, ctx: STContext, dispose: (() => void) | undefined;
 const originalEventPrompt = apiSettings.prompts.eventOverview;
+const originalLatestPrompt = apiSettings.prompts.eventLatestProgress;
 const originalInterval = settings.interval;
 beforeEach(async () => {
   apiSettings.prompts.eventOverview = "";
+  apiSettings.prompts.eventLatestProgress = "";
   const storage = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => storage.get(k) ?? null,
@@ -88,6 +90,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   apiSettings.prompts.eventOverview = originalEventPrompt;
+  apiSettings.prompts.eventLatestProgress = originalLatestPrompt;
   settings.interval = originalInterval;
   dispose?.();
   lib.close();
@@ -162,6 +165,7 @@ test.each([true, false])(
     await chain();
     await joinFloorEvent(3, (await lib.all("event_chains"))[0].id);
     apiSettings.prompts.eventOverview = "合成批量规则：强调约定和关系改变。";
+    apiSettings.prompts.eventLatestProgress = "合成进展写法：保留关键行动与后续待办。";
     if (!manual) {
       settings.interval = 1;
       ctx.chat.push(
@@ -183,6 +187,8 @@ test.each([true, false])(
     }
     const sender = vi.fn(async (prompt: string) => {
       expect(prompt).toContain(apiSettings.prompts.eventOverview);
+      expect(prompt).toContain(apiSettings.prompts.eventLatestProgress);
+      expect(prompt).not.toContain(EVENT_LATEST_PROGRESS_PROMPT);
       expect(prompt).toContain('"overview"');
       expect(prompt).toContain("不超过500字");
       return answer;
@@ -197,24 +203,34 @@ test.each([true, false])(
 );
 test("custom event writing replaces the default for create/update, blank restores default, output protocol remains", async () => {
   expect(buildEventInstruction()).toContain(EVENT_OVERVIEW_PROMPT);
+  expect(buildEventInstruction()).toContain(EVENT_LATEST_PROGRESS_PROMPT);
+  expect(EVENT_LATEST_PROGRESS_PROMPT).toContain('latestProgress.text 不超过100字');
   apiSettings.prompts.eventOverview = "合成自定义：用三句话概括关系转折。";
+  apiSettings.prompts.eventLatestProgress = "合成进展：用一句话写新证据和未决点。";
   const createSender = vi.fn(async (messages) => {
     const instruction = messages.find(
       (m: { role: string; content: string }) =>
         m.role === "system" && m.content.includes("事件任务输出约定"),
     ).content;
     expect(instruction).toContain(apiSettings.prompts.eventOverview);
+    expect(instruction).toContain(apiSettings.prompts.eventLatestProgress);
+    expect(instruction).not.toContain(EVENT_LATEST_PROGRESS_PROMPT);
     expect(instruction).not.toContain("主动舍弃琐碎小事");
     expect(instruction).toContain("不超过500字");
     expect(instruction).toContain('"progress"');
+    expect(instruction).toContain(EVENT_OUTPUT_PROTOCOL);
+    expect(instruction).toContain('100字以内的最新进展小结');
     return answer;
   });
   const draft = await prepareFloorEvent(1, "整天约会", 200000, createSender);
   const id = await draft.confirm(draft.raw);
   await joinFloorEvent(3, id);
   apiSettings.prompts.eventOverview = "合成新规则：重点交代承诺和兑现。";
+  apiSettings.prompts.eventLatestProgress = "合成新进展规则：突出关键决定和结果。";
   const updateSender = vi.fn(async (messages) => {
     expect(messages[0].content).toContain(apiSettings.prompts.eventOverview);
+    expect(messages[0].content).toContain(apiSettings.prompts.eventLatestProgress);
+    expect(messages[0].content).not.toContain('用一句话写新证据');
     expect(messages[0].content).not.toContain("用三句话");
     expect(messages[0].content).toContain("不超过500字");
     return answer;
@@ -223,7 +239,9 @@ test("custom event writing replaces the default for create/update, blank restore
   expect(createSender).toHaveBeenCalledTimes(1);
   expect(updateSender).toHaveBeenCalledTimes(1);
   apiSettings.prompts.eventOverview = " \n ";
+  apiSettings.prompts.eventLatestProgress = " \n ";
   expect(buildEventInstruction()).toContain(EVENT_OVERVIEW_PROMPT);
+  expect(buildEventInstruction()).toContain(EVENT_LATEST_PROGRESS_PROMPT);
 });
 test("stopping an overview request does not publish late output or lose queued members", async () => {
   const id = await chain();
@@ -391,6 +409,7 @@ test("explicit rewrite works for an archived fully summarized chain, sends instr
   const before = (await eventView(lib, await syncDaily())).cards[0];
   expect(eventPending(before)).toBe(false);
   apiSettings.prompts.eventOverview = "合成自定义写法";
+  apiSettings.prompts.eventLatestProgress = "合成重写进展：突出未完成的约定。";
   const output = JSON.stringify({
     ...JSON.parse(answer),
     overview: "改写后的核心关系变化",
@@ -400,6 +419,7 @@ test("explicit rewrite works for an archived fully summarized chain, sends instr
     const prompt = JSON.stringify(messages);
     for (const part of [
       "合成自定义写法",
+      apiSettings.prompts.eventLatestProgress,
       "突出承诺，别逐站罗列",
       "正文细节1",
       before.meta.overview!,
