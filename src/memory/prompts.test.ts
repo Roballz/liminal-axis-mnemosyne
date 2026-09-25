@@ -346,7 +346,7 @@ describe.each(['detailed', 'concise'] as const)('prompt assembly (%s)', verbosit
     expect(thinking.checklist).toContain('这批共 3 楼');
     expect(thinking.checklist).toContain('不得借后面楼补齐当前楼的结论');
     expect(thinking.checklist).toContain('[M消息序号-P段序号] 只供定位,不等于结果的 n');
-    expect(thinking.checklist).toContain('每个元素只含 n / summary / timeStart / timeEnd');
+    expect(thinking.checklist).toContain('每个元素只含 n / summary / timeStart / timeEnd / tags');
     expect(thinking.checklist).toContain('不续写、不跨入下一楼');
     expect(thinking.checklist).toContain('现代/数字日期的两端都必须包含完整年份');
     expect(thinking.prefill).toContain('数组长度 3');

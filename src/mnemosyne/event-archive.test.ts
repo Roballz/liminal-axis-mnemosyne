@@ -49,7 +49,7 @@ test('v4 archive flags round-trip, old v3 is readable, invalid archive metadata 
   const view = await capture(lib, branch.id), card = (await eventView(lib, view)).cards[0];
   await setEventArchived(lib, view, card.chain.id, true);
   const pack = await exportLibrary(lib);
-  expect(pack.version).toBe(6);
+  expect(pack.version).toBe(7);
   const restored = await restoreLibrary(pack, false);
   expect(restored.db.version).toBe(1);
   expect((await exportLibrary(restored)).data).toEqual(pack.data);
@@ -64,6 +64,7 @@ test('v4 archive flags round-trip, old v3 is readable, invalid archive metadata 
   }
   const legacy = structuredClone(pack);
   legacy.version = 3;
+  for (const event of legacy.data.event_revisions) delete (event as any).latestProgress;
   for (const chain of legacy.data.event_chains as EventChain[]) {
     delete chain.archiveSchema;
     delete chain.archived;

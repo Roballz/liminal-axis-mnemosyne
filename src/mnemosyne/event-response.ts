@@ -59,7 +59,13 @@ export function parseManualEvent(raw: string) {
     typeof v.progress === "string" && v.progress.length <= 4000,
     'progress（追加进展）必须是文本，最多4000字符；没有进展可填空字符串 ""。',
   );
+  if (v.latestProgress !== undefined && v.latestProgress !== null) {
+    check(typeof v.latestProgress === 'object' && typeof v.latestProgress.text === 'string' && v.latestProgress.text.trim()
+      && Array.from(v.latestProgress.text.trim()).length <= 30 && typeof v.latestProgress.memory === 'string' && v.latestProgress.memory,
+      'latestProgress 必须含 memory（实际进展来源摘要ID）和 text（30字内小结）。');
+  }
   return {
+    latestProgress: v.latestProgress ? { text: v.latestProgress.text.trim() as string, memory: v.latestProgress.memory as string } : undefined,
     title: v.title,
     status: v.status,
     keywords: v.keywords as string[],

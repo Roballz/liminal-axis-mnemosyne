@@ -1,3 +1,4 @@
+import { splitTimeLabel } from '@/memory/timeTag';
 /** Human-selected membership; models can only describe the selected chain. */
 import { sourceContent } from './source-equivalence';
 import { reactive } from "vue";
@@ -41,7 +42,7 @@ export function eventPending(card: EventCard) {
   const done = new Set(
     card.meta.summarized ?? card.progress.flatMap((p) => p.memories),
   );
-  return !!card.needsReview || !!card.blocked || card.members.some((m) => !done.has(m.memory));
+  return card.meta.latestProgress === undefined || !!card.needsReview || !!card.blocked || card.members.some((m) => !done.has(m.memory));
 }
 export async function commitManualEvent(
   lib: Library,
@@ -54,6 +55,13 @@ export async function commitManualEvent(
 ) {
   const output = parseManualEvent(raw);
   const allowed = (await eventView(lib, view)).valid;
+  const latest = output.latestProgress;
+  if (latest) check(memories.includes(latest.memory) && allowed.some(m => m.id === latest.memory), '最新进展引用不属于本次事件材料');
+  const progressMemory = latest ? allowed.find(m => m.id === latest.memory)! : undefined;
+  const latestProgress = latest && progressMemory ? {
+    version: 1 as const, text: latest.text, memory: progressMemory.id,
+    time: splitTimeLabel(progressMemory.storyTime).end || progressMemory.storyTime,
+  } : card?.meta.latestProgress ?? null;
   check(
     memories.length && memories.every((id) => allowed.some((m) => m.id === id)),
     "事件来源已失效",
@@ -99,6 +107,7 @@ export async function commitManualEvent(
       ...row("er"),
       ...base,
       eventSchema: 2,
+      latestProgress,
       title: reviewed ? output.title : (card?.meta.title ?? output.title),
       status: reviewed ? output.status : (card?.meta.status ?? output.status),
       keywords: output.keywords,
@@ -171,6 +180,8 @@ export async function prepareFloorEvent(
         floor,
         body: view.sources.get(view.refs[floor].revision)?.content,
         summary: memory.content,
+        id: memory.id,
+        storyTime: memory.storyTime,
       }),
     },
   );
@@ -246,6 +257,7 @@ async function requestEventOverview(
     return {
       id,
       summary: m.content,
+      storyTime: m.storyTime,
       sources: [
         ...new Map(
           refs.map((r) => [
@@ -274,6 +286,7 @@ async function requestEventOverview(
           ? { rewriteInstructions, keywords: card.meta.keywords }
           : {}),
         overview: eventOverview(card),
+        latestProgress: card.meta.latestProgress ?? null,
         overviewNeedsReview: !!card.needsReview,
         summarized:
           card.meta.summarized ?? card.progress.flatMap((p) => p.memories),

@@ -1,4 +1,4 @@
-import { summaryPermission, dailyTableText } from '@/mnemosyne/bridge';
+import { summaryPermission, dailyTableText, persistentEventText } from '@/mnemosyne/bridge';
 /**
  * 把记忆注入回主对话上下文。
  *
@@ -623,13 +623,16 @@ export function buildStateInjectionText(): string {
 
   const openPlans = memory.plans
     .filter(p => p.status === 'open')
-    .map(p => ({ kind: p.kind, content: p.content, createdTime: p.createdTime, targetTime: p.targetTime }));
+;
   st.push(`未了结的计划/悬念:\n${fmtPlans(openPlans)}`);
 
   // 近期已完成的计划/悬念:防 AI 把刚了结的当未完成又去推进。与副API摘要同口径,只差截止点
   // (这里用全量 memory.plans;副API用 deriveMemory(chat, beforeIndex).plans)。
   const recentResolved = selectRecentResolvedPlans(memory.plans, apiSettings.recentResolvedPlansCount);
   if (recentResolved.length) st.push(`近期已了结(已结案,含了结方式/原因;勿当未完成再推进/重复记录):\n${fmtResolvedPlans(recentResolved)}`);
+
+  const eventText = persistentEventText();
+  if (eventText) st.push(eventText);
 
   // 自定义变量:发当前状态 + 各字段「含义」给主模型(帮它理解并保持数值/设定连贯),明确框定为只读。
   // ⚠️ 绝不注入「变化规则」(rule)——那是给副API摘要用的「如何增删改」指令(含 set/assign 命令语法);
@@ -648,7 +651,7 @@ export function buildStateInjectionText(): string {
   // 状态块在有任何有意义内容时才注入(物品/计划即使空也会有「(无)」占位,
   // 但只要存在摘要或时间/地点就值得带上整块)
   const hasProtagonist = inj.protagonist && Object.values(memory.protagonist).some(value => !!oneLine(value));
-  const hasState = memory.state.time || memory.state.location || (inj.sceneFocus && memory.state.sceneFocus) || hasProtagonist || (itemsOn && memory.items.length) || (scenesOn && memory.scenes.length) || (npcsOn && memory.npcs.length) || openPlans.length || hasVarState || (inj.lifeDetails && memory.lifeDetails.length);
+  const hasState = memory.state.time || memory.state.location || (inj.sceneFocus && memory.state.sceneFocus) || hasProtagonist || (itemsOn && memory.items.length) || (scenesOn && memory.scenes.length) || (npcsOn && memory.npcs.length) || openPlans.length || !!eventText || hasVarState || (inj.lifeDetails && memory.lifeDetails.length);
   const customTables = dailyTableText();
   if (!hasState && !customTables) return '';
   if (customTables) st.push(customTables);

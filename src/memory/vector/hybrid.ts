@@ -1,8 +1,10 @@
+import type { SummaryTags } from '../contextTags';
 import type { VecHit } from '@/api/baibaoku';
 
 /** 分数各自保留，BM25 独有命中没有余弦分，不能冒充 embedding 或 rerank。 */
 export interface HybridHit extends Omit<VecHit, 'similarity'> {
   similarity: number | null;
+  tags?: SummaryTags;
   bm25Score?: number;
   rrfScore?: number;
 }

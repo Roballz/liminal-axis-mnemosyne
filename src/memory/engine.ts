@@ -1,3 +1,7 @@
+import { generatedTags, type EventHint } from './contextTags';
+import { eventHintsBefore } from '@/mnemosyne/events';
+import { activeLibrary } from '@/mnemosyne/db';
+import { SUMMARY_TAG_PROTOCOL, PLAN_PROGRESS_PROTOCOL } from './prompts';
 import { prepareSummaryTables, parseSummaryTableResult, validateSummaryTableResult, attachTableResult } from '@/mnemosyne/summary-tables';
 import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, syncDaily, summaryAllowed } from '@/mnemosyne/bridge';
 import type { ChatMsg } from '@/api/client';
@@ -1076,6 +1080,7 @@ function applyLeafForFloor(
   delta: SummaryDelta,
   stateBefore: ReturnType<typeof deriveMemory>,
   replaceLeaf?: LeafExtra,
+  events: EventHint[] = [],
 ): void {
   if (!chat[aiFloor]) {
     throw new Error(`摘要落叶失败:楼层 #${aiFloor} 已不存在(可能在请求期间被删除)`);
@@ -1100,6 +1105,7 @@ function applyLeafForFloor(
   const leaf: LeafExtra = {
     id: replaceLeaf?.id ?? makeLeafId(),
     text: llmString(delta.summary),
+    tags: generatedTags(delta.tags, openPlansOrdered, events, replaceLeaf?.tags),
     delta: storedDelta,
     timeStart,
     timeEnd,
@@ -1109,6 +1115,13 @@ function applyLeafForFloor(
     v: 1,
   };
   if (replaceLeaf) invalidateSummaryAncestors(replaceLeaf.id);
+  const planIds = [
+    ...(leaf.tags?.planIds ?? []),
+    ...(storedDelta.plans?.add ?? []).map((_, i) => `plan:${leaf.id}#${i}`),
+    ...(storedDelta.plans?.update ?? []).map(p => p.id),
+    ...(storedDelta.plans?.resolve ?? []).map(p => typeof p === 'string' ? p : p.id),
+  ];
+  if (planIds.length) leaf.tags = { ...(leaf.tags ?? { version: 1, eventIds: [] }), planIds: [...new Set(planIds)] };
   chat[aiFloor].extra = { ...(chat[aiFloor].extra ?? {}), bbs_leaf: leaf };
   // 叶子正文/摘要已变 → 召回读到的向量内容会变,立即失效召回缓存(防重生成/翻页复用旧召回)。
   invalidateRecallCache();
@@ -1130,7 +1143,7 @@ function applyLeafForFloor(
  * **不管理 busy / 不做守卫 / 不触发 checkResummary**——由调用方(runSummaryInner 或批量回退)负责。
  * 失败(请求报错 / JSON 无效)直接抛出,调用方决定如何处理。
  */
-async function floorSummaryContext(chat: STMessage[], aiFloor: number, targets: number[]) {
+async function floorSummaryContext(chat: STMessage[], aiFloor: number, targets: number[], view?: import('@/mnemosyne/model').CapturedView) {
   const ctx = getContext();
   if (!ctx) throw new Error('无 ST 上下文');
   const content = renderMessages(chat, targets, ctx.name1, ctx.name2);
@@ -1163,7 +1176,7 @@ async function floorSummaryContext(chat: STMessage[], aiFloor: number, targets: 
     npcs: stateBefore.npcs.map(n => ({ name: n.name, gender: n.gender, age: n.age, ageTime: n.ageTime, relation: n.relation, affinityInner: n.affinityInner, affinityOuter: n.affinityOuter, affinityNote: n.affinityNote, ties: n.ties, title: n.title, personality: n.personality, important: n.important, outfit: n.outfit, condition: n.condition, follow: n.follow, location: n.location,
       // 在场标记按「本楼之前」的状态算,要 AI 逐个对照做离场/归场对账(与注入端同一权威判定)
       presence: classifyNpcPresence(n, stateBefore.scenes, stateBefore.state.location, stateBefore.state.locationPath) })),
-    openPlans: openPlansOrdered.map(p => ({ kind: p.kind, content: p.content, createdTime: p.createdTime, targetTime: p.targetTime })),
+    openPlans: openPlansOrdered,
     // 近期已完成计划:与注入端同口径,截止点用本楼之前的状态(不泄漏未来)
     resolvedPlans: selectRecentResolvedPlans(stateBefore.plans, apiSettings.recentResolvedPlansCount),
     history,
@@ -1175,14 +1188,17 @@ async function floorSummaryContext(chat: STMessage[], aiFloor: number, targets: 
     varsRule: (['global', 'char', 'chat'] as const).map(t => memory.varTemplates[t].rule.trim()).filter(Boolean).join('\n\n'),
   });
 
-  return { prompt, charCard, persona, worldInfo, stateBefore };
+  const events = view ? await eventHintsBefore(await activeLibrary(), view, beforeIndex) : [];
+  prompt.system += `\n\n${SUMMARY_TAG_PROTOCOL}\n${PLAN_PROGRESS_PROTOCOL}`;
+  prompt.user += `\n【已有事件目录（仅供关联，不改成员）】\n${JSON.stringify(events)}`;
+  return { prompt, charCard, persona, worldInfo, stateBefore, events };
 }
 /** Same native summary materials, repurposed by explicit event creation; no summary writes. */
 export async function eventCreationContext(floor: number, view?: import('@/mnemosyne/model').CapturedView): Promise<ChatMsg[]> {
   const chat = getContext()?.chat;
   if (!chat?.[floor]) throw new Error('楼层已不存在');
   const targets = floorTargets(chat, floor, coveredBeforeFloor(chat, floor));
-  const { prompt, charCard, persona, worldInfo } = await floorSummaryContext(chat, floor, targets);
+  const { prompt, charCard, persona, worldInfo } = await floorSummaryContext(chat, floor, targets, view);
   const tables = await prepareSummaryTables(view, chat, [floor]);
   if (tables) { prompt.system += tables.system; prompt.user += tables.user; }
   const messages: ChatMsg[] = [];
@@ -1209,7 +1225,7 @@ async function summarizeFloorWork(
   const covered = options.replaceLeaf ? coveredBeforeFloor(chat, aiFloor) : coveredSet(chat);
   const targets = floorTargets(chat, aiFloor, covered);
   const mnEvidence = await captureSummaryEvidence(targets, selectHistoryNodesBefore(memory.summaries, chat, targets[0]).map(n=>n.id));
-  const { prompt, charCard, persona, worldInfo, stateBefore } = await floorSummaryContext(chat, aiFloor, targets);
+  const { prompt, charCard, persona, worldInfo, stateBefore, events } = await floorSummaryContext(chat, aiFloor, targets, mnEvidence?.view);
 
   const tableRequest = await prepareSummaryTables(mnEvidence?.view, chat, [aiFloor]);
   if (tableRequest) { prompt.system += tableRequest.system; prompt.user += tableRequest.user; }
@@ -1241,7 +1257,7 @@ async function summarizeFloorWork(
 
   await validateSummaryTableResult(tablePlan);
   assertSummaryEvidence(mnEvidence);
-  applyLeafForFloor(chat, aiFloor, delta, stateBefore, options.replaceLeaf);
+  applyLeafForFloor(chat, aiFloor, delta, stateBefore, options.replaceLeaf, events);
   attachSummaryEvidence(chat, aiFloor, mnEvidence, targets);
   attachTableResult(chat, aiFloor, tablePlan);
   engineState.lastRunAt = Date.now();
@@ -1380,6 +1396,9 @@ async function summarizeBatchWork(
     floorCount: block.length,
   });
 
+  const events = mnEvidence?.view ? await eventHintsBefore(await activeLibrary(), mnEvidence.view, beforeIndex) : [];
+  prompt.system += `\n${SUMMARY_TAG_PROTOCOL}\n批量时每个 floors 元素增加 tags；仍不执行 plans 增删改。只关联本批开始前已存在的事项。`;
+  prompt.user += `\n已有事项（只读）：${JSON.stringify({ plans: stateBefore.plans.filter(p => p.status === 'open').map(p => ({ id: p.id, title: p.title || p.content })), events })}`;
   const tableRequest = await prepareSummaryTables(mnEvidence?.view, chat, block);
   if (tableRequest) { prompt.system += tableRequest.system + '\n本次为批量摘要：保留根对象 floors，customTables 放在根对象与 floors 并列，返回整批按顺序结算后的净变化，不放进各楼对象。'; prompt.user += tableRequest.user; }
   const { checklist, prefill } = buildBatchThinking(block.length);
@@ -1429,11 +1448,12 @@ async function summarizeBatchWork(
     const r = list[idx];
     const lean: SummaryDelta = {
       summary: r.summary,
+      tags: r.tags,
       timeStart: r.timeStart,
       timeEnd: r.timeEnd,
     };
     const sb = deriveMemory(chat, f);
-    applyLeafForFloor(chat, f, lean, sb);
+    applyLeafForFloor(chat, f, lean, sb, undefined, events);
     attachSummaryEvidence(chat, f, mnEvidence, floorTargets(chat, f, covered));
     attachTableResult(chat, f, null);
   });

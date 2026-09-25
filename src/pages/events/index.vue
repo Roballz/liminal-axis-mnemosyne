@@ -527,6 +527,7 @@ onBeforeUnmount(() => {
         @keydown.esc="cancelPress"
       >
         <strong class="mn-event-title">{{ card.meta.title }}</strong>
+        <p v-if="card.meta.latestProgress" class="mn-muted">{{ card.meta.latestProgress.time }} · {{ card.meta.latestProgress.text }}</p>
         <p class="mn-muted mn-event-keywords">
           {{ card.meta.keywords.join(" · ") || "暂无关键词" }}
         </p>

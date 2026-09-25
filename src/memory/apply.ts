@@ -1,3 +1,4 @@
+import { normalizeTags, shortText, resolvePlanRef, type SummaryTags } from './contextTags';
 import { dailyInstalled, markManualSummaryEdit } from '@/mnemosyne/bridge';
 import { apiSettings } from '@/api/settings';
 import { getContext, setMessageText, type STMessage } from '@/st/context';
@@ -11,7 +12,7 @@ import { readItemsTagText, writeItemLogTag, writeVarLogTag } from './timeTag';
 import { scheduleVectorIndex } from './vector';
 import { invalidateRecallCache } from './vector/cache';
 import { createEmptyMemory } from './types';
-import type { BaibaiMemory, ItemDelta, ItemLogEntry, JsonValue, LeafExtra, LifeDetailAdd, LifeDetailUpdate, MemLifeDetail, MemNpc, MemPlan, MemScene, MemSummary, NpcAffinity, NpcDelta, NpcPresence, PlanResolveItem, ProtagonistDelta, SceneDelta, SceneFocus, SceneOp, SceneReparent, StoredDelta, SummaryDelta, VarOp, VarTemplate, VarTier } from './types';
+import type { BaibaiMemory, ItemDelta, ItemLogEntry, JsonValue, LeafExtra, LifeDetailAdd, LifeDetailUpdate, MemLifeDetail, MemNpc, MemPlan, MemScene, MemSummary, NpcAffinity, NpcDelta, NpcPresence, PlanResolveItem, PlanAdd, PlanUpdate, ProtagonistDelta, SceneDelta, SceneFocus, SceneOp, SceneReparent, StoredDelta, SummaryDelta, VarOp, VarTemplate, VarTier } from './types';
 
 // 供既有调用方继续从 apply 取在场类型;定义在 types.ts 与名册展示共用。
 export type { NpcPresence } from './types';
@@ -286,7 +287,16 @@ function cleanProtagonistDelta(raw: unknown): ProtagonistDelta | null {
   return Object.keys(out).length ? out : null;
 }
 
-type PlanAdd = { kind: 'plan' | 'suspense'; content: string; createdTime?: string; targetTime?: string };
+function cleanPlanProgress(raw: Record<string, unknown>) {
+  const out: Omit<PlanUpdate, 'id'> = {};
+  for (const key of ['title', 'currentProgress', 'remaining'] as const)
+    if (typeof raw[key] === 'string') out[key] = shortText(raw[key], key === 'title' ? 30 : 50);
+  return out;
+}
+function cleanPlanUpdates(v: unknown): PlanUpdate[] {
+  return arr(v).flatMap(raw => isRecord(raw) && typeof raw.id === 'string' && raw.id.trim()
+    ? [{ id: raw.id.trim(), ...cleanPlanProgress(raw) }] : []);
+}
 
 function cleanPlanAdd(raw: unknown): PlanAdd | null {
   if (!isRecord(raw)) {
@@ -298,6 +308,7 @@ function cleanPlanAdd(raw: unknown): PlanAdd | null {
   return {
     kind: raw.kind === 'suspense' ? 'suspense' : 'plan',
     content,
+    ...cleanPlanProgress(raw),
     createdTime: optText(raw.createdTime),
     targetTime: optText(raw.targetTime),
   };
@@ -376,6 +387,8 @@ function cleanStoredDelta(raw: StoredDelta): StoredDelta {
   if (isRecord(raw.plans)) {
     const plans: NonNullable<StoredDelta['plans']> = {};
     const add = cleanPlanAddList(raw.plans.add);
+    const update = cleanPlanUpdates(raw.plans.update);
+    if (update.length) plans.update = update;
     const resolve = cleanStoredPlanResolveList(raw.plans.resolve);
     const remove = cleanTextList(raw.plans.remove, ['id', 'planId']);
     const reopen = cleanTextList(raw.plans.reopen, ['id', 'planId']);
@@ -1153,7 +1166,7 @@ export function finalizeVarOps(raw: unknown): VarOp[] {
   return out;
 }
 
-function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: string; createdAt: number; time: string }): void {
+function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: string; createdAt: number; time: string; tags?: SummaryTags }): void {
   const t = leaf.createdAt;
   const logTime = leaf.time;
   const log = (kind: ItemLogEntry['kind'], name: string, from?: number, to?: number): void => {
@@ -1356,6 +1369,8 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
         id,
         kind: add.kind === 'suspense' ? 'suspense' : 'plan',
         content: add.content.trim(),
+        ...cleanPlanProgress(add as unknown as Record<string, unknown>),
+        relatedLeafIds: [leaf.id],
         status: 'open',
         createdAt: t,
         createdTime: add.createdTime?.trim() || undefined,
@@ -1363,9 +1378,17 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
       };
       mem.plans.push(plan);
     });
+    for (const update of d.plans.update ?? []) {
+      const plan = mem.plans.find(p => p.id === update.id && p.status === 'open');
+      if (!plan) continue;
+      Object.assign(plan, cleanPlanProgress(update as unknown as Record<string, unknown>));
+      plan.progressTime = d.time || leaf.time;
+      plan.relatedLeafIds = [...new Set([...(plan.relatedLeafIds ?? []), leaf.id])];
+    }
     for (const r of d.plans.resolve ?? []) {
       const p = mem.plans.find(x => x.id === resolveEntryId(r));
       if (p) {
+        p.relatedLeafIds = [...new Set([...(p.relatedLeafIds ?? []), leaf.id])];
         p.status = 'resolved';
         p.resolvedAt = t;
         // 携带「怎么了结/为什么」;裸字符串旧数据无此信息,保持不写
@@ -1388,6 +1411,11 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
       const idx = mem.plans.findIndex(x => x.id === pid);
       if (idx >= 0) mem.plans.splice(idx, 1);
     }
+  }
+
+  for (const id of leaf.tags?.planIds ?? []) {
+    const p = mem.plans.find(p => p.id === id);
+    if (p) p.relatedLeafIds = [...new Set([...(p.relatedLeafIds ?? []), leaf.id])];
   }
 
   // 生活小档案:add(去重)→ update → archive → remove。id 确定性:detail:${leafId}#序号,重放幂等
@@ -1460,7 +1488,7 @@ export function deriveMemory(
     const leaf = getLeaf(chat[i])!;
     // 日志用「故事内时间」:结束时间优先(本段最后时刻),缺则起始,再缺旧 timeLabel,最后空串
     const time = optText(leaf.timeEnd) || optText(leaf.timeStart) || optText(leaf.timeLabel) || '';
-    applyStoredDeltaTo(mem, leaf.delta, { id: leaf.id, createdAt: leaf.createdAt, time });
+    applyStoredDeltaTo(mem, leaf.delta, { id: leaf.id, createdAt: leaf.createdAt, time, tags: normalizeTags(leaf.tags) });
   }
   // 只留最近若干条变动(注入/喂模型够用即可,省 token)
   if (mem.itemLog.length > ITEM_LOG_KEEP) mem.itemLog = mem.itemLog.slice(-ITEM_LOG_KEEP);
@@ -1651,15 +1679,19 @@ export function finalizeDelta(delta: SummaryDelta, openPlansOrdered: { id: strin
   if (isRecord(delta.plans)) {
     const plans: NonNullable<StoredDelta['plans']> = {};
     const add = cleanPlanAddList(delta.plans.add);
+    const update = cleanPlanUpdates(delta.plans.update).flatMap(p => {
+      const id = resolvePlanRef(p.id, openPlansOrdered);
+      return id ? [{ ...p, id }] : [];
+    });
+    if (update.length) plans.update = update;
     if (add.length) plans.add = add;
     if (arr(delta.plans.resolve).length) {
       const out: PlanResolveItem[] = [];
       for (const ref of arr(delta.plans.resolve)) {
         // 短序号可能是裸字符串 "p2" 或带结局的对象 { id:"p2", outcome, reason }
         const shortRef = namedText(ref, ['id', 'ref', 'planId']);
-        const n = parseShortRef(shortRef);
-        if (n === null) continue;
-        const target = openPlansOrdered[n - 1];
+        const id = resolvePlanRef(shortRef, openPlansOrdered);
+        const target = openPlansOrdered.find(p => p.id === id);
         if (!target) continue;
         if (!isRecord(ref)) {
           out.push(target.id); // 旧格式:只翻译成稳定 id
@@ -1838,8 +1870,9 @@ export function appendOpToLatestLeaf(op: StoredDelta): boolean {
     if (op.scenes.ops?.length) (ds.ops ??= []).push(...op.scenes.ops);
   }
   if (op.plans) {
-    if (op.plans.add?.length || op.plans.resolve?.length || op.plans.remove?.length || op.plans.reopen?.length) changed = true;
+    if (op.plans.update?.length || op.plans.add?.length || op.plans.resolve?.length || op.plans.remove?.length || op.plans.reopen?.length) changed = true;
     const dp = (d.plans ??= {});
+    if (op.plans.update?.length) (dp.update ??= []).push(...op.plans.update);
     if (op.plans.add?.length) (dp.add ??= []).push(...op.plans.add);
     for (const r of op.plans.resolve ?? []) {
       const rid = resolveEntryId(r);
@@ -2184,6 +2217,20 @@ export function editLeafAt(index: number, text: string, timeStart: string, timeE
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要变了 → 召回结果会变,先失效再重算
   scheduleVectorIndex(); // 正文变了 → docHash 变,防抖重 embed,召回及时用上新内容
+  return true;
+}
+
+/** Metadata follows this leaf/swipe and its canonical revision. */
+export function editLeafTags(index: number, expectedId: string, tags: SummaryTags): boolean {
+  const chat = getContext()?.chat;
+  const leaf = getLeaf(chat?.[index]);
+  if (!chat || !leaf || leaf.id !== expectedId || !leafValid(chat[index])) return false;
+  leaf.tags = normalizeTags(tags);
+  chat[index].extra = { ...chat[index].extra, bbs_leaf: leaf };
+  recomputeDerived();
+  scheduleLeafFlush();
+  invalidateRecallCache();
+  scheduleVectorIndex();
   return true;
 }
 

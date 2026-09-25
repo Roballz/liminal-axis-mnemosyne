@@ -15,6 +15,9 @@ import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
 import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue';
 import SummaryNode from './SummaryNode.vue';
+import SummaryTags from './SummaryTags.vue';
+import { planTitle } from '@/memory/contextTags';
+import type { MemPlan } from '@/memory/types';
 import { SUMMARY_CTX, type SummaryRow } from './ctx';
 
 // 打开摘要页时强制重算一次派生:未摘要楼层等派生缓存只在特定事件刷新,
@@ -131,9 +134,16 @@ const leafFloor = computed(() => {
   for (const l of derivedMeta.leaves) m.set(l.id, l.msgIndex);
   return m;
 });
-function planFloor(planId: string): number | undefined {
-  const leafId = planId.replace(/^plan:/, '').replace(/#\d+$/, '');
-  return leafFloor.value.get(leafId);
+
+
+function planLinkedFloors(p: MemPlan) {
+  return [...new Set((p.relatedLeafIds ?? []).map(id => leafFloor.value.get(id)).filter((f): f is number => f !== undefined))].sort((a,b) => a-b);
+}
+function jumpToSummary(floor: number) {
+  const leaf = derivedMeta.leaves.find(l => l.msgIndex === floor && !l.stale);
+  if (!leaf) return;
+  searchOpen.value = true;
+  searchQuery.value = `#${floor}`;
 }
 
 function addPlan() {
@@ -152,9 +162,10 @@ function removePlan(id: string) {
 }
 
 /* —— 编辑计划/悬念(弹窗)—— */
-const editingPlan = ref<{ id: string; kind: 'plan' | 'suspense'; content: string; createdTime: string; targetTime: string } | null>(null);
-function openPlanEdit(p: { id: string; kind: 'plan' | 'suspense'; content: string; createdTime?: string; targetTime?: string }) {
+const editingPlan = ref<(MemPlan & { createdTime: string; targetTime: string }) | null>(null);
+function openPlanEdit(p: MemPlan) {
   editingPlan.value = {
+    ...p,
     id: p.id,
     kind: p.kind,
     content: p.content,
@@ -174,6 +185,7 @@ function savePlanEdit() {
     // 目标时间仅计划有意义;悬念保持空
     targetTime: e.kind === 'plan' ? e.targetTime : '',
   });
+  appendOpToLatestLeaf({ plans: { update: [{ id: e.id, title: e.title ?? '', currentProgress: e.currentProgress ?? '', remaining: e.remaining ?? '' }] } });
   refreshInjection();
   editingPlan.value = null;
 }
@@ -924,18 +936,22 @@ provide(SUMMARY_CTX, {
             <div v-for="p in g.items" :key="p.id" class="bbs-plan">
               <div class="bbs-plan-head">
                 <span class="bbs-plan-kind" :class="p.kind">{{ p.kind === 'suspense' ? '悬念' : '计划' }}</span>
-                <span v-if="planFloor(p.id) !== undefined" class="bbs-plan-floor">#{{ planFloor(p.id) }}</span>
                 <span class="bbs-plan-acts">
                   <button class="bbs-plan-act" type="button" title="编辑" @click="openPlanEdit(p)"><Icon name="edit" /></button>
                   <button class="bbs-plan-act bbs-plan-del" type="button" title="删除" @click="removePlan(p.id)"><Icon name="close" /></button>
                 </span>
               </div>
+              <strong>{{ planTitle(p) }}</strong>
+              <small class="bbs-plan-id" :title="p.id">{{ p.id }}</small>
               <p class="bbs-plan-content">{{ p.content }}</p>
+              <p v-if="p.currentProgress" class="bbs-plan-progress">当前进展：{{ p.currentProgress }}</p>
+              <p v-if="p.remaining" class="bbs-plan-progress">仍待解决：{{ p.remaining }}</p>
               <!-- 故事内时间:立于(创建时间)/ 目标(目标时间),任一存在才显示 -->
               <div v-if="p.createdTime || p.targetTime" class="bbs-plan-times">
                 <span v-if="p.createdTime" class="bbs-plan-time">立于 {{ p.createdTime }}</span>
                 <span v-if="p.targetTime" class="bbs-plan-time bbs-plan-time-target">目标 {{ p.targetTime }}</span>
               </div>
+              <div class="bbs-plan-links"><button v-for="floor in planLinkedFloors(p)" :key="floor" type="button" @click="jumpToSummary(floor)">#{{ floor }}</button></div>
             </div>
           </div>
           <p v-else class="bbs-plan-empty">{{ g.empty }}</p>
@@ -1134,6 +1150,7 @@ provide(SUMMARY_CTX, {
           />
         </span>
         <div class="bbs-summary-main">
+          <SummaryTags v-if="r.kind === 'leaf' && r.msgIndex !== undefined" :floor="r.msgIndex" :leaf-id="r.id" />
           <header class="bbs-summary-meta">
             <!-- 总结:层级标签 + 范围药丸 + 相对时间(留题首行)+ 绝对时间(窄屏换行) -->
             <template v-if="r.kind === 'comp'">
@@ -1357,6 +1374,12 @@ provide(SUMMARY_CTX, {
           <textarea v-model="editingPlan.content" class="bbs-input bbs-modal-textarea" rows="3"></textarea>
         </label>
         <label class="bbs-modal-field">
+          <span class="bbs-modal-label">短标题（30字内）</span>
+          <input v-model="editingPlan.title" class="bbs-input" maxlength="30" />
+        </label>
+        <label class="bbs-modal-field"><span class="bbs-modal-label">当前进展（50字内）</span><textarea v-model="editingPlan.currentProgress" class="bbs-input" maxlength="50" rows="2" /></label>
+        <label class="bbs-modal-field"><span class="bbs-modal-label">仍待解决（50字内）</span><textarea v-model="editingPlan.remaining" class="bbs-input" maxlength="50" rows="2" /></label>
+        <label class="bbs-modal-field">
           <span class="bbs-modal-label">创建时间(可选)</span>
           <input v-model="editingPlan.createdTime" class="bbs-input" type="text" placeholder="故事内时间,如 1988/9/29" />
         </label>
@@ -1411,6 +1434,11 @@ provide(SUMMARY_CTX, {
 </template>
 
 <style scoped>
+.bbs-plan-id { display:block; font-size:10px; opacity:.55; overflow-wrap:anywhere; margin-top:4px; }
+.bbs-plan-progress { margin:5px 0; font-size:12px; }
+.bbs-plan-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.bbs-plan-links button { border:0; background:none; padding:0; color:var(--bbs-accent, #b89b60); font-size:11px; cursor:pointer; }
+
 .bbs-page {
   height: 100%;
   display: flex;

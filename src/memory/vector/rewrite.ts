@@ -1,3 +1,5 @@
+import { currentEventHints } from '@/mnemosyne/bridge';
+import { textList, planTitle, type RecallContext } from '../contextTags';
 /**
  * 向量召回的查询重写(Query Rewrite)。
  *
@@ -30,6 +32,7 @@ const MAX_QUERIES = 6;
 const MAX_QUERY_LEN = 220;
 
 export interface RewriteResult {
+  context?: RecallContext;
   /** 场景意图描述(兼作 rerank 的 query) */
   intent: string;
   /** 多条检索 query(已去重限长) */
@@ -64,7 +67,7 @@ function buildStateSnapshot(chat: STMessage[], upTo: number): string {
   }
   const openPlans = st.plans.filter(p => p.status === 'open');
   if (openPlans.length) {
-    lines.push(`未了结的计划/悬念:\n${fmtPlans(openPlans.map(p => ({ kind: p.kind, content: p.content, createdTime: p.createdTime, targetTime: p.targetTime })))}`);
+    lines.push(`未了结的计划/悬念:\n${fmtPlans(openPlans)}`);
   }
   if (!lines.length) return '';
   return `[状态快照:以下为已滚出最近窗口、但仍有效的主角档案、物品、NPC 与未了结计划,供你解析模糊指代]\n${lines.join('\n')}`;
@@ -105,6 +108,9 @@ function buildMessages(chat: STMessage[]): ChatMsg[] {
     const jb = apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT;
     if (jb) systemContent = `${jb}\n\n${systemContent}`;
   }
+  const contextOn = apiSettings.vector.recall.rrfContextEnabled;
+  const catalog = contextCatalog(chat);
+  if (contextOn) systemContent += `\n${CONTEXT_PROTOCOL}\n可引用事项目录：${JSON.stringify(catalog)}`;
   const messages: ChatMsg[] = [{ role: 'system', content: systemContent }];
 
   // 平铺窗口对话(纯 user/assistant),记录原 msgIndex 以定位快照插入点
@@ -145,7 +151,7 @@ function buildMessages(chat: STMessage[]): ChatMsg[] {
   for (const c of convo) messages.push({ role: c.role, content: c.content });
 
   // 收尾提示词
-  messages.push({ role: 'user', content: QUERY_REWRITE_TAIL });
+  messages.push({ role: 'user', content: QUERY_REWRITE_TAIL + (contextOn ? `\n${CONTEXT_PROTOCOL}` : '') });
   return messages;
 }
 
@@ -160,7 +166,7 @@ function chatCompletionsEndpoint(rawUrl: string): string {
 }
 
 /** 解析 INTENT + 多行 Q(对齐 Horae:去前缀符号、去重、限长) */
-function parseResponse(text: string): RewriteResult {
+export function parseResponse(text: string): RewriteResult {
   const lines = String(text || '')
     .replace(/\r\n?/g, '\n')
     .replace(/\\n/g, '\n')
@@ -172,12 +178,21 @@ function parseResponse(text: string): RewriteResult {
     .filter(Boolean);
 
   let intent = '';
+  let context: RecallContext | undefined;
   const queries: string[] = [];
   const seen = new Set<string>();
 
   for (const raw of lines) {
     // 去掉行首的 -/*/•、数字编号
     const line = raw.replace(/^\s*(?:[-*•]\s*)?(?:\d+[.)、]\s*)?/, '').trim();
+    const cm = line.match(/^CONTEXT\s*[:：]\s*(.+)$/i);
+    if (cm) {
+      try {
+        const value = JSON.parse(cm[1]);
+        if (value && typeof value === 'object') context = { participants: textList(value.participants), planIds: textList(value.planIds), eventIds: textList(value.eventIds) };
+      } catch { /* Missing context disables the preference, not the valid search queries. */ }
+      continue;
+    }
     const im = line.match(/^INTENT\s*[:：]\s*(.+)$/i);
     if (im) {
       intent = sanitize(im[1]);
@@ -190,11 +205,10 @@ function parseResponse(text: string): RewriteResult {
       const key = q.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      queries.push(q);
-      if (queries.length >= MAX_QUERIES) break;
+      if (queries.length < MAX_QUERIES) queries.push(q);
     }
   }
-  return { intent, queries };
+  return { intent, queries, ...(context ? { context } : {}) };
 }
 
 function sanitize(text: string): string {
@@ -252,5 +266,23 @@ export async function rewriteQuery(signal?: AbortSignal): Promise<RewriteResult>
 
   const parsed = parseResponse(raw);
   if (!parsed.queries.length) throw new Error('Query 重写未解析出任何检索 query');
+  if (parsed.context) {
+    const catalog = contextCatalog(chat);
+    parsed.context.planIds = parsed.context.planIds.filter(id => catalog.plans.some(p => p.id === id));
+    parsed.context.eventIds = parsed.context.eventIds.filter(id => catalog.events.some(e => e.id === id));
+  }
   return parsed;
+}
+
+const CONTEXT_PROTOCOL = `本轮在 INTENT 和 Q 行之外，追加一行 CONTEXT: {"participants":["当前正文实际在场人物的规范名字"],"planIds":[],"eventIds":[]}。
+只从最新正文判断当前场景，不把历史摘要中被提及者算作在场；优先沿用目录人物名字。高概率相关才填计划/悬念/事件ID，只能引用目录已有ID，拿不准留空。没有相关事项时两个ID数组均为空；人物不明时也留空。
+这些标识只用于额外召回偏好，不写入 Q，不因目录出现某事件就让所有查询围绕它，仍保持原有多角度检索。`;
+function contextCatalog(chat: STMessage[]) {
+  const st = deriveMemory(chat);
+  const ctx = getContext();
+  return {
+    participants: [...new Set([ctx?.name1, ctx?.name2, ...st.npcs.map(n => n.name), ...chat.flatMap(m => getLeaf(m)?.tags?.participants ?? [])].filter((s): s is string => !!s))].slice(0, 200),
+    plans: st.plans.map(p => ({ id: p.id, title: planTitle(p), status: p.status, currentProgress: p.currentProgress, remaining: p.remaining })),
+    events: currentEventHints(),
+  };
 }

@@ -4,6 +4,7 @@
  * 展开时下方 grid(0fr↔1fr)容器平滑撑开,内部递归渲染子节点 + 组尾收起条。
  * 高度过渡与 Collapsible.vue / 悬念簿同款——内容常驻 DOM,不脱流,故无闪烁。
  */
+import SummaryTags from './SummaryTags.vue';
 import Icon from '@/components/Icon.vue';
 import { computed, inject } from 'vue';
 import type { ViewNode } from '@/memory/inject';
@@ -33,6 +34,7 @@ const isChild = computed(() => props.depth > 0);
       :class="{ 'is-deep': row.level > 0, 'is-child': isChild, 'is-expanded': isExpanded && expandable }"
     >
       <div class="bbs-summary-main">
+        <SummaryTags v-if="row.kind === 'leaf' && row.msgIndex !== undefined" :floor="row.msgIndex" :leaf-id="row.id" />
         <header class="bbs-summary-meta">
           <template v-if="row.kind === 'comp'">
             <span class="bbs-summary-badge">{{ ctx.levelLabel(row.level, row.imported) }}</span>

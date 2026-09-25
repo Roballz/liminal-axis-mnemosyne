@@ -1,3 +1,4 @@
+import type { SummaryTags } from './contextTags';
 /**
  * 柏宝书记忆数据模型 —— 混合架构:叶子在消息上,压缩节点在森林
  *
@@ -274,11 +275,21 @@ export type PlanResolveItem = string | PlanResolveEntry;
  * 计划 / 悬念(派生产物,不持久化)。
  * id 确定性:`plan:${产生它的叶子id}#${在该叶子 add 数组里的序号}`。
  */
-export interface MemPlan {
+export interface PlanProgress {
+  title?: string;
+  currentProgress?: string;
+  remaining?: string;
+}
+export interface PlanUpdate extends PlanProgress { id: string }
+export interface PlanAdd extends PlanProgress { kind: 'plan' | 'suspense'; content: string; createdTime?: string; targetTime?: string }
+
+export interface MemPlan extends PlanProgress {
   id: string;
   /** plan=计划/目标,suspense=悬念/未解之谜 */
   kind: 'plan' | 'suspense';
   content: string;
+  relatedLeafIds?: string[];
+  progressTime?: string;
   /** open=进行中,resolved=已了结 */
   status: 'open' | 'resolved';
   createdAt: number;
@@ -298,6 +309,7 @@ export interface MemPlan {
  * 随 swipe_info 自动跟随、随 chat 文件持久化。**重放的唯一来源**。
  */
 export interface LeafExtra {
+  tags?: SummaryTags;
   /** 稳定叶子 id(写入即固定),压缩节点 childIds 引用它 */
   id: string;
   /** 摘要正文 */
@@ -592,6 +604,7 @@ export type SceneOp =
 
 /** AI 摘要返回的完整 JSON(协议保持不变:AI 只产 add/update/remove/resolve) */
 export interface SummaryDelta {
+  tags?: SummaryTags;
   /** 本楼层叙事摘要正文 */
   summary?: string;
   /** 覆盖型:故事内当前时间(直接写新值)。仅在正文无时间标签、需 AI 兜底时使用 */
@@ -637,7 +650,8 @@ export interface SummaryDelta {
   /** 指令型:计划/悬念增删 */
   plans?: {
     /** createdTime/targetTime 由 AI 直接输出(故事内时间字符串);targetTime 允许模糊或省略 */
-    add?: { kind: 'plan' | 'suspense'; content: string; createdTime?: string; targetTime?: string }[];
+    add?: PlanAdd[];
+    update?: PlanUpdate[];
     /** 按提示词里展示的短 id(p1/p2…)了结,每项带 outcome/reason 说明怎么了结;裸字符串兼容旧格式 */
     resolve?: PlanResolveItem[];
   };
@@ -698,7 +712,8 @@ export interface StoredDelta {
     remove?: string[];
   };
   plans?: {
-    add?: { kind: 'plan' | 'suspense'; content: string; createdTime?: string; targetTime?: string }[];
+    add?: PlanAdd[];
+    update?: PlanUpdate[];
     /** 了结:稳定 plan id(带 outcome/reason);裸字符串兼容旧数据 */
     resolve?: PlanResolveItem[];
     /** 内部/手动:删除 plan(稳定 id) */

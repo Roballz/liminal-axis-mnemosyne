@@ -1,3 +1,5 @@
+import type { RecallContext } from '../contextTags';
+import type { ContextHit } from './contextRecall';
 /**
  * 向量召回调试快照(全局,reactive)。
  *
@@ -36,6 +38,8 @@ export interface RecallDebugRerankHit {
 }
 
 export interface RecallDebug {
+  context?: RecallContext;
+  contextRanked?: { leafId: string; reason: string; raw: number; score: number; preview: string }[];
   /** 记录时刻(Date.now);0 = 尚无记录 */
   at: number;
   /** 状态文案:'召回完成' | '进行中…' | '未召回:…' | '失败:…' */
@@ -54,7 +58,7 @@ export interface RecallDebug {
 }
 
 function empty(): RecallDebug {
-  return { at: 0, status: '', intent: '', queries: [], embedding: [], bm25: [], bm25Status: 'BM25 未启用', fusion: [], rerank: [], injectedText: '' };
+  return { context: undefined, contextRanked: [], at: 0, status: '', intent: '', queries: [], embedding: [], bm25: [], bm25Status: 'BM25 未启用', fusion: [], rerank: [], injectedText: '' };
 }
 
 /** 全局召回调试快照。UI 直接订阅;recall.ts 在各阶段写入。 */
@@ -111,4 +115,10 @@ export function snapshotRecallDebug(): RecallDebug {
 /** 把缓存的调试快照还原到面板(命中缓存时用,免得 reset 后面板空白)。 */
 export function restoreRecallDebug(snap: RecallDebug): void {
   Object.assign(recallDebug, empty(), snap);
+}
+
+export function setRecallContext(context: RecallContext | undefined, hits: ContextHit[]) {
+  recallDebug.context = context;
+  recallDebug.contextRanked = hits.map(h => ({ leafId: h.leafId, reason: h.contextReason,
+    raw: h.rrfScore ?? 0, score: h.contextScore, preview: previewOf(h.document) }));
 }

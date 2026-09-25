@@ -1,3 +1,4 @@
+import type { SummaryTags } from '@/memory/contextTags';
 /** Daily-library v1 is independent of the older B provider's physical protocol. */
 export const SCHEMA = 1;
 export const STORES = [
@@ -90,6 +91,7 @@ export interface Memory extends Row {
     hostId: string;
 }
 export interface MemoryRevision extends Row {
+    tags?: SummaryTags;
     story: string;
     branch: string;
     owner: string;
@@ -143,6 +145,7 @@ export interface EventChain extends Row {
     created: number;
 }
 export interface EventRevision extends Row {
+    latestProgress?: { version: 1; text: string; time: string; memory: string } | null;
     eventSchema?: 2;
     overview?: string;
     summarized?: string[];

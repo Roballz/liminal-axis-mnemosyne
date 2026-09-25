@@ -1,3 +1,4 @@
+import type { SummaryTags } from '@/memory/contextTags';
 import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { Library, Transaction } from './db';
 import {
@@ -27,6 +28,7 @@ export interface HostMessage {
     excluded?: boolean;
 }
 export interface HostMemory {
+    tags?: SummaryTags;
     hostId: string;
     content: string;
     level: number;
@@ -44,6 +46,11 @@ export interface HostMemory {
     basisSnapshot?: string;
     generationKey?: number;
     manualEdit?: boolean;
+}
+/** Metadata edits do not change a narrative dependency. Source/version fields must all match. */
+export function sameNarrativeRevision(a: MemoryRevision, b: MemoryRevision): boolean {
+    const narrative = ({ id, fingerprint, tags, ...rest }: MemoryRevision) => rest;
+    return equal(narrative(a), narrative(b));
 }
 /** A high summary with recorded children depends on those children, not the entire chat tail. */
 export const dependencyOnly = (m: MemoryRevision) => m.level > 0 && !m.anchor && !m.inputRefs.length && !!m.dependencies.length;
@@ -220,6 +227,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                     branch: branch.id,
                     owner: family.id,
                     content: host.content,
+                    ...(host.tags ? { tags: host.tags } : {}),
                     fingerprint: memoryHashes[i],
                     basis: host.basisSnapshot ?? branch.head,
                     inputRefs: host.inputRefs ?? [],
@@ -252,6 +260,9 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                         })) };
                     }
                 }
+                // Editing tags must not silently approve a changed source or renew an old basis.
+                if (prior && !equal(prior.tags, revision.tags) && sameNarrativeRevision(prior, { ...revision, basis: prior.basis }))
+                    revision.basis = prior.basis;
                 newRevisions.push({ revision, host });
             }
             if (host.generatedSidecar && host.inputRefs?.some(ref => !refs.some(r => equal(r, ref))) &&
@@ -327,7 +338,7 @@ export async function current(lib: Library, view: CapturedView): Promise<boolean
 }
 export type MemoryStatus = 'valid' | 'excluded' | 'needs_review' | 'needs_rebuild' | 'out_of_scope';
 export async function statuses(lib: Library, view: CapturedView): Promise<Map<string, MemoryStatus>> {
-    return lib.transaction(['history_snapshots', 'manifest_blocks', 'reviews'], 'readonly', async (tx) => {
+    return lib.transaction(['history_snapshots', 'manifest_blocks', 'reviews', 'memory_revisions'], 'readonly', async (tx) => {
         const snapshots = await Promise.all(
             [...new Set(view.memories.map((m) => m.basis))].map((key) => tx.get<Snapshot>('history_snapshots', key)),
         );
@@ -359,13 +370,19 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
         );
         const reviews = await tx.all<Review>('reviews', 'branch', view.branch.id);
         const compatible = new Map<string, Review>();
+        const selectedByOwner = new Map(view.memories.map(m => [m.owner, m]));
         for (const review of reviews.sort((a,b) => a.created - b.created)) {
+            let memory = view.memories.find(m => m.id === review.owner);
+            if (!memory) {
+                const prior = await tx.get<MemoryRevision>('memory_revisions', review.owner);
+                const selected = prior && selectedByOwner.get(prior.owner);
+                if (prior && selected && sameNarrativeRevision(prior, selected)) memory = selected;
+            }
+            if (!memory) continue;
             if (review.reviewSchema !== 2) {
-                if (review.snapshot === view.snapshot.id) compatible.set(review.owner, review);
+                if (review.snapshot === view.snapshot.id) compatible.set(memory.id, review);
                 continue;
             }
-            const memory = view.memories.find(m => m.id === review.owner);
-            if (!memory) continue;
             const approved = review.sourceRefs!;
             const order = approved.map(r => positions.get(r.message) ?? -1);
             if (approved.some(r => !sourceRefMatches(view.branch, r, refByMessage.get(r.message))) ||
@@ -376,9 +393,16 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
             const coverage = review.coverage!;
             const start = positions.get(coverage[0]?.message) ?? -1;
             if (coverage.length && (start < 0 || !sourceRefsMatch(view.branch, coverage, view.refs.slice(start, start + coverage.length)))) continue;
-            compatible.set(review.owner, review);
+            compatible.set(memory.id, review);
         }
         const byId = new Map(view.memories.map((m) => [m.id, m]));
+        const deps = new Set(view.memories.flatMap(m => compatible.get(m.id)?.dependencies ?? m.dependencies));
+        for (const id of deps) {
+            if (byId.has(id)) continue;
+            const previous = await tx.get<MemoryRevision>('memory_revisions', id);
+            const selected = previous && selectedByOwner.get(previous.owner);
+            if (previous && selected && sameNarrativeRevision(previous, selected)) byId.set(id, selected);
+        }
         const result = new Map<string, MemoryStatus>(),
             active = new Set<string>();
         const evaluate = (memory: MemoryRevision): MemoryStatus => {

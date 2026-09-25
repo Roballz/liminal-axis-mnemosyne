@@ -1,10 +1,11 @@
+import { validTags } from '@/memory/contextTags';
 import { isRoleOnlyPair } from './source-equivalence';
 import { Library, freshLibraryName, activateLibrary } from './db';
 import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7;
     schema: 1;
     created: number;
     excluded: string[];
@@ -21,7 +22,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta is restricted to non-secret daily feature settings, not upstream API configuration.
-    const base = { format: 'mnemosyne-daily' as const, version: 6 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 7 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     validateData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -41,7 +42,7 @@ const FIELDS: Record<Store, string[]> = {
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     check(pack.data && Object.keys(pack.data).length === STORES.length, '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
@@ -56,6 +57,8 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             if (pack.version >= 5 && store === 'host_bindings') optional.push('rebindSchema', 'detached');
             if (pack.version >= 5 && store === 'branches') optional.push('sourceRoleRepairSchema', 'sourceRoleRepairs');
             if (pack.version >= 6 && store === 'reviews') optional.push('reviewSchema', 'sourceRefs', 'coverage', 'dependencies');
+            if (pack.version >= 7 && store === 'memory_revisions') optional.push('tags');
+            if (pack.version >= 7 && store === 'event_revisions') optional.push('latestProgress');
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && FIELDS[store].every(k => k in r), `字段不合法 ${store}`);
             maps[store].set(r.id, r);
@@ -150,6 +153,9 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
     for (const m of maps.memories.values())
         check(get('host_bindings', m.owner).story === m.story, '摘要身份跨故事');
     for (const m of maps.memory_revisions.values()) {
+        if (m.tags !== undefined) {
+            check(validTags(m.tags), '摘要标签版本或字段非法');
+        }
         check(get('memories', m.owner).story === m.story && get('history_snapshots', m.basis).story === m.story, '摘要跨故事');
         check(typeof m.content === 'string' && typeof m.recall === 'boolean' && ['public', 'private'].includes(m.visibility), '摘要结构非法');
         const basisRefs = refs(get('history_snapshots', m.basis));
@@ -190,6 +196,11 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
                 check(['progress', 'reference'].includes(r.kind) && ['ai', 'manual'].includes(r.origin) && typeof r.active === 'boolean' && typeof r.locked === 'boolean', '关联字段非法');
             if (store === 'event_progress')
                 check(typeof r.text === 'string' && r.text.trim(), '追加概述缺失');
+            if (store === 'event_revisions' && r.latestProgress != null) {
+                const p = r.latestProgress;
+                check(p.version === 1 && typeof p.text === 'string' && Array.from(p.text).length <= 30 && typeof p.time === 'string' && typeof p.memory === 'string', '最新进展格式非法');
+                check(get('memory_revisions', p.memory).branch === r.branch, '最新进展来源跨分支');
+            }
             if (store === 'event_revisions' && r.eventSchema !== undefined) {
                 check(r.eventSchema === 2 && typeof r.overview === 'string' && Array.isArray(r.summarized), '事件概要版本非法');
                 memoryRefs(r, r.summarized);

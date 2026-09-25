@@ -23,7 +23,7 @@ test('91 high summaries and 15 events survive an unused final edit, delete and r
   }
   lib.close();
 });
-test('bulk retain records exact sources, survives unrelated tail changes, rejects new relevant edits and roundtrips v6', async () => {
+test('bulk retain records exact sources, survives unrelated tail changes, rejects new relevant edits and roundtrips v7', async () => {
   const { lib, input, view: original, branch } = await fixture(2);
   input.memories[0].inputRefs = original.refs.slice(0,2); input.memories[0].coverage = original.refs.slice(0,2);
   input.memories.push({ ...input.memories[1], hostId: 'high', level: 1, anchorKey: null, children: ['leaf-0'], inputRefs: [], coverage: [] });
@@ -44,7 +44,7 @@ test('bulk retain records exact sources, survives unrelated tail changes, reject
   view = await capture(lib, branch.id);
   expect((await statuses(lib, view)).get(old.id)).toBe('valid');
   expect(await lib.get('memory_revisions', old.id)).toEqual(old);
-  const pack = await exportLibrary(lib); expect(pack.version).toBe(6);
+  const pack = await exportLibrary(lib); expect(pack.version).toBe(7);
   const restored = await restoreLibrary(pack, false);
   expect((await eventView(restored, await capture(restored, branch.id))).cards[0].chain.id).toBe(id);
   expect((await exportLibrary(restored)).data).toEqual(pack.data); restored.close();

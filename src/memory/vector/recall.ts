@@ -1,3 +1,6 @@
+import { prioritizeRrf } from './contextRecall';
+import { planTitle, type RecallContext } from '../contextTags';
+import { memory } from '../store';
 import { dailyInstalled, syncDaily, canonicalLeaves, hostVersion, dailyState } from '@/mnemosyne/bridge';
 import { activeLibrary } from '@/mnemosyne/db';
 import { current } from '@/mnemosyne/canonical';
@@ -41,6 +44,7 @@ import {
   setRecallEmbedding,
   setRecallBm25,
   setRecallFusion,
+  setRecallContext,
   setRecallInjected,
   setRecallRerank,
   setRecallRewrite,
@@ -169,6 +173,7 @@ function recallParamFingerprint(cfg: typeof apiSettings.vector.recall): string {
     cfg.fusionCandidates,
     cfg.bm25Count,
     cfg.rrfCount,
+    cfg.rrfContextEnabled, cfg.rrfOtherEmbeddingThreshold, cfg.rrfBm25Exemption, cfg.rrfAssociationBoost,
     cfg.embeddingThreshold,
     cfg.rerankThreshold,
     cfg.fullTextCount,
@@ -267,7 +272,7 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
   const sourceKey = buildRecallCacheKey(chat, cfg);
   // BM25 从当前聊天有效叶子构建；全文/摘要/删除变化都参与缓存及异步结果复核。
   const leafFingerprint = () => JSON.stringify(collectLeaves(getContext()?.chat ?? [])
-    .map(l => [l.leafId, l.docHash, l.payloadHash, l.msgIndex]));
+    .map(l => [l.leafId, l.docHash, l.payloadHash, l.msgIndex, getLeaf(getContext()?.chat?.[l.msgIndex])?.tags]));
   const leafVersion = leafFingerprint();
   const stillCurrent = () => (!dailyInstalled() || (canonicalHost === hostVersion() && canonicalGeneration === dailyState.generation && canonicalPolicy === JSON.stringify(dailySettings))) && !signal?.aborted && epoch === recallEpoch && recallActiveHere() &&
     currentVectorDb() === database && currentChatId() === sourceChat && settingsKey() === settingsAtStart &&
@@ -314,7 +319,7 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
 
     // 1) 查询重写(强制启用,无降级):得多条 query 向量 + rerank 用的 query 文本。
     // 重写失败/无 query 会抛错 → 落到外层 catch,清空注入槽、结束本次召回。
-    const { queryVectors, rerankQuery, queries } = await resolveQueryVectors(signal);
+    const { queryVectors, rerankQuery, queries, context } = await resolveQueryVectors(signal);
     if (!stillCurrent()) return;
     if (!queryVectors.length) {
       setRecallStatus('未召回:查询重写未产出 query');
@@ -382,6 +387,26 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
     // 3) rerank(用 INTENT/重写 query;渠道未配 → 降级:用 embedding 序,score 复用 similarity)
     if (!stillCurrent()) return;
     const hybridEnabled = cfg.bm25Candidates > 0;
+    const eventCards = canonicalView ? (await eventView(await activeLibrary(), canonicalView)).cards : [];
+    if (!stillCurrent()) return;
+    const safeEvents = eventCards.filter(c => !c.blocked && !c.needsReview);
+    const localLeaves = collectLeaves(chat);
+    const tagHit = <T extends HybridHit>(hit: T): T => {
+      if (hit.scope !== selfScope) return hit;
+      const canonical = dailyInstalled() ? canonicalLeaves().find(l => l.leafId === hit.leafId) : undefined;
+      const local = localLeaves.find(l => l.leafId === hit.leafId);
+      const leaf = !dailyInstalled() && local ? getLeaf(chat[local.msgIndex]) : undefined;
+      const tags = canonical?.tags ?? (leaf?.id === hit.leafId ? leaf.tags : undefined);
+      const hostId = canonical?.hostId ?? hit.leafId;
+      const planIds = memory.plans.filter(p => p.relatedLeafIds?.includes(hostId)).map(p => p.id);
+      const eventIds = safeEvents.filter(c => c.members.some(m => m.memory === hit.leafId)).map(c => c.chain.id);
+      return { ...hit, tags: { ...(tags ?? { version: 1 }),
+        planIds: [...new Set([...(tags?.planIds ?? []), ...planIds])],
+        eventIds: [...new Set([...(tags?.eventIds ?? []), ...eventIds])],
+      } };
+    };
+    results = results.map(tagHit);
+    bm25Results = bm25Results.map(tagHit);
     // 摘要补位使用完整融合榜，不被送入 rerank 的候选上限截断。
     const fused = hybridEnabled ? fuseCandidates(results, bm25Results, results.length + bm25Results.length) : [];
     const candidates: HybridHit[] = hybridEnabled ? fused.slice(0, cfg.fusionCandidates) : results;
@@ -390,14 +415,15 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
 
     // 4) 分档 + 上限(now = 故事内最新时间,作相对时间参照点,对齐历史摘要注入)
     const now = latestStoryTime(chat);
-    const selected = selectRecall(ranked, bm25Results, hybridEnabled ? results : ranked, cfg, fused);
+    const contextRanked = prioritizeRrf(fused, bm25Results, context, cfg);
+    setRecallContext(context, contextRanked);
+    const selected = selectRecall(ranked, bm25Results, hybridEnabled ? results : ranked, cfg, contextRanked);
     const { text: summaryText, tiers } = buildRecallText(selected, selfScope, now);
     let eventText = '';
     if (canonicalView) {
       const lib = await activeLibrary();
       if (!await current(lib, canonicalView)) return;
-      const events = await eventView(lib, canonicalView);
-      eventText = wrapEvents(events.cards, canonicalView, selected.map(s => s.hit.leafId), exclude, dailySettings);
+      eventText = wrapEvents(eventCards, canonicalView, selected.map(s => s.hit.leafId), exclude, dailySettings);
       if (!await current(lib, canonicalView)) return;
     }
     const text = [summaryText, eventText, knowledgeText].filter(Boolean).join('\n\n');
@@ -455,14 +481,14 @@ function recordRerankDebug(
  */
 async function resolveQueryVectors(
   signal?: AbortSignal,
-): Promise<{ queryVectors: string[]; rerankQuery: string; queries: string[] }> {
-  const { intent, queries } = await rewriteQuery(signal);
+): Promise<{ queryVectors: string[]; rerankQuery: string; queries: string[]; context?: RecallContext }> {
+  const { intent, queries, context } = await rewriteQuery(signal);
   setRecallRewrite(intent, queries);
   if (!queries.length) throw new Error('查询重写未产出任何 query');
   // 检索向量:多条 Q(INTENT 偏长偏全文,留给 rerank,不进检索向量以免稀释)
   const vecs = await embedTexts(queries, signal);
   const queryVectors = vecs.map(v => encodeFloat32Base64(v));
-  return { queryVectors, rerankQuery: intent || queries[0], queries };
+  return { queryVectors, rerankQuery: intent || queries[0], queries, context };
 }
 
 /** 对候选做 rerank;失败/未配置则用 embedding 相似度序降级。 */
@@ -510,7 +536,11 @@ function buildRecallText(
     const body = full || (h.document || '').trim();
     if (!body) continue;
     tiers.set(h.leafId, tier);
-    chunks.push(fmtChunk(h, body, !!full, selfScope, now));
+    let chunk = fmtChunk(h, body, !!full, selfScope, now);
+    const plans = memory.plans.filter(p => h.tags?.planIds.includes(p.id));
+    if (plans.length) chunk += `\n关联悬念/计划：${plans.map(p => `${p.kind === 'suspense' ? '悬念' : '计划'}[${p.id}] ${planTitle(p)}`).join('；')}`;
+    if (h.tags?.public) chunk += `\n公开理由：${h.tags.public.reason}`;
+    chunks.push(chunk);
   }
   if (!chunks.length) return { text: '', tiers };
   // 首尾私密简报框定,避免主模型把召回回忆当成要复述/输出的模板

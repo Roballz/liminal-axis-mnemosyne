@@ -2,7 +2,7 @@ import { test, expect } from 'vitest';
 import { fixture } from './fixtures';
 import { capture, forkBranch, keepSummary, statuses, synchronize } from './canonical';
 import { Library } from './db';
-import { editEvent, eventView } from './events';
+import { editEvent, eventView, wrapEvents } from './events';
 import { reviewDifference } from './review-diagnostics';
 import { STORES } from './model';
 
@@ -19,7 +19,9 @@ test('108 legacy summaries can need review after one early role change; readonly
     expect(difference.floor).toBe(0);
     expect(difference.before?.excerpt).toBe(difference.after?.excerpt);
     expect(difference.explanation).toContain('历史前缀');
-    expect(await eventView(lib, next)).toMatchObject({ storedCount: 1, cards: [] });
+    const events = await eventView(lib, next);
+    expect(events).toMatchObject({ storedCount: 1, cards: [{ blocked: true }] });
+    expect(wrapEvents(events.cards, next, next.memories.map(m => m.id), [], { chains: 5, excerptChars: 500, totalChars: 2000, extra: 1 })).toBe('');
     expect(await snapshot()).toEqual(before);
     const name = lib.db.name;
     lib.close();
@@ -50,7 +52,7 @@ test('identical parent and child stay separate; source change in child does not 
     expect(difference.kind).toBe('text');
     expect(difference.after?.excerpt).toContain('\\n新增正文');
     expect((await eventView(lib, next)).storedCount).toBe(1);
-    expect((await eventView(lib, next)).cards).toHaveLength(0);
+    expect((await eventView(lib, next)).cards).toMatchObject([{ blocked: true }]);
     expect((await eventView(lib, await capture(lib, parent.branch.id))).cards).toHaveLength(1);
     expect(await lib.all('event_revisions')).toEqual(eventsBefore);
     lib.close();

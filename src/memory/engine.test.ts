@@ -102,6 +102,26 @@ function useChat(chat: STMessage[]) {
   } as STContext);
 }
 
+it('正常摘要把中途进展和人物标签一起落叶，关联创建/更新的计划且不接受模型公开', async () => {
+  const prior = leaf();
+  prior.delta.plans = { add: [{ kind: 'plan', content: '找到玉佩并归还', remaining: '寻找玉佩' }] };
+  const id = `plan:${prior.id}#0`;
+  const chat = [message(false, { extra: { bbs_leaf: prior } }), message(true), message()];
+  useChat(chat);
+  vi.mocked(client.requestViaMainApi).mockResolvedValue(JSON.stringify({ ...summary,
+    plans: { update: [{ id, currentProgress: '已找到玉佩', remaining: '交还主人' }] },
+    tags: { participants: ['User', 'Character'], planIds: [id], eventIds: ['invented'], public: { reason: '猜测' } },
+  }));
+  await summarizeFloor(2);
+  const saved = chat[2].extra!.bbs_leaf as LeafExtra;
+  expect(saved.tags).toEqual({ version: 1, planIds: [id], eventIds: [], participants: ['User', 'Character'] });
+  expect(memory.plans[0]).toMatchObject({ id, currentProgress: '已找到玉佩', remaining: '交还主人' });
+  expect(memory.plans[0].relatedLeafIds).toEqual([prior.id, saved.id]);
+  const request = JSON.stringify(vi.mocked(client.requestViaMainApi).mock.calls[0]);
+  expect(request).toContain('plans.update');
+  expect(request).toContain('摘要标签协议');
+});
+
 describe('openingPendingFloor', () => {
   it.each([
     ['empty chat', [], -1],

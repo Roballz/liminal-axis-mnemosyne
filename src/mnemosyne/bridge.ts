@@ -1,3 +1,5 @@
+import { normalizeTags, type SummaryTags, type EventHint } from '@/memory/contextTags';
+import { eventView, renderPersistentEvents } from './events';
 import { previewReconnect, commitReconnect } from './binding-recovery';
 import { readTables, renderTableState, commitSummaryTables, type SummaryTablePlan } from './tables';
 import { TABLE_OUTPUT_KEY } from './summary-tables';
@@ -42,6 +44,8 @@ interface DailyCache {
     leaves: CanonicalLeaf[];
     host: string;
     tableText: string;
+    eventText: string;
+    eventHints: EventHint[];
     library: string;
     reviewCount: number;
 }
@@ -133,6 +137,7 @@ export function invalidateDaily() {
     }
 }
 export interface CanonicalLeaf {
+    tags?: SummaryTags;
     leafId: string;
     hostId: string;
     docHash: string;
@@ -162,6 +167,21 @@ export async function dailyBranch(): Promise<Branch | null> {
     return (await (await activeLibrary()).get<Branch>('branches', binding.branch)) ?? null;
 }
 
+async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView) {
+    const { cards } = await eventView(lib, view);
+    check(await current(lib, view), '事件状态已改变，请重试');
+    const safe = cards.filter(c => !c.needsReview && !c.blocked);
+    return { eventText: renderPersistentEvents(safe), eventHints: safe.map(c => ({
+        id: c.chain.id, title: c.meta.title, status: c.meta.status,
+        latest: c.meta.latestProgress ? `${c.meta.latestProgress.time} ${c.meta.latestProgress.text}`.trim() : undefined,
+    })) };
+}
+export function persistentEventText(): string {
+    return cache && cache.host === hostVersion() ? cache.eventText : '';
+}
+export function currentEventHints(): EventHint[] {
+    return cache && cache.host === hostVersion() ? cache.eventHints : [];
+}
 export function canonicalLeaves(): CanonicalLeaf[] {
     return cache && cache.host === hostVersion() ? cache.leaves : [];
 }
@@ -179,6 +199,7 @@ function projectView(view: CapturedView, validity: Map<string, MemoryStatus>) {
                 docHash: m.fingerprint,
                 payloadHash: source?.fingerprint || m.fingerprint,
                 document: m.content,
+                tags: m.tags,
                 mesFull: source?.content ?? '',
                 storyTime: m.storyTime,
                 msgIndex: idx,
@@ -223,6 +244,7 @@ export async function syncDaily(): Promise<CapturedView> {
                             ...reusable,
                             view,
                             ...projectView(view, validity),
+                            ...await projectEvents(lib, view),
                             tableText: renderTableState(
                                 inputs,
                                 new Set(view.memories.filter((m) => validity.get(m.id) === 'valid').map((m) => m.id)),
@@ -235,6 +257,7 @@ export async function syncDaily(): Promise<CapturedView> {
                         observedHost === hostVersion() && observedGeneration === dailyState.generation,
                         '聊天已改变，请重试',
                     );
+                    check(observedHost === hostVersion() && observedGeneration === dailyState.generation, '聊天已改变');
                     lastCache = cache;
                     Object.assign(dailyState, {
                         pending: false,
@@ -311,6 +334,7 @@ export async function syncDaily(): Promise<CapturedView> {
                 const item: HostMemory = {
                     hostId: leaf.id,
                     content: leaf.text,
+                    ...(leaf.tags ? { tags: normalizeTags(leaf.tags) } : {}),
                     level: 0,
                     anchorKey: String(m.extra![MESSAGE_KEY]),
                     children: [],
@@ -367,8 +391,8 @@ export async function syncDaily(): Promise<CapturedView> {
             ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
             ctx.chatMetadata.mnemosyne_archive_v1 = { status: 'saved', scope, branch: branch.id, head: branch.head };
             await ctx.saveMetadata();
-            const view = await capture(lib, branch.id);
-            const validity = await statuses(lib, view);
+            let view = await capture(lib, branch.id);
+            let validity = await statuses(lib, view);
             check(host === hostVersion() && generation === dailyState.generation, '归档完成；当前视图已变化');
             dailyState.tableError = '';
             const receipts = new Set((await lib.all('table_receipts', 'branch', branch.id)).map((r) => r.id));
@@ -400,11 +424,20 @@ export async function syncDaily(): Promise<CapturedView> {
                     dailyState.tableError = `摘要已保存，#${floor} 楼填表待处理：${String((error as Error).message)}。可刷新重试；若表已改动，请重新生成该楼摘要以替代旧请求。`;
                 }
             }
+            // Table sidecars may have advanced epoch during this sync. Capture that commit before
+            // publishing event context; never cache a newer event projection under an older view.
+            const latestBranch = await lib.get<Branch>('branches', branch.id);
+            check(latestBranch && latestBranch.head === view.branch.head && latestBranch.view === view.branch.view, '归档视图已改变，请重试');
+            if (latestBranch.epoch !== view.branch.epoch) {
+                view = { ...view, branch: latestBranch };
+                validity = await statuses(lib, view);
+            }
             const inputs = await readTables(lib, view.branch);
             check(host === hostVersion() && generation === dailyState.generation, '归档完成；当前视图已变化');
             cache = {
                 view,
                 ...projectView(view, validity),
+                ...await projectEvents(lib, view),
                 host,
                 library: lib.db.name,
                 tableText: renderTableState(
@@ -412,6 +445,7 @@ export async function syncDaily(): Promise<CapturedView> {
                     new Set(view.memories.filter((m) => validity.get(m.id) === 'valid').map((m) => m.id)),
                 ),
             };
+            check(host === hostVersion() && generation === dailyState.generation, '聊天已改变');
             lastCache = cache;
             Object.assign(dailyState, {
                 branch: branch.id,
@@ -455,11 +489,13 @@ export async function refreshDailyTables() {
     )
         return;
     const inputs = await readTables(lib, branch);
+    const events = await projectEvents(lib, { ...previous.view, branch });
     if (cache !== previous || host !== hostVersion()) return;
     const permitted = new Set(previous.view.memories.filter((m) => previous.allowed.has(m.hostId)).map((m) => m.id));
-    cache = { ...previous, view: { ...previous.view, branch }, tableText: renderTableState(inputs, permitted) };
+    cache = { ...previous, ...events, view: { ...previous.view, branch }, tableText: renderTableState(inputs, permitted) };
     lastCache = cache;
     dailyState.tableRevision++;
+    dailyState.revision++;
     if (installed) refreshInjection();
 }
 export function scheduleDaily() {

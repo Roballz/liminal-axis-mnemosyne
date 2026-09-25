@@ -84,6 +84,23 @@ it('BM25 独有候选可以经 rerank 升原文，不要求 embedding 达标', a
   expect(finalText()).toContain('B 摘要'); expect(finalText()).toContain('C 摘要');
 });
 
+it('人物规则仅改变RRF摘要：原始Top1仍送rerank，BM25与向量继续按原榜补位', async () => {
+  Object.assign(settings.apiSettings.vector.recall, { bm25Count: 1, rrfCount: 1, rrfContextEnabled: true,
+    rrfBm25Exemption: 0, rrfOtherEmbeddingThreshold: .99, rrfAssociationBoost: .15 });
+  const chat = context.getContext()!.chat;
+  chat[0].is_system = true;
+  chat[0].extra = { bbs_hidden: true, bbs_leaf: { id: 'C', text: 'C 摘要', delta: {}, v: 1, createdAt: 1,
+    tags: { version: 1, participants: ['甲'], planIds: [], eventIds: [] } } };
+  leaves.find(l => l.leafId === 'C')!.msgIndex = 0;
+  vi.mocked(rewrite.rewriteQuery).mockResolvedValue({ intent: '回忆徽章', queries: ['徽章'],
+    context: { participants: ['甲'], planIds: [], eventIds: [] } });
+  await runVectorRecall();
+  expect(embed.rerankDocuments).toHaveBeenCalledWith('回忆徽章', ['A 原文'], 1, undefined);
+  expect(recallDebug.contextRanked?.[0]).toMatchObject({ leafId: 'C', reason: '在场人物' });
+  expect(finalText()).toContain('A 原文');
+  for (const id of ['B', 'C', 'D']) expect(finalText()).toContain(`${id} 摘要`);
+});
+
 it('rerank 失败保留原生向量回退，BM25 独有项不借分升原文，仍按自身榜补位', async () => {
   settings.apiSettings.vector.recall.fusionCandidates = 5;
   settings.apiSettings.vector.recall.rerankThreshold = 0.8;

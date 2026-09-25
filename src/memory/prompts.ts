@@ -1,3 +1,5 @@
+import { planTitle } from './contextTags';
+import type { PlanAdd } from './types';
 /**
  * 提示词模板。
  *
@@ -303,7 +305,7 @@ export const RULE_PLANS = `═══ 【计划/悬念规则】(plans 字段) ═
 ━━ 新增前查重:按未知答案/待决事件归一 ━━
 写任何 plans.add 前,逐条核对上方【未了结】与【近期已了结】条目:
   · 把已有条目与候选 suspense 各自归一为"等待揭晓的答案是什么"或"等待结果的同一个外部事件是什么"。
-  · 若答案会同时揭晓,或本质是同一个事件的结果 → 同一条,严禁 add。新线索、规则细节、阶段进展、佐证、人物反应与两难只写 summary,不另建悬念。
+  · 若答案会同时揭晓,或本质是同一个事件的结果 → 同一条,严禁 add。新线索、阶段进展写 summary 并更新原条目的 plans.update，不另建悬念；没有实质进展时不更新。
   · 仅仅根源相同不必强行合并:若未知答案不同、可各自独立揭晓,或确是两个独立外部事件,才可分别记录。
   · 已了结条目禁止换个说法重新 add。拿不准是否重复 → 视为重复,不写。
 【悬念核销预检】新增前先设想未来如何 resolve:必须能写成"未知答案揭晓为……"或"已启动事件的结果为……"。如果只能写"这种状态后来消失/改变/缓和了",它就不是悬念。
@@ -442,6 +444,7 @@ ${RULE_LONGTERM_DB}
 
 {
   "summary": "本轮剧情摘要,见下方【摘要撰写规则】。",
+  "tags": {"participants":["实际在场人物名"],"planIds":[],"eventIds":[]},
 {{time_field}}
   "location": "本轮结束时主角所在地点(有变化才写,可写得很细,如「滨江区某老小区-302室屋内」)",
   "locationPath": ["在【已知地点】里、与上面 location 对应的场景节点完整路径,由粗到细(可比 location 粗)。给了 location 就尽量给它,作精确定位"],
@@ -470,7 +473,8 @@ ${RULE_LONGTERM_DB}
     "remove": ["永久退场的已有NPC名"]
   },
   "plans": {
-    "add": [{ "kind": "plan", "content": "新出现的计划/目标", "createdTime": "立计划时的故事内时间", "targetTime": "打算完成的目标时间(见下)" }, { "kind": "suspense", "content": "正文明确留下的待揭晓事实,或已经启动且等待结果的外部事件", "createdTime": "悬念出现时的故事内时间" }],
+    "add": [{ "kind": "plan", "content": "新出现的计划/目标", "title": "短标题", "currentProgress": "当前进展，50字内", "remaining": "仍待解决，50字内", "createdTime": "立计划时的故事内时间", "targetTime": "打算完成的目标时间(见下)" }, { "kind": "suspense", "content": "正文明确留下的待揭晓事实,或已经启动且等待结果的外部事件", "createdTime": "悬念出现时的故事内时间" }],
+    "update": [{ "id": "p1", "currentProgress": "当前进展，50字内", "remaining": "仍待解决，50字内" }],
     "resolve": [{ "id": "p1", "outcome": "done|cancelled|failed", "reason": "一句话:为什么/如何了结(见下方【核销/了结】)" }]
   }{{lifedetails_field}}{{vars_field}}
 }
@@ -523,7 +527,7 @@ const BATCH_SUMMARY_RULES = `你是严谨的剧情记忆整理员。材料消息
 
 ═══ 【批量任务说明(关键)】 ═══
 - 本次只做两件事:为每楼写**摘要正文**(summary)+ 标注**起止时间**(timeStart/timeEnd)。
-  **不要**输出物品、计划、悬念、地点等任何其它字段——批量补摘只管摘要与时间,其余交给后续处理。
+  **不要**输出物品、计划、悬念、地点等任何其它字段——批量补摘只管摘要、时间与tags,其余交给后续处理。
 - 你要为这 {{floor_count}} 个楼层【各自】产出一个元素,**严格按上面第 1..{{floor_count}} 楼的先后顺序**一一对应,顺序绝不能打乱。
 - 每楼只摘**该楼正文**;时间按剧情自然推进,后面楼的时间不早于前面楼(见【时间规则】)。
 
@@ -556,7 +560,7 @@ ${RULE_SUMMARY_WRITE}
 
 【输出铁律】
 - 检查记录之后的最终 JSON 根键只有 floors;floors 长度严格等于 {{floor_count}},n 从 1 连续到 {{floor_count}},不可缺楼、不可多楼、不可乱序。
-- 每个元素只含 n / summary / timeStart / timeEnd,不要输出 items / plans / location 等字段。`;
+- 每个元素只含 n / summary / timeStart / timeEnd / tags,不要输出 items / plans / location 等字段。`;
 
 export const BATCH_SUMMARY_PROMPT = `${BATCH_SUMMARY_RULES}\n\n${BATCH_SUMMARY_INPUT}\n\n${SUMMARY_OUTPUT_PROTOCOL}`;
 
@@ -570,7 +574,7 @@ ${SUMMARY_OUTPUT_PROTOCOL}
 1. 逐楼定位:这批共 {{floor_count}} 楼,我将**严格按先后顺序**为每楼产出一个数组元素,n 依次 1..{{floor_count}},不漏、不重、不乱序。
 2. 时间单调且完整:每楼标起止时间,后一楼不早于前一楼;无依据则按剧情流逝合理推算。现代/数字日期的两端都必须包含完整年份,不得缩写成月日或单独时刻。
 3. 收笔:每楼 summary 止步于该楼正文最后一个明文动作,不续写、不跨入下一楼。
-4. 只产摘要+时间:每个元素只含 n / summary / timeStart / timeEnd,不输出物品、计划、地点等字段。
+4. 只产摘要+时间:每个元素只含 n / summary / timeStart / timeEnd / tags,不输出物品、计划、地点等字段。
 
 每楼以「第 n 楼」简记关键取舍或修正,依次核对以下要点,不重复抄写正文。前面楼只作历史参考,不得借后面楼补齐当前楼的结论。正文的 [M消息序号-P段序号] 只供定位,不等于结果的 n。
 ${SUMMARY_FACT_PREPARATION}
@@ -760,7 +764,7 @@ interface BuildArgs {
   /** 已登场 NPC(供 AI 复用命名、防重复记录、判断状态更新) */
   npcs: NpcSummaryView[];
   /** 未了结计划(顺序即编号 p1..pn);createdTime/targetTime 为故事内时间(可空) */
-  openPlans: { kind: 'plan' | 'suspense'; content: string; createdTime?: string; targetTime?: string }[];
+  openPlans: (PlanAdd & { id?: string })[];
   /** 近期已完成的计划/悬念(已按 resolvedAt 倒序取好最近 N 条);防副模型重复记录。空数组→渲染「(无)」 */
   resolvedPlans: MemPlan[];
   /** 本轮之前的历史摘要文本(已选「最高压缩层」节点拼接);空表示无前情 */
@@ -958,7 +962,7 @@ export function fmtResolvedPlans(plans: MemPlan[]): string {
       const time = parts.length ? `(${parts.join(' · ')})` : '';
       const tag = `${p.kind === 'suspense' ? '悬念' : '计划'}·${outcomeLabel(p.kind, p.outcome)}`;
       const reason = oneLine(p.resolvedReason) ? ` —— ${oneLine(p.resolvedReason)}` : '';
-      return `  - [${tag}] ${oneLine(p.content)}${reason}${time}`;
+      return `  - [${p.id}] [${tag}] ${oneLine(p.content)}${reason}${time}`;
     })
     .join('\n');
 }
@@ -972,7 +976,8 @@ export function fmtPlans(plans: BuildArgs['openPlans']): string {
       if (p.createdTime?.trim()) parts.push(`立于 ${p.createdTime.trim()}`);
       if (p.targetTime?.trim()) parts.push(`目标 ${p.targetTime.trim()}`);
       const time = parts.length ? `(${parts.join(' · ')})` : '';
-      return `  p${idx + 1}. [${p.kind === 'suspense' ? '悬念' : '计划'}] ${oneLine(p.content)}${time}`;
+      const progress = [p.currentProgress ? `当前进展：${oneLine(p.currentProgress)}` : '', p.remaining ? `仍待解决：${oneLine(p.remaining)}` : ''].filter(Boolean).join('；');
+      return `  p${idx + 1}. ${p.id ? `[${p.id}] ` : ''}[${p.kind === 'suspense' ? '悬念' : '计划'}] ${progress ? planTitle(p) : oneLine(p.content)}${time}${progress ? `；${progress}` : ''}`;
     })
     .join('\n');
 }
@@ -1360,15 +1365,16 @@ ${SUMMARY_OUTPUT_PROTOCOL}
    - 列出【未了结的计划/悬念】里所有"计划"条目,逐条判断:当前时间是否已越过截止?是否被执行/取消?需了结的记下其编号,准备 plans.resolve 并**标好 outcome + 一句 reason**。
    - 用本楼结束时间逐条比较原截止时间,不能用旧快照时间或现实日期;不同纪年或模糊期限不可可靠比较时不强判。到期与结果分开判断:已过期但结果未确认,保持原条目,不得自动 resolve,也不把未解决等同于未到期。
    - 列出所有"悬念"条目,逐条判断:是否已被解决/揭露/推翻/彻底不可能?只有完全解决才 resolve,同样带 outcome + reason。
-   - ⚠️了结方式别标错:一件事「**被提出后又当场被化解、对方退让、承认搞错、撤回、不了了之**」→ outcome 是 **cancelled(取消/作废),不是 done**;reason 写清「所以不用做了」,否则后续会以为还要做而反复提。真去做成/真揭晓才是 done。
+   - 了结方式：被化解、退让、撤回或不了了之属于 cancelled(取消/作废),不是 done；reason 写清「所以不用做了」。确已兑现/揭晓才是 done。
    - 检查本回合是否产生 plans.add。候选"计划"先判断是否跨场景,再判断行动主体是否真心决定/承诺要做;敷衍、客套、口嗨或拿不准 → 丢弃。
    - 候选"悬念"必须先归类,且只能命中一种:
      A. 待揭晓事实:正文明确留下未知答案,并有具体异常/线索/隐瞒/冲突证据;
      B. 已启动外部事件:外部进程已实际开始并朝具体结果推进,后续只待客观结果。
    - 若只是已知设定、能力代价、伤势/诅咒/灵魂绑定、无法下手、人物两难、身份职责冲突、关系张力、存在弱点或潜在危险 → 它是状态/信息,只进 summary 或对应字段,不写 suspense。
    - 禁止用"会不会……""将如何收场""可能造成什么后果"把状态强行改写成问题。预想其未来核销句:能写"答案揭晓为……"或"已启动事件结果为……"才保留;只能写"状态后来改变了"则丢弃。
-   - 查重:将每条候选归一为【未知答案】或【待决外部事件】,逐条对照未了结和近期已了结条目。答案相同/同一事件 → 不 add;新线索、阶段进展、规则细节、人物反应只写 summary。根源相同但答案确实不同、可独立揭晓时才允许分开。
-   - 最后确认 suspense.content 只含【已知关键事实 + 精确未决点】或【已启动事件 + 待定结果】,没有"潜在威胁、埋下隐患、矛盾持续"等剧情评论。
+   - 已有事项有中途进展：plans.update 更新 currentProgress、remaining，各50字内；tags.planIds 记录关联ID。无实质变化不改。
+   - 查重:将每条候选归一为【未知答案】或【待决外部事件】,逐条对照未了结和近期已了结条目。答案相同/同一事件 → 不 add;新线索、阶段进展写 summary 并更新原事项的 plans.update；规则细节、人物反应没有实质进展时只写 summary。根源相同但答案确实不同、可独立揭晓时才允许分开。
+   - suspense.content 只含已知事实与具体未决点，不写剧情评论。
 
 4. summary 收笔位置确认
    - 【本轮对话】在哪个动作/对话处停止?用一句话概括最后发生了什么。
@@ -1532,3 +1538,13 @@ export const QUERY_REWRITE_TAIL = `记住你的任务:
 - 所有查询只能指向过去已经发生的事
 - 不要查询当前对话窗口中已经完整呈现的内容
 - 严格按格式输出:一行INTENT加恰好5行Q,不要输出任何其他内容`;
+
+export const SUMMARY_TAG_PROTOCOL = `【摘要标签协议】
+每条摘要 JSON 增加 tags: {"participants":["本段实际在场人物的规范名字"],"planIds":["关联计划/悬念的稳定ID"],"eventIds":["关联事件的稳定ID"]}。
+人物只记录本段真实在场或直接参与当前通话/通信者，不把被提及、回忆、设定中的人算在场；同一人物沿用已有名字，不写代词。确定无人时 participants 为 []，不确定可以省略 participants。
+计划/悬念和事件只引用提供目录中的 ID；只有正文明确相关才标记，允许空数组。相同人物或地点不等于同一事件。eventIds 仅表示检索相关，不创建、合并或更改人工事件成员。
+不要输出 public，公开状态仅由用户手动设置。标签不写进 summary 正文。`;
+export const PLAN_PROGRESS_PROTOCOL = `【计划/悬念持续更新协议】
+本协议补充旧模板：plans.add 可带 title（30字内短标题）、currentProgress（当前进展）、remaining（仍待解决）。currentProgress 与 remaining 各不超过50字，输入输出均精简，不抄整段摘要。
+每次逐条核对现有计划/悬念：正文出现阶段进展、新证据、目标变化但尚未结束时，输出 plans.update:[{"id":"目录中的稳定ID或p1","currentProgress":"更新后的当前进展","remaining":"仍未解决的具体事项"}]。有变化才写，不凭时间流逝、推测或再次提及改写；已知解决部分必须从 remaining 移除。
+无进展省略 update；真正结束仍用 resolve。关联到本段的旧计划/悬念同时写 tags.planIds；本段新建项由程序自动关联，无需编造 ID。`;

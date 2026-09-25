@@ -96,6 +96,10 @@ export interface VectorEndpoint {
  *  ③ 仅向量摘要须过 embeddingThreshold；四档合计 ≤ finalRecallCount。
  */
 export interface VectorRecallSettings {
+  rrfContextEnabled: boolean;
+  rrfOtherEmbeddingThreshold: number;
+  rrfBm25Exemption: number;
+  rrfAssociationBoost: number;
   /** 召回内容注入深度:D0 最贴近最新输入,数字越大越靠前。 */
   injectionDepth: number;
   /** 向量候选数:纯按 embedding 相似度取 top-N(不套阈值过滤) */
@@ -357,6 +361,10 @@ function defaults(): ApiSettings {
         fusionCandidates: 20,
         bm25Count: 2,
         rrfCount: 0,
+        rrfContextEnabled: true,
+        rrfOtherEmbeddingThreshold: 0.9,
+        rrfBm25Exemption: 5,
+        rrfAssociationBoost: 0.15,
         embeddingThreshold: 0.8,
         rerankThreshold: 0.9,
         fullTextCount: 2,

@@ -1,7 +1,9 @@
+import { splitTimeLabel } from '@/memory/timeTag';
+import type { EventHint } from '@/memory/contextTags';
 import { sourceContent, sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { parseStrictJson } from './json';
 import { Library } from './db';
-import { snapshotRefs, statuses, capture, current } from './canonical';
+import { snapshotRefs, statuses, capture, current, sameNarrativeRevision } from './canonical';
 import { STORES, row, check, equal, fingerprint, type CapturedView, type EventChain, type EventRevision, type Membership, type Progress, type EventReceipt, type Branch, type Snapshot, type MemoryRevision } from './model';
 export interface EventCard {
     chain: EventChain;
@@ -37,10 +39,23 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
             return ok;
         };
         const cards: EventCard[] = [];
+        const equivalents = new Map<string, string>();
+        const resolveMemory = async (id: string): Promise<string> => {
+            if (equivalents.has(id)) return equivalents.get(id)!;
+            const prior = await tx.get<MemoryRevision>('memory_revisions', id);
+            const next = prior && selected.get(prior.owner);
+            const resolved = prior && next && sameNarrativeRevision(prior, next) ? next.id : id;
+            equivalents.set(id, resolved);
+            return resolved;
+        };
         for (const chain of chains) {
             const revisions = await tx.all<EventRevision>('event_revisions', 'owner', chain.id);
             let meta: EventRevision | undefined;
-            for (const r of revisions.sort((a, b) => b.epoch - a.epoch)) {
+            for (const original of revisions.sort((a, b) => b.epoch - a.epoch)) {
+                const r = { ...original, refs: await Promise.all(original.refs.map(resolveMemory)),
+                    ...(original.summarized ? { summarized: await Promise.all(original.summarized.map(resolveMemory)) } : {}),
+                    ...(original.latestProgress ? { latestProgress: { ...original.latestProgress, memory: await resolveMemory(original.latestProgress.memory) } } : {}),
+                };
                 if (live || (r.refs.every(id => permitted.has(id)) && await within(r.snapshot, r.cutoff))) {
                     meta = r;
                     break;
@@ -51,7 +66,8 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
             const memberships = await tx.all<Membership>('event_memberships', 'owner', chain.id);
             const latest = new Map<string, Membership>();
             const memberDetails = new Map<string, MemoryRevision>();
-            for (const m of memberships.sort((a, b) => a.epoch - b.epoch)) {
+            for (const original of memberships.sort((a, b) => a.epoch - b.epoch)) {
+                const m = { ...original, memory: await resolveMemory(original.memory) };
                 if (live) {
                     const previous = await tx.get<MemoryRevision>('memory_revisions', m.memory);
                     if (!previous) continue;
@@ -67,7 +83,8 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
             const memberSet = new Set(members.map(m => m.memory));
             const progress: Progress[] = [];
             const allProgress = await tx.all<Progress>('event_progress', 'owner', chain.id);
-            for (const p of allProgress) {
+            for (const original of allProgress) {
+                const p = { ...original, memories: await Promise.all(original.memories.map(resolveMemory)) };
                 // Current workbench retains historical text locally; recall still requires every dependency.
                 if (p.memories.every(m => memberSet.has(m) && permitted.has(m)) && (live || await within(p.snapshot, p.cutoff))) progress.push(p);
             }
@@ -77,8 +94,8 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
                 meta = { ...meta, overview: history.map(p => p.text).join('\n'), summarized: [...new Set(history.flatMap(p => p.memories))] };
             }
             const blocked = live && members.some(m => !permitted.has(m.memory));
-            const needsReview = live && (meta.refs.some(id => !permitted.has(id)) || !!meta.summarized?.some(id => !memberSet.has(id) || !permitted.has(id)));
-            if (!live && meta.summarized?.some(id => !memberSet.has(id))) meta = { ...meta, overview: '', summarized: [] };
+            const needsReview = live && ((!!meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))) || meta.refs.some(id => !permitted.has(id)) || !!meta.summarized?.some(id => !memberSet.has(id) || !permitted.has(id)));
+            if (!live && (meta.summarized?.some(id => !memberSet.has(id)) || (meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))))) meta = { ...meta, overview: '', summarized: [], latestProgress: null };
             cards.push({ chain, meta, members, progress, needsReview, blocked, memberDetails: [...memberDetails.values()] });
         }
         return { cards, valid, storedCount: chains.length };
@@ -93,13 +110,15 @@ export const EVENT_PROMPT = `你只整理事件，不重新生成摘要，不结
 每个输入摘要必须恰有一个 decisions 项，可在多个 events 中关联。none 和 needs_review 不得同时关联。
 严格 JSON：{"decisions":[{"memory":"mr_...","result":"linked|none|needs_review"}],
 "events":[{"event_id":null,"title":"事项","status":"open","keywords":[],
-"members":[{"memory":"mr_...","kind":"progress|reference"}],"progress":"本批新增进展；仅reference则空字符串"}]}`;
+"members":[{"memory":"mr_...","kind":"progress|reference"}],"progress":"本批新增进展；仅reference则空字符串","latestProgress":{"memory":"实际最近进展的摘要ID","text":"30字内小结"}}]}。
+latestProgress 只在本批有 progress 成员时填写，不能使用 reference；时间由来源摘要确定，重复提及不刷新进展。`;
 export interface EventOutput {
     decisions: {
         memory: string;
         result: 'linked' | 'none' | 'needs_review';
     }[];
     events: {
+        latestProgress?: { memory: string; text: string } | null;
         event_id: string | null;
         title: string;
         status: string;
@@ -183,6 +202,7 @@ export function parseEventOutput(raw: string, batch: EventBatch): EventOutput {
             members.add(m.memory);
             linked.add(m.memory);
         }
+        if (e.latestProgress) check(typeof e.latestProgress.text === 'string' && e.latestProgress.text.trim() && Array.from(e.latestProgress.text.trim()).length <= 30 && e.members.some(m => m.memory === e.latestProgress!.memory && m.kind === 'progress'), '最新进展必须引用真实进展成员且不超过30字');
         check(e.members.some(m => m.kind === 'progress') ? !!e.progress.trim() : !e.progress.trim(), 'progress/reference 与概述不一致');
     }
     for (const d of output.decisions)
@@ -210,7 +230,11 @@ export async function commitEventBatch(lib: Library, batch: EventBatch, output: 
             }
             const base = { schema: 1 as const, story: branch.story, branch: branch.id, owner: chainId,
                 snapshot: batch.view.snapshot.id, cutoff: batch.view.cutoff, epoch: branch.epoch };
-            const meta: EventRevision = { ...row('er'), ...base, title: event.title, status: event.status,
+            const previous = batch.catalog.find(c => c.chain.id === chainId)?.meta.latestProgress;
+            const latest = event.latestProgress;
+            const source = latest ? batch.memories.find(m => m.id === latest.memory)! : undefined;
+            const latestProgress = latest && source ? { version: 1 as const, memory: source.id, text: latest.text.trim(), time: splitTimeLabel(source.storyTime).end || source.storyTime } : previous ?? null;
+            const meta: EventRevision = { ...row('er'), ...base, latestProgress, title: event.title, status: event.status,
                 keywords: event.keywords, refs: batch.memories.map(m => m.id), created: Date.now() };
             await tx.add('event_revisions', meta);
             for (const m of event.members) {
@@ -288,7 +312,7 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
             key = chain.id;
         }
         const base = { story: branch.story, branch: branch.id, owner: key, snapshot: view.snapshot.id, cutoff: view.cutoff, epoch: branch.epoch };
-        await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2, overview: patch.overview ?? existing?.meta.overview ?? existing?.progress.map(p => p.text).join('\n') ?? '', summarized: patch.summarized ?? existing?.meta.summarized ?? existing?.progress.flatMap(p => p.memories) ?? [], title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: patch.confirmOverview ? patch.summarized ?? [] : existing?.meta.refs ?? [], created: Date.now() } as EventRevision);
+        await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2, ...(existing?.meta.latestProgress !== undefined ? { latestProgress: existing.meta.latestProgress } : {}), overview: patch.overview ?? existing?.meta.overview ?? existing?.progress.map(p => p.text).join('\n') ?? '', summarized: patch.summarized ?? existing?.meta.summarized ?? existing?.progress.flatMap(p => p.memories) ?? [], title: patch.title, status: patch.status, keywords: [...patch.keywords], refs: patch.confirmOverview ? patch.summarized ?? [] : existing?.meta.refs ?? [], created: Date.now() } as EventRevision);
         if (member)
             await tx.add('event_memberships', { ...row('link'), ...base, ...member, locked: true, origin: 'manual' } as Membership);
         check(guard(), '聊天已改变，编辑未提交');
@@ -396,4 +420,26 @@ export async function deleteEvent(lib: Library, view: CapturedView, eventId: str
         branch.epoch++;
         await tx.put('branches', branch);
     });
+}
+
+/** Compact, persistent state; the detailed event wrapper remains recall-only. */
+export function renderPersistentEvents(cards: EventCard[]): string {
+    return ([['open', '进行中的事件链'], ['dormant', '暂搁的事件链']] as const).flatMap(([status, label]) => {
+        const group = cards.filter(c => c.meta.status === status && !c.blocked && !c.needsReview);
+        if (!group.length) return [];
+        return [`${label}:\n${group.map(c => {
+            const p = c.meta.latestProgress;
+            return `[${c.chain.id}] ${c.meta.title} · ${p ? `${p.time} ${p.text}`.trim() : c.meta.latestProgress === null ? '暂无明确进展' : '待生成最新进展'}`;
+        }).join('\n')}`];
+    }).join('\n\n');
+}
+export async function eventHintsBefore(lib: Library, view: CapturedView | undefined, cutoff: number): Promise<EventHint[]> {
+    if (!view) return [];
+    const prior = await capture(lib, view.branch.id, Math.min(cutoff, view.cutoff), view.snapshot.id);
+    const { cards } = await eventView(lib, prior);
+    check(await current(lib, view), '事件目录已改变，请重试');
+    return cards.filter(c => !c.blocked && !c.needsReview).map(c => ({
+        id: c.chain.id, title: c.meta.title, status: c.meta.status,
+        latest: c.meta.latestProgress ? `${c.meta.latestProgress.time} ${c.meta.latestProgress.text}`.trim() : undefined,
+    }));
 }
