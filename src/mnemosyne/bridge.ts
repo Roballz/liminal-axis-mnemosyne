@@ -54,6 +54,7 @@ let lastCache: DailyCache | null = null;
 let serial: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let savedHost = '';
+let scheduledHost = '';
 const MESSAGE_KEY = 'mnemosyne_message_v1';
 const BINDING_KEY = 'mnemosyne_binding_v1';
 const EVIDENCE_KEY = 'mnemosyne_summary_evidence_v1';
@@ -114,8 +115,10 @@ export function hiddenRoleRepairRefs(view: CapturedView): SourceRef[] {
             source.provenance.swipe === (message.swipe_id ?? 0);
     });
 }
-export function invalidateDaily() {
+export function invalidateDaily(reason = '档案视图已更新') {
     const scope = hostScope();
+    if (dailyState.scope !== scope) reason = '已切换聊天';
+    scheduledHost = hostVersion();
     if (dailyState.scope !== scope)
         Object.assign(dailyState, {
             scope,
@@ -132,7 +135,7 @@ export function invalidateDaily() {
     cache = null;
     dailyState.pending = true;
     if (installed) {
-        clearRecallInjection();
+        clearRecallInjection(reason, true);
         refreshInjection();
     }
 }
@@ -306,6 +309,7 @@ export async function syncDaily(): Promise<CapturedView> {
             }
             const generation = dailyState.generation;
             const host = hostVersion();
+            scheduledHost = host; // 归档自身补写消息 ID 不等于一次新的内容编辑。
             const observation: HostObservation = {
                 scope,
                 messages: ctx.chat.map((m) => ({
@@ -500,7 +504,8 @@ export async function refreshDailyTables() {
 }
 export function scheduleDaily() {
     if (!installed) return;
-    invalidateDaily();
+    // 派生重算和宿主事件只是通知；同一内容重复通知不应撤销正在等待的召回。
+    if (hostVersion() !== (cache?.host ?? scheduledHost)) invalidateDaily('当前聊天的正文或摘要已更新');
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
         void syncDaily().catch(() => {});
@@ -601,6 +606,7 @@ export async function confirmBinding(branchId: string) {
 export function bindDaily() {
     installed = true;
     savedHost = '';
+    scheduledHost = '';
     lastCache = null;
     const ctx = getContext();
     if (!ctx) return;

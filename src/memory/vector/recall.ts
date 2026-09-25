@@ -1,5 +1,6 @@
 import { prioritizeRrf } from './contextRecall';
 import { abortable } from './abort';
+import { nextTick } from 'vue';
 import { planTitle, type RecallContext } from '../contextTags';
 import { memory } from '../store';
 import { dailyInstalled, syncDaily, canonicalLeaves, hostVersion, dailyState } from '@/mnemosyne/bridge';
@@ -32,7 +33,7 @@ import { collectLeaves, ensureRecallIndex } from './index';
 import { searchBm25 } from './bm25';
 import { candidateKey, fuseCandidates, normalizeHybridLimits, selectRecall, type HybridHit, type RankedHit } from './hybrid';
 import { currentBundleHashes, currentChatId, currentChatScope, currentVectorDb, recallScopes } from './scope';
-import { isAiFloor, resolveKeepStart } from '../engine';
+import { currentAutoSummaryPromise, currentSummaryPromise, isAiFloor, resolveKeepStart } from '../engine';
 import { cleanBody, compactTimeLabel, latestStoryTime, splitTimeLabel } from '../timeTag';
 import { relativeTimeLabel } from '../timeRel';
 import { normalizeRecallInjectionDepth } from './depth';
@@ -216,7 +217,8 @@ function buildRecallCacheKey(chat: STMessage[], cfg: typeof apiSettings.vector.r
   return `${chatId}|${userIdx}|${fnv1a(userText)}|${fnv1a(aiText)}|${recallParamFingerprint(cfg)}`;
 }
 
-let activeRecall: { key: string; controller: AbortController; promise: Promise<void> } | null = null;
+let activeRecall: { key: string; controller: AbortController; promise: Promise<void>;
+  acceptsSummaryChange: () => boolean } | null = null;
 let recallEpoch = 0;
 
 function cancelActiveRecall(reason: string): void {
@@ -225,7 +227,8 @@ function cancelActiveRecall(reason: string): void {
   activeRecall = null;
   run.controller.abort(new Error(reason));
   setRecallInjected('');
-  setRecallStatus(`召回失败:${reason}`);
+  const stage = recallDebug.status.startsWith('进行中…') ? recallDebug.status.slice('进行中…'.length) : '';
+  setRecallStatus(`召回失败:${reason}${stage ? `（阶段：${stage}）` : ''}`);
 }
 
 /** 召回是否在当前聊天生效。 */
@@ -242,9 +245,9 @@ export function shouldRecallForType(type: string | undefined): boolean {
 }
 
 /** 清空召回注入槽(降级/未命中/切聊天时)。 */
-export function clearRecallInjection(): void {
+export function clearRecallInjection(reason = '聊天、记忆或设置已改变，本轮召回已取消', summaryMaySettle = false): void {
   recallEpoch++;
-  cancelActiveRecall('聊天、记忆或设置已改变，本轮召回已取消');
+  if (!summaryMaySettle || !activeRecall?.acceptsSummaryChange()) cancelActiveRecall(reason);
   getContext()?.setExtensionPrompt?.(RECALL_INJECT_KEY, '', IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
 }
 
@@ -266,18 +269,47 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
   if (typeof fn !== 'function' || !chat.length) return;
 
   // 同一轮重复进入必须一起等待；新一轮则取消旧任务，不能被悬挂的布尔锁直接放行。
-  const key = JSON.stringify([database, currentChatId(), hostVersion(), apiSettings.vector,
+  const runKey = () => JSON.stringify([database, currentChatId(), hostVersion(), apiSettings.vector,
     apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags]);
-  if (activeRecall?.key === key && !activeRecall.controller.signal.aborted) return activeRecall.promise;
+  const key = runKey();
+  if (activeRecall && (activeRecall.key === key || activeRecall.acceptsSummaryChange()) &&
+    !activeRecall.controller.signal.aborted) return activeRecall.promise;
   cancelActiveRecall('已开始新一轮召回，旧任务已取消');
-  const run = { key, controller: new AbortController(), promise: Promise.resolve() };
+  const pendingSummary = currentAutoSummaryPromise() ?? currentSummaryPromise();
+  const sourceChat = currentChatId();
+  const sourceLength = chat.length;
+  const userInput = () => {
+    const messages = getContext()?.chat ?? [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].is_user) return JSON.stringify([i, messages[i].mes]);
+    }
+    return '';
+  };
+  const inputAtStart = userInput();
+  const settingsAtStart = JSON.stringify(apiSettings.vector);
+  const sameRequest = () => sourceChat === currentChatId() && database === currentVectorDb() &&
+    getContext()?.chat === chat && chat.length === sourceLength && userInput() === inputAtStart &&
+    settingsAtStart === JSON.stringify(apiSettings.vector);
+  let preparing = !!pendingSummary;
+  const run = { key, controller: new AbortController(), promise: Promise.resolve(),
+    acceptsSummaryChange: () => preparing && sameRequest() };
   activeRecall = run;
   const onAbort = () => run.controller.abort(new Error('召回已取消'));
   signal?.addEventListener('abort', onAbort, { once: true });
   if (signal?.aborted) onAbort();
   resetRecallDebug();
-  run.promise = Promise.resolve().then(() => {
+  run.promise = Promise.resolve().then(async () => {
     run.controller.signal.throwIfAborted();
+    if (pendingSummary) {
+      setRecallStatus('进行中…等待本轮自动摘要及隐藏收尾');
+      // 此时尚未取召回快照或发送 Query。只接纳同一聊天、同一输入的摘要落盘。
+      await abortable(pendingSummary, run.controller.signal);
+      await nextTick(); // 派生刷新通知先落定，之后才固定 host/generation/候选版本。
+      run.controller.signal.throwIfAborted();
+      if (!sameRequest()) throw new Error('等待摘要期间聊天或输入已改变');
+      preparing = false;
+      run.key = runKey();
+    }
     return abortable(executeVectorRecall(run.controller.signal), run.controller.signal);
   }).catch(error => {
     if (activeRecall !== run) return;

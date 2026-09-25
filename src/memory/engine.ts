@@ -77,6 +77,18 @@ let busy = false;
 // 当前在飞的摘要完成信号:拦截器可 await 它(成功/失败都 resolve,永不 reject,故不会卡死生成)。
 // 无在飞摘要时为 null。在 runSummary 头尾维护。
 let currentRun: Promise<void> | null = null;
+let currentAutoSettlement: Promise<void> | null = null;
+/** 自动摘要的完整收尾，包含窗口隐藏；召回需在它之后取稳定档案。 */
+export function currentAutoSummaryPromise(): Promise<void> | null {
+  return currentAutoSettlement;
+}
+function trackAutoSummary(work: Promise<void>): Promise<void> {
+  const settled = work.finally(() => {
+    if (currentAutoSettlement === settled) currentAutoSettlement = null;
+  });
+  currentAutoSettlement = settled;
+  return settled;
+}
 let summaryRunSeq = 0;
 export function currentSummaryPromise(): Promise<void> | null {
   return currentRun;
@@ -799,7 +811,7 @@ export async function maybeSummarizePrevAi(
   const pending = pendingAiFloors(chat);
   const target = pending.find(f => f <= ceiling);
   if (target === undefined) {
-    await afterSummaryHideAndInject(chat);
+    await trackAutoSummary(afterSummaryHideAndInject(chat));
     return;
   }
 
@@ -809,23 +821,22 @@ export async function maybeSummarizePrevAi(
       markStarted = () => resolve('request-started');
     });
     const run = runSummary(target, { onRequestStart: markStarted });
-    void run
+    const settled = trackAutoSummary(run
       .then(async () => {
         await afterSummaryHideAndInject(chat);
       })
       .catch(e => {
         engineState.lastError = e instanceof Error ? e.message : String(e);
-      });
+      }));
     // 早退/失败时 run 会先完成,不会因为启动屏障未触发而卡住正文生成。
     await Promise.race([
       started,
-      run.then(() => 'run-finished' as const),
+      settled.then(() => 'run-finished' as const),
     ]);
     return;
   }
 
-  await runSummary(target);
-  await afterSummaryHideAndInject(chat);
+  await trackAutoSummary(runSummary(target).then(() => afterSummaryHideAndInject(chat)));
 }
 
 /**
@@ -1984,7 +1995,7 @@ export function bindEngine(): void {
   if (et.CHAT_CHANGED) {
     es.on(et.CHAT_CHANGED, () => {
       // 记忆重载由 store 的 CHAT_CHANGED 监听负责;此处仅在其后刷新注入
-      clearRecallInjection(); // 切聊天先抹掉上个聊天的召回残留(新聊天下次生成再重算)
+      clearRecallInjection('已切换聊天'); // 切聊天先抹掉上个聊天的召回残留
       setTimeout(() => {
         normalizeBacklogNotices(getContext()?.chat ?? []);
         refreshInjection();
@@ -2011,7 +2022,7 @@ export function bindEngine(): void {
   // 切换自动隐藏只刷新注入与召回缓存，不立即改动任何楼层隐藏状态。
   watch(() => apiSettings.autoHideEnabled, () => {
     invalidateRecallCache();
-    clearRecallInjection();
+    clearRecallInjection('自动隐藏设置已改变');
     refreshInjection();
   });
 
