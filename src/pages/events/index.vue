@@ -576,10 +576,10 @@ onBeforeUnmount(() => {
       <div v-if="eventPending(card)" class="mn-card">
         <p v-if="card.blocked">关联摘要待审核或来源已删除。先处理上方摘要审核；已删除来源可展开成员解除关联。</p>
         <p v-else>概要待更新。可以保留原概要、手动补充，或让模型更新；事件关联仍保留。</p>
-        <div class="mn-actions">
-          <button :disabled="busy || jobState.busy || card.blocked" @click="run(async () => { await keepEventOverview(await activeLibrary(), validView(), card.chain.id, () => viewHost === hostVersion() && viewGeneration === dailyState.generation); await refresh(); })">保留现有事件概要</button>
-          <button :disabled="busy || jobState.busy" @click="edit(card)">手动更新概要</button>
-          <button :disabled="busy || jobState.busy || card.blocked || manualEventState.busy" @click="openRewrite(card)">模型更新概要</button>
+        <div class="mn-actions mn-overview-actions">
+          <button :disabled="busy || jobState.busy || card.blocked" @click="run(async () => { await keepEventOverview(await activeLibrary(), validView(), card.chain.id, () => viewHost === hostVersion() && viewGeneration === dailyState.generation); await refresh(); })">保留当前</button>
+          <button :disabled="busy || jobState.busy" @click="edit(card)">手动更新</button>
+          <button :disabled="busy || jobState.busy || card.blocked || manualEventState.busy" @click="openRewrite(card)">AI更新</button>
         </div>
       </div>
       <p class="mn-pre">
@@ -842,6 +842,17 @@ onBeforeUnmount(() => {
 }
 .mn-event-meta button {
   padding: 5px 9px;
+}
+.mn-overview-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.mn-overview-actions button {
+  min-width: 0;
+  padding: 6px 4px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 .mn-event-card hr {
   border: 0;

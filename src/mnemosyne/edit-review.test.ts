@@ -1,12 +1,88 @@
 import { test, expect, vi } from 'vitest';
 import { fixture } from './fixtures';
 import { capture, synchronize, statuses, keepSummary, keepSummaries, forkBranch } from './canonical';
-import { eventView, editEvent, wrapEvents } from './events';
+import { eventView, editEvent, wrapEvents, renderPersistentEvents } from './events';
 import { commitManualEvent, keepEventOverview, updateEventOverview, eventPending } from './manual-events';
 import { exportLibrary, restoreLibrary, validateData } from './migration';
 import { STORES, type MemoryRevision } from './model';
 const response = JSON.stringify({ title: '合成事件', status: 'open', keywords: [], overview: '已经整理好的关系变化', progress: '最初进展' });
 const budget = { chains: 2, excerptChars: 500, totalChars: 1600, extra: 1 };
+test.each(['keep', 'manual', 'ai'] as const)('%s overview confirmation rebinds retained latest progress after summary-only edits', async (action) => {
+  const { lib, input, branch } = await fixture(2);
+  try {
+    input.memories[0].storyTime = '2026/9/25 10:00 - 2026/9/25 10:30';
+    await synchronize(lib, input);
+    let view = await capture(lib, branch.id);
+    const original = view.memories[0];
+    const id = await commitManualEvent(lib, view, null, [original.id], JSON.stringify({ ...JSON.parse(response),
+      latestProgress: { memory: original.id, text: '已找到玉佩，等待归还' } }), () => true);
+    const before = (await eventView(lib, await capture(lib, branch.id))).cards[0];
+    const originalSources = view.refs;
+    input.memories[0] = { ...input.memories[0], content: '仅润色摘要，正文保持原样', manualEdit: true, generationKey: 2 };
+    await synchronize(lib, input); view = await capture(lib, branch.id);
+    const next = view.memories[0];
+    expect(view.refs).toEqual(originalSources);
+    expect(next.id).not.toBe(original.id);
+    expect((await statuses(lib, view)).get(next.id)).toBe('valid');
+    let card = (await eventView(lib, view)).cards[0];
+    expect(card.needsReview).toBe(true); expect(card.blocked).toBe(false);
+    // Saving metadata without confirmation must not approve the changed summary.
+    await editEvent(lib, view, id, { ...card.meta, title: '润色后的事件标题' });
+    view = await capture(lib, branch.id); card = (await eventView(lib, view)).cards[0];
+    expect(eventPending(card)).toBe(true);
+    expect(card.meta.latestProgress).toEqual(before.meta.latestProgress);
+    if (action === 'keep') await keepEventOverview(lib, view, id);
+    else if (action === 'manual') await editEvent(lib, view, id, {
+      title: card.meta.title, status: card.meta.status, keywords: card.meta.keywords,
+      overview: '手工润色后的事件概要', summarized: [next.id], confirmOverview: true,
+    });
+    else {
+      const sender = vi.fn(async () => response); // Legacy AI response omits latestProgress.
+      await updateEventOverview(lib, view, id, 48000, sender);
+      expect(sender).toHaveBeenCalledTimes(1);
+    }
+    // A fresh synchronization and database read must retain the confirmation.
+    await synchronize(lib, input); view = await capture(lib, branch.id);
+    card = (await eventView(lib, view)).cards[0];
+    expect(eventPending(card)).toBe(false);
+    expect(card.meta.latestProgress).toEqual({ ...before.meta.latestProgress, memory: next.id });
+    expect(card.meta.overview).toBe(action === 'manual' ? '手工润色后的事件概要' : before.meta.overview);
+    expect(renderPersistentEvents([card])).toContain('已找到玉佩，等待归还');
+    expect(await lib.all('event_progress')).toHaveLength(1);
+    expect(await lib.get('memory_revisions', original.id)).toEqual(original);
+    const pack = await exportLibrary(lib);
+    const restored = await restoreLibrary(pack, false);
+    try { expect(eventPending((await eventView(restored, await capture(restored, branch.id))).cards[0])).toBe(false); }
+    finally { restored.close(); }
+    input.memories[0].content += '再次修改'; input.memories[0].generationKey = 3;
+    await synchronize(lib, input);
+    expect(eventPending((await eventView(lib, await capture(lib, branch.id))).cards[0])).toBe(true);
+  } finally { lib.close(); }
+});
+
+test('confirmation cannot move latest progress to an unrelated remaining member', async () => {
+  const { lib, input, branch, view } = await fixture(2);
+  try {
+    const [source, other] = view.memories;
+    const id = await commitManualEvent(lib, view, null, [source.id, other.id], JSON.stringify({ ...JSON.parse(response),
+      latestProgress: { memory: source.id, text: '待归还' } }), () => true);
+    input.messages[1].content += '正文改变'; await synchronize(lib, input);
+    let current = await capture(lib, branch.id);
+    await expect(keepEventOverview(lib, current, id)).rejects.toThrow('审核来源摘要');
+    // This legacy fixture's second summary covers the prefix, so review it independently.
+    await keepSummary(lib, current, other.id); current = await capture(lib, branch.id);
+    let card = (await eventView(lib, current)).cards[0];
+    await editEvent(lib, current, id, card.meta, { memory: source.id, active: false, kind: 'progress' });
+    current = await capture(lib, branch.id);
+    const count = (await lib.all('event_revisions')).length;
+    await expect(keepEventOverview(lib, current, id)).rejects.toThrow('最新进展来源');
+    expect(await lib.all('event_revisions')).toHaveLength(count);
+    card = (await eventView(lib, current)).cards[0];
+    await editEvent(lib, current, id, { ...card.meta, latestProgress: null, summarized: [other.id], confirmOverview: true });
+    expect(eventPending((await eventView(lib, await capture(lib, branch.id))).cards[0])).toBe(false);
+  } finally { lib.close(); }
+});
+
 test('91 high summaries and 15 events survive an unused final edit, delete and regenerated reply', async () => {
   const { lib, input, branch } = await fixture(3);
   for (let i = 6; i < 561; i++) input.messages.push({ key: `tail-${i}`, role: i % 2 ? 'assistant' : 'user', content: `合成未总结正文 ${i}`, swipe: 0 });

@@ -275,6 +275,15 @@ export const eventOverviewLength = (text: string) => Array.from(text.trim()).len
 export function checkEventOverview(text: string) {
     check(eventOverviewLength(text) <= EVENT_OVERVIEW_MAX_CHARS, `事件概要不能超过${EVENT_OVERVIEW_MAX_CHARS}字（含标点），未保存；请精简后重试`);
 }
+/** Rebind retained progress only when the user/model confirms the current event material. */
+export async function confirmLatestProgressSource(lib: Library, progress: EventRevision['latestProgress'], members: MemoryRevision[]) {
+    if (!progress || members.some(m => m.id === progress.memory)) return progress;
+    const previous = await lib.get<MemoryRevision>('memory_revisions', progress.memory);
+    const source = previous && members.find(m => m.owner === previous.owner);
+    check(source, '最新进展来源已解除关联或失效，请手动选择有效摘要或清空最新进展');
+    // Summary revision changes are not new plot progress: retain text and original story time.
+    return { ...progress, memory: source.id };
+}
 export async function editEvent(lib: Library, view: CapturedView, eventId: string | null, patch: {
     title: string;
     status: string;
@@ -308,6 +317,10 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
         check(!existing?.blocked, '请先审核来源摘要，或解除已删除来源的关联');
         check(equal([...(patch.summarized ?? [])].sort(), (existing?.members.map(m => m.memory) ?? []).sort()), '确认范围必须包含当前全部关联摘要');
     }
+    const retainedProgress = patch.latestProgress === undefined ? existing?.meta.latestProgress : patch.latestProgress;
+    const latestProgress = patch.confirmOverview
+        ? await confirmLatestProgressSource(lib, retainedProgress, valid.filter(m => patch.summarized?.includes(m.id)))
+        : retainedProgress;
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
         check(guard() && branch && branch.epoch === view.branch.epoch, '视图已改变，请刷新');
@@ -319,7 +332,6 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
             key = chain.id;
         }
         const base = { story: branch.story, branch: branch.id, owner: key, snapshot: view.snapshot.id, cutoff: view.cutoff, epoch: branch.epoch };
-        const latestProgress = patch.latestProgress === undefined ? existing?.meta.latestProgress : patch.latestProgress;
         const progressSource = progressChanged && patch.latestProgress && valid.find(m => m.id === patch.latestProgress!.memory);
         await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2,
             ...(latestProgress !== undefined ? { latestProgress: latestProgress && progressSource ? {

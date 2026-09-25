@@ -12,7 +12,7 @@ import { eventCreationContext } from "@/memory/engine";
 import { activeLibrary, type Library } from "./db";
 import { current, statuses } from "./canonical";
 import { syncDaily, hostVersion, dailyState, dailyCurrent } from "./bridge";
-import { eventView, editEvent, type EventCard } from "./events";
+import { eventView, editEvent, confirmLatestProgressSource, type EventCard } from "./events";
 import { buildEventInstruction } from "./event-prompts";
 import { parseManualEvent } from "./event-response";
 export { parseManualEvent } from "./event-response";
@@ -61,7 +61,7 @@ export async function commitManualEvent(
   const latestProgress = latest && progressMemory ? {
     version: 1 as const, text: latest.text, memory: progressMemory.id,
     time: splitTimeLabel(progressMemory.storyTime).end || progressMemory.storyTime,
-  } : card?.meta.latestProgress ?? null;
+  } : await confirmLatestProgressSource(lib, card?.meta.latestProgress, allowed.filter(m => memories.includes(m.id))) ?? null;
   check(
     memories.length && memories.every((id) => allowed.some((m) => m.id === id)),
     "事件来源已失效",
