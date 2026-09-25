@@ -219,6 +219,7 @@ test("custom event writing replaces the default for create/update, blank restore
     expect(instruction).toContain("不超过500字");
     expect(instruction).toContain('"progress"');
     expect(instruction).toContain(EVENT_OUTPUT_PROTOCOL);
+    expect(instruction).toContain('progress 不超过80字');
     expect(instruction).toContain('100字以内的最新进展小结');
     return answer;
   });
@@ -465,6 +466,23 @@ test("rewrite without instructions, valid members or sufficient budget does not 
     prepareEventRewrite(empty, "简洁", 48000, sender),
   ).rejects.toThrow("没有有效关联摘要");
   expect(sender).not.toHaveBeenCalled();
+});
+test("append progress accepts 100 characters, rejects 101 before saving and still permits empty rewrites", async () => {
+  const progress = '进'.repeat(99) + '🌸';
+  const output = (text: string) => JSON.stringify({ ...JSON.parse(answer), progress: text });
+  const view = await syncDaily();
+  await expect(commitManualEvent(lib, view, null, [view.memories[0].id], output(progress + '超'), () => true)).rejects.toThrow('最多100字');
+  expect(await lib.all('event_chains')).toHaveLength(0);
+  const id = await commitManualEvent(lib, view, null, [view.memories[0].id], output(progress), () => true);
+  expect((await lib.all<any>('event_progress'))[0].text).toBe(progress);
+  await joinFloorEvent(3, id);
+  const pending = await syncDaily(), before = await lib.all('event_revisions');
+  await expect(updateEventOverview(lib, pending, id, 48000, async () => output(progress + '超'))).rejects.toThrow('最多100字');
+  expect(await lib.all('event_revisions')).toEqual(before);
+  expect(await lib.all('event_progress')).toHaveLength(1);
+  await updateEventOverview(lib, pending, id, 48000, async () => output(''));
+  expect(eventPending((await eventView(lib, await syncDaily())).cards[0])).toBe(false);
+  expect(await lib.all('event_progress')).toHaveLength(1);
 });
 test("overview limit accepts 500 Unicode characters and rejects overlong creation/update without publishing", async () => {
   const atLimit = "核".repeat(499) + "🌸";

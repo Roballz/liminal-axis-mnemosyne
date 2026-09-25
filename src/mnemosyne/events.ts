@@ -1,4 +1,4 @@
-import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
+import { EVENT_PROGRESS_MAX_CHARS, EVENT_APPEND_MAX_CHARS, EVENT_APPEND_PROMPT_MAX_CHARS } from '@/memory/limits';
 import { splitTimeLabel } from '@/memory/timeTag';
 import type { EventHint } from '@/memory/contextTags';
 import { sourceContent, sourceRefMatches, sourceRefsMatch } from './source-equivalence';
@@ -107,7 +107,7 @@ export const EVENT_PROMPT = `你只整理事件，不重新生成摘要，不结
 已有事项的新行动、结果、转折、新证据续接旧 event_id；独立事项才新建。
 重复提及可以 reference，不冒充 progress。没有事件明确 none；证据不足 needs_review。
 只能引用提供的旧 event_id 和本批 memory_revision_id；新事件用 null，由程序生成 ID。
-概述只追加本批一到两句，不重写旧叙事，不编造动机、结局，不撤销人工关联。
+概述只追加本批一到两句，progress 不超过${EVENT_APPEND_PROMPT_MAX_CHARS}字，不重写旧叙事，不编造动机、结局，不撤销人工关联。
 每个输入摘要必须恰有一个 decisions 项，可在多个 events 中关联。none 和 needs_review 不得同时关联。
 严格 JSON：{"decisions":[{"memory":"mr_...","result":"linked|none|needs_review"}],
 "events":[{"event_id":null,"title":"事项","status":"open","keywords":[],
@@ -196,7 +196,8 @@ export function parseEventOutput(raw: string, batch: EventBatch): EventOutput {
         }
         check(typeof e.title === 'string' && e.title.trim() && e.title.length <= 300 && typeof e.status === 'string' && e.status.length <= 100, '事件元信息不完整');
         check(Array.isArray(e.keywords) && e.keywords.length <= 100 && e.keywords.every(k => typeof k === 'string' && k.length <= 100), '关键词非法');
-        check(typeof e.progress === 'string' && e.progress.length <= 4000 && Array.isArray(e.members) && e.members.length > 0, '事件进展/成员缺失');
+        check(typeof e.progress === 'string' && Array.from(e.progress).length <= EVENT_APPEND_MAX_CHARS, `progress（追加进展）必须是文本，最多${EVENT_APPEND_MAX_CHARS}字`);
+        check(Array.isArray(e.members) && e.members.length > 0, '事件成员缺失');
         const members = new Set<string>();
         for (const m of e.members) {
             check(inputs.has(m.memory) && !members.has(m.memory) && ['progress', 'reference'].includes(m.kind), '非法或重复摘要成员');

@@ -1,4 +1,4 @@
-import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
+import { EVENT_PROGRESS_MAX_CHARS, EVENT_APPEND_MAX_CHARS } from '@/memory/limits';
 /** Event-only diagnostics; archive/import JSON rules remain unchanged. */
 import { check } from "./model";
 import { parseStrictJson } from "./json";
@@ -57,8 +57,8 @@ export function parseManualEvent(raw: string) {
   );
   checkEventOverview(v.overview);
   check(
-    typeof v.progress === "string" && v.progress.length <= 4000,
-    'progress（追加进展）必须是文本，最多4000字符；没有进展可填空字符串 ""。',
+    typeof v.progress === "string" && Array.from(v.progress).length <= EVENT_APPEND_MAX_CHARS,
+    `progress（追加进展）必须是文本，最多${EVENT_APPEND_MAX_CHARS}字（含标点、数字、字母）；没有进展可填空字符串 ""。`,
   );
   if (v.latestProgress !== undefined && v.latestProgress !== null) {
     check(typeof v.latestProgress === 'object' && typeof v.latestProgress.text === 'string' && v.latestProgress.text.trim()

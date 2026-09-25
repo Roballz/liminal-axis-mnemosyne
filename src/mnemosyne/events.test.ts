@@ -3,9 +3,15 @@ import { batchFixture, fixture, output, observation } from './fixtures';
 import { prepareEventBatch, parseEventOutput, commitEventBatch, eventView, editEvent, wrapEvents } from './events';
 import { capture, synchronize } from './canonical';
 import { type Branch, type EventReceipt, type Progress } from './model';
+import { exportLibrary, restoreLibrary } from './migration';
 test('five summaries publish five memberships and exactly one append-only progress', async () => {
     const { lib, batch, branch } = await batchFixture();
     const out = output(batch);
+    out.events[0].progress = '进'.repeat(99) + '🌸';
+    expect(batch.prompt).toContain('progress 不超过80字');
+    const overlongProgress = structuredClone(out); overlongProgress.events[0].progress += '超';
+    await expect(commitEventBatch(lib, batch, overlongProgress)).rejects.toThrow('最多100字');
+    expect(await lib.all('event_chains')).toHaveLength(0);
     out.events[0].latestProgress = { memory: batch.memories[0].id, text: '已找到玉佩'.padEnd(100, '续') };
     expect(batch.prompt).toContain('100字内小结');
     const oversized = structuredClone(out); oversized.events[0].latestProgress!.text += '超';
@@ -196,8 +202,14 @@ test('long 25-member chain has a fixed total budget and at most one extra summar
     const { lib, view, branch } = await fixture(25);
     const batch = (await prepareEventBatch(lib, view, 30, 48000))!;
     const result = output(batch);
-    result.events[0].progress = '长概述'.repeat(800);
     await commitEventBatch(lib, batch, result);
+    // Simulate a legacy record, which must remain readable after new writes are limited.
+    const legacy = (await lib.all<Progress>('event_progress'))[0];
+    legacy.text = '长概述'.repeat(800);
+    await lib.transaction(['event_progress'], 'readwrite', tx => tx.put('event_progress', legacy));
+    const restored = await restoreLibrary(await exportLibrary(lib), false);
+    try { expect((await restored.get<Progress>('event_progress', legacy.id))?.text).toBe(legacy.text); }
+    finally { restored.close(); }
     const next = await capture(lib, branch.id), { cards } = await eventView(lib, next);
     const text = wrapEvents(cards, next, [batch.memories[12].id], [], { chains: 2, excerptChars: 120, totalChars: 250, extra: 1 });
     expect(text.length).toBeLessThanOrEqual(250);
