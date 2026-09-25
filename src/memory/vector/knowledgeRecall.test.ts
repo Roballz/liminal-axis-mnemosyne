@@ -49,16 +49,20 @@ beforeEach(async () => {
 afterEach(() => { Object.assign(settings.apiSettings.vector, original); settings.apiSettings.autoHideEnabled = originalAutoHide; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const finalText = () => String(inject.mock.calls.at(-1)?.[1] ?? '');
 
-it('自动隐藏关闭后排除窗口外仍显示原文的叶子，切换开关失效旧缓存', async () => {
+it('自动隐藏开关均排除尚未隐藏的叶子，真正隐藏后才召回；切换开关失效旧缓存', async () => {
   const chat = context.getContext()!.chat;
   chat[0].extra = { bbs_leaf: { id: 'visible-old', text: 'visible summary', delta: {}, createdAt: 1, swipe: 0, v: 1 } };
   settings.apiSettings.autoHideEnabled = true;
   await runVectorRecall();
-  expect(store.vecSearch).toHaveBeenLastCalledWith(database, expect.anything(), expect.anything(), expect.objectContaining({ excludeLeafIds: [] }));
+  expect(store.vecSearch).toHaveBeenLastCalledWith(database, expect.anything(), expect.anything(), expect.objectContaining({ excludeLeafIds: ['visible-old'] }));
   settings.apiSettings.autoHideEnabled = false;
   await runVectorRecall();
   expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(2);
   expect(store.vecSearch).toHaveBeenLastCalledWith(database, expect.anything(), expect.anything(), expect.objectContaining({ excludeLeafIds: ['visible-old'] }));
+  chat[0].is_system = true;
+  await runVectorRecall();
+  expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(3);
+  expect(store.vecSearch).toHaveBeenLastCalledWith(database, expect.anything(), expect.anything(), expect.objectContaining({ excludeLeafIds: [] }));
 });
 
 it('摘要与知识库共享一次 query/embedding，独立额度并按摘要后顺序注入；再次运行命中缓存', async () => {

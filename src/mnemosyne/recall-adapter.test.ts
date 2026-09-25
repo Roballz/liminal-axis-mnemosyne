@@ -32,7 +32,7 @@ beforeEach(async () => {
     vi.spyOn(db, 'activeLibrary').mockResolvedValue(lib);
     vi.spyOn(bridge, 'dailyInstalled').mockReturnValue(true);
     vi.spyOn(bridge, 'syncDaily').mockImplementation(async () => view);
-    vi.spyOn(bridge, 'hostVersion').mockImplementation(() => host);
+    vi.spyOn(bridge, 'recallHostVersion').mockImplementation(() => host);
     leaves = view.memories.map((m, i) => ({ leafId: m.id, hostId: m.hostId, docHash: m.fingerprint, payloadHash: m.fingerprint, document: m.content, mesFull: f.input.messages[i * 2 + 1].content, storyTime: '', msgIndex: i * 2 + 1 }));
     vi.spyOn(bridge, 'canonicalLeaves').mockImplementation(() => leaves);
     vi.spyOn(context, 'getContext').mockReturnValue({ chat: [{ is_user: false, mes: '近期全文' }, { is_user: true, mes: '玉佩' }], setExtensionPrompt: inject } as any);
@@ -79,7 +79,7 @@ test('late rerank result after host edit is never injected', async () => {
     expect(recallDebug.status).toContain('召回失败');
 });
 test('an event edit during rerank advances DB epoch and blocks obsolete recall publication', async () => {
-    vi.mocked(embed.rerankDocuments).mockImplementation(async () => { await editEvent(lib, view, null, { title: '人工变化', status: 'open', keywords: [] }); return [{ index: 0, score: .99 }]; });
+    vi.mocked(embed.rerankDocuments).mockImplementation(async () => { await editEvent(lib, view, null, { title: '人工变化', status: 'open', keywords: [] }, { memory: view.memories[0].id, active: true, kind: 'progress' }); return [{ index: 0, score: .99 }]; });
     await runVectorRecall();
     expect(text()).toBe('');
     expect(recallDebug.status).toContain('召回失败');

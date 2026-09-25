@@ -3,7 +3,7 @@ import { eventHintsBefore } from '@/mnemosyne/events';
 import { activeLibrary } from '@/mnemosyne/db';
 import { SUMMARY_TAG_PROTOCOL, PLAN_PROGRESS_PROTOCOL } from './prompts';
 import { prepareSummaryTables, parseSummaryTableResult, validateSummaryTableResult, attachTableResult } from '@/mnemosyne/summary-tables';
-import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, syncDaily, summaryAllowed } from '@/mnemosyne/bridge';
+import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, beginVisibleSummaryCommit, syncDaily, summaryAllowed } from '@/mnemosyne/bridge';
 import type { ChatMsg } from '@/api/client';
 import { mainApiAvailable, requestCompletion, requestViaMainApi } from '@/api/client';
 import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings';
@@ -1268,9 +1268,11 @@ async function summarizeFloorWork(
 
   await validateSummaryTableResult(tablePlan);
   assertSummaryEvidence(mnEvidence);
+  const commitVisibleSummary = beginVisibleSummaryCommit(aiFloor);
   applyLeafForFloor(chat, aiFloor, delta, stateBefore, options.replaceLeaf, events);
   attachSummaryEvidence(chat, aiFloor, mnEvidence, targets);
   attachTableResult(chat, aiFloor, tablePlan);
+  commitVisibleSummary();
   engineState.lastRunAt = Date.now();
 
   // 立刻反映到派生与注入;落盘走防抖(隐藏由收尾的 syncWindowHiddenState 统一负责)

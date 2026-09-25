@@ -8,6 +8,8 @@ import { reactive, watch } from 'vue';
 import { getContext, type STMessage } from '@/st/context';
 import { derivedMeta, memory } from '@/memory/store';
 import { getLeaf, leafValid } from '@/memory/apply';
+import { apiSettings } from '@/api/settings';
+import { resolveKeepStart } from '@/memory/engine';
 import { clearRecallInjection } from '@/memory/vector/recall';
 import { refreshInjection } from '@/memory/inject';
 import { activeLibrary } from './db';
@@ -51,6 +53,9 @@ interface DailyCache {
 }
 let cache: DailyCache | null = null;
 let lastCache: DailyCache | null = null;
+// 已验证的基础注入投影独立于正在写入的档案缓存；只沿已证明无关的变化续用。
+let injectionCache: DailyCache | null = null;
+let parallelHost: { host: string; version: string } | null = null;
 let serial: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let savedHost = '';
@@ -104,6 +109,50 @@ export function hostVersion(): string {
         memory.summaries,
     ]);
 }
+/** 只有引擎同步提交的可见近期补摘可以沿用版本；正文编辑始终得到新版本。 */
+export function recallHostVersion(): string {
+    const host = hostVersion();
+    return JSON.stringify([parallelHost?.host === host ? parallelHost.version : host,
+        getContext()?.chat.map(m => !m.is_user && !!m.is_system)]);
+}
+function readableProjection(): DailyCache | null {
+    return injectionCache?.host === hostVersion() ? injectionCache : null;
+}
+/** 在已校验来源之后、同步落叶之前调用；返回的提交器不得跨 await 使用。 */
+export function beginVisibleSummaryCommit(floor: number): () => void {
+    const ctx = getContext(), message = ctx?.chat[floor], projection = readableProjection();
+    if (!installed || !ctx || !message || !projection || getLeaf(message) || message.is_system ||
+        message.extra?.bbs_omit || (apiSettings.autoHideEnabled && floor < resolveKeepStart(ctx.chat))) return () => {};
+    const ref = projection.view.refs[floor];
+    // 既有记忆若实际依赖此楼，仍走完整失效；不把“可见”当成跳过来源校验的理由。
+    if (!ref || projection.view.memories.some(m => m.anchor === ref.message ||
+        [...m.inputRefs, ...m.coverage].some(r => r.message === ref.message))) return () => {};
+    const before = hostVersion();
+    const version = parallelHost?.host === before ? parallelHost.version : before;
+    return () => {
+        if (getContext()?.chat !== ctx.chat || ctx.chat[floor] !== message || message.is_system || !leafValid(message)) return;
+        const after = hostVersion();
+        const prior = JSON.parse(before), next = JSON.parse(after);
+        const a = prior[1][floor], b = next[1][floor];
+        if (!b || [0, 1, 3, 4].some(i => JSON.stringify(a[i]) !== JSON.stringify(b[i]))) return;
+        prior[1][floor] = b;
+        if (JSON.stringify(prior) !== after) return; // 不吞掉同时发生的其他楼/高层摘要修改。
+        parallelHost = { host: after, version };
+        injectionCache = { ...projection, host: after };
+        scheduledHost = after;
+        dailyState.generation++;
+        dailyState.pending = true;
+    };
+}
+
+function appendedProjection(host: string): DailyCache | null {
+    if (!injectionCache) return null;
+    const before = JSON.parse(injectionCache.host), after = JSON.parse(host);
+    if (before[0] !== after[0] || JSON.stringify(before[2]) !== JSON.stringify(after[2]) ||
+        after[1].length <= before[1].length ||
+        JSON.stringify(before[1]) !== JSON.stringify(after[1].slice(0, before[1].length))) return null;
+    return { ...injectionCache, host };
+}
 /** Separate from source identity: hide/unhide can revoke a pending repair preview. */
 export function hiddenRoleRepairRefs(view: CapturedView): SourceRef[] {
     const chat = getContext()?.chat ?? [];
@@ -115,10 +164,12 @@ export function hiddenRoleRepairRefs(view: CapturedView): SourceRef[] {
             source.provenance.swipe === (message.swipe_id ?? 0);
     });
 }
-export function invalidateDaily(reason = '档案视图已更新') {
+export function invalidateDaily(reason = '档案视图已更新', hostNotification = false) {
     const scope = hostScope();
     if (dailyState.scope !== scope) reason = '已切换聊天';
     scheduledHost = hostVersion();
+    injectionCache = hostNotification ? appendedProjection(scheduledHost) : null;
+    parallelHost = null;
     if (dailyState.scope !== scope)
         Object.assign(dailyState, {
             scope,
@@ -135,7 +186,7 @@ export function invalidateDaily(reason = '档案视图已更新') {
     cache = null;
     dailyState.pending = true;
     if (installed) {
-        clearRecallInjection(reason, true);
+        clearRecallInjection(reason);
         refreshInjection();
     }
 }
@@ -155,7 +206,7 @@ export function dailyInstalled() {
 }
 export function summaryPermission(): (hostId: string) => boolean {
     if (!installed) return () => true;
-    const allowed = cache && cache.host === hostVersion() ? cache.allowed : new Set<string>();
+    const allowed = readableProjection()?.allowed ?? new Set<string>();
     return (hostId) => allowed.has(hostId);
 }
 export function summaryAllowed(hostId: string): boolean {
@@ -180,13 +231,13 @@ async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, vie
     })) };
 }
 export function persistentEventText(): string {
-    return cache && cache.host === hostVersion() ? cache.eventText : '';
+    return readableProjection()?.eventText ?? '';
 }
 export function currentEventHints(): EventHint[] {
-    return cache && cache.host === hostVersion() ? cache.eventHints : [];
+    return readableProjection()?.eventHints ?? [];
 }
 export function canonicalLeaves(): CanonicalLeaf[] {
-    return cache && cache.host === hostVersion() ? cache.leaves : [];
+    return readableProjection()?.leaves ?? [];
 }
 function projectView(view: CapturedView, validity: Map<string, MemoryStatus>) {
     const allowed = new Set(view.memories.filter((m) => validity.get(m.id) === 'valid').map((m) => m.hostId));
@@ -222,6 +273,7 @@ export async function syncDaily(): Promise<CapturedView> {
             const scope = hostScope();
             check(ctx && scope, '请先打开聊天');
             const lib = await activeLibrary();
+            if (injectionCache?.library !== lib.db.name) injectionCache = null;
             const observedHost = hostVersion(),
                 observedGeneration = dailyState.generation;
             const reusable = cache ?? lastCache;
@@ -232,6 +284,8 @@ export async function syncDaily(): Promise<CapturedView> {
                 reusable.library === lib.db.name
             ) {
                 const live = await lib.get<Branch>('branches', reusable.view.branch.id);
+                if (!live || live.head !== reusable.view.branch.head || live.view !== reusable.view.branch.view ||
+                    live.epoch !== reusable.view.branch.epoch) injectionCache = null;
                 if (live && live.head === reusable.view.branch.head && live.view === reusable.view.branch.view) {
                     cache = reusable;
                     if (live.epoch !== reusable.view.branch.epoch) {
@@ -261,7 +315,7 @@ export async function syncDaily(): Promise<CapturedView> {
                         '聊天已改变，请重试',
                     );
                     check(observedHost === hostVersion() && observedGeneration === dailyState.generation, '聊天已改变');
-                    lastCache = cache;
+                    lastCache = injectionCache = cache;
                     Object.assign(dailyState, {
                         pending: false,
                         status: '已归档',
@@ -294,6 +348,7 @@ export async function syncDaily(): Promise<CapturedView> {
                 throw new Error('聊天名称或绑定已改变：若只是改名，请接回原档案；若创建了新分支，请明确选择新故事或继承。不自动猜测分支。');
             }
             dailyState.conflict = false;
+            const beforeIds = hostVersion();
             let dirty = false;
             const keys = new Set<string>();
             for (const message of ctx.chat) {
@@ -309,6 +364,8 @@ export async function syncDaily(): Promise<CapturedView> {
             }
             const generation = dailyState.generation;
             const host = hostVersion();
+            // 新追加楼层补写稳定 ID 不改变既有记忆的来源；保存失败时仍可使用原基础注入。
+            if (injectionCache?.host === beforeIds) injectionCache = { ...injectionCache, host };
             scheduledHost = host; // 归档自身补写消息 ID 不等于一次新的内容编辑。
             const observation: HostObservation = {
                 scope,
@@ -450,7 +507,7 @@ export async function syncDaily(): Promise<CapturedView> {
                 ),
             };
             check(host === hostVersion() && generation === dailyState.generation, '聊天已改变');
-            lastCache = cache;
+            lastCache = injectionCache = cache;
             Object.assign(dailyState, {
                 branch: branch.id,
                 archived: view.refs.length,
@@ -476,7 +533,7 @@ export async function syncDaily(): Promise<CapturedView> {
     });
 }
 export function dailyTableText(): string {
-    return cache && cache.host === hostVersion() ? cache.tableText : '';
+    return readableProjection()?.tableText ?? '';
 }
 /** Table-only mutations refresh state without re-archiving the chat or rereading source bodies. */
 export async function refreshDailyTables() {
@@ -497,7 +554,7 @@ export async function refreshDailyTables() {
     if (cache !== previous || host !== hostVersion()) return;
     const permitted = new Set(previous.view.memories.filter((m) => previous.allowed.has(m.hostId)).map((m) => m.id));
     cache = { ...previous, ...events, view: { ...previous.view, branch }, tableText: renderTableState(inputs, permitted) };
-    lastCache = cache;
+    lastCache = injectionCache = cache;
     dailyState.tableRevision++;
     dailyState.revision++;
     if (installed) refreshInjection();
@@ -505,7 +562,7 @@ export async function refreshDailyTables() {
 export function scheduleDaily() {
     if (!installed) return;
     // 派生重算和宿主事件只是通知；同一内容重复通知不应撤销正在等待的召回。
-    if (hostVersion() !== (cache?.host ?? scheduledHost)) invalidateDaily('当前聊天的正文或摘要已更新');
+    if (hostVersion() !== scheduledHost) invalidateDaily('当前聊天的正文或摘要已更新', true);
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
         void syncDaily().catch(() => {});
@@ -589,6 +646,7 @@ export async function reconnectArchive(preview: Awaited<ReturnType<typeof previe
         await commitReconnect(lib, plan, guard);
         cache = null;
         lastCache = null;
+        injectionCache = null;
         check(guard(), '档案连接已保存；聊天已切换，请返回后刷新');
         // Durable binding is committed first; a failed metadata save can retry the same binding.
         ctx.chatMetadata[BINDING_KEY] = { scope: plan.scope, branch: plan.branch.id };
@@ -608,6 +666,8 @@ export function bindDaily() {
     savedHost = '';
     scheduledHost = '';
     lastCache = null;
+    injectionCache = null;
+    parallelHost = null;
     const ctx = getContext();
     if (!ctx) return;
     const handlers: {
@@ -637,6 +697,8 @@ export function bindDaily() {
         if (timer) clearTimeout(timer);
         for (const h of handlers) ctx.eventSource.off?.(h.event, h.callback);
         cache = null;
+        injectionCache = null;
+        parallelHost = null;
     };
 }
 export async function captureSummaryEvidence(indices: number[], dependencies: string[] = []) {
@@ -703,6 +765,7 @@ export async function confirmFork(parentId: string, prefixLength: number) {
         const branch = await forkBranch(lib, parent, scope, guard);
         cache = null;
         lastCache = null;
+        injectionCache = null;
         check(guard(), '分支已保存；聊天已切换，请返回后刷新');
         ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
         await ctx.saveMetadata();

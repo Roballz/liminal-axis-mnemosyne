@@ -1,12 +1,11 @@
 import { prioritizeRrf } from './contextRecall';
 import { abortable } from './abort';
-import { nextTick } from 'vue';
 import { planTitle, type RecallContext } from '../contextTags';
 import { memory } from '../store';
-import { dailyInstalled, syncDaily, canonicalLeaves, hostVersion, dailyState } from '@/mnemosyne/bridge';
+import { dailyInstalled, syncDaily, canonicalLeaves, recallHostVersion } from '@/mnemosyne/bridge';
 import { activeLibrary } from '@/mnemosyne/db';
 import { current } from '@/mnemosyne/canonical';
-import { eventView, wrapEvents } from '@/mnemosyne/events';
+import { eventView, wrapEvents, type EventCard } from '@/mnemosyne/events';
 import { settings as dailySettings } from '@/mnemosyne/jobs';
 /**
  * 阻塞式向量召回:生成主回复前,按用户输入 + 近期上下文检索相关旧记忆,注入主对话。
@@ -33,7 +32,7 @@ import { collectLeaves, ensureRecallIndex } from './index';
 import { searchBm25 } from './bm25';
 import { candidateKey, fuseCandidates, normalizeHybridLimits, selectRecall, type HybridHit, type RankedHit } from './hybrid';
 import { currentBundleHashes, currentChatId, currentChatScope, currentVectorDb, recallScopes } from './scope';
-import { currentAutoSummaryPromise, currentSummaryPromise, isAiFloor, resolveKeepStart } from '../engine';
+import { isAiFloor, resolveKeepStart } from '../engine';
 import { cleanBody, compactTimeLabel, latestStoryTime, splitTimeLabel } from '../timeTag';
 import { relativeTimeLabel } from '../timeRel';
 import { normalizeRecallInjectionDepth } from './depth';
@@ -84,9 +83,9 @@ function sourceLabel(hit: HybridHit, selfScope: string | null): string {
 function windowLeafIds(chat: STMessage[]): string[] {
   const keepStart = resolveKeepStart(chat);
   const ids: string[] = [];
-  for (let i = apiSettings.autoHideEnabled ? keepStart : 0; i < chat.length; i++) {
+  for (let i = 0; i < chat.length; i++) {
     if (chat[i]?.extra?.bbs_omit) continue;
-    if (!apiSettings.autoHideEnabled && chat[i]?.is_system === true) continue;
+    if (chat[i]?.is_system === true && (!apiSettings.autoHideEnabled || i < keepStart)) continue;
     if (leafValid(chat[i])) {
       const key = dailyInstalled() ? canonicalLeaves().find(l => l.msgIndex === i)?.leafId : getLeaf(chat[i])!.id;
       if (key) ids.push(key);
@@ -217,8 +216,7 @@ function buildRecallCacheKey(chat: STMessage[], cfg: typeof apiSettings.vector.r
   return `${chatId}|${userIdx}|${fnv1a(userText)}|${fnv1a(aiText)}|${recallParamFingerprint(cfg)}`;
 }
 
-let activeRecall: { key: string; controller: AbortController; promise: Promise<void>;
-  acceptsSummaryChange: () => boolean } | null = null;
+let activeRecall: { key: string; controller: AbortController; promise: Promise<void> } | null = null;
 let recallEpoch = 0;
 
 function cancelActiveRecall(reason: string): void {
@@ -245,9 +243,9 @@ export function shouldRecallForType(type: string | undefined): boolean {
 }
 
 /** 清空召回注入槽(降级/未命中/切聊天时)。 */
-export function clearRecallInjection(reason = '聊天、记忆或设置已改变，本轮召回已取消', summaryMaySettle = false): void {
+export function clearRecallInjection(reason = '聊天、记忆或设置已改变，本轮召回已取消'): void {
   recallEpoch++;
-  if (!summaryMaySettle || !activeRecall?.acceptsSummaryChange()) cancelActiveRecall(reason);
+  cancelActiveRecall(reason);
   getContext()?.setExtensionPrompt?.(RECALL_INJECT_KEY, '', IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
 }
 
@@ -269,30 +267,11 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
   if (typeof fn !== 'function' || !chat.length) return;
 
   // 同一轮重复进入必须一起等待；新一轮则取消旧任务，不能被悬挂的布尔锁直接放行。
-  const runKey = () => JSON.stringify([database, currentChatId(), hostVersion(), apiSettings.vector,
+  const key = JSON.stringify([database, currentChatId(), recallHostVersion(), apiSettings.vector,
     apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags]);
-  const key = runKey();
-  if (activeRecall && (activeRecall.key === key || activeRecall.acceptsSummaryChange()) &&
-    !activeRecall.controller.signal.aborted) return activeRecall.promise;
+  if (activeRecall?.key === key && !activeRecall.controller.signal.aborted) return activeRecall.promise;
   cancelActiveRecall('已开始新一轮召回，旧任务已取消');
-  const pendingSummary = currentAutoSummaryPromise() ?? currentSummaryPromise();
-  const sourceChat = currentChatId();
-  const sourceLength = chat.length;
-  const userInput = () => {
-    const messages = getContext()?.chat ?? [];
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].is_user) return JSON.stringify([i, messages[i].mes]);
-    }
-    return '';
-  };
-  const inputAtStart = userInput();
-  const settingsAtStart = JSON.stringify(apiSettings.vector);
-  const sameRequest = () => sourceChat === currentChatId() && database === currentVectorDb() &&
-    getContext()?.chat === chat && chat.length === sourceLength && userInput() === inputAtStart &&
-    settingsAtStart === JSON.stringify(apiSettings.vector);
-  let preparing = !!pendingSummary;
-  const run = { key, controller: new AbortController(), promise: Promise.resolve(),
-    acceptsSummaryChange: () => preparing && sameRequest() };
+  const run = { key, controller: new AbortController(), promise: Promise.resolve() };
   activeRecall = run;
   const onAbort = () => run.controller.abort(new Error('召回已取消'));
   signal?.addEventListener('abort', onAbort, { once: true });
@@ -300,16 +279,6 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
   resetRecallDebug();
   run.promise = Promise.resolve().then(async () => {
     run.controller.signal.throwIfAborted();
-    if (pendingSummary) {
-      setRecallStatus('进行中…等待本轮自动摘要及隐藏收尾');
-      // 此时尚未取召回快照或发送 Query。只接纳同一聊天、同一输入的摘要落盘。
-      await abortable(pendingSummary, run.controller.signal);
-      await nextTick(); // 派生刷新通知先落定，之后才固定 host/generation/候选版本。
-      run.controller.signal.throwIfAborted();
-      if (!sameRequest()) throw new Error('等待摘要期间聊天或输入已改变');
-      preparing = false;
-      run.key = runKey();
-    }
     return abortable(executeVectorRecall(run.controller.signal), run.controller.signal);
   }).catch(error => {
     if (activeRecall !== run) return;
@@ -344,8 +313,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     try { canonicalView = await syncDaily(); } catch { /* Knowledge remains independently available. */ }
   }
   signal.throwIfAborted();
-  const canonicalHost = hostVersion();
-  const canonicalGeneration = dailyState.generation;
+  const canonicalHost = recallHostVersion();
   const canonicalPolicy = JSON.stringify(dailySettings);
   const cfg = normalizeHybridLimits({ ...apiSettings.vector.recall });
   const knowledgeConfig = { ...apiSettings.vector.knowledge };
@@ -355,13 +323,27 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     apiSettings.vector.queryRewrite, apiSettings.vector.rerank, apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags]);
   const settingsAtStart = settingsKey();
   const sourceKey = buildRecallCacheKey(chat, cfg);
-  // BM25 从当前聊天有效叶子构建；全文/摘要/删除变化都参与缓存及异步结果复核。
-  const leafFingerprint = () => JSON.stringify(collectLeaves(getContext()?.chat ?? [])
-    .map(l => [l.leafId, l.docHash, l.payloadHash, l.msgIndex, getLeaf(getContext()?.chat?.[l.msgIndex])?.tags]));
-  const leafVersion = leafFingerprint();
-  const stillCurrent = () => (!dailyInstalled() || (canonicalHost === hostVersion() && canonicalGeneration === dailyState.generation && canonicalPolicy === JSON.stringify(dailySettings))) && !signal?.aborted && epoch === recallEpoch && recallActiveHere() &&
+  // 本轮候选与关联数据固定；可见近期补摘不加入本轮，也不改写已选旧记忆。
+  const excluded = new Set(windowLeafIds(chat));
+  const eligibleLeaves = () => {
+    const currentChat = getContext()?.chat ?? [], excluded = new Set(windowLeafIds(currentChat));
+    return collectLeaves(currentChat).filter(l => !excluded.has(l.leafId));
+  };
+  const leaves = eligibleLeaves();
+  const canonicalAtStart = canonicalLeaves();
+  const plans = JSON.parse(JSON.stringify(memory.plans)) as typeof memory.plans;
+  const now = latestStoryTime(chat);
+  const leafFingerprint = (items = eligibleLeaves()) => JSON.stringify(items
+    .map(l => [l.leafId, l.docHash, l.payloadHash, l.msgIndex,
+      dailyInstalled() ? null : getLeaf(getContext()?.chat?.[l.msgIndex])?.tags]));
+  const leafVersion = leafFingerprint(leaves);
+  const stillCurrent = () => (!dailyInstalled() || (canonicalHost === recallHostVersion() && canonicalPolicy === JSON.stringify(dailySettings))) && !signal.aborted && epoch === recallEpoch && recallActiveHere() &&
     currentVectorDb() === database && currentChatId() === sourceChat && settingsKey() === settingsAtStart &&
-    buildRecallCacheKey(getContext()?.chat ?? [], cfg) === sourceKey && leafFingerprint() === leafVersion;
+    (dailyInstalled() || (buildRecallCacheKey(getContext()?.chat ?? [], cfg) === sourceKey && leafFingerprint() === leafVersion));
+  const eligibleIds = new Set(leaves.map(l => l.leafId));
+  const relevantEvents = (cards: EventCard[]) => cards.filter(c => c.members.some(m => eligibleIds.has(m.memory)));
+  const eventCards = canonicalView ? relevantEvents((await eventView(await activeLibrary(), canonicalView)).cards) : [];
+  if (!stillCurrent()) return;
   let files: Awaited<ReturnType<typeof listKnowledge>> = [];
   let knowledgeStoreReady = true;
   if (knowledgeConfig.enabled) {
@@ -412,14 +394,13 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   }
 
   // 2) 后端检索:多路在范围内纯按 embedding 得分取前 rerankCandidates(后端 max 融合,不套阈值),排除窗口内叶子
-  const exclude = windowLeafIds(chat);
+  const exclude = [...excluded];
   setRecallStatus('进行中…检索候选记忆');
   const selfScope = currentChatScope();
   let bm25Failed = false;
   let bm25Results: HybridHit[] = [];
   if (summaryWanted && cfg.bm25Candidates > 0 && selfScope) {
     try {
-      const leaves = collectLeaves(chat);
       const byId = new Map(leaves.map(l => [l.leafId, l]));
       const user = [...chat].reverse().find(m => m.is_user && !m.extra?.bbs_omit);
       const lexical = await searchBm25({ database, scope: selfScope,
@@ -452,7 +433,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   }
   if (!stillCurrent()) return;
   if (dailyInstalled()) {
-    const allowed = new Map(canonicalLeaves().map(l => [l.leafId,l]));
+    const allowed = new Map(leaves.map(l => [l.leafId,l]));
     results = results.flatMap(hit => {
       const leaf = allowed.get(hit.leafId);
       return leaf && hit.scope === selfScope ? [{ ...hit, ...leaf }] : [];
@@ -479,18 +460,16 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   // 3) rerank(用 INTENT/重写 query;渠道未配 → 降级:用 embedding 序,score 复用 similarity)
   if (!stillCurrent()) return;
   const hybridEnabled = cfg.bm25Candidates > 0;
-  const eventCards = canonicalView ? (await eventView(await activeLibrary(), canonicalView)).cards : [];
-  if (!stillCurrent()) return;
   const safeEvents = eventCards.filter(c => !c.blocked && !c.needsReview);
-  const localLeaves = collectLeaves(chat);
+  const localLeaves = leaves;
   const tagHit = <T extends HybridHit>(hit: T): T => {
     if (hit.scope !== selfScope) return hit;
-    const canonical = dailyInstalled() ? canonicalLeaves().find(l => l.leafId === hit.leafId) : undefined;
+    const canonical = dailyInstalled() ? canonicalAtStart.find(l => l.leafId === hit.leafId) : undefined;
     const local = localLeaves.find(l => l.leafId === hit.leafId);
     const leaf = !dailyInstalled() && local ? getLeaf(chat[local.msgIndex]) : undefined;
     const tags = canonical?.tags ?? (leaf?.id === hit.leafId ? leaf.tags : undefined);
     const hostId = canonical?.hostId ?? hit.leafId;
-    const planIds = memory.plans.filter(p => p.relatedLeafIds?.includes(hostId)).map(p => p.id);
+    const planIds = plans.filter(p => p.relatedLeafIds?.includes(hostId)).map(p => p.id);
     const eventIds = safeEvents.filter(c => c.members.some(m => m.memory === hit.leafId)).map(c => c.chain.id);
     return { ...hit, tags: { ...(tags ?? { version: 1 }),
       planIds: [...new Set([...(tags?.planIds ?? []), ...planIds])],
@@ -509,21 +488,27 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   if (!stillCurrent()) return;
 
   // 4) 分档 + 上限(now = 故事内最新时间,作相对时间参照点,对齐历史摘要注入)
-  const now = latestStoryTime(chat);
   const contextRanked = prioritizeRrf(fused, bm25Results, context, cfg);
   setRecallContext(context, contextRanked);
   const selected = selectRecall(ranked, bm25Results, hybridEnabled ? results : ranked, cfg, contextRanked);
-  const { text: summaryText, tiers } = buildRecallText(selected, selfScope, now);
+  const { text: summaryText, tiers } = buildRecallText(selected, selfScope, now, plans);
   let eventText = '';
   if (canonicalView) {
     const lib = await activeLibrary();
-    if (!await current(lib, canonicalView)) return;
+    if (!await current(lib, canonicalView)) {
+      const latest = await syncDaily();
+      if (!stillCurrent() || latest.branch.id !== canonicalView.branch.id || leafFingerprint() !== leafVersion) return;
+      const latestEvents = relevantEvents((await eventView(lib, latest)).cards);
+      if (JSON.stringify(latestEvents) !== JSON.stringify(eventCards)) return;
+      canonicalView = latest;
+    }
     eventText = wrapEvents(eventCards, canonicalView, selected.map(s => s.hit.leafId), exclude, dailySettings);
     if (!await current(lib, canonicalView)) return;
   }
   const text = [summaryText, eventText, knowledgeText].filter(Boolean).join('\n\n');
   if (!stillCurrent()) return;
   if (knowledgeConfig.enabled && knowledgeStoreReady && knowledgeFingerprint(await listKnowledge(database)) !== fingerprint) return;
+  if (canonicalView && !await current(await activeLibrary(), canonicalView)) return;
   if (!stillCurrent()) return;
   const debugHits = [...ranked];
   const debugKeys = new Set(ranked.map(candidateKey));
@@ -624,6 +609,7 @@ function buildRecallText(
   selected: ReturnType<typeof selectRecall>,
   selfScope: string | null,
   now: string,
+  planSnapshot = memory.plans,
 ): { text: string; tiers: Map<string, 'full' | 'brief'> } {
   const tiers = new Map<string, 'full' | 'brief'>();
   const chunks: string[] = [];
@@ -633,7 +619,7 @@ function buildRecallText(
     if (!body) continue;
     tiers.set(h.leafId, tier);
     let chunk = fmtChunk(h, body, !!full, selfScope, now);
-    const plans = memory.plans.filter(p => h.tags?.planIds.includes(p.id));
+    const plans = planSnapshot.filter(p => h.tags?.planIds.includes(p.id));
     if (plans.length) chunk += `\n关联悬念/计划：${plans.map(p => `[${p.kind === 'suspense' ? '悬念' : '计划'}] ${planTitle(p)}`).join('；')}`;
     if (h.tags?.public) chunk += `\n公开理由：${h.tags.public.reason}`;
     chunks.push(chunk);
