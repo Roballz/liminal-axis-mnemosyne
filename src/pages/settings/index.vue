@@ -959,6 +959,11 @@ function exportPublicApiDocument() {
       <!-- 摘要设置 -->
       <Collapsible title="摘要设置" :open="false">
         <label class="bbs-switch-row">
+          <span class="bbs-field-label">编辑后弹窗处理摘要</span>
+          <input v-model="apiSettings.summaryEditPromptEnabled" type="checkbox" class="bbs-checkbox" />
+        </label>
+        <p class="bbs-field-hint">默认关闭。开启后，编辑正文或摘要产生待审核摘要时，在聊天界面弹出“保留摘要 / 更新摘要 / 过后处理”；更新会调用摘要 API，过后处理保留待审核状态。</p>
+        <label class="bbs-switch-row">
           <span class="bbs-field-label">启用自动摘要</span>
           <input v-model="apiSettings.autoSummaryEnabled" type="checkbox" class="bbs-checkbox" />
         </label>

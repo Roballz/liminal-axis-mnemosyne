@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SummaryEditPrompt from '@/components/SummaryEditPrompt.vue';
 import Icon from '@/components/Icon.vue';
 import NavBar from '@/components/NavBar.vue';
 import FloatingOrb from '@/components/FloatingOrb.vue';
@@ -88,6 +89,7 @@ const windowStyle = computed(() => {
     <!-- 弹窗 Teleport 宿主:.bbs-root 直接子级,在 .bbs-body 滚动容器之外。
          各页弹窗 Teleport 到此,避开 iOS「可滚动祖先内 fixed 后代定位错乱」(详见 state/ui.ts)。 -->
     <div ref="modalHost"></div>
+    <SummaryEditPrompt />
     <!-- 悬浮球:留在 shadow 内才能用 --bbs-* 主题变量;自身 position:fixed 贴边,不受 host 影响 -->
     <FloatingOrb v-if="ui.showOrb" />
     <Transition name="bbs-fade">

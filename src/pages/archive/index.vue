@@ -362,6 +362,7 @@ async function copyKnowledge() {
       <div v-if="deletionPreview" class="mn-card">
         <p>{{ deletionPreview.plan.labels.join(' / ') }}</p>
         <p>将删除 {{ deletionPreview.plan.messages }} 条正文版本、{{ deletionPreview.plan.summaries }} 条摘要版本、{{ deletionPreview.plan.events }} 条事件链、{{ deletionPreview.plan.tables }} 张自定义表。</p>
+        <p v-if="deletionPreview.plan.retainedSources">另有 {{ deletionPreview.plan.retainedSources }} 条原文版本被其他档案共享，将保留原文及来源凭据，不影响其他档案。</p>
         <p class="mn-warning">永久删除，不能撤销。宿主聊天与其他档案保留；删除后不会自动重新建库，需要时可明确重新建档。</p>
         <button :disabled="busy" @click="run(applyDeletion)">永久删除这个聊天档案</button>
       </div>

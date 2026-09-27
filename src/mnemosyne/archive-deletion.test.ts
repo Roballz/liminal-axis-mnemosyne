@@ -1,6 +1,6 @@
 import { test, expect } from 'vitest';
 import { fixture, observation } from './fixtures';
-import { capture, forkBranch, synchronize } from './canonical';
+import { capture, forkBranch, synchronize, keepSummary } from './canonical';
 import { editEvent, eventView } from './events';
 import { exportLibrary, restoreLibrary } from './migration';
 import { archiveDeletionChoices, previewArchiveDeletion, commitArchiveDeletion, archiveWasDeleted, allowArchiveCreation } from './archive-deletion';
@@ -76,4 +76,37 @@ test('deleting a detached mistaken archive does not pause the other archive now 
     expect(await archiveWasDeleted(lib, input.scope)).toBe(false);
     expect(await capture(lib, replacement.id)).toEqual(before);
     const restored = await restoreLibrary(await exportLibrary(lib), false); restored.close(); lib.close();
+});
+
+
+test('parent can reuse a child-first exact source version; deleting the child retains source and origin without changing parent', async () => {
+    const { lib, branch, input, view } = await fixture(1);
+    const child = await forkBranch(lib, view, 'shared-source-child');
+    const edited = structuredClone(input); edited.scope = 'shared-source-child'; edited.messages[0].content = '同一消息的修订正文';
+    await synchronize(lib, edited);
+    const childView = await capture(lib, child.id), shared = childView.refs[0];
+    input.messages[0].content = edited.messages[0].content;
+    await synchronize(lib, input);
+    let parent = await capture(lib, branch.id);
+    expect(parent.refs[0]).toEqual(shared);
+    await keepSummary(lib, parent, parent.memories[0].id);
+    parent = await capture(lib, branch.id);
+    const originalRevision = await lib.get('source_revisions', shared.revision);
+    const plan = await previewArchiveDeletion(lib, child.id);
+    expect(plan.retainedSources).toBe(1);
+    await commitArchiveDeletion(lib, plan, () => true);
+    expect(await lib.get('branches', child.id)).toBeUndefined();
+    expect(await capture(lib, branch.id)).toEqual(parent);
+    expect(await lib.get('source_revisions', shared.revision)).toEqual(originalRevision);
+    const pack = await exportLibrary(lib);
+    const restored = await restoreLibrary(pack, false);
+    expect(await capture(restored, branch.id)).toEqual(parent); restored.close();
+    const broken = structuredClone(pack);
+    broken.data.library_meta = broken.data.library_meta.filter(r => r.id !== 'retired-source-bindings');
+    broken.counts.library_meta--;
+    await expect(restoreLibrary(broken, false)).rejects.toThrow('正文来源绑定缺失');
+    await commitArchiveDeletion(lib, await previewArchiveDeletion(lib, branch.id), () => true);
+    expect(await lib.all('source_revisions')).toEqual([]);
+    expect((await lib.get<any>('library_meta', 'retired-source-bindings')).value.bindings).toEqual([]);
+    await exportLibrary(lib); lib.close();
 });

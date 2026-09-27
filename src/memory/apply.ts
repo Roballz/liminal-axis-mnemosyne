@@ -1,3 +1,4 @@
+import { notifySummaryEdit } from '@/mnemosyne/summary-edit-signal';
 import { PLAN_TEXT_MAX_CHARS } from './limits';
 import { normalizeTags, shortText, resolvePlanRef, type SummaryTags } from './contextTags';
 import { dailyInstalled, markManualSummaryEdit } from '@/mnemosyne/bridge';
@@ -2214,6 +2215,7 @@ export function editLeafAt(index: number, text: string, timeStart: string, timeE
   else delete leaf.delta.time;
   chat[index].extra = { ...(chat[index].extra ?? {}), bbs_leaf: leaf };
   markManualSummaryEdit(chat[index]);
+  notifySummaryEdit();
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要变了 → 召回结果会变,先失效再重算
@@ -2273,6 +2275,7 @@ export function editLeafFull(
   // 与 applyLeafForFloor 落叶时同口径:物品净变动以「本楼之前状态」为基准算 from→to,变量直接渲染命令。
   rewriteFloorTags(chat, index, delta);
   markManualSummaryEdit(chat[index]);
+  notifySummaryEdit();
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要正文/时间变了 → 失效旧召回
@@ -2345,6 +2348,7 @@ export function editSummary(id: string, text: string): boolean {
   comp.text = text.trim();
   comp.createdAt = Math.max(Date.now(), (comp.createdAt ?? 0) + 1);
   saveMemory();
+  notifySummaryEdit();
   return true;
 }
 

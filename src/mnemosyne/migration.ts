@@ -6,7 +6,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
     schema: 1;
     created: number;
     excluded: string[];
@@ -22,8 +22,8 @@ export async function exportLibrary(lib: Library): Promise<Package> {
             result[store] = await tx.all(store);
         return result;
     });
-    // library_meta is restricted to non-secret daily feature settings, not upstream API configuration.
-    const base = { format: 'mnemosyne-daily' as const, version: 8 as const, schema: 1 as const, created: Date.now(),
+    // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
+    const base = { format: 'mnemosyne-daily' as const, version: 9 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     validateData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -43,7 +43,7 @@ const FIELDS: Record<Store, string[]> = {
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     check(pack.data && Object.keys(pack.data).length === STORES.length, '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
@@ -81,10 +81,28 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
                 check(!r.story || b.story === r.story, '跨故事分支');
             }
         }
+    const retiredBindings = new Map<string, any>();
+    const originRecord = maps.library_meta.get('retired-source-bindings');
+    if (originRecord) {
+        check(pack.version >= 9 && originRecord.value?.version === 1 && Object.keys(originRecord.value).length === 2 &&
+            Array.isArray(originRecord.value.bindings), '历史来源绑定格式非法');
+        for (const b of originRecord.value.bindings) {
+            check(b && b.schema === 1 && typeof b.id === 'string' && b.id && typeof b.branch === 'string' && b.branch &&
+                typeof b.story === 'string' && typeof b.scope === 'string' && b.scope && Number.isSafeInteger(b.generation) && b.generation > 0 &&
+                ['new_story', 'fork', 'carryover', 'confirmed_mapping'].includes(b.intent) &&
+                Object.keys(b).every(k => ['id','schema','story','branch','scope','generation','intent','rebindSchema','detached'].includes(k)) &&
+                (b.rebindSchema === undefined && b.detached === undefined || b.rebindSchema === 1 && typeof b.detached === 'boolean') &&
+                !retiredBindings.has(b.id) && !maps.host_bindings.has(b.id) && !maps.branches.has(b.branch), '历史来源绑定非法或与活动档案冲突');
+            get('stories', b.story);
+            check([...maps.source_revisions.values()].some(r => r.provenance.binding === b.id), '历史来源绑定没有引用');
+            retiredBindings.set(b.id, b);
+        }
+    }
     for (const r of maps.source_revisions.values()) {
         check(['user', 'assistant', 'system'].includes(r.role) && typeof r.content === 'string', '正文结构无效');
         check(get('source_messages', r.owner).story === r.story, '正文身份跨故事');
-        get('host_bindings', r.provenance.binding);
+        const origin = maps.host_bindings.get(r.provenance.binding) ?? retiredBindings.get(r.provenance.binding);
+        check(origin && origin.story === r.story, '正文来源绑定缺失或跨故事');
     }
     for (const r of maps.manifest_blocks.values()) {
         check(Array.isArray(r.entries) && r.entries.length <= 128, '历史块过大');
@@ -268,6 +286,7 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
         }
     }
     for (const r of maps.library_meta.values()) {
+        if (r.id === 'retired-source-bindings' && pack.version >= 9) continue;
         if (pack.version >= 8 && r.id === 'archive-deletions') {
             check(r.value?.version === 1 && Object.keys(r.value).length === 2 && Array.isArray(r.value.scopes) &&
                 r.value.scopes.every((s: unknown) => typeof s === 'string' && s.length > 0) &&

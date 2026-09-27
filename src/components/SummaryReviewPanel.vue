@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue';
+import { rebuildSummaryOwners } from '@/mnemosyne/summary-review-actions';
 import ModalMask from './ModalMask.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import TableTextField from './TableTextField.vue';
@@ -9,7 +10,7 @@ import { capture, statuses, keepSummaries, type MemoryStatus } from '@/mnemosyne
 import { check, type CapturedView, type MemoryRevision } from '@/mnemosyne/model';
 import { editLeafAt, editSummary, getLeaf } from '@/memory/apply';
 import { getContext } from '@/st/context';
-import { engineState, regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
+import { engineState } from '@/memory/engine';
 const props = defineProps<{ disabled?: boolean }>();
 const view = shallowRef<CapturedView | null>(null), states = shallowRef(new Map<string, MemoryStatus>());
 const busy = ref(false), error = ref(''), notice = ref(''), page = ref(0), confirmUpdate = ref(false);
@@ -69,34 +70,9 @@ async function saveEdit() {
 async function rebuild() {
   confirmUpdate.value = false;
   await currentView();
-  const targets = new Set(pending.value.map(m => m.owner));
-  const lib = await activeLibrary();
-  let done = 0;
-  while (targets.size && !stopped && !disposed) {
-    check(guard(), '聊天改变，已停止；完成的摘要已保留');
-    const captured = await syncDaily(), validity = await statuses(lib, captured);
-    const currentByOwner = new Map(captured.memories.map(m => [m.owner, m]));
-    let next: MemoryRevision | undefined;
-    for (const owner of targets) {
-      const memory = currentByOwner.get(owner);
-      check(memory, '摘要已删除，停止更新');
-      if (validity.get(memory.id) === 'valid') { targets.delete(owner); continue; }
-      const dependencies = await Promise.all(memory.dependencies.map(id => lib.get<MemoryRevision>('memory_revisions', id)));
-      if (dependencies.every(m => m && validity.get(currentByOwner.get(m.owner)?.id ?? '') === 'valid')) { next = memory; break; }
-    }
-    if (!targets.size) break;
-    check(next, '请先修复缺失的来源或依赖摘要；已完成部分保留');
-    if (next.level) await regenerateHigherSummary(next.hostId);
-    else {
-      const floor = captured.refs.findIndex(r => r.message === next!.anchor);
-      check(floor >= 0 && await regenerateFloor(floor), '本楼无法重新生成，请手改或检查摘要 API 配置');
-    }
-    const updated = await syncDaily(), validityAfter = await statuses(lib, updated);
-    const result = updated.memories.find(m => m.owner === next!.owner);
-    check(result && validityAfter.get(result.id) === 'valid', '生成结果仍需审核，请检查来源；完成部分已保存');
-    host = hostVersion(); generation = dailyState.generation;
-    targets.delete(next.owner); done++; notice.value = `已更新 ${done} 条摘要`;
-  }
+  const done = await rebuildSummaryOwners(pending.value.map(m => m.owner), view.value!.branch.id, guard, done => {
+    host = hostVersion(); generation = dailyState.generation; notice.value = `已更新 ${done} 条摘要`;
+  }, () => stopped || disposed);
   notice.value = `${stopped ? '已停止' : '更新完成'}：已保存 ${done} 条摘要。事件概要可单独保留或更新。`;
 }
 </script>

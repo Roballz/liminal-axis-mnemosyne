@@ -222,6 +222,8 @@ export interface ApiSettings {
   autoSummaryEnabled: boolean;
   /** 自动同步楼层隐藏状态；关闭后保留现有隐藏状态，仍可生成摘要。 */
   autoHideEnabled: boolean;
+  /** 编辑后在聊天界面提示保留/更新受影响摘要。 */
+  summaryEditPromptEnabled: boolean;
   /**
    * 仅摘要模式。继续分析、保存结构化状态,但不向主模型注入当前状态,
    * 也不再把物品/变量变动旁注写回正文。已有正文旁注不主动清理。
@@ -381,6 +383,7 @@ function defaults(): ApiSettings {
     assignments: { summary: '', resummary: '' },
     autoSummaryEnabled: true,
     autoHideEnabled: true,
+    summaryEditPromptEnabled: false,
     summaryOnlyMode: false,
     injection: { sceneFocus: true, lifeDetails: true, protagonist: true, npcs: true, npcAffinity: true, items: true, scenes: true },
     keepRecent: 3,
@@ -415,6 +418,7 @@ function normalize(raw: unknown): ApiSettings {
   merged.prompts.eventOverview = typeof merged.prompts.eventOverview === 'string' ? merged.prompts.eventOverview : '';
   merged.prompts.eventLatestProgress = typeof merged.prompts.eventLatestProgress === 'string' ? merged.prompts.eventLatestProgress : '';
   // ui 同为嵌套对象,逐字段兜底(老数据没有 ui 键时回退默认,值非字符串时丢弃)
+  merged.summaryEditPromptEnabled = merged.summaryEditPromptEnabled === true;
   merged.autoHideEnabled = typeof merged.autoHideEnabled === 'boolean' ? merged.autoHideEnabled : true;
   const ru = ((raw as Partial<ApiSettings>).ui ?? {}) as Partial<UiPrefs>;
   merged.ui = {
@@ -647,6 +651,7 @@ function applyInto(target: ApiSettings, src: ApiSettings): void {
   target.assignments = src.assignments;
   target.autoSummaryEnabled = src.autoSummaryEnabled;
   target.autoHideEnabled = src.autoHideEnabled;
+  target.summaryEditPromptEnabled = src.summaryEditPromptEnabled;
   target.summaryOnlyMode = src.summaryOnlyMode;
   target.injection = src.injection;
   target.keepRecent = src.keepRecent;

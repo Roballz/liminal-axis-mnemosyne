@@ -1,3 +1,4 @@
+import { summaryEditPrompt, prepareSummaryEditPrompt, resolveSummaryEdit, deferSummaryEdit, bindSummaryEditPrompt } from './summary-edit-prompt';
 import { previewArchiveDeletion } from './archive-deletion';
 import { fingerprint } from './model';
 import { commitReconnect } from './binding-recovery';
@@ -370,7 +371,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect((await syncDaily()).branch.sourceRoleRepairs).toHaveLength(1);
     expect(dailyState.review).toBe(0);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(8);
+    expect(pack.version).toBe(9);
     const restored = await restoreLibrary(pack);
     lib = restored;
     dispose?.(); dispose = bindDaily();
@@ -880,4 +881,70 @@ test('automatic inheritance from an earlier floor uses the complete matching sho
     const child = await syncDaily();
     expect(child.branch.fork).toMatchObject({ branch: parent.branch.id, length: 2 });
     expect(child.refs).toEqual(parent.refs);
+});
+
+
+test('edit popup defaults off, later leaves reviews unchanged, and keep uses the original approval path', async () => {
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    const original = await syncDaily();
+    ctx.chat[0].mes += '人工修订'; invalidateDaily();
+    api.apiSettings.summaryEditPromptEnabled = false;
+    await prepareSummaryEditPrompt(); expect(summaryEditPrompt.open).toBe(false);
+    api.apiSettings.summaryEditPromptEnabled = true;
+    await prepareSummaryEditPrompt();
+    expect(summaryEditPrompt.open).toBe(true); expect(summaryEditPrompt.count).toBe(1);
+    await resolveSummaryEdit('later');
+    expect(summaryEditPrompt.open).toBe(false); expect(await lib.all('reviews')).toEqual([]);
+    await prepareSummaryEditPrompt(); await resolveSummaryEdit('keep');
+    expect(summaryEditPrompt.open).toBe(false);
+    const current = await syncDaily();
+    expect((await statuses(lib, current)).get(original.memories[0].id)).toBe('valid');
+    api.apiSettings.summaryEditPromptEnabled = false; deferSummaryEdit();
+});
+
+test('stale edit popup cannot approve a newer edit or a different chat', async () => {
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    await syncDaily(); api.apiSettings.summaryEditPromptEnabled = true;
+    ctx.chat[0].mes += '一次修改'; invalidateDaily(); await prepareSummaryEditPrompt();
+    ctx.chat[0].mes += '又一次修改'; invalidateDaily();
+    await resolveSummaryEdit('keep');
+    expect(summaryEditPrompt.error).toContain('已改变'); expect(await lib.all('reviews')).toEqual([]);
+    await prepareSummaryEditPrompt(); ctx.getCurrentChatId = () => 'another-chat'; invalidateDaily();
+    await resolveSummaryEdit('keep'); expect(await lib.all('reviews')).toEqual([]);
+    api.apiSettings.summaryEditPromptEnabled = false; deferSummaryEdit();
+});
+
+test('edit popup update delegates to the existing floor regeneration and preserves completed summary', async () => {
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    await syncDaily(); api.apiSettings.summaryEditPromptEnabled = true;
+    ctx.chat[1].mes += '编辑正文'; invalidateDaily(); await prepareSummaryEditPrompt();
+    const engine = await import('@/memory/engine');
+    const regenerate = vi.spyOn(engine, 'regenerateFloor').mockImplementationOnce(async floor => {
+        const evidence = await captureSummaryEvidence([0, 1]);
+        ctx.chat[floor].extra!.bbs_leaf!.text = '更新后的合成摘要';
+        attachSummaryEvidence(ctx.chat, floor, evidence, [0, 1]);
+        invalidateDaily(); return true;
+    });
+    await resolveSummaryEdit('update');
+    expect(regenerate).toHaveBeenCalledWith(1);
+    expect(summaryEditPrompt.error).toBe(''); expect(summaryEditPrompt.open).toBe(false);
+    expect((await syncDaily()).memories[0].content).toBe('更新后的合成摘要');
+    api.apiSettings.summaryEditPromptEnabled = false; deferSummaryEdit();
+});
+
+
+test('edit event opens the external prompt with setting enabled, and chat switching cancels a queued prompt', async () => {
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    await syncDaily(); api.apiSettings.summaryEditPromptEnabled = true;
+    ctx.eventTypes.MESSAGE_EDITED = 'synthetic-edit';
+    const stopPrompt = bindSummaryEditPrompt()!;
+    const edited = vi.mocked(ctx.eventSource.on).mock.calls.find(([event]) => event === 'synthetic-edit')![1];
+    ctx.chat[0].mes += '正文编辑'; invalidateDaily(); edited(0);
+    await new Promise(resolve => setTimeout(resolve, 450));
+    expect(summaryEditPrompt.open).toBe(true);
+    await resolveSummaryEdit('later');
+    edited(0); ctx.getCurrentChatId = () => 'switched-away'; invalidateDaily();
+    await new Promise(resolve => setTimeout(resolve, 450));
+    expect(summaryEditPrompt.open).toBe(false);
+    stopPrompt(); api.apiSettings.summaryEditPromptEnabled = false;
 });

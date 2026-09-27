@@ -1,4 +1,5 @@
 import '@/mnemosyne/ui.css';
+import { bindSummaryEditPrompt } from '@/mnemosyne/summary-edit-prompt';
 import { bindDaily } from '@/mnemosyne/bridge';
 import { bindDailyJobs } from '@/mnemosyne/jobs';
 import { hydrateSettings } from '@/api/settings';
@@ -140,6 +141,7 @@ function bindMemoryWhenReady(attempt = 0) {
       void registerPublicInterface();
       bindEngine();
       bindDaily();
+      bindSummaryEditPrompt();
       bindDailyJobs();
       // 时间标签:按开关注册/移除 ST 隐藏正则(幂等;开关变化的后续同步在 bindEngine 的 watch 里)
       syncTimeTagRegex();
