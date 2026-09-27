@@ -103,7 +103,7 @@ async function refresh() {
 }
 async function loadReconnectChoices() {
   reconnectPreview.value = null;
-  const result = await dailyBranchChoices();
+  const result = await dailyBranchChoices(true);
   if (disposed) return;
   reconnectChoices.value = result;
   reconnectChoice.value = result.find(c => c.inherited)?.value ?? '';
@@ -303,12 +303,12 @@ async function copyKnowledge() {
       </p>
       <p class="mn-muted">
         “继承档案”会建立独立分支。
-        “独立新故事”则不继承原分支身份。分叉不会复制原分支的事件链和自定义表。
+        “独立新故事”则不继承原分支身份。分叉会复制截止范围内来源有效的事件链、概要、最新进展及关联摘要，父子后续各自独立；自定义表暂不复制。
       </p>
     </div>
     <details class="mn-card">
       <summary>聊天改名 / 接回已有档案</summary>
-      <p>只改名字或改名后误选过“继承档案”时，从这里接回原分支。原事件链和自定义表仍属于原档案。</p>
+      <p>聊天关联异常、只改名字或改名后误选过“继承档案”时，从这里接回原分支。当前已绑定的档案也可重新校验并修复关联。原事件链和自定义表仍属于原档案。</p>
       <button :disabled="busy" @click="run(loadReconnectChoices)">查找原档案（只读）</button>
       <template v-if="reconnectChoices.length">
         <BbsSelect v-model="reconnectChoice" :options="reconnectOptions" aria-label="改名前的原档案" />

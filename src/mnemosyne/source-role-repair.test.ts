@@ -1,6 +1,6 @@
 import { test, expect } from 'vitest';
 import { fixture } from './fixtures';
-import { capture, statuses, synchronize } from './canonical';
+import { capture, statuses, synchronize, forkBranch } from './canonical';
 import { previewRoleRepairs, confirmRoleRepairs } from './source-role-repair';
 import { eventView, prepareEventBatch, commitEventBatch } from './events';
 import { exportLibrary, restoreLibrary } from './migration';
@@ -95,4 +95,18 @@ test('repair cannot merge a same-text new message or approve reordered source pr
     current = await capture(lib, (await synchronize(lib, input)).id);
     expect((await eventView(lib, current)).cards).toMatchObject([{ needsReview: true, blocked: true }]);
     lib.close();
+});
+
+
+test('fork preserves exact role repair approvals without importing parent-wide repair authority', async () => {
+    const { lib, view, candidates } = await legacyFixture();
+    await confirmRoleRepairs(lib, view, candidates, () => true);
+    const parent = await capture(lib, view.branch.id);
+    const child = await forkBranch(lib, parent, 'repaired-child');
+    const copied = await capture(lib, child.id);
+    expect([...await statuses(lib, copied)].map(([, s]) => s)).toEqual(['valid', 'valid']);
+    expect((await eventView(lib, copied)).cards[0]).toMatchObject({ blocked: false, needsReview: false });
+    const restored = await restoreLibrary(await exportLibrary(lib), false);
+    expect([...await statuses(restored, await capture(restored, child.id))].every(([, s]) => s === 'valid')).toBe(true);
+    restored.close(); lib.close();
 });

@@ -184,7 +184,7 @@ test('review rejects changed host and reordered identities; current event UI nev
   await expect(keepSummary(lib, current, view.memories[1].id, () => false)).rejects.toThrow('视图');
   expect(await Promise.all(STORES.map(s => lib.all(s).then(r => r.length)))).toEqual(counts);
   expect((await eventView(lib, await capture(lib, branch.id, 2))).cards).toEqual([]);
-  const child = await forkBranch(lib, current, 'explicit-child'); expect((await eventView(lib, await capture(lib, child.id))).cards).toEqual([]);
+  const child = await forkBranch(lib, await capture(lib, branch.id, 2), 'explicit-child'); expect((await eventView(lib, await capture(lib, child.id))).cards).toEqual([]);
   [input.messages[0], input.messages[1]] = [input.messages[1], input.messages[0]]; await synchronize(lib, input); current = await capture(lib, branch.id);
   await expect(keepSummary(lib, current, view.memories[1].id)).rejects.toThrow('重排');
   expect((await eventView(lib, current)).cards[0].chain.id).toBe(id); lib.close();

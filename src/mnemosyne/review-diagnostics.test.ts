@@ -43,7 +43,7 @@ test('identical parent and child stay separate; source change in child does not 
     const eventsBefore = await lib.all('event_revisions');
     await synchronize(lib, input);
     await synchronize(lib, childInput);
-    expect((await eventView(lib, await capture(lib, child.id))).cards[0].meta.title).toBe('子事件');
+    expect((await eventView(lib, await capture(lib, child.id))).cards.map(c => c.meta.title)).toContain('子事件');
     expect((await eventView(lib, await capture(lib, parent.branch.id))).cards[0].meta.title).toBe('父事件');
     childInput.messages[0].content += '\n新增正文';
     await synchronize(lib, childInput);
@@ -51,8 +51,8 @@ test('identical parent and child stay separate; source change in child does not 
     const difference = await reviewDifference(lib, next, next.memories[0].id);
     expect(difference.kind).toBe('text');
     expect(difference.after?.excerpt).toContain('\\n新增正文');
-    expect((await eventView(lib, next)).storedCount).toBe(1);
-    expect((await eventView(lib, next)).cards).toMatchObject([{ blocked: true }]);
+    expect((await eventView(lib, next)).storedCount).toBe(2);
+    expect((await eventView(lib, next)).cards.find(c => c.meta.title === '子事件')).toMatchObject({ blocked: true });
     expect((await eventView(lib, await capture(lib, parent.branch.id))).cards).toHaveLength(1);
     expect(await lib.all('event_revisions')).toEqual(eventsBefore);
     lib.close();

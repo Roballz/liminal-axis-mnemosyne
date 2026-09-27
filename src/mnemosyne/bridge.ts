@@ -277,8 +277,10 @@ export async function syncDaily(): Promise<CapturedView> {
             const observedHost = hostVersion(),
                 observedGeneration = dailyState.generation;
             const reusable = cache ?? lastCache;
+            const metadataBinding = ctx.chatMetadata[BINDING_KEY] as { branch?: string } | undefined;
             if (
                 reusable &&
+                metadataBinding?.branch === reusable.view.branch.id &&
                 !dailyState.tableError &&
                 reusable.host === observedHost &&
                 reusable.library === lib.db.name
@@ -595,7 +597,7 @@ export async function chooseNewStory() {
 }
 /** Explicitly reuse a known binding after host rename; no content-based identity guess. */
 /** Dropdown metadata only: never load source bodies or summaries here. */
-export async function dailyBranchChoices() {
+export async function dailyBranchChoices(includeCurrent = false) {
     const ctx = getContext(), scope = hostScope(), generation = dailyState.generation;
     check(ctx && scope, '请先打开聊天');
     const inherited = ctx.chatMetadata[BINDING_KEY] as { branch?: string } | undefined;
@@ -613,14 +615,14 @@ export async function dailyBranchChoices() {
         const result: { value: string; label: string; inherited: boolean; length: number; suggested: number }[] = [];
         for (const binding of bindings) {
             const [owner, name] = parseScope(binding.scope);
-            if (owner !== character || !name || (!binding.detached && binding.scope === scope) || seen.has(binding.branch)) continue;
+            if (owner !== character || !name || (!includeCurrent && !binding.detached && binding.scope === scope) || seen.has(binding.branch)) continue;
             const branch = await tx.get<Branch>('branches', binding.branch);
             if (!branch) continue;
             const snapshot = await tx.get<import('./model').Snapshot>('history_snapshots', branch.head);
             if (!snapshot) continue;
             seen.add(branch.id);
             const source = inherited?.branch === branch.id;
-            result.push({ value: branch.id, label: `${name} · ${snapshot.length} 条消息${binding.detached ? ' · 未连接，档案保留' : ''}${source ? ' · 当前聊天的来源' : ''}`,
+            result.push({ value: branch.id, label: `${name} · ${snapshot.length} 条消息${binding.detached ? ' · 未连接，档案保留' : binding.scope === scope ? ' · 当前聊天已绑定，可修复关联' : ''}${source ? ' · 当前聊天的来源' : ''}`,
                 inherited: source, length: snapshot.length, suggested: Math.min(snapshot.length, ctx.chat.length) });
         }
         return result.sort((a, b) => Number(b.inherited) - Number(a.inherited) || a.label.localeCompare(b.label));

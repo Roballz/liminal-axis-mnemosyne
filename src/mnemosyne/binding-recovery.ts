@@ -39,7 +39,7 @@ export async function previewReconnect(lib: Library, branchId: string, scope: st
                 `#${i} 消息身份或正文与原档案不一致：${difference}；前 ${i} 条已匹配，未接回；不能凭相同楼数猜测`);
         }
         const active = bindings.find(b => !b.detached && b.scope === scope);
-        check(active?.id !== binding.id, '当前聊天已经连接这个档案');
+        const displaced = active?.id !== binding.id ? active : undefined;
         const displacedBranch = active ? await tx.get<Branch>('branches', active.branch) : undefined;
         check(!active || displacedBranch, '当前绑定分支缺失');
         const selection = await tx.get<MemoryView>('memory_views', branch.view);
@@ -48,7 +48,7 @@ export async function previewReconnect(lib: Library, branchId: string, scope: st
             summaries: Object.keys(selection.selections).length,
             events: (await tx.all('event_chains', 'branch', branchId)).length,
             tables: (await tx.all('custom_table_defs', 'branch', branchId)).length,
-            displaced: active && displacedBranch ? { binding: active, branch: displacedBranch } : undefined,
+            displaced: displaced && displacedBranch ? { binding: displaced, branch: displacedBranch } : undefined,
             displacedEvents: active ? (await tx.all('event_chains', 'branch', active.branch)).length : 0 };
     });
 }
@@ -59,7 +59,7 @@ export async function commitReconnect(lib: Library, plan: ReconnectPlan, guard: 
         const source = bindings.find(b => b.id === plan.binding.id);
         const branch = await tx.get<Branch>('branches', plan.branch.id);
         const active = bindings.find(b => !b.detached && b.scope === plan.scope);
-        check(guard() && equal(source, plan.binding) && equal(branch, plan.branch) && equal(active, plan.displaced?.binding), '聊天或档案已改变，请重新预览接回');
+        check(guard() && equal(source, plan.binding) && equal(branch, plan.branch) && equal(active, plan.displaced?.binding ?? (plan.binding.scope === plan.scope && !plan.binding.detached ? plan.binding : undefined)), '聊天或档案已改变，请重新预览接回');
         if (plan.displaced) {
             const displaced = await tx.get<Branch>('branches', plan.displaced.branch.id);
             check(equal(displaced, plan.displaced.branch), '当前档案已改变，请重新预览接回');

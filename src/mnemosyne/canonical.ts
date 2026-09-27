@@ -1,3 +1,5 @@
+import { eventView } from './events';
+import { inheritForkMemory } from './fork-memory';
 import type { SummaryTags } from '@/memory/contextTags';
 import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { Library, Transaction } from './db';
@@ -501,7 +503,10 @@ export async function keepSummaries(lib: Library, view: CapturedView, memoryIds:
 }
 /** Explicit fixed-parent fork; bindings are never inferred from matching content. */
 export async function forkBranch(lib: Library, parent: CapturedView, scope: string, guard: () => boolean = () => true): Promise<Branch> {
+    const events = await eventView(lib, parent);
     return lib.transaction(STORES, 'readwrite', async (tx) => {
+        const liveParent = await tx.get<Branch>('branches', parent.branch.id);
+        check(equal(liveParent, parent.branch), '父分支已改变，请重新选择分支');
         check(guard(), '聊天已改变，请重新选择分支');
         check(!(await tx.all<Binding>('host_bindings')).some((b) => !b.detached && b.scope === scope), '目标聊天已绑定');
         const branch: Branch = {
@@ -519,8 +524,7 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
         };
         branch.head = await publishSnapshot(tx, branch, parent.refs);
         const selection: MemoryView = { ...row('mv'), branch: branch.id, selections: {} };
-        // Unknown-source legacy summaries are branch-scoped; do not silently inherit them.
-        await tx.add('memory_views', selection);
+
         branch.view = selection.id;
         const binding: Binding = {
             ...row('hb'),
@@ -542,6 +546,8 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
                     });
             }
         }
+        await inheritForkMemory(tx, parent, branch, binding, selection, events);
+        await tx.add('memory_views', selection);
         await tx.add('branches', branch);
         check(guard(), '聊天已改变，本次分叉已撤销');
         return branch;
