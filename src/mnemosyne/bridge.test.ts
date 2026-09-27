@@ -11,7 +11,7 @@ import { invalidateSummaryAncestors } from '@/memory/apply';
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import { Library, activateLibrary, freshLibraryName } from './db';
-import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices, hiddenRoleRepairRefs, dailyBranch, previewArchiveReconnect, reconnectArchive, deleteDailyArchive, chooseNewStory } from './bridge';
+import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices, hiddenRoleRepairRefs, dailyBranch, previewArchiveReconnect, reconnectArchive, deleteDailyArchive, chooseNewStory, readDailyReview } from './bridge';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
 import { type STContext, type STMessage } from '@/st/context';
@@ -47,6 +47,50 @@ test('real bridge archives once, persists independent host IDs, and exposes cano
     expect(leaves[0].mesFull).toBe('合成答复');
     expect((ctx.chatMetadata.mnemosyne_archive_v1 as any).status).toBe('saved');
     expect(dailyState.pending).toBe(false);
+});
+
+test('opening summary review reuses the checked archive without rereading bodies or saving the host', async () => {
+    const view = await syncDaily();
+    const captureSpy = vi.spyOn(canonical, 'capture'), statusSpy = vi.spyOn(canonical, 'statuses');
+    vi.mocked(ctx.saveChat).mockClear(); vi.mocked(ctx.saveMetadata).mockClear();
+    const first = await readDailyReview(), second = await readDailyReview();
+    expect(first?.view).toBe(view); expect(second?.view).toBe(view);
+    expect(first?.validity.get(view.memories[0].id)).toBe('valid');
+    expect(captureSpy).not.toHaveBeenCalled(); expect(statusSpy).not.toHaveBeenCalled();
+    expect(ctx.saveChat).not.toHaveBeenCalled(); expect(ctx.saveMetadata).not.toHaveBeenCalled();
+});
+
+test('summary review rejects stale cached epochs and reads fresh review decisions', async () => {
+    await syncDaily();
+    ctx.chat[0].mes = '改变摘要来源';
+    invalidateDaily();
+    const view = await syncDaily(), id = view.memories[0].id;
+    expect((await readDailyReview())?.validity.get(id)).toBe('needs_review');
+    await canonical.keepSummary(lib, view, id);
+    const captureSpy = vi.spyOn(canonical, 'capture');
+    const result = await readDailyReview();
+    expect(captureSpy).toHaveBeenCalledTimes(1);
+    expect(result?.validity.get(id)).toBe('valid');
+    expect(result?.view.branch.epoch).toBeGreaterThan(view.branch.epoch);
+});
+
+test('summary review cannot publish cached data after a chat or database switch', async () => {
+    const view = await syncDaily();
+    const read = lib.get.bind(lib);
+    const get = vi.spyOn(lib, 'get').mockImplementation(async (store, key) => {
+        const result = await read(store, key);
+        if (store === 'branches') ctx.chat[0].mes = '读取期间编辑';
+        return result as any;
+    });
+    await expect(readDailyReview()).rejects.toThrow('已改变');
+    get.mockRestore();
+    ctx.getCurrentChatId = () => 'different-chat';
+    expect(await readDailyReview()).toBeNull();
+    ctx.getCurrentChatId = () => 'synthetic';
+    const next = await Library.open(freshLibraryName());
+    await activateLibrary(next); lib = next;
+    expect(await readDailyReview()).toBeNull();
+    expect(await lib.get('branches', view.branch.id)).toBeUndefined();
 });
 
 

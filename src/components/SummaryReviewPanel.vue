@@ -4,9 +4,9 @@ import { rebuildSummaryOwners } from '@/mnemosyne/summary-review-actions';
 import ModalMask from './ModalMask.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import TableTextField from './TableTextField.vue';
-import { dailyState, dailyBranch, hostVersion, syncDaily, invalidateDaily, dailyCurrent } from '@/mnemosyne/bridge';
+import { dailyState, readDailyReview, hostVersion, syncDaily, invalidateDaily, dailyCurrent } from '@/mnemosyne/bridge';
 import { activeLibrary } from '@/mnemosyne/db';
-import { capture, statuses, keepSummaries, type MemoryStatus } from '@/mnemosyne/canonical';
+import { keepSummaries, type MemoryStatus } from '@/mnemosyne/canonical';
 import { check, type CapturedView, type MemoryRevision } from '@/mnemosyne/model';
 import { editLeafAt, editSummary, getLeaf } from '@/memory/apply';
 import { getContext } from '@/st/context';
@@ -23,13 +23,13 @@ async function load() {
   if (busy.value || disposed) return;
   const token = ++ticket, stamp = hostVersion(), gen = dailyState.generation;
   try {
-    const lib = await activeLibrary(), branch = await dailyBranch();
-    if (!branch) { if (token === ticket) view.value = null; return; }
-    const result = await capture(lib, branch.id), validity = await statuses(lib, result);
+    const result = await readDailyReview();
     if (disposed || token !== ticket || stamp !== hostVersion() || gen !== dailyState.generation) return;
-    view.value = result; states.value = validity; host = stamp; generation = gen;
+    if (!result) { view.value = null; return; }
+    view.value = result.view; states.value = result.validity; host = stamp; generation = gen;
+    error.value = '';
     page.value = Math.min(page.value, Math.max(0, Math.ceil(pending.value.length / 10) - 1));
-  } catch (e) { if (token === ticket) error.value = (e as Error).message; }
+  } catch (e) { if (!disposed && token === ticket && stamp === hostVersion() && gen === dailyState.generation) error.value = (e as Error).message; }
 }
 watch(() => [dailyState.revision, dailyState.scope, dailyState.review], load, { immediate: true });
 watch(() => dailyState.scope, () => { editing.value = null; view.value = null; error.value = ''; notice.value = ''; stopped = true; }, { flush: 'sync' });

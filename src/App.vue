@@ -134,9 +134,7 @@ const windowStyle = computed(() => {
             <NavBar v-if="navPlacement === 'top'" placement="top" :narrow="narrowFlag" />
 
             <main class="bbs-body">
-              <Transition name="bbs-page" mode="out-in">
-                <component :is="current.component" :key="current.id" />
-              </Transition>
+              <component :is="current.component" :key="current.id" />
             </main>
 
             <NavBar v-if="navPlacement === 'bottom'" placement="bottom" :narrow="narrowFlag" />
@@ -213,21 +211,6 @@ const windowStyle = computed(() => {
 .bbs-fade-leave-to .bbs-window {
   opacity: 0;
   transform: translateY(16px) scale(0.985);
-}
-
-.bbs-page-enter-active,
-.bbs-page-leave-active {
-  transition:
-    opacity 0.13s var(--bbs-ease),
-    transform 0.13s var(--bbs-ease);
-}
-.bbs-page-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-.bbs-page-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
 }
 
 /* 窗口过渡:进出场(transform+opacity)与拖动回弹(transform)共用;

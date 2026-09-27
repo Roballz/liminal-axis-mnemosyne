@@ -20,6 +20,7 @@ export interface EventCard {
 export interface EventView {
     cards: EventCard[];
     valid: MemoryRevision[];
+    validity: Map<string, import('./canonical').MemoryStatus>;
     storedCount: number;
 }
 export async function eventView(lib: Library, view: CapturedView, includeHistory = false): Promise<EventView> {
@@ -28,12 +29,22 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
     const permitted = new Set(valid.map(m => m.id));
     const live = view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length;
     const selected = new Map(view.memories.map(m => [m.owner, m]));
+    const positions = new Map(view.refs.map((ref, index) => [ref.message, index]));
     const result = await lib.transaction(STORES, 'readonly', async (tx) => {
         const chains = await tx.all<EventChain>('event_chains', 'branch', view.branch.id);
-        const snapshots = new Map<string, Snapshot | undefined>();
+        // Share reads only inside this projection. Never reuse across a branch/epoch change.
+        const memories = new Map(view.memories.map(m => [m.id, Promise.resolve<MemoryRevision | undefined>(m)]));
+        const readMemory = (id: string) => {
+            if (!memories.has(id)) memories.set(id, tx.get<MemoryRevision>('memory_revisions', id));
+            return memories.get(id)!;
+        };
+        const snapshots = new Map<string, Promise<Snapshot | undefined>>();
+        const readSnapshot = (id: string) => {
+            if (!snapshots.has(id)) snapshots.set(id, tx.get<Snapshot>('history_snapshots', id));
+            return snapshots.get(id)!;
+        };
         const inRange = async (snapshotId: string, cutoff: number) => {
-            if (!snapshots.has(snapshotId)) snapshots.set(snapshotId, await tx.get<Snapshot>('history_snapshots', snapshotId));
-            const snapshot = snapshots.get(snapshotId);
+            const snapshot = await readSnapshot(snapshotId);
             return !!snapshot && snapshot.branch === view.branch.id && cutoff <= view.cutoff;
         };
         const cache = new Map<string, boolean>();
@@ -41,7 +52,7 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             const key = `${snapshotId}:${cutoff}`;
             if (cache.has(key))
                 return cache.get(key)!;
-            const snapshot = await tx.get<Snapshot>('history_snapshots', snapshotId);
+            const snapshot = await readSnapshot(snapshotId);
             const ok = !!snapshot && snapshot.branch === view.branch.id && cutoff <= view.cutoff &&
                 sourceRefsMatch(view.branch, (await snapshotRefs(tx, snapshot)).slice(0, cutoff), view.refs.slice(0, cutoff));
             cache.set(key, ok);
@@ -51,17 +62,27 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
         const equivalents = new Map<string, string>();
         const resolveMemory = async (id: string): Promise<string> => {
             if (equivalents.has(id)) return equivalents.get(id)!;
-            const prior = await tx.get<MemoryRevision>('memory_revisions', id);
+            const prior = await readMemory(id);
             const next = prior && selected.get(prior.owner);
             const resolved = prior && next && sameNarrativeRevision(prior, next) ? next.id : id;
             equivalents.set(id, resolved);
             return resolved;
         };
         for (const chain of chains) {
-            const revisions = await tx.all<EventRevision>('event_revisions', 'owner', chain.id);
+            const [revisions, memberships, allProgress] = await Promise.all([
+                tx.all<EventRevision>('event_revisions', 'owner', chain.id),
+                tx.all<Membership>('event_memberships', 'owner', chain.id),
+                tx.all<Progress>('event_progress', 'owner', chain.id),
+            ]);
+            revisions.sort((a, b) => b.epoch - a.epoch);
+            const candidates = live && !includeHistory ? revisions.slice(0, 1) : revisions;
+            await Promise.all([...new Set([
+                ...candidates.flatMap(r => [...r.refs, ...(r.summarized ?? []), ...(r.latestProgress ? [r.latestProgress.memory] : [])]),
+                ...memberships.map(m => m.memory), ...allProgress.flatMap(p => p.memories),
+            ])].map(readMemory));
             const history: NonNullable<EventCard['history']> = { revisions: [], memberships: [], progress: [] };
             let meta: EventRevision | undefined;
-            for (const original of revisions.sort((a, b) => b.epoch - a.epoch)) {
+            for (const original of candidates) {
                 const r = { ...original, refs: await Promise.all(original.refs.map(resolveMemory)),
                     ...(original.summarized ? { summarized: await Promise.all(original.summarized.map(resolveMemory)) } : {}),
                     ...(original.latestProgress ? { latestProgress: { ...original.latestProgress, memory: await resolveMemory(original.latestProgress.memory) } } : {}),
@@ -69,7 +90,7 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
                 // Narrative provenance is the recorded material, not every unrelated floor in
                 // the chat at save time. Keep the operation cutoff: never backdate later prose.
                 const dependencies = [...r.refs, ...(r.summarized ?? []), ...(r.latestProgress ? [r.latestProgress.memory] : [])];
-                const eligible = await inRange(r.snapshot, r.cutoff) && dependencies.every(id => permitted.has(id)) &&
+                const eligible = (!live || includeHistory) && await inRange(r.snapshot, r.cutoff) && dependencies.every(id => permitted.has(id)) &&
                     (dependencies.length > 0 || await within(r.snapshot, r.cutoff));
                 if (eligible && includeHistory) history.revisions.push(r);
                 if (!meta && (live || eligible)) meta = r;
@@ -77,17 +98,16 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             }
             if (!meta)
                 continue;
-            const memberships = await tx.all<Membership>('event_memberships', 'owner', chain.id);
             const latest = new Map<string, Membership>();
             const memberDetails = new Map<string, MemoryRevision>();
             for (const original of memberships.sort((a, b) => a.epoch - b.epoch)) {
-                const previous = await tx.get<MemoryRevision>('memory_revisions', original.memory);
+                const previous = await readMemory(original.memory);
                 if (!previous) continue;
                 // The link belongs to the summary family; narrative text above still requires
                 // the exact/equivalent revision or an explicit overview confirmation.
                 const memory = selected.get(previous.owner) ?? previous;
                 const m = { ...original, memory: memory.id };
-                const eligible = permitted.has(m.memory) && await inRange(m.snapshot, m.cutoff);
+                const eligible = (!live || includeHistory) && permitted.has(m.memory) && await inRange(m.snapshot, m.cutoff);
                 if (eligible && includeHistory) history.memberships.push(m);
                 if (live || eligible) {
                     latest.set(previous.owner, m);
@@ -95,15 +115,14 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
                 }
             }
             const members = [...latest.values()].filter(m => m.active).sort((a, b) => {
-                const anchor = (key: string) => view.refs.findIndex(r => r.message === (memberDetails.get(key) ?? valid.find(v => v.id === key))?.anchor);
+                const anchor = (key: string) => positions.get(memberDetails.get(key)?.anchor ?? '') ?? -1;
                 return anchor(a.memory) - anchor(b.memory);
             });
             const memberSet = new Set(members.map(m => m.memory));
             const progress: Progress[] = [];
-            const allProgress = await tx.all<Progress>('event_progress', 'owner', chain.id);
             for (const original of allProgress) {
                 const p = { ...original, memories: await Promise.all(original.memories.map(resolveMemory)) };
-                const eligible = p.memories.every(m => permitted.has(m)) && await inRange(p.snapshot, p.cutoff);
+                const eligible = (!live || includeHistory) && p.memories.every(m => permitted.has(m)) && await inRange(p.snapshot, p.cutoff);
                 if (eligible && includeHistory) history.progress.push(p);
                 // Current workbench retains historical text locally; recall still requires every dependency.
                 if (p.memories.every(m => memberSet.has(m) && permitted.has(m)) && (live || eligible)) progress.push(p);
@@ -119,7 +138,7 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             cards.push({ chain, meta, members, progress, needsReview, blocked, memberDetails: [...memberDetails.values()],
                 ...(includeHistory ? { history } : {}) });
         }
-        return { cards, valid, storedCount: chains.length };
+        return { cards, valid, validity: validStates, storedCount: chains.length };
     });
     // Hash only after the IndexedDB transaction has completed.
     if (includeHistory) for (const card of result.cards)

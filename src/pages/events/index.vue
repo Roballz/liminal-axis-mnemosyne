@@ -433,7 +433,7 @@ onBeforeUnmount(() => {
     </div>
     <div class="mn-actions mn-event-toolbar">
       <button :disabled="busy || loading" @click="queueRefresh">刷新</button
-      ><button v-if="view?.branch.fork" :disabled="busy || loading || jobState.busy || manualEventState.busy" @click="run(previewResync)">重新继承父事件链</button
+      ><button v-if="view?.branch.fork" :disabled="busy || loading || jobState.busy || manualEventState.busy" @click="run(previewResync)">重新继承</button
       ><button
         :disabled="manualEventState.busy"
         @click="jobState.busy ? stopDailyJob() : run(batch)"

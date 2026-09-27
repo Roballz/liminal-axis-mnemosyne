@@ -44,6 +44,7 @@ export const dailyState = reactive({
 let installed = false;
 interface DailyCache {
     view: CapturedView;
+    validity: Map<string, MemoryStatus>;
     allowed: Set<string>;
     leaves: CanonicalLeaf[];
     host: string;
@@ -224,11 +225,27 @@ export async function dailyBranch(): Promise<Branch | null> {
     return (await (await activeLibrary()).get<Branch>('branches', binding.branch)) ?? null;
 }
 
+/** Read-only review UI: reuse the archived projection after checking its exact live version. */
+export async function readDailyReview() {
+    const host = hostVersion(), generation = dailyState.generation, lib = await activeLibrary();
+    const branch = await dailyBranch();
+    if (!branch) return null;
+    const prior = cache;
+    const reusable = prior && prior.library === lib.db.name && prior.host === host &&
+        prior.view.branch.id === branch.id && prior.view.branch.head === branch.head &&
+        prior.view.branch.view === branch.view && prior.view.branch.epoch === branch.epoch;
+    const view = reusable ? prior.view : await capture(lib, branch.id);
+    const validity = reusable ? prior.validity : await statuses(lib, view);
+    check(await current(lib, view) && lib === await activeLibrary(), '聊天或摘要已改变，请刷新后再处理');
+    check(host === hostVersion() && generation === dailyState.generation, '聊天或摘要已改变，请刷新后再处理');
+    return { view, validity, host, generation, lib };
+}
+
 async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView) {
-    const { cards } = await eventView(lib, view);
+    const { cards, validity } = await eventView(lib, view);
     check(await current(lib, view), '事件状态已改变，请重试');
     const safe = cards.filter(c => !c.needsReview && !c.blocked);
-    return { eventText: renderPersistentEvents(safe), eventHints: safe.map(c => ({
+    return { validity, eventText: renderPersistentEvents(safe), eventHints: safe.map(c => ({
         id: c.chain.id, title: c.meta.title, status: c.meta.status,
         latest: c.meta.latestProgress ? `${c.meta.latestProgress.time} ${c.meta.latestProgress.text}`.trim() : undefined,
     })) };
@@ -595,8 +612,8 @@ export async function refreshDailyTables() {
     const inputs = await readTables(lib, branch);
     const events = await projectEvents(lib, { ...previous.view, branch });
     if (cache !== previous || host !== hostVersion()) return;
-    const permitted = new Set(previous.view.memories.filter((m) => previous.allowed.has(m.hostId)).map((m) => m.id));
-    cache = { ...previous, ...events, view: { ...previous.view, branch }, tableText: renderTableState(inputs, permitted) };
+    const permitted = new Set(previous.view.memories.filter((m) => events.validity.get(m.id) === 'valid').map((m) => m.id));
+    cache = { ...previous, ...events, ...projectView(previous.view, events.validity), view: { ...previous.view, branch }, tableText: renderTableState(inputs, permitted) };
     lastCache = injectionCache = cache;
     dailyState.tableRevision++;
     dailyState.revision++;

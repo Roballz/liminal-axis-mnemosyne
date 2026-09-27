@@ -3,8 +3,8 @@ import { apiSettings, engineActiveHere } from '@/api/settings';
 import { engineState } from '@/memory/engine';
 import { getContext } from '@/st/context';
 import { activeLibrary } from './db';
-import { keepSummaries, statuses } from './canonical';
-import { dailyState, dailyCurrent, hostScope, hostVersion, invalidateDaily, syncDaily } from './bridge';
+import { keepSummaries } from './canonical';
+import { dailyState, dailyCurrent, hostScope, hostVersion, invalidateDaily, syncDaily, readDailyReview } from './bridge';
 import { check, type CapturedView } from './model';
 import { rebuildSummaryOwners } from './summary-review-actions';
 import { summaryEditSignal } from './summary-edit-signal';
@@ -21,8 +21,10 @@ export async function prepareSummaryEditPrompt() {
     const run = ++ticket, scope = hostScope();
     summaryEditPrompt.open = false; pending = null;
     try {
-        const view = await syncDaily(), host = hostVersion(), generation = dailyState.generation, lib = await activeLibrary();
-        const validity = await statuses(lib, view);
+        await syncDaily();
+        const result = await readDailyReview();
+        if (!result) return;
+        const { view, validity, host, generation, lib } = result;
         if (run !== ticket || scope !== hostScope() || !apiSettings.summaryEditPromptEnabled || !await dailyCurrent(view, host, generation)) return;
         const ids = view.memories.filter(m => ['needs_review', 'needs_rebuild'].includes(validity.get(m.id) ?? '')).map(m => m.id);
         if (!ids.length) return;
