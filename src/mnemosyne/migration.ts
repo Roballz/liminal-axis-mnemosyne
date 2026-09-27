@@ -6,7 +6,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
     schema: 1;
     created: number;
     excluded: string[];
@@ -23,7 +23,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta is restricted to non-secret daily feature settings, not upstream API configuration.
-    const base = { format: 'mnemosyne-daily' as const, version: 7 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 8 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     validateData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -43,7 +43,7 @@ const FIELDS: Record<Store, string[]> = {
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     check(pack.data && Object.keys(pack.data).length === STORES.length, '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
@@ -268,6 +268,12 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
         }
     }
     for (const r of maps.library_meta.values()) {
+        if (pack.version >= 8 && r.id === 'archive-deletions') {
+            check(r.value?.version === 1 && Object.keys(r.value).length === 2 && Array.isArray(r.value.scopes) &&
+                r.value.scopes.every((s: unknown) => typeof s === 'string' && s.length > 0) &&
+                new Set(r.value.scopes).size === r.value.scopes.length, '删除记录格式非法');
+            continue;
+        }
         check(r.id === 'daily-settings' && r.value && typeof r.value === 'object', '不允许导出任意设置或密钥');
         const keys = ['eventsEnabled', 'interval', 'delay', 'batchSize', 'maxChars', 'chains', 'excerptChars', 'totalChars', 'extra'];
         if (pack.version >= 6) keys.push('backfillBatchSize');

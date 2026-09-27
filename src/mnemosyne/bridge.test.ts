@@ -1,3 +1,4 @@
+import { previewArchiveDeletion } from './archive-deletion';
 import { fingerprint } from './model';
 import { commitReconnect } from './binding-recovery';
 import { previewRoleRepairs, confirmRoleRepairs } from './source-role-repair';
@@ -9,7 +10,7 @@ import { invalidateSummaryAncestors } from '@/memory/apply';
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import { Library, activateLibrary, freshLibraryName } from './db';
-import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices, hiddenRoleRepairRefs, dailyBranch, previewArchiveReconnect, reconnectArchive } from './bridge';
+import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices, hiddenRoleRepairRefs, dailyBranch, previewArchiveReconnect, reconnectArchive, deleteDailyArchive, chooseNewStory } from './bridge';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
 import { type STContext, type STMessage } from '@/st/context';
@@ -369,7 +370,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect((await syncDaily()).branch.sourceRoleRepairs).toHaveLength(1);
     expect(dailyState.review).toBe(0);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(7);
+    expect(pack.version).toBe(8);
     const restored = await restoreLibrary(pack);
     lib = restored;
     dispose?.(); dispose = bindDaily();
@@ -423,7 +424,7 @@ test('host write failure stays pending and retries the unsaved message markers',
     expect(dailyState.pending).toBe(false);
 });
 test('canonical failure after host success keeps persistent pending and retries without duplicate source objects', async () => {
-    const spy = vi.spyOn(lib, 'transaction');
+    const spy = vi.spyOn(canonical, 'synchronize');
     spy.mockRejectedValueOnce(new Error('canonical unavailable'));
     await expect(syncDaily()).rejects.toThrow('canonical unavailable');
     expect(dailyState.pending).toBe(true);
@@ -516,7 +517,7 @@ test('unchanged refresh and lightweight page scope do not resave or scan sources
     await syncDaily(); await syncDaily();
     expect(ctx.saveChat).not.toHaveBeenCalled(); expect(ctx.saveMetadata).not.toHaveBeenCalled();
     expect(all).not.toHaveBeenCalled();
-    expect(transaction.mock.calls.every(([stores,mode]) => mode === 'readonly' && stores.length === 1 && stores[0] === 'branches')).toBe(true);
+    expect(transaction.mock.calls.every(([stores,mode]) => mode === 'readonly' && stores.length === 1 && ['branches', 'library_meta'].includes(stores[0]))).toBe(true);
 });
 
 test.each([false,true])('one native summary call also fills tables and enters current-state injection (custom=%s)', async custom => {
@@ -783,4 +784,100 @@ test('same-binding repair still rejects changed identity or body', async () => {
     ctx.chat[0].mes = '合成问题';
     ctx.chat[0].extra = {};
     await expect(previewArchiveReconnect(original.branch.id)).rejects.toThrow('唯一消息身份');
+});
+
+
+test('host-marked branch automatically inherits once and emits the requested success notice', async () => {
+    const parent = await syncDaily();
+    await editEvent(lib, parent, null, { title: '自动继承的事件', status: 'open', keywords: [] });
+    const success = vi.fn(), error = vi.fn();
+    Object.assign(window, { toastr: { success, error } });
+    ctx.chatMetadata.main_chat = 'synthetic';
+    ctx.getCurrentChatId = () => 'auto-child';
+    invalidateDaily();
+    const child = await syncDaily();
+    expect(child.branch.fork?.branch).toBe(parent.branch.id);
+    expect((await eventView(lib, child)).cards[0].meta.title).toBe('自动继承的事件');
+    expect(success).toHaveBeenCalledWith('已成功继承synthetic档案', '柏宝书');
+    await syncDaily();
+    expect(success).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveBeenCalled();
+    expect(await lib.all('branches')).toHaveLength(2);
+});
+
+test('automatic fork with changed body stays manual, writes nothing, and failure notice is not repeated', async () => {
+    await syncDaily();
+    const before = await exportLibrary(lib);
+    const error = vi.fn(); Object.assign(window, { toastr: { error } });
+    ctx.chatMetadata.main_chat = 'synthetic';
+    ctx.getCurrentChatId = () => 'bad-auto-child';
+    ctx.chat[1].mes += '正文变化';
+    invalidateDaily();
+    await expect(syncDaily()).rejects.toThrow('正文不匹配');
+    expect(dailyState.conflict).toBe(true);
+    expect(error).toHaveBeenCalledWith('档案继承失败，请手动检查。', '柏宝书');
+    await expect(syncDaily()).rejects.toThrow('请手动检查');
+    expect(error).toHaveBeenCalledTimes(1);
+    expect((await exportLibrary(lib)).data).toEqual(before.data);
+    const independent = await chooseNewStory();
+    expect(independent.branch.fork).toBeNull();
+});
+
+test('automatic fork supports explicit host parent without copied binding but never guesses another character', async () => {
+    const parent = await syncDaily();
+    ctx.chatMetadata = { main_chat: 'synthetic' };
+    ctx.getCurrentChatId = () => 'metadata-new-child';
+    invalidateDaily();
+    expect((await syncDaily()).branch.fork?.branch).toBe(parent.branch.id);
+    ctx.chatMetadata = { main_chat: 'synthetic' };
+    ctx.characters![0].avatar = 'other-character.png';
+    ctx.getCurrentChatId = () => 'other-child';
+    invalidateDaily();
+    await expect(syncDaily()).rejects.toThrow('来源档案不存在');
+    expect(await lib.all('branches')).toHaveLength(2);
+});
+
+test('deleting the current archive clears projection and blocks automatic recreation even without host metadata', async () => {
+    const current = await syncDaily();
+    const plan = await previewArchiveDeletion(lib, current.branch.id);
+    await deleteDailyArchive(lib, plan, () => true);
+    expect(canonicalLeaves()).toEqual([]);
+    ctx.chatMetadata = {};
+    await expect(syncDaily()).rejects.toThrow('已手动删除');
+    expect(await lib.all('branches')).toHaveLength(0);
+    const rebuilt = await chooseNewStory();
+    expect(rebuilt.branch.id).not.toBe(current.branch.id);
+    expect(rebuilt.branch.fork).toBeNull();
+});
+
+
+test('chat switch during automatic fork cancels before commit and sends no result to another chat', async () => {
+    await syncDaily();
+    const notices = { success: vi.fn(), error: vi.fn() }; Object.assign(window, { toastr: notices });
+    ctx.chatMetadata.main_chat = 'synthetic';
+    ctx.getCurrentChatId = () => 'switching-auto-child';
+    invalidateDaily();
+    const original = canonical.forkBranch;
+    vi.spyOn(canonical, 'forkBranch').mockImplementationOnce(async (...args) => {
+        ctx.getCurrentChatId = () => 'unrelated-chat';
+        invalidateDaily();
+        return original(...args);
+    });
+    await expect(syncDaily()).rejects.toThrow('聊天已改变');
+    expect(await lib.all('branches')).toHaveLength(1);
+    expect(notices.success).not.toHaveBeenCalled(); expect(notices.error).not.toHaveBeenCalled();
+});
+
+
+test('automatic inheritance from an earlier floor uses the complete matching shorter prefix', async () => {
+    const parent = await syncDaily();
+    ctx.chat.push(message(true, '后来的问题'), message(false, '后来的回答'));
+    invalidateDaily(); await syncDaily();
+    ctx.chat = ctx.chat.slice(0, 2);
+    ctx.chatMetadata.main_chat = 'synthetic';
+    ctx.getCurrentChatId = () => 'earlier-auto-child';
+    invalidateDaily();
+    const child = await syncDaily();
+    expect(child.branch.fork).toMatchObject({ branch: parent.branch.id, length: 2 });
+    expect(child.refs).toEqual(parent.refs);
 });

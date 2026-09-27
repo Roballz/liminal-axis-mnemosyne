@@ -16,7 +16,9 @@ import {
   hiddenRoleRepairRefs,
   previewArchiveReconnect,
   reconnectArchive,
+  deleteDailyArchive,
 } from '@/mnemosyne/bridge';
+import { archiveDeletionChoices, previewArchiveDeletion, type ArchiveDeletionPlan } from '@/mnemosyne/archive-deletion';
 import { activeLibrary } from '@/mnemosyne/db';
 import { capture, statuses, keepSummary } from '@/mnemosyne/canonical';
 import { reviewDifference, type ReviewDifference } from '@/mnemosyne/review-diagnostics';
@@ -125,6 +127,33 @@ async function applyReconnect() {
   reconnectChoice.value = '';
   clearReviews();
   notice.value = `已接回原档案。库内原有 ${preview.plan.events} 条事件链；仍有 ${dailyState.review} 条摘要待审核。若事件未显示，请继续检查隐藏来源差异。`;
+}
+const deletionChoices = ref<{ value: string; label: string }[]>([]);
+const deletionChoice = ref('');
+const deletionPreview = shallowRef<{ lib: Awaited<ReturnType<typeof activeLibrary>>; plan: ArchiveDeletionPlan } | null>(null);
+watch(deletionChoice, () => { deletionPreview.value = null; });
+watch(() => dailyState.scope, () => { deletionPreview.value = null; });
+async function loadDeletionChoices() {
+  deletionPreview.value = null;
+  deletionChoices.value = await archiveDeletionChoices(await activeLibrary());
+  deletionChoice.value = '';
+}
+async function inspectDeletion() {
+  deletionPreview.value = null;
+  const choice = deletionChoice.value, scope = hostScope();
+  const lib = await activeLibrary(), plan = await previewArchiveDeletion(lib, choice);
+  check(!disposed && choice === deletionChoice.value && scope === hostScope(), '选择或聊天已改变，请重新预览');
+  deletionPreview.value = { lib, plan };
+}
+async function applyDeletion() {
+  const preview = deletionPreview.value;
+  check(preview, '请先预览删除范围');
+  if (!confirm(`永久删除这个聊天档案？\n${preview.plan.labels.join('\n')}\n包括其正文、摘要、事件链和自定义表。不会删除宿主聊天，也不会删除其他聊天档案。此操作不能撤销。`)) return;
+  await deleteDailyArchive(preview.lib, preview.plan, () => !disposed && deletionPreview.value === preview);
+  clearReviews();
+  reconnectChoices.value = []; reconnectPreview.value = null;
+  await loadDeletionChoices();
+  notice.value = '已删除所选聊天档案。该聊天的自动建档已暂停；其他档案保持不变。';
 }
 async function loadReviews() {
   clearReviews();
@@ -298,7 +327,7 @@ async function copyKnowledge() {
         “分叉”会继承开头指定条数的消息，之后两条路线独立发展，原聊天不变。你的消息、AI 回复和开场白各算一条，不是按对话轮数计算。
       </p>
       <p class="mn-muted">
-        数量默认填两边聊天较短的长度，仅是建议值；若分叉后已聊了新内容，请改为分叉时保留的消息数。
+        新分支有明确来源且身份、正文全部匹配时会自动继承并弹出结果提示；失败时可在这里手动处理。数量默认填两边聊天较短的长度，仅是建议值；若分叉后已聊了新内容，请改为分叉时保留的消息数。
         确认时仍会逐条核对消息身份和正文，不匹配就停止，不会靠同样的文字猜测来源。
       </p>
       <p class="mn-muted">
@@ -321,6 +350,21 @@ async function copyKnowledge() {
         <button :disabled="busy" @click="run(applyReconnect)">确认是同一聊天，接回原档案</button>
       </div>
       <p class="mn-muted">不会按相同文字合并消息。若身份缺失、正文不同或聊天变短，预览会停止；先保留核心包和宿主聊天。备份只包含导出时的数据。</p>
+    </details>
+    <details class="mn-card">
+      <summary>手动删除聊天档案</summary>
+      <p>宿主聊天删除后，本机档案仍会保留。这里可清理不需要或建错的单个聊天档案；若其他分支仍依赖它，会阻止删除。</p>
+      <button :disabled="busy" @click="run(loadDeletionChoices)">加载可清理档案</button>
+      <template v-if="deletionChoices.length">
+        <BbsSelect v-model="deletionChoice" :options="[{ value: '', label: '请选择要删除的聊天档案' }, ...deletionChoices]" aria-label="要删除的聊天档案" />
+        <button :disabled="busy || !deletionChoice" @click="run(inspectDeletion)">预览删除范围</button>
+      </template>
+      <div v-if="deletionPreview" class="mn-card">
+        <p>{{ deletionPreview.plan.labels.join(' / ') }}</p>
+        <p>将删除 {{ deletionPreview.plan.messages }} 条正文版本、{{ deletionPreview.plan.summaries }} 条摘要版本、{{ deletionPreview.plan.events }} 条事件链、{{ deletionPreview.plan.tables }} 张自定义表。</p>
+        <p class="mn-warning">永久删除，不能撤销。宿主聊天与其他档案保留；删除后不会自动重新建库，需要时可明确重新建档。</p>
+        <button :disabled="busy" @click="run(applyDeletion)">永久删除这个聊天档案</button>
+      </div>
     </details>
     <details class="mn-card">
       <summary>数据包边界与恢复</summary>

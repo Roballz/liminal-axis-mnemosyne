@@ -1,3 +1,5 @@
+import { toast } from '@/st/toast';
+import { archiveWasDeleted, allowArchiveCreation, commitArchiveDeletion, type ArchiveDeletionPlan } from './archive-deletion';
 import { normalizeTags, type SummaryTags, type EventHint } from '@/memory/contextTags';
 import { eventView, renderPersistentEvents } from './events';
 import { previewReconnect, commitReconnect } from './binding-recovery';
@@ -60,6 +62,7 @@ let serial: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let savedHost = '';
 let scheduledHost = '';
+const autoForkAttempted = new Set<string>();
 const MESSAGE_KEY = 'mnemosyne_message_v1';
 const BINDING_KEY = 'mnemosyne_binding_v1';
 const EVIDENCE_KEY = 'mnemosyne_summary_evidence_v1';
@@ -274,6 +277,10 @@ export async function syncDaily(): Promise<CapturedView> {
             check(ctx && scope, '请先打开聊天');
             const lib = await activeLibrary();
             if (injectionCache?.library !== lib.db.name) injectionCache = null;
+            if (await archiveWasDeleted(lib, scope)) {
+                dailyState.conflict = true;
+                throw new Error('这个聊天的档案已手动删除，自动归档已暂停。如需重新建档，请明确选择“作为独立新故事”或手动继承。');
+            }
             const observedHost = hostVersion(),
                 observedGeneration = dailyState.generation;
             const reusable = cache ?? lastCache;
@@ -339,13 +346,47 @@ export async function syncDaily(): Promise<CapturedView> {
                 | {
                       scope?: string;
                       branch?: string;
+                      independent?: boolean;
                   }
                 | undefined;
-            const bindings = inherited?.branch || inherited?.scope ? await lib.all<Binding>('host_bindings') : [];
-            const activeBinding = bindings.find(b => !b.detached && b.scope === scope);
-            if ((inherited?.scope && inherited.scope !== scope && activeBinding?.branch !== inherited.branch) ||
-                (inherited?.branch && !activeBinding) ||
-                (inherited?.branch && activeBinding?.branch !== inherited.branch && !bindings.some(b => b.detached && b.scope === scope && b.branch === inherited.branch))) {
+            const bindings = await lib.all<Binding>('host_bindings');
+            let activeBinding = bindings.find(b => !b.detached && b.scope === scope);
+            const parentName = ctx.chatMetadata.main_chat;
+            const attempt = `${lib.db.name}:${scope}`;
+            // The host's explicit parent marker distinguishes a branch from a rename.
+            if (!activeBinding && !inherited?.independent && typeof parentName === 'string' && parentName && !autoForkAttempted.has(attempt)) {
+                autoForkAttempted.add(attempt);
+                const guard = () => observedHost === hostVersion() && observedGeneration === dailyState.generation && getContext()?.chatMetadata === ctx.chatMetadata;
+                try {
+                    const owner = JSON.parse(scope)[0];
+                    const candidates = bindings.filter(b => !b.detached && b.scope === JSON.stringify([owner, parentName]));
+                    check(candidates.length === 1, '来源档案不存在或不唯一');
+                    const source = candidates[0];
+                    check(!inherited?.branch || inherited.branch === source.branch, '来源标记不一致');
+                    const parent = await capture(lib, source.branch);
+                    const prefix = Math.min(parent.cutoff, ctx.chat.length);
+                    check(prefix > 0, '分叉范围为空');
+                    const child = await forkCurrentChat(source.branch, prefix, ctx, scope, guard);
+                    activeBinding = (await lib.all<Binding>('host_bindings', 'branch', child.id))[0];
+                    check(guard(), '聊天已切换');
+                    const safeName = parentName.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+                    toast(`已成功继承${safeName}档案`, 'success');
+                } catch (error) {
+                    if (guard()) {
+                        dailyState.conflict = true;
+                        toast('档案继承失败，请手动检查。', 'error');
+                    }
+                    throw error;
+                }
+            }
+            const currentBinding = ctx.chatMetadata[BINDING_KEY] as typeof inherited;
+            if (!activeBinding && !inherited?.independent && typeof parentName === 'string' && parentName) {
+                dailyState.conflict = true;
+                throw new Error('档案继承失败，请手动检查。');
+            }
+            if ((currentBinding?.scope && currentBinding.scope !== scope && activeBinding?.branch !== currentBinding.branch) ||
+                (currentBinding?.branch && !activeBinding) ||
+                (currentBinding?.branch && activeBinding?.branch !== currentBinding.branch && !bindings.some(b => b.detached && b.scope === scope && b.branch === currentBinding.branch))) {
                 dailyState.conflict = true;
                 throw new Error('聊天名称或绑定已改变：若只是改名，请接回原档案；若创建了新分支，请明确选择新故事或继承。不自动猜测分支。');
             }
@@ -582,7 +623,9 @@ export async function dailyCurrent(view: CapturedView, host: string, generation:
 export async function chooseNewStory() {
     const ctx = getContext();
     check(ctx, '无聊天');
-    delete ctx.chatMetadata[BINDING_KEY];
+    const scope = hostScope();
+    await allowArchiveCreation(await activeLibrary(), scope);
+    ctx.chatMetadata[BINDING_KEY] = { scope, independent: true };
     for (const m of ctx.chat) {
         if (m.extra) {
             delete m.extra[MESSAGE_KEY];
@@ -646,6 +689,7 @@ export async function reconnectArchive(preview: Awaited<ReturnType<typeof previe
         const guard = () => isCurrent() && host === hostVersion() && generation === dailyState.generation;
         check(ctx && guard() && lib === await activeLibrary(), '聊天已改变，请重新预览接回');
         await commitReconnect(lib, plan, guard);
+        await allowArchiveCreation(lib, plan.scope);
         cache = null;
         lastCache = null;
         injectionCache = null;
@@ -745,35 +789,61 @@ export function assertSummaryEvidence(evidence: Awaited<ReturnType<typeof captur
             '摘要请求期间正文已改变，旧结果不能应用',
         );
 }
+async function forkCurrentChat(parentId: string, prefixLength: number, ctx: NonNullable<ReturnType<typeof getContext>>,
+    scope: string, guard: () => boolean) {
+    const lib = await activeLibrary();
+    const parent = await capture(lib, parentId, prefixLength);
+    const bindings = await lib.all<Binding>('host_bindings', 'branch', parentId);
+    const mappings = (await Promise.all(bindings.map((b) => lib.all<any>('message_mappings', 'owner', b.id)))).flat();
+    check(guard() && prefixLength <= ctx.chat.length, '聊天已改变或分叉前缀超过聊天长度');
+    for (let i = 0; i < prefixLength; i++) {
+        const message = ctx.chat[i], ref = parent.refs[i], source = parent.sources.get(ref.revision)!;
+        const identityMatches = mappings.some(m => m.message === ref.message && m.hostKey === message.extra?.[MESSAGE_KEY]);
+        const bodyMatches = source.content === message.mes;
+        const difference = [!identityMatches && '消息身份不同或缺失', !bodyMatches && '正文不同'].filter(Boolean).join('、');
+        check(identityMatches && bodyMatches,
+            `#${i} 分叉前缀身份或正文不匹配：${difference}；前 ${i} 条已匹配，未建立分支。若要找回原事件，请使用“聊天改名 / 接回已有档案”，不要通过缩短前缀新建分支来恢复。`);
+    }
+    const branch = await forkBranch(lib, parent, scope, guard);
+    cache = null;
+    lastCache = null;
+    injectionCache = null;
+    check(guard(), '分支已保存；聊天已切换，请返回后刷新');
+    ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
+    await ctx.saveMetadata();
+    return branch;
+
+}
 export async function confirmFork(parentId: string, prefixLength: number) {
     const ctx = getContext(), scope = hostScope(), host = hostVersion(), generation = dailyState.generation;
     check(ctx && scope, '无聊天');
     const job = serial.catch(() => {}).then(async () => {
         const guard = () => scope === hostScope() && host === hostVersion() && generation === dailyState.generation;
         check(guard(), '聊天已改变，请重新选择分支');
-        const lib = await activeLibrary();
-        const parent = await capture(lib, parentId, prefixLength);
-        const bindings = await lib.all<Binding>('host_bindings', 'branch', parentId);
-        const mappings = (await Promise.all(bindings.map((b) => lib.all<any>('message_mappings', 'owner', b.id)))).flat();
-        check(guard() && prefixLength <= ctx.chat.length, '聊天已改变或分叉前缀超过聊天长度');
-        for (let i = 0; i < prefixLength; i++) {
-            const message = ctx.chat[i], ref = parent.refs[i], source = parent.sources.get(ref.revision)!;
-            const identityMatches = mappings.some(m => m.message === ref.message && m.hostKey === message.extra?.[MESSAGE_KEY]);
-            const bodyMatches = source.content === message.mes;
-            const difference = [!identityMatches && '消息身份不同或缺失', !bodyMatches && '正文不同'].filter(Boolean).join('、');
-            check(identityMatches && bodyMatches,
-                `#${i} 分叉前缀身份或正文不匹配：${difference}；前 ${i} 条已匹配，未建立分支。若要找回原事件，请使用“聊天改名 / 接回已有档案”，不要通过缩短前缀新建分支来恢复。`);
-        }
-        const branch = await forkBranch(lib, parent, scope, guard);
-        cache = null;
-        lastCache = null;
-        injectionCache = null;
-        check(guard(), '分支已保存；聊天已切换，请返回后刷新');
-        ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
-        await ctx.saveMetadata();
+        await forkCurrentChat(parentId, prefixLength, ctx, scope, guard);
+        await allowArchiveCreation(await activeLibrary(), scope);
         invalidateDaily();
     });
     serial = job;
     await job;
     return syncDaily();
+}
+export async function deleteDailyArchive(lib: Awaited<ReturnType<typeof activeLibrary>>, plan: ArchiveDeletionPlan, isCurrent: () => boolean) {
+    const scope = hostScope(), generation = dailyState.generation;
+    const job = serial.catch(() => {}).then(async () => {
+        const guard = () => isCurrent() && scope === hostScope() && generation === dailyState.generation;
+        check(lib === await activeLibrary() && guard(), '聊天或数据库已改变，请重新预览删除');
+        await commitArchiveDeletion(lib, plan, guard);
+        cache = lastCache = injectionCache = null;
+        invalidateDaily('档案已删除');
+        if (plan.scopes.includes(scope)) {
+            dailyState.branch = '';
+            dailyState.conflict = true;
+            dailyState.status = '档案已删除';
+            dailyState.error = '自动归档已暂停，需要时可明确重新建档。';
+            if (installed) refreshInjection();
+        }
+    });
+    serial = job;
+    return job;
 }
