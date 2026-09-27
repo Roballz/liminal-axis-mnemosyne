@@ -503,10 +503,12 @@ export async function keepSummaries(lib: Library, view: CapturedView, memoryIds:
 }
 /** Explicit fixed-parent fork; bindings are never inferred from matching content. */
 export async function forkBranch(lib: Library, parent: CapturedView, scope: string, guard: () => boolean = () => true): Promise<Branch> {
-    const events = await eventView(lib, parent);
+    const events = await eventView(lib, parent, true);
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const liveParent = await tx.get<Branch>('branches', parent.branch.id);
         check(equal(liveParent, parent.branch), '父分支已改变，请重新选择分支');
+        for (const card of events.cards)
+            check(equal(await tx.get('event_chains', card.chain.id), card.chain), '父事件已改变，请重新选择分支');
         check(guard(), '聊天已改变，请重新选择分支');
         check(!(await tx.all<Binding>('host_bindings')).some((b) => !b.detached && b.scope === scope), '目标聊天已绑定');
         const branch: Branch = {
@@ -514,7 +516,8 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
             story: parent.branch.story,
             head: '',
             view: '',
-            epoch: 1,
+            // Inherited event history retains its ordering; later child edits follow it.
+            epoch: parent.branch.epoch + 1,
             fork: {
                 branch: parent.branch.id,
                 snapshot: parent.snapshot.id,

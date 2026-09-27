@@ -14,20 +14,28 @@ export interface EventCard {
     needsReview?: boolean;
     blocked?: boolean;
     memberDetails?: MemoryRevision[];
+    history?: { revisions: EventRevision[]; memberships: Membership[]; progress: Progress[] };
+    inheritanceKey?: string;
 }
 export interface EventView {
     cards: EventCard[];
     valid: MemoryRevision[];
     storedCount: number;
 }
-export async function eventView(lib: Library, view: CapturedView): Promise<EventView> {
+export async function eventView(lib: Library, view: CapturedView, includeHistory = false): Promise<EventView> {
     const validStates = await statuses(lib, view);
     const valid = view.memories.filter(m => validStates.get(m.id) === 'valid');
     const permitted = new Set(valid.map(m => m.id));
     const live = view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length;
     const selected = new Map(view.memories.map(m => [m.owner, m]));
-    return lib.transaction(STORES, 'readonly', async (tx) => {
+    const result = await lib.transaction(STORES, 'readonly', async (tx) => {
         const chains = await tx.all<EventChain>('event_chains', 'branch', view.branch.id);
+        const snapshots = new Map<string, Snapshot | undefined>();
+        const inRange = async (snapshotId: string, cutoff: number) => {
+            if (!snapshots.has(snapshotId)) snapshots.set(snapshotId, await tx.get<Snapshot>('history_snapshots', snapshotId));
+            const snapshot = snapshots.get(snapshotId);
+            return !!snapshot && snapshot.branch === view.branch.id && cutoff <= view.cutoff;
+        };
         const cache = new Map<string, boolean>();
         const within = async (snapshotId: string, cutoff: number): Promise<boolean> => {
             const key = `${snapshotId}:${cutoff}`;
@@ -51,16 +59,21 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
         };
         for (const chain of chains) {
             const revisions = await tx.all<EventRevision>('event_revisions', 'owner', chain.id);
+            const history: NonNullable<EventCard['history']> = { revisions: [], memberships: [], progress: [] };
             let meta: EventRevision | undefined;
             for (const original of revisions.sort((a, b) => b.epoch - a.epoch)) {
                 const r = { ...original, refs: await Promise.all(original.refs.map(resolveMemory)),
                     ...(original.summarized ? { summarized: await Promise.all(original.summarized.map(resolveMemory)) } : {}),
                     ...(original.latestProgress ? { latestProgress: { ...original.latestProgress, memory: await resolveMemory(original.latestProgress.memory) } } : {}),
                 };
-                if (live || (r.refs.every(id => permitted.has(id)) && await within(r.snapshot, r.cutoff))) {
-                    meta = r;
-                    break;
-                }
+                // Narrative provenance is the recorded material, not every unrelated floor in
+                // the chat at save time. Keep the operation cutoff: never backdate later prose.
+                const dependencies = [...r.refs, ...(r.summarized ?? []), ...(r.latestProgress ? [r.latestProgress.memory] : [])];
+                const eligible = await inRange(r.snapshot, r.cutoff) && dependencies.every(id => permitted.has(id)) &&
+                    (dependencies.length > 0 || await within(r.snapshot, r.cutoff));
+                if (eligible && includeHistory) history.revisions.push(r);
+                if (!meta && (live || eligible)) meta = r;
+                if (meta && !includeHistory) break;
             }
             if (!meta)
                 continue;
@@ -68,14 +81,18 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
             const latest = new Map<string, Membership>();
             const memberDetails = new Map<string, MemoryRevision>();
             for (const original of memberships.sort((a, b) => a.epoch - b.epoch)) {
-                const m = { ...original, memory: await resolveMemory(original.memory) };
-                if (live) {
-                    const previous = await tx.get<MemoryRevision>('memory_revisions', m.memory);
-                    if (!previous) continue;
-                    const memory = selected.get(previous.owner) ?? previous;
-                    latest.set(previous.owner, { ...m, memory: memory.id });
+                const previous = await tx.get<MemoryRevision>('memory_revisions', original.memory);
+                if (!previous) continue;
+                // The link belongs to the summary family; narrative text above still requires
+                // the exact/equivalent revision or an explicit overview confirmation.
+                const memory = selected.get(previous.owner) ?? previous;
+                const m = { ...original, memory: memory.id };
+                const eligible = permitted.has(m.memory) && await inRange(m.snapshot, m.cutoff);
+                if (eligible && includeHistory) history.memberships.push(m);
+                if (live || eligible) {
+                    latest.set(previous.owner, m);
                     memberDetails.set(memory.id, memory);
-                } else if (permitted.has(m.memory) && await within(m.snapshot, m.cutoff)) latest.set(m.memory, m);
+                }
             }
             const members = [...latest.values()].filter(m => m.active).sort((a, b) => {
                 const anchor = (key: string) => view.refs.findIndex(r => r.message === (memberDetails.get(key) ?? valid.find(v => v.id === key))?.anchor);
@@ -86,8 +103,10 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
             const allProgress = await tx.all<Progress>('event_progress', 'owner', chain.id);
             for (const original of allProgress) {
                 const p = { ...original, memories: await Promise.all(original.memories.map(resolveMemory)) };
+                const eligible = p.memories.every(m => permitted.has(m)) && await inRange(p.snapshot, p.cutoff);
+                if (eligible && includeHistory) history.progress.push(p);
                 // Current workbench retains historical text locally; recall still requires every dependency.
-                if (p.memories.every(m => memberSet.has(m) && permitted.has(m)) && (live || await within(p.snapshot, p.cutoff))) progress.push(p);
+                if (p.memories.every(m => memberSet.has(m) && permitted.has(m)) && (live || eligible)) progress.push(p);
             }
             progress.sort((a,b) => a.cutoff - b.cutoff || a.epoch - b.epoch);
             if (live && meta.overview === undefined) {
@@ -97,10 +116,15 @@ export async function eventView(lib: Library, view: CapturedView): Promise<Event
             const blocked = live && members.some(m => !permitted.has(m.memory));
             const needsReview = live && ((!!meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))) || meta.refs.some(id => !permitted.has(id)) || !!meta.summarized?.some(id => !memberSet.has(id) || !permitted.has(id)));
             if (!live && (meta.summarized?.some(id => !memberSet.has(id)) || (meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))))) meta = { ...meta, overview: '', summarized: [], latestProgress: null };
-            cards.push({ chain, meta, members, progress, needsReview, blocked, memberDetails: [...memberDetails.values()] });
+            cards.push({ chain, meta, members, progress, needsReview, blocked, memberDetails: [...memberDetails.values()],
+                ...(includeHistory ? { history } : {}) });
         }
         return { cards, valid, storedCount: chains.length };
     });
+    // Hash only after the IndexedDB transaction has completed.
+    if (includeHistory) for (const card of result.cards)
+        card.inheritanceKey = await fingerprint([!!card.chain.archived, card.meta, card.members, card.progress, card.history]);
+    return result;
 }
 export const EVENT_PROMPT = `你只整理事件，不重新生成摘要，不结算物品、人物、变量。
 围绕具体事项、目标、约定、冲突或重要变化归组。相同人物/地点/物品或时间接近不等于同事件。

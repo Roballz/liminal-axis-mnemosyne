@@ -23,6 +23,7 @@ import {
   dailyCurrent,
 } from "@/mnemosyne/bridge";
 import { activeLibrary } from "@/mnemosyne/db";
+import { previewEventResync, commitEventResync, type EventResyncPlan } from "@/mnemosyne/event-resync";
 import {
   eventView,
   editEvent,
@@ -75,6 +76,27 @@ const progressSources = computed(() => {
 });
 const overviewChars = computed(() => eventOverviewLength(overview.value));
 const removing = shallowRef<EventCard | null>(null);
+const resyncPlan = shallowRef<EventResyncPlan | null>(null);
+let resyncHost = "", resyncGeneration = 0, resyncLibrary: Awaited<ReturnType<typeof activeLibrary>> | undefined;
+async function previewResync() {
+  const captured = validView(), lib = await activeLibrary();
+  const host = hostVersion(), generation = dailyState.generation;
+  const plan = await previewEventResync(lib, captured);
+  check(!disposed && await dailyCurrent(captured, host, generation) && lib === await activeLibrary(), "聊天已改变，请重新预览");
+  resyncHost = host; resyncGeneration = generation; resyncLibrary = lib;
+  resyncPlan.value = plan;
+}
+async function confirmResync() {
+  const plan = resyncPlan.value, lib = await activeLibrary();
+  const live = () => !disposed && resyncPlan.value === plan && scope === hostScope() && resyncHost === hostVersion() && resyncGeneration === dailyState.generation;
+  check(plan && live() && lib === resyncLibrary, "聊天已改变，请重新预览");
+  const count = await commitEventResync(lib, plan, live);
+  if (live()) {
+    resyncPlan.value = null;
+    notice.value = `已重新继承 ${count} 条父事件链`;
+    await refresh();
+  }
+}
 const archiveMode = ref(false),
   archiveMenu = shallowRef<EventCard | null>(null);
 const visibleCards = computed(() =>
@@ -382,6 +404,7 @@ watch(
     notice.value = "";
     editing.value = false;
     removing.value = null;
+    resyncPlan.value = null;
     archiveMenu.value = null;
     archiveMode.value = false;
     resetRewrite();
@@ -410,6 +433,7 @@ onBeforeUnmount(() => {
     </div>
     <div class="mn-actions mn-event-toolbar">
       <button :disabled="busy || loading" @click="queueRefresh">刷新</button
+      ><button v-if="view?.branch.fork" :disabled="busy || loading || jobState.busy || manualEventState.busy" @click="run(previewResync)">重新继承父事件链</button
       ><button
         :disabled="manualEventState.busy"
         @click="jobState.busy ? stopDailyJob() : run(batch)"
@@ -732,6 +756,24 @@ onBeforeUnmount(() => {
       @cancel="cancelReview"
       @confirm="saveRewrite"
     />
+    <ModalMask :open="!!resyncPlan" @close="!busy && (resyncPlan = null)">
+      <section v-if="resyncPlan" class="mn-dialog" role="dialog" aria-label="重新继承父事件链">
+        <h3>重新继承父事件链</h3>
+        <p>按已保存的分叉点（前 {{ resyncPlan.parent.cutoff }} 条消息）检查，包含归档事件。补齐缺失事件，替换未修改的继承事件；子分支自己修改过的事件会跳过。</p>
+        <p>父档案、聊天正文与摘要保持原样，不调用模型。</p>
+        <ul style="max-height: 45vh; overflow-y: auto">
+          <li v-for="(item, index) in resyncPlan.entries" :key="index">
+            {{ item.action === 'add' ? '新增' : item.action === 'replace' ? '补齐／更新' : '跳过' }}：{{ item.title }}{{ item.archived ? '（已归档）' : '' }} — {{ item.reason }}
+          </li>
+        </ul>
+        <p v-if="!resyncPlan.entries.length">父档案没有可继承的事件。</p>
+        <p v-if="error" class="mn-error" role="alert">{{ error }}</p>
+        <div class="mn-actions">
+          <button :disabled="busy" @click="resyncPlan = null">取消</button>
+          <button :disabled="busy || !resyncPlan.cards.length" @click="run(confirmResync)">确认继承 {{ resyncPlan.cards.length }} 条</button>
+        </div>
+      </section>
+    </ModalMask>
     <ModalMask :open="editing" @close="!busy && (editing = false)"
       ><form
         class="mn-dialog"

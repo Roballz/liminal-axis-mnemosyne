@@ -137,6 +137,8 @@ export interface CapturedView {
     cutoff: number;
 }
 export interface EventChain extends Row {
+    /** Import receipt, not a live dependency on the parent's event records. */
+    inheritance?: { version: 1; branch: string; event: string; epoch: number; archived: boolean; key: string };
     /** Current UI organization only; never a recall/visibility filter. */
     archiveSchema?: 1;
     archived?: boolean;

@@ -33,7 +33,7 @@ it('标签随摘要版本导出恢复，纯标签编辑不破坏上层总结和�
     expect(text).toContain(output.latestProgress.text);
     expect(text).not.toContain(output.overview);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(9);
+    expect(pack.version).toBe(10);
     const restored = await restoreLibrary(pack, false);
     try { expect((await exportLibrary(restored)).data).toEqual(pack.data); } finally { restored.close(); }
 

@@ -3,6 +3,7 @@ import { fixture, observation, output } from './fixtures';
 import { capture, forkBranch, synchronize, statuses, keepSummary } from './canonical';
 import { editEvent, eventView, deleteEvent, setEventArchived, prepareEventBatch, commitEventBatch } from './events';
 import { exportLibrary, restoreLibrary } from './migration';
+import { previewEventResync } from './event-resync';
 import { STORES } from './model';
 
 test('full fork copies event summaries, progress, manual links and archive flag independently, survives sync and export', async () => {
@@ -87,4 +88,29 @@ test('explicitly reviewed sources remain valid in the child and a later edit sti
     copied = await capture(lib, child.id);
     expect([...await statuses(lib, copied)].map(([, s]) => s)).toEqual(['needs_review']);
     lib.close();
+});
+
+test('reviewed high summaries copy old and approved dependency revisions into the same child family', async () => {
+    const { lib, input, branch } = await fixture(1);
+    input.memories.push({ ...input.memories[0], hostId: 'high', level: 1, anchorKey: null, children: ['leaf-0'], inputRefs: [], coverage: [] });
+    await synchronize(lib, input);
+    const original = await capture(lib, branch.id), high = original.memories.find(m => m.level === 1)!;
+    input.memories[0].content = '重新措辞的底层摘要';
+    await synchronize(lib, input);
+    await keepSummary(lib, await capture(lib, branch.id), high.id);
+    const event = await editEvent(lib, await capture(lib, branch.id), null, { title: '高层事件', status: 'open', keywords: [],
+        overview: '已确认高层概要', summarized: [high.id] }, { memory: high.id, active: true, kind: 'progress' });
+    const child = await forkBranch(lib, await capture(lib, branch.id), 'reviewed-high-child');
+    const view = await capture(lib, child.id), copied = view.memories.find(m => m.level === 1)!;
+    expect([...await statuses(lib, view)].map(([, s]) => s)).toEqual(['valid', 'valid']);
+    const oldDependency = await lib.get('memory_revisions', copied.dependencies[0]);
+    expect((oldDependency as any).branch).toBe(child.id);
+    expect((oldDependency as any).owner).toBe(view.memories.find(m => m.level === 0)!.owner);
+    expect(copied.dependencies[0]).not.toBe(view.memories.find(m => m.level === 0)!.id);
+    const restored = await restoreLibrary(await exportLibrary(lib), false);
+    expect([...await statuses(restored, await capture(restored, child.id))].every(([, s]) => s === 'valid')).toBe(true);
+    const card = (await eventView(lib, await capture(lib, branch.id))).cards[0];
+    await editEvent(lib, await capture(lib, branch.id), event, { ...card.meta, title: '高层事件新标题' });
+    expect((await previewEventResync(lib, await capture(lib, child.id))).cards).toHaveLength(1);
+    restored.close(); lib.close();
 });
