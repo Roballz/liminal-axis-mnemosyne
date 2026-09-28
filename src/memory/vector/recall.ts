@@ -2,9 +2,10 @@ import { prioritizeRrf } from './contextRecall';
 import { abortable } from './abort';
 import { planTitle, type RecallContext } from '../contextTags';
 import { memory } from '../store';
-import { dailyInstalled, syncDaily, canonicalLeaves, recallHostVersion } from '@/mnemosyne/bridge';
+import { dailyInstalled, syncDaily, canonicalLeaves, recallHostVersion, currentEventHints } from '@/mnemosyne/bridge';
 import { activeLibrary } from '@/mnemosyne/db';
 import { current } from '@/mnemosyne/canonical';
+import { fingerprint as digest } from '@/mnemosyne/model';
 import { eventView, wrapEvents, type EventCard } from '@/mnemosyne/events';
 import { settings as dailySettings } from '@/mnemosyne/jobs';
 /**
@@ -24,10 +25,10 @@ import { getContext, type STMessage } from '@/st/context';
 import { apiSettings, engineActiveHere } from '@/api/settings';
 import type { VecHit } from '@/api/baibaoku';
 import { vecSearch } from './store';
-import { getLeaf, leafValid } from '../apply';
+import { deriveMemory, getLeaf, leafValid } from '../apply';
 import { MEMORY_BRIEFING_NOTE, MEMORY_BRIEFING_END } from '../prompts';
 import { embedTexts, encodeFloat32Base64, rerankDocuments } from './embed';
-import { rewriteQuery } from './rewrite';
+import { recallInputChat, rewriteQuery } from './rewrite';
 import { collectLeaves, ensureRecallIndex } from './index';
 import { searchBm25 } from './bm25';
 import { candidateKey, fuseCandidates, normalizeHybridLimits, selectRecall, type HybridHit, type RankedHit } from './hybrid';
@@ -131,11 +132,9 @@ function fnv1a(text: string): string {
  * 召回结果缓存:重新生成 / 翻页(swipe)时召回输入一字不变,直接复用上次结果,
  * 省掉重写+embed+search+rerank 的额度与时间。只存「最近一次」一条,key 不匹配即覆盖。
  *
- * key = chatId | 最新user楼层号 | hash(最新user文本) | hash(上一条AI文本) | 召回参数指纹
- *  - 带 user 文本 hash:编辑最新输入后重生成,楼层号没变但内容变了,靠它失效(否则错误复用)。
- *  - 带 AI 文本 hash:编辑上一条 AI 楼后重生成,靠它失效。
- *  - 带召回参数指纹:rerank/embedding 阈值、条数等任一改动则失效;只改别的设置(渠道/开关)不失效。
- *  - 带 chatId:换聊天后楼层号/哈希偶然相同也不跨聊天误命中。
+ * key 校验当前库/故事/分支、截至用户输入的正文、有效候选/标签/关联事件、计划和设置。
+ * 不直接使用整个档案 Head/epoch:它们会随本轮回答追加或 swipe 改变。
+ * 命中前仍同步并验证当前档案权限；缓存不赋予旧摘要跨版本发送的权限。
  */
 interface RecallCache {
   key: string;
@@ -150,7 +149,9 @@ interface RecallCache {
 function loadRecallCache(): RecallCache | null {
   try {
     const raw = localStorage.getItem(RECALL_CACHE_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as RecallCache) : null;
+    const cached = raw ? JSON.parse(raw) as RecallCache : null;
+    return cached && typeof cached.key === 'string' && typeof cached.text === 'string' &&
+      typeof cached.debug?.status === 'string' ? cached : null;
   } catch {
     return null;
   }
@@ -302,7 +303,7 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
 async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const database = currentVectorDb()!;
   const ctx = getContext()!;
-  const chat = ctx.chat;
+  const chat = recallInputChat(ctx.chat);
   const fn = ctx.setExtensionPrompt!;
   const epoch = ++recallEpoch;
   fn(RECALL_INJECT_KEY, '', IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
@@ -313,6 +314,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     try { canonicalView = await syncDaily(); } catch { /* Knowledge remains independently available. */ }
   }
   signal.throwIfAborted();
+  const canonicalLib = canonicalView ? await activeLibrary() : null;
   const canonicalHost = recallHostVersion();
   const canonicalPolicy = JSON.stringify(dailySettings);
   const cfg = normalizeHybridLimits({ ...apiSettings.vector.recall });
@@ -320,29 +322,33 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const scopes = recallScopes();
   const sourceChat = currentChatId();
   const settingsKey = () => JSON.stringify([apiSettings.vector.recall, apiSettings.vector.knowledge, embeddingIdentity(),
-    apiSettings.vector.queryRewrite, apiSettings.vector.rerank, apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags]);
+    apiSettings.vector.queryRewrite, apiSettings.vector.rerank, apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags,
+    apiSettings.vector.queryRewriteMaxTokens, apiSettings.vector.queryRewriteJailbreak, apiSettings.prompts.jailbreak]);
   const settingsAtStart = settingsKey();
   const sourceKey = buildRecallCacheKey(chat, cfg);
   // 本轮候选与关联数据固定；可见近期补摘不加入本轮，也不改写已选旧记忆。
   const excluded = new Set(windowLeafIds(chat));
   const eligibleLeaves = () => {
-    const currentChat = getContext()?.chat ?? [], excluded = new Set(windowLeafIds(currentChat));
-    return collectLeaves(currentChat).filter(l => !excluded.has(l.leafId));
+    const currentChat = recallInputChat(getContext()?.chat ?? []), excluded = new Set(windowLeafIds(currentChat));
+    return collectLeaves(currentChat).filter(l => !excluded.has(l.leafId) &&
+      (!dailyInstalled() || (l.msgIndex >= 0 && l.msgIndex < currentChat.length)));
   };
   const leaves = eligibleLeaves();
   const canonicalAtStart = canonicalLeaves();
-  const plans = JSON.parse(JSON.stringify(memory.plans)) as typeof memory.plans;
+  const plans = deriveMemory(chat).plans;
   const now = latestStoryTime(chat);
-  const leafFingerprint = (items = eligibleLeaves()) => JSON.stringify(items
-    .map(l => [l.leafId, l.docHash, l.payloadHash, l.msgIndex,
-      dailyInstalled() ? null : getLeaf(getContext()?.chat?.[l.msgIndex])?.tags]));
+  const leafFingerprint = (items = eligibleLeaves()) => {
+    const tags = new Map(canonicalLeaves().map(l => [l.leafId, l.tags]));
+    return JSON.stringify(items.map(l => [l.leafId, l.docHash, l.payloadHash, l.msgIndex,
+      dailyInstalled() ? tags.get(l.leafId) : getLeaf(getContext()?.chat?.[l.msgIndex])?.tags]));
+  };
   const leafVersion = leafFingerprint(leaves);
   const stillCurrent = () => (!dailyInstalled() || (canonicalHost === recallHostVersion() && canonicalPolicy === JSON.stringify(dailySettings))) && !signal.aborted && epoch === recallEpoch && recallActiveHere() &&
-    currentVectorDb() === database && currentChatId() === sourceChat && settingsKey() === settingsAtStart &&
+    currentVectorDb() === database && currentChatId() === sourceChat && settingsKey() === settingsAtStart && JSON.stringify(recallScopes()) === JSON.stringify(scopes) &&
     (dailyInstalled() || (buildRecallCacheKey(getContext()?.chat ?? [], cfg) === sourceKey && leafFingerprint() === leafVersion));
   const eligibleIds = new Set(leaves.map(l => l.leafId));
   const relevantEvents = (cards: EventCard[]) => cards.filter(c => c.members.some(m => eligibleIds.has(m.memory)));
-  const eventCards = canonicalView ? relevantEvents((await eventView(await activeLibrary(), canonicalView)).cards) : [];
+  const eventCards = canonicalView ? relevantEvents((await eventView(canonicalLib!, canonicalView)).cards) : [];
   if (!stillCurrent()) return;
   let files: Awaited<ReturnType<typeof listKnowledge>> = [];
   let knowledgeStoreReady = true;
@@ -358,10 +364,22 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     setRecallStatus('未召回:没有可召回的旧摘要或启用的知识库');
     return;
   }
-  // Knowledge revisions/configuration and character identity participate in cache invalidation.
-  const cacheKey = sourceKey && !dailyInstalled() ? `hybrid-v1|${database}|${sourceKey}|${fnv1a(settingsAtStart)}|${fingerprint}|${summaryWanted}|${leafVersion}` : null;
+  // 使用实际召回依赖的指纹，既允许同轮重 roll，又拒绝来源/权限/候选变化后的旧文本。
+  // 只保存摘要指纹，避免把百万字正文或设置中的密钥重复写入 localStorage。
+  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v2|${await digest([
+    database, scopes, sourceKey, settingsAtStart, fingerprint, summaryWanted, leafVersion,
+    canonicalView ? [canonicalLib!.db.name, canonicalView.branch.story, canonicalView.branch.id,
+      canonicalView.refs.slice(0, chat.length), canonicalPolicy] : null,
+    chat.map(m => [m.name, m.is_user, m.is_system, m.swipe_id, m.mes, m.extra?.bbs_omit,
+      m.extra?.type, m.extra?.bbs_internal_notice, leafValid(m) ? getLeaf(m) : null]),
+    ctx.name1, ctx.name2, memory.summaries, plans, now, eventCards, currentEventHints(),
+  ])}` : null;
+  if (!stillCurrent()) return;
   const cached = cacheKey ? loadRecallCache() : null;
   if (cached && cached.key === cacheKey) {
+    if (knowledgeConfig.enabled && knowledgeFingerprint(await listKnowledge(database)) !== fingerprint) return;
+    if (canonicalView && (canonicalLib !== await activeLibrary() || !await current(canonicalLib!, canonicalView))) return;
+    if (!stillCurrent()) return;
     fn(RECALL_INJECT_KEY, cached.text, IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
     restoreRecallDebug(cached.debug);
     knowledgeDebug.hits = [];
@@ -387,7 +405,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
 
   // 1) 查询重写(强制启用,无降级):得多条 query 向量 + rerank 用的 query 文本。
   // 重写失败/无 query 会抛错 → 落到外层 catch,清空注入槽、结束本次召回。
-  const { queryVectors, rerankQuery, queries, context } = await resolveQueryVectors(signal);
+  const { queryVectors, rerankQuery, queries, context } = await resolveQueryVectors(signal, chat);
   if (!stillCurrent()) return;
   if (!queryVectors.length) {
     throw new Error('Embedding 未产出查询向量');
@@ -555,9 +573,10 @@ function recordRerankDebug(
  */
 async function resolveQueryVectors(
   signal?: AbortSignal,
+  chat?: STMessage[],
 ): Promise<{ queryVectors: string[]; rerankQuery: string; queries: string[]; context?: RecallContext }> {
   setRecallStatus('进行中…Query 重写');
-  const { intent, queries, context } = await rewriteQuery(signal);
+  const { intent, queries, context } = await rewriteQuery(signal, chat);
   signal?.throwIfAborted();
   setRecallRewrite(intent, queries);
   if (!queries.length) throw new Error('查询重写未产出任何 query');

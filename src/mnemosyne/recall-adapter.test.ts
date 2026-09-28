@@ -35,7 +35,9 @@ beforeEach(async () => {
     vi.spyOn(bridge, 'recallHostVersion').mockImplementation(() => host);
     leaves = view.memories.map((m, i) => ({ leafId: m.id, hostId: m.hostId, docHash: m.fingerprint, payloadHash: m.fingerprint, document: m.content, mesFull: f.input.messages[i * 2 + 1].content, storyTime: '', msgIndex: i * 2 + 1 }));
     vi.spyOn(bridge, 'canonicalLeaves').mockImplementation(() => leaves);
-    vi.spyOn(context, 'getContext').mockReturnValue({ chat: [{ is_user: false, mes: '近期全文' }, { is_user: true, mes: '玉佩' }], setExtensionPrompt: inject } as any);
+    vi.spyOn(context, 'getContext').mockReturnValue({ chat: [...f.input.messages.map(m => ({
+      is_user: m.role === 'user', is_system: true, mes: m.content,
+    })), { is_user: true, mes: '玉佩' }], setExtensionPrompt: inject } as any);
     vi.spyOn(scope, 'currentVectorDb').mockReturnValue('synthetic-db');
     vi.spyOn(scope, 'currentChatId').mockReturnValue('synthetic');
     vi.spyOn(scope, 'currentChatScope').mockReturnValue('chat:synthetic');

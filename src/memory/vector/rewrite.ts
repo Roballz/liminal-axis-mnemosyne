@@ -220,18 +220,26 @@ function sanitize(text: string): string {
     .slice(0, MAX_QUERY_LEN);
 }
 
+/** 同轮重生成只分析最新用户输入及其之前的剧情，不把待替换的回答当成新输入。 */
+export function recallInputChat(chat: STMessage[]): STMessage[] {
+  for (let i = chat.length - 1; i >= 0; i--) {
+    if (chat[i]?.is_user) return chat.slice(0, i + 1);
+  }
+  return chat;
+}
+
 /**
  * 执行查询重写。queryRewrite 端点未配 model 时抛错(调用方降级)。
  * 走前端直连 chat/completions(与 embed 同源策略,渠道地址/密钥可留空复用 embedding)。
  */
-export async function rewriteQuery(signal?: AbortSignal): Promise<RewriteResult> {
+export async function rewriteQuery(signal?: AbortSignal, inputChat?: STMessage[]): Promise<RewriteResult> {
   const ep = resolveVectorModel('queryRewrite');
   if (!ep.model) throw new Error('Query 重写模型未配置');
   const endpoint = chatCompletionsEndpoint(ep.url);
   if (!endpoint) throw new Error('Query 重写地址未配置');
 
   const ctx = getContext();
-  const chat = ctx?.chat ?? [];
+  const chat = inputChat ?? recallInputChat(ctx?.chat ?? []);
   if (!chat.length) throw new Error('无对话上下文可重写');
 
   const messages = buildMessages(chat);

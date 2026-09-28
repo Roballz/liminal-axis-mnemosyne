@@ -159,9 +159,9 @@ export async function syncVectorIndex(signal?: AbortSignal): Promise<VectorSyncR
 
         // 摘要变化走 embed+upsert；仅全文/时间变化走轻量 payload 更新。
         const { deleted = 0, missing, stalePayload = [] } = await vecReconcile(database, scope, present);
-        // 后端对账删掉了陈旧条目（如用户经 ST 原生删楼、叶子随之消失）→ 召回依赖的内容已变，
-        // 立即失效缓存，避免后续复用含已删记忆的旧注入。
-        if (deleted > 0) invalidateRecallCache();
+        // 原生缓存仍保守失效。Mnemosyne 在命中前校验完整候选/来源指纹，
+        // 不能因清理当前回答的旧 swipe 索引就删除与它无关的同轮召回。
+        if (deleted > 0 && !dailyInstalled()) invalidateRecallCache();
         const missingSet = new Set(missing);
         const staleSet = new Set(stalePayload);
         total.embedded += await embedAndUpsert(

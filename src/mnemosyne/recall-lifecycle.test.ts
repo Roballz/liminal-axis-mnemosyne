@@ -17,6 +17,8 @@ import * as rewrite from '@/memory/vector/rewrite';
 import * as lexical from '@/memory/vector/bm25';
 import { clearRecallInjection, runVectorRecall } from '@/memory/vector/recall';
 import { recallDebug } from '@/memory/vector/debug';
+import { RECALL_CACHE_STORAGE_KEY } from '@/memory/vector/cache';
+import { settings as dailySettings } from './jobs';
 import { Library, activateLibrary, freshLibraryName } from './db';
 import { bindDaily, syncDaily, scheduleDaily, canonicalLeaves, dailyState, hostVersion, recallHostVersion, invalidateDaily } from './bridge';
 
@@ -238,4 +240,95 @@ test('新输入归档失败不撤销未变的历史；显式权限/档案失效�
   invalidateDaily('权限或档案已改变');
   expect(promptText('mnemosyne_memory_history')).toBe('');
   expect(promptText('mnemosyne_memory_state')).not.toContain('持续约定');
+});
+
+test('同轮回答追加、swipe 与删除后重新生成复用召回，真实保留窗口不随末尾回答移动', async () => {
+  vi.mocked(engine.resolveKeepStart).mockRestore();
+  api.apiSettings.keepRecent = 1; api.apiSettings.autoHideEnabled = true;
+  ctx.chat.push(message(false, '上一轮可见回复'), message(true, '本轮输入'));
+  scheduleDaily(); await syncDaily();
+  await runVectorRecall();
+  const recalled = injected(); expect(recalled).toContain('旧剧情');
+  const firstQueries = [...recallDebug.queries];
+  expect(localStorage.getItem(RECALL_CACHE_STORAGE_KEY)).toContain('hybrid-v2');
+  const reply = message(false, '待替换回答 A <bbs_end>2099-01-01 12:00</bbs_end>');
+  reply.extra!.bbs_leaf = { id: 'tail-leaf', text: '本轮回答摘要', delta: {}, v: 1, createdAt: 2, swipe: 0 };
+  ctx.chat.push(reply); scheduleDaily();
+  await runVectorRecall();
+  reply.mes = '待替换回答 B'; reply.swipe_id = 1; scheduleDaily();
+  vi.spyOn(vector, 'vecReconcile').mockResolvedValue({ deleted: 1, missing: [], stalePayload: [] });
+  await indexing.syncVectorIndex(); // 后台清理旧 swipe 的索引，不能清掉这轮的召回。
+  expect(vector.vecReconcile).toHaveBeenCalledOnce();
+  await runVectorRecall();
+  ctx.chat.pop(); scheduleDaily();
+  await runVectorRecall();
+  expect(injected()).toBe(recalled);
+  expect(recallDebug.status).toContain('复用缓存');
+  expect(recallDebug.queries).toEqual(firstQueries);
+  for (const call of [rewrite.rewriteQuery, embed.embedTexts, vector.vecSearch, lexical.searchBm25, embed.rerankDocuments, indexing.ensureRecallIndex])
+    expect(call).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(rewrite.rewriteQuery).mock.calls[0][1]?.at(-1)?.mes).toBe('本轮输入');
+});
+
+test('实际 Query 请求在无缓存的重 roll 中也不带待替换回答', async () => {
+  vi.mocked(rewrite.rewriteQuery).mockRestore();
+  vi.spyOn(api, 'resolveVectorModel').mockReturnValue({ url: 'https://example.test', key: '', model: 'synthetic', timeoutSec: 1, retries: 0 });
+  const sender = vi.spyOn(embed, 'fetchWithTimeoutRetry').mockResolvedValue(new Response(JSON.stringify({
+    choices: [{ message: { content: 'INTENT: 回忆\nQ: 旧剧情' } }],
+  }), { status: 200 }));
+  ctx.chat.push(message(false, '不应发送的待替换回答')); scheduleDaily();
+  await runVectorRecall();
+  const request = String(sender.mock.calls[0][1]?.body);
+  expect(request).toContain('第一轮提问');
+  expect(request).not.toContain('不应发送的待替换回答');
+  expect(recallDebug.status).toBe('召回完成');
+});
+
+test.each(['new-input', 'edit-input', 'old-body', 'old-summary', 'delete-summary', 'tags', 'visibility', 'settings', 'event', 'policy', 'chat'] as const)(
+  '缓存命中后 %s 变化仍失效，无法确认绑定时不发送旧内容', async change => {
+    await runVectorRecall();
+    const policy = dailySettings.totalChars;
+    try {
+      if (change === 'new-input') ctx.chat.push(message(false, '已完成回复'), message(true, '下一轮'));
+      if (change === 'edit-input') ctx.chat[2].mes += '补充要求';
+      if (change === 'old-body') ctx.chat[1].mes += '更正';
+      if (change === 'old-summary') ctx.chat[1].extra!.bbs_leaf!.text += '新的摘要';
+      if (change === 'delete-summary') delete ctx.chat[1].extra!.bbs_leaf;
+      if (change === 'tags') ctx.chat[1].extra!.bbs_leaf!.tags = { version: 1, participants: ['新人物'], planIds: [], eventIds: [] };
+      if (change === 'visibility') ctx.chat[1].is_system = false;
+      if (change === 'settings') api.apiSettings.vector.recall.embeddingThreshold = .81;
+      if (change === 'event') await editEvent(lib, await syncDaily(), (await lib.all('event_chains'))[0].id,
+        { title: '修改后的约定', status: 'open', keywords: [] });
+      if (change === 'policy') dailySettings.totalChars++;
+      if (change === 'chat') chatId = '另一个聊天';
+      scheduleDaily(); await runVectorRecall();
+      expect(recallDebug.status).not.toContain('复用缓存');
+      expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(change === 'chat' ? 1 : 2);
+      if (change === 'chat') expect(injected()).toBe('');
+      if (change === 'visibility') expect(injected()).not.toContain('旧剧情');
+      if (change === 'old-body') expect(injected()).not.toContain('[#1]');
+      if (change === 'delete-summary') expect(injected()).not.toContain('旧剧情');
+      if (change === 'event') expect(injected()).toContain('修改后的约定');
+    } finally { dailySettings.totalChars = policy; }
+  },
+);
+
+test('失败重排不缓存，下一次重 roll 仍重新请求，成功后才复用', async () => {
+  vi.mocked(embed.rerankDocuments).mockRejectedValueOnce(new Error('合成重排超时'));
+  await runVectorRecall();
+  expect(localStorage.getItem(RECALL_CACHE_STORAGE_KEY)).toBeNull();
+  expect(recallDebug.status).toContain('降级');
+  await runVectorRecall(); await runVectorRecall();
+  expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(2);
+  expect(recallDebug.status).toContain('复用缓存');
+});
+
+test('缓存存在但档案权限/绑定校验失败时不复用旧文本', async () => {
+  await runVectorRecall();
+  expect(injected()).toContain('旧剧情');
+  ctx.chatMetadata.mnemosyne_binding_v1 = { scope: '不匹配的绑定', branch: '不存在' };
+  invalidateDaily('档案绑定改变');
+  await runVectorRecall();
+  expect(injected()).toBe('');
+  expect(recallDebug.status).not.toContain('复用缓存');
 });
