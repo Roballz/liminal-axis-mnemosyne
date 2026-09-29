@@ -1449,7 +1449,7 @@ function exportPublicApiDocument() {
           <label class="bbs-num-row"><span class="bbs-field-label">BM25 例外前 N 名</span><input v-model.number="apiSettings.vector.recall.rrfBm25Exemption" class="bbs-input bbs-num" type="number" min="0" max="200" step="1" /></label>
           <p class="bbs-field-hint">非在场且未公开的摘要，向量分达到上方阈值，或位于 BM25 前 N 名，也进入优先候选。N 为 0 时关闭 BM25 例外。</p>
           <label class="bbs-num-row"><span class="bbs-field-label">事项关联加分比例</span><input v-model.number="apiSettings.vector.recall.rrfAssociationBoost" class="bbs-input bbs-num" type="number" min="0" max="0.5" step="0.05" /></label>
-          <p class="bbs-field-hint">例如 0.15 = RRF 排序分增加15%；匹配多个计划、悬念或事件也只加一次。0 关闭加分。原始 RRF、Embedding 和 rerank 分数保持不变。</p>
+          <p class="bbs-field-hint">例如 0.15 = RRF 排序分增加15%；匹配多个事件也只加一次。0 关闭加分。原始 RRF、Embedding 和 rerank 分数保持不变。</p>
 
           <label class="bbs-num-row">
             <span class="bbs-field-label">Embedding 阈值</span>
@@ -1639,7 +1639,7 @@ function exportPublicApiDocument() {
             </Collapsible>
 
             <Collapsible title="RRF 人物／事件选择" :open="false">
-              <p v-if="recallDebug.context" class="bbs-field-hint">当前人物：{{ recallDebug.context.participants.join('、') || '未确定' }}；相关事项：{{ [...recallDebug.context.planIds, ...recallDebug.context.eventIds].join('、') || '无' }}</p>
+              <p v-if="recallDebug.context" class="bbs-field-hint">当前人物：{{ recallDebug.context.participants.join('、') || '未确定' }}；相关事件：{{ recallDebug.context.eventIds.join('、') || '无' }}</p>
               <ul class="bbs-dbg-cards"><li v-for="h in recallDebug.contextRanked" :key="h.leafId" class="bbs-dbg-card"><div>{{ h.reason }} · {{ h.raw.toFixed(5) }} → {{ h.score.toFixed(5) }}</div><p class="bbs-dbg-prev">{{ h.preview }}</p></li></ul>
             </Collapsible>
             <Collapsible title="6 · 最终注入" :open="false">

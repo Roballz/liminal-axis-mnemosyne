@@ -1,9 +1,10 @@
 import { generatedTags, type EventHint } from './contextTags';
+import { describePlanWrite } from './plan-write';
 import { eventHintsBefore } from '@/mnemosyne/events';
 import { activeLibrary } from '@/mnemosyne/db';
 import { SUMMARY_TAG_PROTOCOL, PLAN_PROGRESS_PROTOCOL } from './prompts';
 import { prepareSummaryTables, parseSummaryTableResult, validateSummaryTableResult, attachTableResult } from '@/mnemosyne/summary-tables';
-import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, beginVisibleSummaryCommit, syncDaily, summaryAllowed } from '@/mnemosyne/bridge';
+import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, beginVisibleSummaryCommit, syncDaily, summaryAllowed, hostScope } from '@/mnemosyne/bridge';
 import type { ChatMsg } from '@/api/client';
 import { mainApiAvailable, requestCompletion, requestViaMainApi } from '@/api/client';
 import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings';
@@ -43,6 +44,8 @@ export const engineState = reactive({
   running: false,
   lastError: '' as string,
   lastRunAt: 0,
+  // 本次会话最近一次成功落叶的计数诊断，不保存模型原文、不代替计划真源。
+  lastPlanWrite: null as { scope: string; floor: number; leafId: string; text: string } | null,
 });
 
 /**
@@ -1126,13 +1129,6 @@ function applyLeafForFloor(
     v: 1,
   };
   if (replaceLeaf) invalidateSummaryAncestors(replaceLeaf.id);
-  const planIds = [
-    ...(leaf.tags?.planIds ?? []),
-    ...(storedDelta.plans?.add ?? []).map((_, i) => `plan:${leaf.id}#${i}`),
-    ...(storedDelta.plans?.update ?? []).map(p => p.id),
-    ...(storedDelta.plans?.resolve ?? []).map(p => typeof p === 'string' ? p : p.id),
-  ];
-  if (planIds.length) leaf.tags = { ...(leaf.tags ?? { version: 1, eventIds: [] }), planIds: [...new Set(planIds)] };
   chat[aiFloor].extra = { ...(chat[aiFloor].extra ?? {}), bbs_leaf: leaf };
   // 叶子正文/摘要已变 → 召回读到的向量内容会变,立即失效召回缓存(防重生成/翻页复用旧召回)。
   invalidateRecallCache();
@@ -1273,6 +1269,9 @@ async function summarizeFloorWork(
   attachSummaryEvidence(chat, aiFloor, mnEvidence, targets);
   attachTableResult(chat, aiFloor, tablePlan);
   commitVisibleSummary();
+  const saved = getLeaf(chat[aiFloor])!;
+  engineState.lastPlanWrite = { scope: hostScope(), floor: aiFloor, leafId: saved.id,
+    text: describePlanWrite(delta.plans, saved.delta.plans) };
   engineState.lastRunAt = Date.now();
 
   // 立刻反映到派生与注入;落盘走防抖(隐藏由收尾的 syncWindowHiddenState 统一负责)
@@ -1410,8 +1409,8 @@ async function summarizeBatchWork(
   });
 
   const events = mnEvidence?.view ? await eventHintsBefore(await activeLibrary(), mnEvidence.view, beforeIndex) : [];
-  prompt.system += `\n${SUMMARY_TAG_PROTOCOL}\n批量时每个 floors 元素增加 tags；仍不执行 plans 增删改。只关联本批开始前已存在的事项。`;
-  prompt.user += `\n已有事项（只读）：${JSON.stringify({ plans: stateBefore.plans.filter(p => p.status === 'open').map(p => ({ id: p.id, title: p.title || p.content })), events })}`;
+  prompt.system += `\n${SUMMARY_TAG_PROTOCOL}\n批量时每个 floors 元素增加 tags；仍不执行 plans 增删改。只关联本批开始前已存在的事件。`;
+  prompt.user += `\n已有事件（只读）：${JSON.stringify(events)}`;
   const tableRequest = await prepareSummaryTables(mnEvidence?.view, chat, block);
   if (tableRequest) { prompt.system += tableRequest.system + '\n本次为批量摘要：保留根对象 floors，customTables 放在根对象与 floors 并列，返回整批按顺序结算后的净变化，不放进各楼对象。'; prompt.user += tableRequest.user; }
   const { checklist, prefill } = buildBatchThinking(block.length);

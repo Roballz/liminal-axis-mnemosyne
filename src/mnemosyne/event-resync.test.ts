@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 import { fixture, observation } from './fixtures';
 import { capture, forkBranch, synchronize } from './canonical';
 import { editEvent, eventView, setEventArchived } from './events';
@@ -86,8 +86,14 @@ test('link removal history survives inheritance and does not erase earlier assoc
 
 test('resync repairs a legacy empty shell, adds missing archives, keeps child edits and is idempotent', async () => {
     const { lib, branch, view } = await fixture(2);
-    const first = await create(lib, view);
-    const archived = await create(lib, await capture(lib, branch.id), '归档');
+    // Legacy matching uses creation time: these same-title events must have distinct identities.
+    let created = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => created++);
+    let first: string, archived: string;
+    try {
+        first = await create(lib, view);
+        archived = await create(lib, await capture(lib, branch.id), '归档');
+    } finally { clock.mockRestore(); }
     await setEventArchived(lib, await capture(lib, branch.id), archived, true);
     const child = await forkBranch(lib, await capture(lib, branch.id), 'legacy-child');
     const inherited = await cards(lib, child.id), shell = inherited.find(c => !c.chain.archived)!;

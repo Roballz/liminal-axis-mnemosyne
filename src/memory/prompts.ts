@@ -276,7 +276,7 @@ export const RULE_LIFE_DETAILS = `═══ 【生活小档案规则】(lifeDeta
 
 /** 计划/悬念规则(plans 字段)。 */
 export const RULE_PLANS = `═══ 【计划/悬念规则】(plans 字段) ═══
-分"计划"(plan)和"悬念"(suspense)两类。共同铁律:【默认不写】。只有确信一件事必须被长期记住、否则会损害后续剧情,才记。绝大多数楼层不产生任何 plans.add。
+分"计划"(plan)和"悬念"(suspense)两类。新增条目的共同铁律:【默认不新增】。只有确信一件事必须被长期记住、否则会损害后续剧情,才记。绝大多数楼层不产生任何 plans.add。此门槛只限制新增；已有事项出现明确进展或结局时，仍须按 plans.update 或 plans.resolve 更新。
 ━━ 准入第一关:跨场景存活测试(最重要) ━━
 问:"这件事会在接下来一两个回合的自然推进里得到结果吗?"
   会 → 不写。它只是当前还没写完的剧情,交给 summary 即可。
@@ -445,7 +445,7 @@ ${RULE_LONGTERM_DB}
 
 {
   "summary": "本轮剧情摘要,见下方【摘要撰写规则】。",
-  "tags": {"participants":["实际在场人物名"],"planIds":[],"eventIds":[]},
+  "tags": {"participants":["实际在场人物名"],"eventIds":[]},
 {{time_field}}
   "location": "本轮结束时主角所在地点(有变化才写,可写得很细,如「滨江区某老小区-302室屋内」)",
   "locationPath": ["在【已知地点】里、与上面 location 对应的场景节点完整路径,由粗到细(可比 location 粗)。给了 location 就尽量给它,作精确定位"],
@@ -1155,7 +1155,9 @@ export function buildSummaryPrompt(a: BuildArgs): { system: string; user: string
     user: `${prompt}\n\n【主角当前档案(本轮之前,只读参考)】\n${macros.protagonist_block}`
       + (prompt.includes(macros.items_block) ? '' : `\n\n【现有物品(只读参考)】\n${macros.items_block}`)
       + (prompt.includes(macros.npcs_block) ? '' : `\n\n【已登场NPC(本轮之前,好感估计只作基线,不重复结算)】\n${macros.npcs_block}`)
-      + (prompt.includes(macros.lifedetails_block.trim()) ? '' : `\n\n${macros.lifedetails_block}`),
+      + (prompt.includes(macros.lifedetails_block.trim()) ? '' : `\n\n${macros.lifedetails_block}`)
+      + (custom.includes('{{plans_block}}') ? '' : `\n\n【未了结的计划/悬念（本楼之前，编号用于更新和了结）】\n${macros.plans_block}`)
+      + (custom.includes('{{resolved_plans_block}}') ? '' : `\n\n【近期已了结的计划/悬念（只读，禁止重复新增）】\n${macros.resolved_plans_block}`),
   };
 }
 
@@ -1373,7 +1375,7 @@ ${SUMMARY_OUTPUT_PROTOCOL}
      B. 已启动外部事件:外部进程已实际开始并朝具体结果推进,后续只待客观结果。
    - 若只是已知设定、能力代价、伤势/诅咒/灵魂绑定、无法下手、人物两难、身份职责冲突、关系张力、存在弱点或潜在危险 → 它是状态/信息,只进 summary 或对应字段,不写 suspense。
    - 禁止用"会不会……""将如何收场""可能造成什么后果"把状态强行改写成问题。预想其未来核销句:能写"答案揭晓为……"或"已启动事件结果为……"才保留;只能写"状态后来改变了"则丢弃。
-   - 已有事项有中途进展：plans.update 更新 currentProgress、remaining，各${PLAN_TEXT_MAX_CHARS}字内；tags.planIds 记录关联ID。无实质变化不改。
+   - 已有事项有中途进展：plans.update 更新 currentProgress、remaining，各${PLAN_TEXT_MAX_CHARS}字内。无实质变化不改；不输出计划与摘要的关联。
    - 查重:将每条候选归一为【未知答案】或【待决外部事件】,逐条对照未了结和近期已了结条目。答案相同/同一事件 → 不 add;新线索、阶段进展写 summary 并更新原事项的 plans.update；规则细节、人物反应没有实质进展时只写 summary。根源相同但答案确实不同、可独立揭晓时才允许分开。
    - suspense.content 只含已知事实与具体未决点，不写剧情评论。
 
@@ -1541,11 +1543,14 @@ export const QUERY_REWRITE_TAIL = `记住你的任务:
 - 严格按格式输出:一行INTENT加恰好5行Q,不要输出任何其他内容`;
 
 export const SUMMARY_TAG_PROTOCOL = `【摘要标签协议】
-每条摘要 JSON 增加 tags: {"participants":["本段实际在场人物的规范名字"],"planIds":["关联计划/悬念的稳定ID"],"eventIds":["关联事件的稳定ID"]}。
+每条摘要 JSON 增加 tags: {"participants":["本段实际在场人物的规范名字"],"eventIds":["关联事件的稳定ID"]}。
 人物只记录本段真实在场或直接参与当前通话/通信者，不把被提及、回忆、设定中的人算在场；同一人物沿用已有名字，不写代词。确定无人时 participants 为 []，不确定可以省略 participants。
-计划/悬念和事件只引用提供目录中的 ID；只有正文明确相关才标记，允许空数组。相同人物或地点不等于同一事件。eventIds 仅表示检索相关，不创建、合并或更改人工事件成员。
+事件只引用提供目录中的 ID；只有正文明确相关才标记，允许空数组。相同人物或地点不等于同一事件。eventIds 仅表示检索相关，不创建、合并或更改人工事件成员。
+计划/悬念与摘要的关联已停用，不输出 planIds、relatedLeafIds 或关联楼层号，即使旧模板要求也忽略。计划的实际变更仍单独写入 plans。
 不要输出 public，公开状态仅由用户手动设置。标签不写进 summary 正文。`;
 export const PLAN_PROGRESS_PROTOCOL = `【计划/悬念持续更新协议】
 本协议更新旧模板中的计划/悬念字数要求，相关上限以本协议为准：plans.add 使用 content（内容）、currentProgress（当前进展）、remaining（仍待解决），三者各不超过${PLAN_TEXT_MAX_CHARS}字。不要生成 title 短标题；内容直接用于展示和注入，不抄整段摘要。
+plans 是最终 JSON 的根字段，与 summary 并列。新增示例："plans":{"add":[{"kind":"plan","content":"已知事实及目标/未决点","currentProgress":"已有进展","remaining":"待完成或待揭晓事项"}]}。kind 只可取 plan（计划）或 suspense（悬念）。没有符合新增准入要求的事项就不 add；该限制不妨碍更新已有事项。
 每次逐条核对现有计划/悬念：正文出现阶段进展、新证据、目标变化但尚未结束时，输出 plans.update:[{"id":"目录中的稳定ID或p1","currentProgress":"更新后的当前进展","remaining":"仍未解决的具体事项"}]。有变化才写，不凭时间流逝、推测或再次提及改写；已知解决部分必须从 remaining 移除。
-无进展省略 update；真正结束仍用 resolve。关联到本段的旧计划/悬念同时写 tags.planIds；本段新建项由程序自动关联，无需编造 ID。`;
+update 只修改 currentProgress、remaining，content 保留原内容；省略字段保持原值，空字符串明确清空。id 必须取上述目录中的稳定ID或 p1/p2 编号，不可填摘要ID或 #楼层号。只输出 id 而没有进展字段不算更新。
+无进展省略 update；真正结束仍用 resolve。不得用关联标签代替 plans.add/update/resolve，不建立与摘要的关联。`;

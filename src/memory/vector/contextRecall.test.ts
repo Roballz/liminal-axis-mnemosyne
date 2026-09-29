@@ -23,7 +23,7 @@ it('全量RRF后优先在场/公开/高相关例外，旧数据和其他人物�
   expect(prioritizeRrf(inputs, [], { ...context, participants: [] }, cfg).map(h => h.leafId)).toEqual(inputs.map(h => h.leafId));
 });
 
-it('事件和计划只加一次有限分，不改原RRF分、向量分或原始榜', () => {
+it('事件只加一次有限分，旧计划关联不加分，不改原RRF分、向量分或原始榜', () => {
   const a = hit('A', .030), b = hit('B', .029, { tags: normalizeTags({ participants: ['甲'], planIds: ['P'], eventIds: ['E'] }) });
   const baseline = JSON.stringify([a, b]);
   const ranked = prioritizeRrf([a, b], [], { ...context, participants: [] }, cfg);
@@ -31,6 +31,8 @@ it('事件和计划只加一次有限分，不改原RRF分、向量分或原始�
   expect(ranked[0].contextScore).toBeCloseTo(.029 * 1.15);
   expect(ranked[0].rrfScore).toBe(.029);
   expect(JSON.stringify([a, b])).toBe(baseline);
+  const planOnly = { ...b, tags: normalizeTags({ planIds: ['P'] }) };
+  expect(prioritizeRrf([a, planOnly], [], { ...context, participants: [] }, cfg)[0].leafId).toBe('A');
 });
 
 it('只有RRF摘要名额使用筛后榜，原文/BM25/向量及跨路顺延继续工作', () => {

@@ -250,7 +250,7 @@ test('同轮回答追加、swipe 与删除后重新生成复用召回，真实�
   await runVectorRecall();
   const recalled = injected(); expect(recalled).toContain('旧剧情');
   const firstQueries = [...recallDebug.queries];
-  expect(localStorage.getItem(RECALL_CACHE_STORAGE_KEY)).toContain('hybrid-v2');
+  expect(localStorage.getItem(RECALL_CACHE_STORAGE_KEY)).toContain('hybrid-v3');
   const reply = message(false, '待替换回答 A <bbs_end>2099-01-01 12:00</bbs_end>');
   reply.extra!.bbs_leaf = { id: 'tail-leaf', text: '本轮回答摘要', delta: {}, v: 1, createdAt: 2, swipe: 0 };
   ctx.chat.push(reply); scheduleDaily();

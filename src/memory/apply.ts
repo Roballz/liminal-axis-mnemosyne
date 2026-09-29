@@ -296,8 +296,11 @@ function cleanPlanProgress(raw: Record<string, unknown>) {
   return out;
 }
 function cleanPlanUpdates(v: unknown): PlanUpdate[] {
-  return arr(v).flatMap(raw => isRecord(raw) && typeof raw.id === 'string' && raw.id.trim()
-    ? [{ id: raw.id.trim(), ...cleanPlanProgress(raw) }] : []);
+  return arr(v).flatMap(raw => {
+    if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id.trim()) return [];
+    const progress = cleanPlanProgress(raw);
+    return Object.keys(progress).length ? [{ id: raw.id.trim(), ...progress }] : [];
+  });
 }
 
 function cleanPlanAdd(raw: unknown): PlanAdd | null {
@@ -1372,7 +1375,6 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
         kind: add.kind === 'suspense' ? 'suspense' : 'plan',
         content: add.content.trim(),
         ...cleanPlanProgress(add as unknown as Record<string, unknown>),
-        relatedLeafIds: [leaf.id],
         status: 'open',
         createdAt: t,
         createdTime: add.createdTime?.trim() || undefined,
@@ -1385,12 +1387,10 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
       if (!plan) continue;
       Object.assign(plan, cleanPlanProgress(update as unknown as Record<string, unknown>));
       plan.progressTime = d.time || leaf.time;
-      plan.relatedLeafIds = [...new Set([...(plan.relatedLeafIds ?? []), leaf.id])];
     }
     for (const r of d.plans.resolve ?? []) {
       const p = mem.plans.find(x => x.id === resolveEntryId(r));
       if (p) {
-        p.relatedLeafIds = [...new Set([...(p.relatedLeafIds ?? []), leaf.id])];
         p.status = 'resolved';
         p.resolvedAt = t;
         // 携带「怎么了结/为什么」;裸字符串旧数据无此信息,保持不写
@@ -1413,11 +1413,6 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
       const idx = mem.plans.findIndex(x => x.id === pid);
       if (idx >= 0) mem.plans.splice(idx, 1);
     }
-  }
-
-  for (const id of leaf.tags?.planIds ?? []) {
-    const p = mem.plans.find(p => p.id === id);
-    if (p) p.relatedLeafIds = [...new Set([...(p.relatedLeafIds ?? []), leaf.id])];
   }
 
   // 生活小档案:add(去重)→ update → archive → remove。id 确定性:detail:${leafId}#序号,重放幂等

@@ -4,11 +4,11 @@ import * as settings from '@/api/settings';
 import * as context from '@/st/context';
 import type { STContext, STMessage } from '@/st/context';
 import * as notices from '@/st/toast';
-import { batchBackfill, checkResummary, currentSummaryPromise, handleGenerationIntercept, maybeSummarizePrevAi, syncHiddenNow, openingPendingFloor, planBatches, summarizeFloor, summarizeSelected } from './engine';
+import { batchBackfill, checkResummary, currentSummaryPromise, engineState, handleGenerationIntercept, maybeSummarizePrevAi, syncHiddenNow, openingPendingFloor, planBatches, summarizeFloor, summarizeSelected } from './engine';
 import { selectInjectionNodes } from './inject';
 import { buildBatchThinking, buildResummaryPrompt, buildSummaryThinking, RESUMMARY_THINKING_CHECKLIST, RESUMMARY_THINKING_PREFILL, RULE_SUMMARY_COMPOSITION, SUMMARY_OUTPUT_PROTOCOL } from './prompts';
 import { renderSourceHints, SOURCE_HINTS_HEADER } from './sourceHints';
-import { memory } from './store';
+import { flushLeavesNow, loadMemory, memory } from './store';
 import { createEmptyMemory, type LeafExtra, type SummaryDelta } from './types';
 
 const message = (isUser = false, overrides: Partial<STMessage> = {}): STMessage => ({
@@ -78,6 +78,7 @@ describe('自动隐藏独立开关', () => {
 beforeEach(() => {
   vi.useFakeTimers();
   Object.assign(memory, createEmptyMemory());
+  engineState.lastPlanWrite = null;
   vi.spyOn(settings, 'engineActiveHere').mockReturnValue(true);
   vi.spyOn(settings, 'getChannelForTask').mockReturnValue(null);
   vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
@@ -102,7 +103,7 @@ function useChat(chat: STMessage[]) {
   } as STContext);
 }
 
-it('正常摘要把中途进展和人物标签一起落叶，关联创建/更新的计划且不接受模型公开', async () => {
+it('正常摘要把中途进展和人物标签一起落叶，不再接受计划关联或模型公开', async () => {
   const prior = leaf();
   prior.delta.plans = { add: [{ kind: 'plan', content: '找到玉佩并归还', remaining: '寻找玉佩' }] };
   const id = `plan:${prior.id}#0`;
@@ -114,12 +115,84 @@ it('正常摘要把中途进展和人物标签一起落叶，关联创建/更新
   }));
   await summarizeFloor(2);
   const saved = chat[2].extra!.bbs_leaf as LeafExtra;
-  expect(saved.tags).toEqual({ version: 1, planIds: [id], eventIds: [], participants: ['User', 'Character'] });
+  expect(saved.tags).toEqual({ version: 1, planIds: [], eventIds: [], participants: ['User', 'Character'] });
   expect(memory.plans[0]).toMatchObject({ id, currentProgress: '已找到玉佩', remaining: '交还主人' });
-  expect(memory.plans[0].relatedLeafIds).toEqual([prior.id, saved.id]);
+  expect(memory.plans[0].relatedLeafIds).toBeUndefined();
+  expect(engineState.lastPlanWrite?.text).toContain('更新 1');
   const request = JSON.stringify(vi.mocked(client.requestViaMainApi).mock.calls[0]);
   expect(request).toContain('plans.update');
   expect(request).toContain('摘要标签协议');
+});
+
+it('新增计划/悬念、短编号更新、了结经过实际摘要保存和重载，超长字段截取而非丢弃', async () => {
+  useChat([message()]);
+  const ctx = context.getContext()!;
+  let stored = '';
+  ctx.saveChat = vi.fn(async () => { stored = JSON.stringify(ctx.chat); });
+  const reload = () => {
+    flushLeavesNow(); ctx.chat = JSON.parse(stored);
+    Object.assign(memory, createEmptyMemory()); loadMemory();
+  };
+  vi.mocked(client.requestViaMainApi).mockResolvedValueOnce(JSON.stringify({ ...summary, plans: { add: [
+    { kind: 'plan', content: '约定'.repeat(70), currentProgress: '准备'.repeat(60), remaining: '去见铁匠' },
+    { kind: 'suspense', content: '查清玉佩来源', currentProgress: '找到刻印', remaining: '失主是谁' },
+  ] } }));
+  await summarizeFloor(0); reload();
+  expect(memory.plans).toHaveLength(2);
+  expect(memory.plans[0].content).toHaveLength(100);
+  expect(memory.plans[0].currentProgress).toHaveLength(100);
+  expect(engineState.lastPlanWrite?.text).toContain('新增 2');
+  expect(engineState.lastPlanWrite?.text).toContain('截取前 100 字');
+  ctx.chat.push(message(true), message());
+  vi.mocked(client.requestViaMainApi).mockResolvedValueOnce(JSON.stringify({ ...summary, plans: { update: [
+    { id: 'p1', currentProgress: '准备好工具', remaining: '' },
+    { id: 'p2', currentProgress: '问到姓氏', remaining: '具体身份' },
+    { id: '#559', currentProgress: '无效编号' }, { id: 'p1' },
+  ] } }));
+  await summarizeFloor(2); reload();
+  expect(memory.plans[0]).toMatchObject({ currentProgress: '准备好工具', remaining: '', status: 'open' });
+  expect(memory.plans[1]).toMatchObject({ currentProgress: '问到姓氏', remaining: '具体身份' });
+  expect(engineState.lastPlanWrite?.text).toContain('更新 2');
+  expect(engineState.lastPlanWrite?.text).toContain('过滤 2 项');
+  ctx.chat.push(message(true), message());
+  vi.mocked(client.requestViaMainApi).mockResolvedValueOnce(JSON.stringify({ ...summary,
+    plans: { resolve: [{ id: 'p1', outcome: 'done', reason: '已经兑现约定' }] },
+  }));
+  await summarizeFloor(4); reload();
+  expect(memory.plans[0]).toMatchObject({ status: 'resolved', resolvedReason: '已经兑现约定' });
+  expect(memory.plans[1].status).toBe('open');
+  expect(memory.plans.every(p => !p.relatedLeafIds)).toBe(true);
+});
+
+it('只返回全部计划的关联标签不会更新计划，诊断明确模型没写指令', async () => {
+  const prior = leaf();
+  prior.delta.plans = { add: [{ kind: 'plan', content: '远行约定' }, { kind: 'suspense', content: '失物来源' }] };
+  const ids = [0, 1].map(i => `plan:${prior.id}#${i}`);
+  useChat([message(false, { extra: { bbs_leaf: prior } }), message(true), message()]);
+  vi.mocked(client.requestViaMainApi).mockResolvedValueOnce(JSON.stringify({ ...summary, tags: { planIds: ids } }));
+  await summarizeFloor(2);
+  expect(memory.plans.map(p => p.content)).toEqual(['远行约定', '失物来源']);
+  expect(memory.plans.every(p => !p.relatedLeafIds && !p.progressTime)).toBe(true);
+  expect(engineState.lastPlanWrite?.text).toContain('模型未返回');
+});
+
+it('自定义摘要漏掉计划宏时补齐现有/已了结目录，并能按目录更新', async () => {
+  const original = settings.apiSettings.prompts.summary;
+  settings.apiSettings.prompts.summary = 'CUSTOM {{content}}';
+  const prior = leaf();
+  prior.delta.plans = { add: [{ kind: 'plan', content: '远行约定' }, { kind: 'suspense', content: '已经揭开的谜团' }],
+    resolve: [{ id: `plan:${prior.id}#1`, outcome: 'done', reason: '查明真相' }] };
+  useChat([message(false, { extra: { bbs_leaf: prior } }), message(true), message()]);
+  vi.mocked(client.requestViaMainApi).mockResolvedValueOnce(JSON.stringify({ ...summary,
+    plans: { update: [{ id: 'p1', currentProgress: '订好车票', remaining: '出发' }] },
+  }));
+  try {
+    await summarizeFloor(2);
+    const request = JSON.stringify(vi.mocked(client.requestViaMainApi).mock.calls[0]);
+    expect(request).toContain('远行约定'); expect(request).toContain('已经揭开的谜团');
+    expect(request).toContain('plan:first-page#0');
+    expect(memory.plans[0].currentProgress).toBe('订好车票');
+  } finally { settings.apiSettings.prompts.summary = original; }
 });
 
 describe('openingPendingFloor', () => {

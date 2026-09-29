@@ -1,6 +1,6 @@
 import { prioritizeRrf } from './contextRecall';
 import { abortable } from './abort';
-import { planTitle, type RecallContext } from '../contextTags';
+import { type RecallContext } from '../contextTags';
 import { memory } from '../store';
 import { dailyInstalled, syncDaily, canonicalLeaves, recallHostVersion, currentEventHints } from '@/mnemosyne/bridge';
 import { activeLibrary } from '@/mnemosyne/db';
@@ -366,7 +366,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   }
   // 使用实际召回依赖的指纹，既允许同轮重 roll，又拒绝来源/权限/候选变化后的旧文本。
   // 只保存摘要指纹，避免把百万字正文或设置中的密钥重复写入 localStorage。
-  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v2|${await digest([
+  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v3|${await digest([
     database, scopes, sourceKey, settingsAtStart, fingerprint, summaryWanted, leafVersion,
     canonicalView ? [canonicalLib!.db.name, canonicalView.branch.story, canonicalView.branch.id,
       canonicalView.refs.slice(0, chat.length), canonicalPolicy] : null,
@@ -486,11 +486,9 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     const local = localLeaves.find(l => l.leafId === hit.leafId);
     const leaf = !dailyInstalled() && local ? getLeaf(chat[local.msgIndex]) : undefined;
     const tags = canonical?.tags ?? (leaf?.id === hit.leafId ? leaf.tags : undefined);
-    const hostId = canonical?.hostId ?? hit.leafId;
-    const planIds = plans.filter(p => p.relatedLeafIds?.includes(hostId)).map(p => p.id);
     const eventIds = safeEvents.filter(c => c.members.some(m => m.memory === hit.leafId)).map(c => c.chain.id);
     return { ...hit, tags: { ...(tags ?? { version: 1 }),
-      planIds: [...new Set([...(tags?.planIds ?? []), ...planIds])],
+      planIds: [],
       eventIds: [...new Set([...(tags?.eventIds ?? []), ...eventIds])],
     } };
   };
@@ -509,7 +507,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const contextRanked = prioritizeRrf(fused, bm25Results, context, cfg);
   setRecallContext(context, contextRanked);
   const selected = selectRecall(ranked, bm25Results, hybridEnabled ? results : ranked, cfg, contextRanked);
-  const { text: summaryText, tiers } = buildRecallText(selected, selfScope, now, plans);
+  const { text: summaryText, tiers } = buildRecallText(selected, selfScope, now);
   let eventText = '';
   if (canonicalView) {
     const lib = await activeLibrary();
@@ -628,7 +626,6 @@ function buildRecallText(
   selected: ReturnType<typeof selectRecall>,
   selfScope: string | null,
   now: string,
-  planSnapshot = memory.plans,
 ): { text: string; tiers: Map<string, 'full' | 'brief'> } {
   const tiers = new Map<string, 'full' | 'brief'>();
   const chunks: string[] = [];
@@ -638,8 +635,6 @@ function buildRecallText(
     if (!body) continue;
     tiers.set(h.leafId, tier);
     let chunk = fmtChunk(h, body, !!full, selfScope, now);
-    const plans = planSnapshot.filter(p => h.tags?.planIds.includes(p.id));
-    if (plans.length) chunk += `\n关联悬念/计划：${plans.map(p => `[${p.kind === 'suspense' ? '悬念' : '计划'}] ${planTitle(p)}`).join('；')}`;
     if (h.tags?.public) chunk += `\n公开理由：${h.tags.public.reason}`;
     chunks.push(chunk);
   }

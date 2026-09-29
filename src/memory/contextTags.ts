@@ -34,11 +34,11 @@ export function normalizeTags(value: unknown): SummaryTags | undefined {
   }
   return tags;
 }
-/** Models may link only supplied identities; publication is exclusively manual. */
-export function generatedTags(value: unknown, plans: { id: string }[], events: EventHint[], previous?: SummaryTags): SummaryTags | undefined {
-  const tags = normalizeTags(value);
-  if (!tags) return previous;
-  tags.planIds = tags.planIds.map(id => resolvePlanRef(id, plans)).filter((id): id is string => !!id);
+/** Plan links are disabled; models may only link supplied events. Publication is manual. */
+export function generatedTags(value: unknown, _plans: { id: string }[], events: EventHint[], previous?: SummaryTags): SummaryTags | undefined {
+  const tags = normalizeTags(value) ?? (previous ? { ...previous } : undefined);
+  if (!tags) return undefined;
+  tags.planIds = [];
   tags.eventIds = tags.eventIds.filter(id => events.some(e => e.id === id));
   delete tags.public;
   if (previous?.public) tags.public = previous.public;

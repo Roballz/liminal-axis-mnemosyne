@@ -289,6 +289,7 @@ export interface MemPlan extends PlanProgress {
   /** plan=计划/目标,suspense=悬念/未解之谜 */
   kind: 'plan' | 'suspense';
   content: string;
+  /** Legacy linkage field; no longer populated or used for recall/display. */
   relatedLeafIds?: string[];
   progressTime?: string;
   /** open=进行中,resolved=已了结 */

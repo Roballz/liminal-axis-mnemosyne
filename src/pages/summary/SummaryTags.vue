@@ -5,8 +5,8 @@ import ModalMask from '@/components/ModalMask.vue';
 import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
 import { getLeaf, editLeafTags } from '@/memory/apply';
-import { derivedMeta, memory } from '@/memory/store';
-import { normalizeTags, planTitle, type SummaryTags } from '@/memory/contextTags';
+import { derivedMeta } from '@/memory/store';
+import { normalizeTags, type SummaryTags } from '@/memory/contextTags';
 import { dailyInstalled, hostVersion, syncDaily } from '@/mnemosyne/bridge';
 import { refreshInjection } from '@/memory/inject';
 
@@ -19,11 +19,10 @@ const tags = computed(() => {
 // One validated directory per page revision, never one full chat serialization per card.
 const events = inject(SUMMARY_CTX)!.events;
 const links = computed(() => [
-  ...memory.plans.filter(p => tags.value?.planIds.includes(p.id)).map(p => `${p.kind === 'suspense' ? '悬念' : '计划'} · ${planTitle(p)}`),
   ...(tags.value?.eventIds.length ? events.value.filter(e => tags.value!.eventIds.includes(e.id)).map(e => `事件 · ${e.title}`) : []),
 ]);
 const opened = ref(false), busy = ref(false), publicOnly = ref(false);
-const participants = ref(''), reason = ref(''), planIds = ref<string[]>([]), eventIds = ref<string[]>([]);
+const participants = ref(''), reason = ref(''), eventIds = ref<string[]>([]);
 let expectedHost = '';
 async function open(publication = false) {
   busy.value = true;
@@ -35,7 +34,6 @@ async function open(publication = false) {
     publicOnly.value = publication;
     participants.value = tags.value?.participants?.join('、') ?? '';
     reason.value = tags.value?.public?.reason ?? '';
-    planIds.value = [...(tags.value?.planIds ?? [])];
     eventIds.value = [...(tags.value?.eventIds ?? [])];
     opened.value = true;
   } catch (error) { toast((error as Error).message, 'warning'); }
@@ -59,7 +57,7 @@ async function save() {
   const next: SummaryTags = publicOnly.value
     ? { ...(tags.value ?? { version: 1, planIds: [], eventIds: [] }), public: { reason: reason.value.trim() } }
     : { version: 1, participants: participants.value.split(/[、,，\n]/).map(s => s.trim()).filter(Boolean),
-      planIds: planIds.value, eventIds: eventIds.value, ...(tags.value?.public ? { public: tags.value.public } : {}) };
+      planIds: tags.value?.planIds ?? [], eventIds: eventIds.value, ...(tags.value?.public ? { public: tags.value.public } : {}) };
   busy.value = true;
   try { await persist(next); opened.value = false; }
   catch (error) { toast((error as Error).message, 'warning'); }
@@ -85,9 +83,6 @@ async function save() {
       </template>
       <template v-else>
         <label>在场人物<input v-model="participants" class="bbs-input" placeholder="名字之间用顿号分隔" /></label>
-        <fieldset v-if="memory.plans.length"><legend>计划／悬念</legend>
-          <label v-for="p in memory.plans" :key="p.id"><input v-model="planIds" type="checkbox" :value="p.id" />{{ planTitle(p) }}<small>{{ p.status === 'resolved' ? '已了结' : '' }}</small></label>
-        </fieldset>
         <fieldset v-if="events.length"><legend>相关事件</legend>
           <label v-for="e in events" :key="e.id"><input v-model="eventIds" type="checkbox" :value="e.id" />{{ e.title }}</label>
           <small>这里只调整召回关联，正式事件链成员在事件页管理。</small>

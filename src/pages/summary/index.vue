@@ -18,7 +18,7 @@ import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 
 import SummaryNode from './SummaryNode.vue';
 import SummaryTags from './SummaryTags.vue';
 import { normalizeTags, shortText } from '@/memory/contextTags';
-import { currentEventHints, dailyInstalled, dailyState, hostVersion, syncDaily } from '@/mnemosyne/bridge';
+import { currentEventHints, dailyInstalled, dailyState, hostScope, hostVersion, syncDaily } from '@/mnemosyne/bridge';
 import type { MemPlan } from '@/memory/types';
 import { SUMMARY_CTX, type SummaryRow } from './ctx';
 
@@ -136,24 +136,12 @@ const foldGroups = computed(() => [
   },
 ]);
 
-// 叶子 id → 创建楼层。计划 id 形如 `plan:${叶子id}#${序号}`,由此反查创建该计划/悬念
-// 时所在楼层(与摘要列表的 #楼层 同源)。手动添加的计划挂在最新叶子上,显示其楼层。
-const leafFloor = computed(() => {
-  const m = new Map<string, number>();
-  for (const l of derivedMeta.leaves) m.set(l.id, l.msgIndex);
-  return m;
+const lastPlanWrite = computed(() => {
+  void derivedMeta.rev;
+  const result = engineState.lastPlanWrite;
+  return result?.scope === hostScope() && derivedMeta.leaves.some(l =>
+    l.msgIndex === result.floor && l.id === result.leafId && !l.stale) ? result : null;
 });
-
-
-function planLinkedFloors(p: MemPlan) {
-  return [...new Set((p.relatedLeafIds ?? []).map(id => leafFloor.value.get(id)).filter((f): f is number => f !== undefined))].sort((a,b) => a-b);
-}
-function jumpToSummary(floor: number) {
-  const leaf = derivedMeta.leaves.find(l => l.msgIndex === floor && !l.stale);
-  if (!leaf) return;
-  searchOpen.value = true;
-  searchQuery.value = `#${floor}`;
-}
 
 function addPlan() {
   const content = shortText(newContent.value, PLAN_TEXT_MAX_CHARS);
@@ -960,6 +948,7 @@ provide(SUMMARY_CTX, {
     </ModalMask>
 
     <!-- ===== 计划 / 悬念:顶部两区,各自折叠计数 ===== -->
+    <p v-if="lastPlanWrite" class="bbs-field-hint">最近一次单楼摘要 #{{ lastPlanWrite.floor }} · 计划／悬念：{{ lastPlanWrite.text }}</p>
     <!-- 结构同构、配置驱动(foldGroups):标题行兼折叠开关,右侧「+」独立(disabled 时不响应,不误触折叠) -->
     <div v-for="g in foldGroups" :key="g.kind" class="bbs-fold-section">
       <div class="bbs-section-head">
@@ -1008,7 +997,6 @@ provide(SUMMARY_CTX, {
                 <span v-if="p.createdTime" class="bbs-plan-time">立于 {{ p.createdTime }}</span>
                 <span v-if="p.targetTime" class="bbs-plan-time bbs-plan-time-target">目标 {{ p.targetTime }}</span>
               </div>
-              <div class="bbs-plan-links"><button v-for="floor in planLinkedFloors(p)" :key="floor" type="button" @click="jumpToSummary(floor)">#{{ floor }}</button></div>
             </div>
           </div>
           <p v-else class="bbs-plan-empty">{{ g.empty }}</p>
@@ -1504,8 +1492,6 @@ provide(SUMMARY_CTX, {
 <style scoped>
 .bbs-plan-id { display:block; font-size:10px; opacity:.55; overflow-wrap:anywhere; margin-top:4px; }
 .bbs-plan-progress { margin:5px 0; font-size:12px; }
-.bbs-plan-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-.bbs-plan-links button { border:0; background:none; padding:0; color:var(--bbs-accent, #b89b60); font-size:11px; cursor:pointer; }
 
 .bbs-page {
   height: 100%;
