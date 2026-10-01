@@ -1,3 +1,4 @@
+import { withoutTableHistory } from './fixtures';
 import { summaryEditPrompt, prepareSummaryEditPrompt, resolveSummaryEdit, deferSummaryEdit, bindSummaryEditPrompt } from './summary-edit-prompt';
 import { previewArchiveDeletion } from './archive-deletion';
 import { fingerprint } from './model';
@@ -178,7 +179,7 @@ test('backup taken before rename can be restored then reconnected without creati
     const original = await syncDaily();
     await editEvent(lib, original, null, { title: '备份中的事件', status: 'open', keywords: [] });
     const pack = await exportLibrary(lib);
-    pack.version = 4; // User's actual pre-repair package format.
+    pack.version = 4; withoutTableHistory(pack); // User's actual pre-repair package format.
     const { checksum, ...base } = pack;
     pack.checksum = await fingerprint(base);
     ctx.getCurrentChatId = () => 'rename-after-backup';
@@ -415,7 +416,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect((await syncDaily()).branch.sourceRoleRepairs).toHaveLength(1);
     expect(dailyState.review).toBe(0);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(10);
+    expect(pack.version).toBe(11);
     const restored = await restoreLibrary(pack);
     lib = restored;
     dispose?.(); dispose = bindDaily();
@@ -617,7 +618,7 @@ test('historical summary does not read current table rows and invalid source row
     const spy=vi.spyOn(lib,'transaction');
     expect(await prepareSummaryTables(view,ctx.chat,[1])).toBeNull();expect(spy).not.toHaveBeenCalled();spy.mockRestore();
     ctx.chat[0].mes='改写旧正文';invalidateDaily();view=await syncDaily();
-    const request=await prepareSummaryTables(view,ctx.chat,[3]);expect(request?.user).not.toContain('失效来源记录');
+    const request=await prepareSummaryTables(view,ctx.chat,[3]);expect(request).toBeNull(); // The table itself was created after the rewritten prefix and is now rolled back.
 });
 
 test('latest-floor batch puts table changes beside floors in one request',async()=>{
@@ -991,4 +992,29 @@ test('edit event opens the external prompt with setting enabled, and chat switch
     await new Promise(resolve => setTimeout(resolve, 450));
     expect(summaryEditPrompt.open).toBe(false);
     stopPrompt(); api.apiSettings.summaryEditPromptEnabled = false;
+});
+
+test('saved pending host plan is rejected after rollback and committed plan never reapplies after regrowth', async () => {
+    const { newTable, saveTable, applyRows, readTables, parseSummaryTables } = await import('./tables');
+    const { attachTableResult } = await import('./summary-tables');
+    let view = await syncDaily();
+    const def = newTable(view, '宿主回退'); def.columns = [{ id: 'v', name: '值', type: 'text', mode: 'replace', description: '' }];
+    await saveTable(lib, view, def); view = await capture(lib, view.branch.id);
+    await applyRows(lib, view, (await lib.get<any>('custom_table_defs', def.id))!, [{ row_id: null, values: { v: '旧值' } }], false);
+    ctx.chat.push(message(true, '后来的问题'), message(false, '后来的回答'));
+    invalidateDaily(); view = await syncDaily();
+    let inputs = await readTables(lib, view.branch);
+    const committed = parseSummaryTables([{ table_id: def.id, add: [], update: [{ row_id: inputs[0].rows[0].id, values: { v: '未来值' } }] }], inputs, view.branch.id)!;
+    attachTableResult(ctx.chat, 1, committed); // Even an old-floor sidecar is committed at the current observed head.
+    view = await syncDaily(); expect((await readTables(lib, view.branch))[0].rows[0].values.v).toBe('未来值');
+    inputs = await readTables(lib, view.branch);
+    const pending = parseSummaryTables([{ table_id: def.id, add: [], update: [{ row_id: inputs[0].rows[0].id, values: { v: '未提交未来' } }] }], inputs, view.branch.id)!;
+    pending.tableHead = view.branch.tableHead;
+    attachTableResult(ctx.chat, 1, pending);
+    const tail = ctx.chat.splice(2); invalidateDaily(); view = await syncDaily();
+    expect((await readTables(lib, view.branch))[0].rows[0].values.v).toBe('旧值');
+    expect(dailyState.tableError).toContain('历史已改变');
+    attachTableResult(ctx.chat, 1, committed); ctx.chat.push(...tail); invalidateDaily(); view = await syncDaily();
+    expect((await readTables(lib, view.branch))[0].rows[0].values.v).toBe('旧值');
+    expect((await lib.all<any>('table_receipts')).filter(r => r.id === `${committed.operation}:${def.id}`)).toHaveLength(1);
 });

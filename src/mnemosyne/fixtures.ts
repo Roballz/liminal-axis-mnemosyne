@@ -25,3 +25,14 @@ export async function batchFixture(count = 5) {
     const batch = (await prepareEventBatch(data.lib, data.view, 20, 48000))!;
     return { ...data, batch };
 }
+
+/** Remove only fields unavailable in pre-table-history package fixtures. */
+export function withoutTableHistory(pack: import('./migration').Package) {
+    delete (pack.data as Partial<typeof pack.data>).table_history;
+    delete (pack.counts as Partial<typeof pack.counts>).table_history;
+    for (const branch of pack.data.branches as import('./model').Branch[]) {
+        delete branch.tableHead; delete branch.tableHistoryGap;
+    }
+    for (const snapshot of pack.data.history_snapshots as import('./model').Snapshot[]) delete snapshot.variants;
+    return pack;
+}

@@ -1,3 +1,4 @@
+import { withoutTableHistory } from './fixtures';
 import { expect, test, vi } from 'vitest';
 import { fixture } from './fixtures';
 import { capture, statuses, synchronize } from './canonical';
@@ -219,7 +220,7 @@ test('new schema instructions, lock policy and hidden rows survive core export/r
             restored = await restoreLibrary(pack, false);
         try {
             expect((await exportLibrary(restored)).data).toEqual(pack.data);
-            expect(restored.db.version).toBe(1);
+            expect(restored.db.version).toBe(2);
         } finally {
             restored.close();
         }
@@ -263,7 +264,7 @@ test('legacy v1 packages restore without changing IDs or legacy manual policy', 
     const f = await setup();
     try {
         const pack = await exportLibrary(f.lib);
-        pack.version = 1;
+        pack.version = 1; withoutTableHistory(pack);
         for (const def of pack.data.custom_table_defs as TableDef[]) {
             delete def.tableSchema;
             delete def.dataVersion;
@@ -276,7 +277,7 @@ test('legacy v1 packages restore without changing IDs or legacy manual policy', 
         pack.checksum = await fingerprint(base);
         const restored = await restoreLibrary(pack, false);
         try {
-            expect((await exportLibrary(restored)).data).toEqual(pack.data);
+            expect((await exportLibrary(restored)).data).toEqual({ ...pack.data, table_history: [] });
         } finally {
             restored.close();
         }

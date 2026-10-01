@@ -120,7 +120,7 @@ test('bulk retain records exact sources, survives unrelated tail changes, reject
   view = await capture(lib, branch.id);
   expect((await statuses(lib, view)).get(old.id)).toBe('valid');
   expect(await lib.get('memory_revisions', old.id)).toEqual(old);
-  const pack = await exportLibrary(lib); expect(pack.version).toBe(10);
+  const pack = await exportLibrary(lib); expect(pack.version).toBe(11);
   const restored = await restoreLibrary(pack, false);
   expect((await eventView(restored, await capture(restored, branch.id))).cards[0].chain.id).toBe(id);
   expect((await exportLibrary(restored)).data).toEqual(pack.data); restored.close();

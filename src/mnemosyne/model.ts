@@ -6,7 +6,7 @@ export const STORES = [
     'manifest_blocks', 'host_bindings', 'message_mappings', 'memories', 'memory_revisions',
     'memory_views', 'reviews', 'event_chains', 'event_revisions', 'event_memberships',
     'event_progress', 'event_processing_receipts', 'custom_table_defs', 'custom_table_rows',
-    'table_receipts', 'library_meta',
+    'table_receipts', 'table_history', 'library_meta',
 ] as const;
 export type Store = typeof STORES[number];
 export interface Row {
@@ -24,6 +24,8 @@ export interface Story extends Row {
     created: number;
 }
 export interface Branch extends Row {
+    tableHead?: string;
+    tableHistoryGap?: boolean;
     /** Explicit, branch-local confirmation; historical records remain immutable. */
     sourceRoleRepairSchema?: 1;
     sourceRoleRepairs?: SourceRoleRepair[];
@@ -63,6 +65,8 @@ export interface Block extends Row {
     entries: SourceRef[];
 }
 export interface Snapshot extends Row {
+    /** Observed host swipe indexes, not invented stable variant identities. */
+    variants?: number[];
     story: string;
     branch: string;
     previous: string | null;
@@ -244,4 +248,22 @@ export async function fingerprint(value: unknown): Promise<string> {
     const bytes = new TextEncoder().encode(JSON.stringify(value));
     const hash = await crypto.subtle.digest('SHA-256', bytes);
     return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Immutable table after-images. previous is audit order; parent is the adopted state ancestry. */
+export interface TableCommit extends Row {
+    story: string;
+    branch: string;
+    previous: string | null;
+    parent: string | null;
+    snapshot: string;
+    cutoff: number;
+    sequence: number;
+    depth: number;
+    kind: 'baseline' | 'write' | 'restore' | 'inherit';
+    operation: string;
+    checkpoint: boolean;
+    gap: boolean;
+    defs: TableDef[];
+    rows: TableRow[];
 }

@@ -76,4 +76,29 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
             ...(review.dependencies ? { dependencies: await mapIds(review.dependencies) } : {}) } as Review);
     }
     await inheritForkEvents(tx, parent, branch, events.cards, mapIds);
+    // Table history can refer to an older, now unselected summary. Preserve that evidence
+    // locally without selecting it or promoting it to valid recall material.
+    const tableEvidence = new Map<string, string>();
+    const copyTableEvidence = async (id: string): Promise<string | undefined> => {
+        const selected = await equivalent(id);
+        if (selected) return selected;
+        if (tableEvidence.has(id)) return tableEvidence.get(id)!;
+        const prior = await tx.get<MemoryRevision>('memory_revisions', id);
+        if (!prior) return undefined;
+        let family = families.get(prior.owner);
+        if (!family) {
+            const original = await tx.get<Memory>('memories', prior.owner);
+            if (!original) return undefined;
+            family = { ...original, ...row('mem'), owner: binding.id };
+            families.set(prior.owner, family);
+            await tx.add('memories', family);
+        }
+        const key = row('mr').id; tableEvidence.set(id, key);
+        const dependencies = await Promise.all(prior.dependencies.map(copyTableEvidence));
+        if (dependencies.some(id => !id)) throw new Error('继承表格历史来源依赖缺失');
+        await tx.add('memory_revisions', { ...prior, id: key, branch: branch.id, owner: family.id,
+            dependencies: dependencies as string[] } as MemoryRevision);
+        return key;
+    };
+    return copyTableEvidence;
 }

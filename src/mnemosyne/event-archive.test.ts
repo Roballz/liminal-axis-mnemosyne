@@ -1,3 +1,4 @@
+import { withoutTableHistory } from './fixtures';
 import { test, expect } from 'vitest';
 import { batchFixture, output, observation } from './fixtures';
 import { capture, synchronize } from './canonical';
@@ -49,9 +50,9 @@ test('v4 archive flags round-trip, old v3 is readable, invalid archive metadata 
   const view = await capture(lib, branch.id), card = (await eventView(lib, view)).cards[0];
   await setEventArchived(lib, view, card.chain.id, true);
   const pack = await exportLibrary(lib);
-  expect(pack.version).toBe(10);
+  expect(pack.version).toBe(11);
   const restored = await restoreLibrary(pack, false);
-  expect(restored.db.version).toBe(1);
+  expect(restored.db.version).toBe(2);
   expect((await exportLibrary(restored)).data).toEqual(pack.data);
   expect((await eventView(restored, await capture(restored, branch.id))).cards[0].chain.archived).toBe(true);
   restored.close();
@@ -63,7 +64,7 @@ test('v4 archive flags round-trip, old v3 is readable, invalid archive metadata 
     await expect(restoreLibrary(bad, false)).rejects.toThrow('归档标记非法');
   }
   const legacy = structuredClone(pack);
-  legacy.version = 3;
+  legacy.version = 3; withoutTableHistory(legacy);
   for (const event of legacy.data.event_revisions) delete (event as any).latestProgress;
   for (const chain of legacy.data.event_chains as EventChain[]) {
     delete chain.archiveSchema;

@@ -1,3 +1,4 @@
+import { TABLE_STORES, ensureTableHistory, recordTableWrite } from './table-history';
 import { parseStrictJson } from './json';
 import { Library, type Transaction } from './db';
 import { current, statuses, snapshotRefs } from './canonical';
@@ -38,24 +39,27 @@ export function validateColumns(columns: Column[]) {
 export async function saveTable(lib: Library, view: Pick<CapturedView, 'branch'>, input: TableDef) {
     validateColumns(input.columns);
     check(input.name.trim() && input.branch === view.branch.id && input.story === view.branch.story, '表名/范围无效');
-    await lib.transaction(['branches', 'custom_table_defs'], 'readwrite', async (tx) => {
+    await lib.transaction(TABLE_STORES, 'readwrite', async (tx) => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
         check(branch && branch.epoch === view.branch.epoch, '视图已改变');
+        await ensureTableHistory(tx, branch);
         const old = await tx.get<TableDef>('custom_table_defs', input.id);
-        check(!old || old.version === input.version, '表定义已改变');
+        check(!old || old.version === input.version && old.branch === view.branch.id && old.story === view.branch.story, '表定义已改变或跨分支');
         // Removed column values stay in rows as recoverable historical cells; AI never receives them.
         if (old)
             for (const column of input.columns) {
                 const previous = old.columns.find((c) => c.id === column.id);
                 check(!previous || previous.type === column.type, '已有字段不可原地改类型；请新建字段，旧值保留');
             }
-        await tx.put('custom_table_defs', {
+        const saved: TableDef = {
             ...input,
             tableSchema: 2,
             dataVersion: old?.dataVersion ?? input.dataVersion ?? 0,
             version: (old?.version ?? 0) + 1,
             updated: Date.now(),
-        } as TableDef);
+        };
+        await tx.put('custom_table_defs', saved);
+        await recordTableWrite(tx, branch, [saved], [], row('tabledefop').id);
         branch.epoch++;
         await tx.put('branches', branch);
     });
@@ -119,7 +123,7 @@ export async function applyRows(
     }
     const digest = await fingerprint([view.branch.id, def.id, def.version, ops, ai, sources]);
     await lib.transaction(
-        ['branches', 'custom_table_defs', 'custom_table_rows', 'table_receipts'],
+        TABLE_STORES,
         'readwrite',
         async (tx) => {
             const previous = await tx.get<any>('table_receipts', operation);
@@ -129,8 +133,10 @@ export async function applyRows(
             }
             const branch = await tx.get<Branch>('branches', view.branch.id);
             check(branch && branch.epoch === view.branch.epoch, '迟到填表结果已拒绝');
+            await ensureTableHistory(tx, branch);
+            const changedRows: TableRow[] = [];
             const stored = await tx.get<TableDef>('custom_table_defs', def.id);
-            check(stored && stored.version === def.version && !stored.deleted, '表定义已改变');
+            check(stored && stored.version === def.version && !stored.deleted && stored.branch === branch.id && def.branch === branch.id, '表定义已改变或跨分支');
             for (const op of ops) {
                 let record = op.row_id ? await tx.get<TableRow>('custom_table_rows', op.row_id) : undefined;
                 check(!op.row_id || (record && record.owner === def.id && !record.deleted), '行不存在或不属于选定表');
@@ -150,7 +156,7 @@ export async function applyRows(
                 };
                 check(!ai || !record.hidden, '隐藏行不可由 AI 修改');
                 const values = mergeCells(def, record.values, op.values, ai);
-                await tx.put('custom_table_rows', {
+                const changed: TableRow = {
                     ...record,
                     values,
                     hidden: op.hidden ?? record.hidden ?? false,
@@ -158,7 +164,9 @@ export async function applyRows(
                     version: record.version + 1,
                     sources: ai ? [...new Set([...record.sources, ...sources])] : Object.keys(op.values).length ? sources : record.sources,
                     ...(!ai && Object.keys(op.values).length && record.bodySources ? {bodySources: []} : {}),
-                } as TableRow);
+                };
+                await tx.put('custom_table_rows', changed);
+                changedRows.push(changed);
             }
             await tx.add('table_receipts', {
                 id: operation,
@@ -172,7 +180,9 @@ export async function applyRows(
                 count: ops.length,
                 fingerprint: digest,
             } as any);
-            await tx.put('custom_table_defs', { ...stored, dataVersion: (stored.dataVersion ?? 0) + 1 } as TableDef);
+            const changedDef = { ...stored, dataVersion: (stored.dataVersion ?? 0) + 1 };
+            await tx.put('custom_table_defs', changedDef);
+            await recordTableWrite(tx, branch, [changedDef], changedRows, operation);
             branch.epoch++;
             await tx.put('branches', branch);
         },
@@ -233,6 +243,7 @@ export interface TableInput {
 }
 export interface SummaryTablePlan {
     version: 2;
+    tableHead?: string;
     operation: string;
     branch: string;
     tables: { id: string; version: number; dataVersion: number; operations: TableOperation[] }[];
@@ -351,7 +362,7 @@ export async function commitSummaryTables(
     const digest = await fingerprint(body ? [plan, body] : plan);
     if (body) check(Number.isInteger(body.start) && Number.isInteger(body.end) && body.start >= 0 && body.end < view.cutoff && body.start <= body.end && JSON.stringify(body.refs) === JSON.stringify(view.refs.slice(body.start, body.end + 1)), '补表正文范围无效');
     await lib.transaction(
-        ['branches', 'custom_table_defs', 'custom_table_rows', 'table_receipts'],
+        TABLE_STORES,
         'readwrite',
         async (tx) => {
             const previous = await Promise.all(
@@ -371,6 +382,9 @@ export async function commitSummaryTables(
             const branch = await tx.get<Branch>('branches', plan.branch);
             check(branch && branch.id === view.branch.id && branch.epoch === view.branch.epoch, '迟到填表结果已拒绝');
             check((sources.length > 0 || !!body) && sources.every((id) => view.memories.some((m) => m.id === id)), '填表来源缺失');
+            if (plan.tableHead !== undefined) check(plan.tableHead === branch.tableHead, '表格历史已改变，旧填表结果未应用');
+            await ensureTableHistory(tx, branch);
+            const changedRows: TableRow[] = [], changedDefs: TableDef[] = [];
             await assertTablePlan(tx, plan, !!body);
             check(guard(), '聊天已改变，填表结果未应用');
             for (const item of plan.tables) {
@@ -392,15 +406,19 @@ export async function commitSummaryTables(
                         sources: [],
                     };
                     const values = mergeCells(def, record.values, op.values, true);
-                    await tx.put('custom_table_rows', {
+                    const changed: TableRow = {
                         ...record,
                         values,
                         version: record.version + 1,
                         sources: [...new Set([...record.sources, ...sources])],
                         ...(body ? { bodySources: [...new Map([...(record.bodySources ?? []), ...body.refs].map(r => [r.message, r])).values()] } : {}),
-                    } as TableRow);
+                    };
+                    await tx.put('custom_table_rows', changed);
+                    changedRows.push(changed);
                 }
-                await tx.put('custom_table_defs', { ...def, dataVersion: (def.dataVersion ?? 0) + 1 } as TableDef);
+                const changedDef = { ...def, dataVersion: (def.dataVersion ?? 0) + 1 };
+                await tx.put('custom_table_defs', changedDef);
+                changedDefs.push(changedDef);
                 await tx.add('table_receipts', {
                     id: `${plan.operation}:${def.id}`,
                     schema: 1,
@@ -415,6 +433,8 @@ export async function commitSummaryTables(
                     ...(body ? { backfillSchema: 1, bodySources: body.refs, start: body.start, end: body.end } : {}),
                 } as any);
             }
+            check(guard(), '聊天已改变，填表结果未应用');
+            await recordTableWrite(tx, branch, changedDefs, changedRows, plan.operation);
             check(guard(), '聊天已改变，填表结果未应用');
             branch.epoch++;
             await tx.put('branches', branch);

@@ -14,6 +14,7 @@ import { type CapturedView, check } from './model';
 export const TABLE_OUTPUT_KEY = 'mnemosyne_tables_v2';
 export interface SummaryTables {
     inputs: TableInput[];
+    tableHead?: string;
     branch: string;
     system: string;
     user: string;
@@ -34,10 +35,12 @@ export async function prepareSummaryTables(
         rows: input.rows.filter((r) => r.sources.every((id) => validity.get(id) === 'valid')),
     }));
     const prompt = summaryTablesPrompt(inputs);
-    return prompt.system ? { inputs, branch: view.branch.id, ...prompt } : null;
+    return prompt.system ? { inputs, tableHead: view.branch.tableHead, branch: view.branch.id, ...prompt } : null;
 }
 export function parseSummaryTableResult(value: unknown, request: SummaryTables | null) {
-    return request ? parseSummaryTables(value, request.inputs, request.branch) : null;
+    const plan = request ? parseSummaryTables(value, request.inputs, request.branch) : null;
+    if (plan && request?.tableHead) plan.tableHead = request.tableHead;
+    return plan;
 }
 export async function validateSummaryTableResult(plan: SummaryTablePlan | null) {
     if (plan)

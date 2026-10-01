@@ -65,7 +65,7 @@ export async function previewArchiveDeletion(lib: Library, branchId: string): Pr
         if (typeof ref.message === 'string' && typeof ref.revision === 'string') referenced.add(ref.revision);
         for (const child of Object.values(value)) collect(child);
     };
-    for (const store of ['manifest_blocks', 'memory_revisions', 'reviews', 'branches'] as const)
+    for (const store of ['manifest_blocks', 'memory_revisions', 'reviews', 'branches', 'table_history', 'custom_table_rows'] as const)
         for (const record of remaining[store]) collect(record);
     remove.source_revisions = (data.source_revisions as Revision[]).filter(r => r.story === branch.story &&
         (owners.has(r.provenance.binding) || retiredIds.has(r.provenance.binding)) && !referenced.has(r.id)).map(r => r.id);

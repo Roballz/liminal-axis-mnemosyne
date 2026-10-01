@@ -1,3 +1,4 @@
+import { ensureTableHistory, reconcileTableHistory, inheritTableHistory } from './table-history';
 import { eventView } from './events';
 import { inheritForkMemory } from './fork-memory';
 import type { SummaryTags } from '@/memory/contextTags';
@@ -79,10 +80,10 @@ export async function snapshotRefs(tx: Transaction, snapshot: Snapshot): Promise
     check(refs.length === snapshot.length, '历史清单计数错误');
     return refs;
 }
-async function publishSnapshot(tx: Transaction, branch: Branch, refs: SourceRef[]): Promise<string> {
+async function publishSnapshot(tx: Transaction, branch: Branch, refs: SourceRef[], variants?: number[]): Promise<string> {
     const prior = branch.head ? await tx.get<Snapshot>('history_snapshots', branch.head) : undefined;
     const old = prior ? await snapshotRefs(tx, prior) : [];
-    if (prior && equal(old, refs)) return prior.id;
+    if (prior && equal(old, refs) && equal(prior.variants ?? Array(old.length).fill(0), variants ?? Array(refs.length).fill(0))) return prior.id;
     const blocks: string[] = [];
     // Reuse unchanged 128-reference blocks; appends do not copy entire histories.
     for (let offset = 0; offset < refs.length; offset += 128) {
@@ -102,6 +103,7 @@ async function publishSnapshot(tx: Transaction, branch: Branch, refs: SourceRef[
         blocks,
         length: refs.length,
         created: Date.now(),
+        ...(variants ? { variants } : {}),
     };
     await tx.add('history_snapshots', snapshot);
     return snapshot.id;
@@ -184,7 +186,11 @@ export async function synchronize(lib: Library, observation: HostObservation): P
             byHost.set(host.key, ref);
         }
         const oldHead = branch.head;
-        branch.head = await publishSnapshot(tx, branch, refs);
+        if (oldHead) await ensureTableHistory(tx, branch);
+        const variants = observation.messages.map(m => m.swipe);
+        branch.head = await publishSnapshot(tx, branch, refs, variants);
+        if (!oldHead) await ensureTableHistory(tx, branch);
+        else if (oldHead !== branch.head) await reconcileTableHistory(tx, branch, refs, variants);
         const families = await tx.all<Memory>('memories', 'owner', binding.id);
         const familyByHost = new Map(families.map((m) => [m.hostId, m]));
         const previous = branch.view ? await tx.get<MemoryView>('memory_views', branch.view) : undefined;
@@ -525,7 +531,7 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
                 anchor: parent.refs.at(-1) ?? null,
             },
         };
-        branch.head = await publishSnapshot(tx, branch, parent.refs);
+        branch.head = await publishSnapshot(tx, branch, parent.refs, parent.snapshot.variants?.slice(0, parent.cutoff));
         const selection: MemoryView = { ...row('mv'), branch: branch.id, selections: {} };
 
         branch.view = selection.id;
@@ -549,7 +555,8 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
                     });
             }
         }
-        await inheritForkMemory(tx, parent, branch, binding, selection, events);
+        const mapMemory = await inheritForkMemory(tx, parent, branch, binding, selection, events);
+        await inheritTableHistory(tx, liveParent!, branch, parent.refs, parent.snapshot.variants?.slice(0, parent.cutoff), mapMemory);
         await tx.add('memory_views', selection);
         await tx.add('branches', branch);
         check(guard(), '聊天已改变，本次分叉已撤销');

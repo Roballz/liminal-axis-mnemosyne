@@ -1,7 +1,7 @@
 import { STORES, type Store, type Row, check, id } from './model';
 export const DB_PREFIX = 'mnemosyne_daily_';
 export const ACTIVE_KEY = 'mnemosyne_daily_active_v1';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 export function request<T>(r: IDBRequest<T>): Promise<T> {
     return new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 }
@@ -26,6 +26,7 @@ export class Library {
             const r = indexedDB.open(name, DB_VERSION);
             r.onupgradeneeded = () => {
                 for (const name of STORES) {
+                    if (r.result.objectStoreNames.contains(name)) continue;
                     const s = r.result.createObjectStore(name, { keyPath: 'id' });
                     for (const key of ['story', 'branch', 'owner'])
                         s.createIndex(key, key);

@@ -18,7 +18,7 @@ import {
 import { sendEvent, sendReviewEvent, type EventSender } from "./manual-events";
 import { eventJsonText } from "./event-response";
 import { parseStrictJson } from "./json";
-import { check, equal, type Branch, type Snapshot } from "./model";
+import { check, equal, type Branch, type Snapshot, type TableCommit } from "./model";
 export const backfillState = reactive({
   busy: false,
   status: "",
@@ -36,6 +36,7 @@ export async function tableLastFloors(lib: Library, branch: Branch) {
   return lib.transaction(
     [
       "table_receipts",
+      "table_history",
       "history_snapshots",
       "manifest_blocks",
       "memory_revisions",
@@ -46,12 +47,23 @@ export async function tableLastFloors(lib: Library, branch: Branch) {
       check(snapshot, "快照缺失");
       const refs = await snapshotRefs(tx, snapshot),
         result: Record<string, number> = {};
+      const history = await tx.all<TableCommit>('table_history', 'branch', branch.id);
+      const byId = new Map(history.map(c => [c.id, c]));
+      const receiptIds = (c: TableCommit) => c.operation ? [c.operation, ...c.defs.map(d => `${c.operation}:${d.id}`)] : [];
+      const known = new Set(history.flatMap(receiptIds)), active = new Set<string>();
+      let cursor = branch.tableHead ? byId.get(branch.tableHead) : undefined;
+      let legacy = !branch.tableHead;
+      while (cursor) {
+        for (const id of receiptIds(cursor)) active.add(id);
+        if (cursor.kind === 'baseline' && cursor.cutoff > 0) legacy = true;
+        cursor = cursor.parent ? byId.get(cursor.parent) : undefined;
+      }
       for (const receipt of await tx.all<any>(
         "table_receipts",
         "branch",
         branch.id,
       )) {
-        if (receipt.result !== "success") continue;
+        if (receipt.result !== "success" || (known.has(receipt.id) ? !active.has(receipt.id) : !legacy)) continue;
         let floor = -1;
         if (receipt.bodySources) {
           if (
@@ -148,6 +160,7 @@ export async function runTableBackfill(
           const output = parseStrictJson(eventJsonText(text)) as any;
           const plan = parseSummaryTables(output?.customTables, inputs, view.branch.id);
           check(plan, "缺少补表结果");
+          plan.tableHead = view.branch.tableHead;
           return plan;
         };
         const review: TableBackfillReview = {

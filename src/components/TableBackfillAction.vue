@@ -6,13 +6,15 @@ import { dailyBranch, hostScope, hostVersion } from '@/mnemosyne/bridge';
 import { activeLibrary } from '@/mnemosyne/db';
 import { tableLastFloors, runTableBackfill, stopTableBackfill, backfillState, type TableBackfillReview } from '@/mnemosyne/table-backfill';
 import { settings, loadDailySettings, saveDailySettings } from '@/mnemosyne/jobs';
+import { useTableBackfillRange, type BackfillChoice } from '@/mnemosyne/table-backfill-range';
 import { check, type TableDef } from '@/mnemosyne/model';
 const props = defineProps<{ tables: TableDef[]; disabled?: boolean }>();
 const emit = defineEmits<{ done: [] }>();
 const open = ref(false), error = ref(''), loading = ref(false), total = ref(0);
-const start = ref(0), end = ref(0), batchSize = ref(20);
-const choices = ref<{ id: string; name: string; last: number; selected: boolean }[]>([]);
-const count = computed(() => Number.isSafeInteger(batchSize.value) && batchSize.value > 0 && end.value >= start.value ? Math.ceil((end.value - start.value + 1) / batchSize.value) : 0);
+const batchSize = ref(20);
+const choices = ref<BackfillChoice[]>([]);
+const { start, end, startEdited, valid, caughtUp, automatic, reset, markEdited } = useTableBackfillRange(choices, total);
+const count = computed(() => valid.value && Number.isSafeInteger(batchSize.value) && batchSize.value > 0 ? Math.ceil((end.value - start.value + 1) / batchSize.value) : 0);
 const review = shallowRef<TableBackfillReview | null>(null), reviewError = ref(''), saving = ref(false);
 let scope = '', host = '', ownsJob = false, disposed = false, finishReview: ((accepted: boolean) => void) | undefined;
 const live = () => !disposed && scope === hostScope() && host === hostVersion();
@@ -29,8 +31,9 @@ async function show() {
     const progress = await tableLastFloors(await activeLibrary(), branch);
     await loadDailySettings();
     check(live(), '聊天已改变，请重新打开');
-    total.value = progress.total; start.value = 0; end.value = total.value - 1; batchSize.value = settings.backfillBatchSize;
+    total.value = progress.total; batchSize.value = settings.backfillBatchSize;
     choices.value = props.tables.filter(t => !t.deleted && t.columns.length).map(t => ({ id: t.id, name: t.name, last: progress.floors[t.id] ?? -1, selected: false }));
+    reset();
     open.value = true;
   } catch (e) { error.value = (e as Error).message; }
   finally { loading.value = false; }
@@ -47,6 +50,7 @@ async function submit() {
   error.value = '';
   try {
     check(live(), '聊天已改变，请重新打开');
+    check(valid.value, caughtUp.value ? '所选表已确认到当前最后一楼，没有待补范围' : '请选择表并填写有效的起止楼号');
     check(Number.isSafeInteger(batchSize.value) && batchSize.value > 0, '每批楼数必须为正整数');
     settings.backfillBatchSize = batchSize.value; await saveDailySettings();
     ownsJob = true;
@@ -70,7 +74,9 @@ async function submit() {
         <p>楼号从0开始。“最后确认”不保证之前没有缺口；范围重叠时只补缺失内容。</p>
         <fieldset :disabled="backfillState.busy" class="mn-backfill-choice">
           <legend>所有选中表共用范围</legend>
-          <div class="mn-backfill-range"><label>从楼号<input v-model.number="start" type="number" min="0" :max="total - 1" required /></label><label>到楼号<input v-model.number="end" type="number" :min="start" :max="total - 1" required /></label></div>
+          <div class="mn-backfill-range"><label>从楼号<input v-model.number="start" @input="markEdited()" type="number" min="0" :max="total" required /></label><label>到楼号<input v-model.number="end" type="number" :min="start" :max="total - 1" required /></label></div>
+          <p>默认从选中表最早的“最后确认 + 1”开始；尚未更新的表从0开始。<button v-if="startEdited" type="button" @click="automatic()">恢复自动起点</button></p>
+          <p v-if="caughtUp" role="status">所选表已确认到当前最后一楼，没有待补范围；如需重补，可手动修改起点。</p>
           <label>每批楼数<input v-model.number="batchSize" type="number" min="1" step="1" required /></label>
           <p>预计 {{ count }} 批／{{ count }} 次请求；每批包含全部选中表。可能产生模型费用。</p>
         </fieldset>

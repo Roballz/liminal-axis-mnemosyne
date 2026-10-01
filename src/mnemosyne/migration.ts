@@ -6,7 +6,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
     schema: 1;
     created: number;
     excluded: string[];
@@ -23,7 +23,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
-    const base = { format: 'mnemosyne-daily' as const, version: 10 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 11 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     validateData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -40,15 +40,17 @@ const FIELDS: Record<Store, string[]> = {
     event_processing_receipts: ['snapshot', 'cutoff', 'view', 'fingerprint', 'memories', 'result', 'output', 'created'],
     custom_table_defs: ['name', 'description', 'columns', 'ai', 'version', 'created', 'updated', 'deleted'],
     custom_table_rows: ['values', 'version', 'deleted', 'sources'], table_receipts: ['sources', 'snapshot', 'result', 'count', 'fingerprint'],
+    table_history: ['previous', 'parent', 'snapshot', 'cutoff', 'sequence', 'depth', 'kind', 'operation', 'checkpoint', 'gap', 'defs', 'rows'],
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
-    check(pack.data && Object.keys(pack.data).length === STORES.length, '迁移模块不完整');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    const stores: readonly Store[] = pack.version < 11 ? STORES.filter(s => s !== 'table_history') : STORES;
+    check(pack.data && Object.keys(pack.data).length === stores.length && Object.keys(pack.data).every(s => stores.includes(s as Store)), '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
-        const rows = pack.data[store];
-        check(Array.isArray(rows) && rows.length === pack.counts[store], `计数错误 ${store}`);
+        const rows = store === 'table_history' && pack.version < 11 ? [] : pack.data[store];
+        check(Array.isArray(rows) && (store === 'table_history' && pack.version < 11 || rows.length === pack.counts[store]), `计数错误 ${store}`);
         maps[store] = new Map();
         for (const r of rows) {
             check(r && r.schema === 1 && typeof r.id === 'string' && r.id && !maps[store].has(r.id), `非法或重复ID ${store}`);
@@ -61,6 +63,8 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             if (pack.version >= 7 && store === 'memory_revisions') optional.push('tags');
             if (pack.version >= 7 && store === 'event_revisions') optional.push('latestProgress');
             if (pack.version >= 10 && store === 'event_chains') optional.push('inheritance');
+            if (pack.version >= 11 && store === 'branches') optional.push('tableHead', 'tableHistoryGap');
+            if (pack.version >= 11 && store === 'history_snapshots') optional.push('variants');
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && FIELDS[store].every(k => k in r), `字段不合法 ${store}`);
             maps[store].set(r.id, r);
@@ -112,6 +116,7 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
     }
     for (const s of maps.history_snapshots.values()) {
         check(Array.isArray(s.blocks) && Number.isSafeInteger(s.length) && s.length >= 0, '快照结构非法');
+        check(s.variants === undefined || Array.isArray(s.variants) && s.variants.length === s.length && s.variants.every((v: unknown) => Number.isSafeInteger(v) && Number(v) >= 0), '宿主变体标记非法');
         const all = refs(s);
         check(all.length === s.length && new Set(all.map(r => r.message)).size === all.length, '快照计数/消息重复');
         for (const r of all)
@@ -293,6 +298,62 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             check(JSON.stringify(r.bodySources) === JSON.stringify(refs(snapshot).slice(r.start, r.end + 1)), '补表回执正文不匹配');
         }
     }
+    for (const c of maps.table_history.values()) {
+        const snapshot = get('history_snapshots', c.snapshot);
+        check(snapshot.branch === c.branch && snapshot.story === c.story && Number.isSafeInteger(c.cutoff) && c.cutoff >= 0 && c.cutoff <= snapshot.length, '表格历史范围非法');
+        check(Number.isSafeInteger(c.sequence) && c.sequence > 0 && ['baseline', 'write', 'restore', 'inherit'].includes(c.kind) && typeof c.operation === 'string' && typeof c.checkpoint === 'boolean' && typeof c.gap === 'boolean', '表格历史结构非法');
+        check(Array.isArray(c.defs) && Array.isArray(c.rows) && new Set(c.defs.map((d: any) => d.id)).size === c.defs.length && new Set(c.rows.map((r: any) => r.id)).size === c.rows.length, '表格历史对象重复');
+        for (const key of ['previous', 'parent']) {
+            check(c[key] === null || typeof c[key] === 'string', '表格历史前驱非法');
+            if (c[key]) { const prior = get('table_history', c[key]); check(prior.branch === c.branch && prior.sequence < c.sequence, '表格历史循环或跨分支'); }
+        }
+        check(c.parent !== null || c.checkpoint, '表格历史缺少基线');
+        check(Number.isSafeInteger(c.depth) && c.depth >= 0 && c.depth <= 64 && (c.checkpoint ? c.depth === 0 : c.parent && c.depth === get('table_history', c.parent).depth + 1), '表格检查点距离非法');
+        for (const d of c.defs) {
+            const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS.custom_table_defs, 'tableSchema', 'dataVersion'];
+            check(d && d.schema === 1 && d.branch === c.branch && d.story === c.story && typeof d.id === 'string' && Object.keys(d).every(k => fields.includes(k)) && FIELDS.custom_table_defs.every(k => k in d), '历史表定义非法');
+            check(get('custom_table_defs', d.id).branch === c.branch, '历史表身份跨分支');
+            validateColumns(d.columns);
+            check(typeof d.name === 'string' && !!d.name.trim() && typeof d.description === 'string' && typeof d.ai === 'boolean' && typeof d.deleted === 'boolean' && Number.isSafeInteger(d.version) && d.version >= 0 && (d.dataVersion === undefined || Number.isSafeInteger(d.dataVersion) && d.dataVersion >= 0), '历史表字段非法');
+        }
+        for (const r of c.rows) {
+            const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS.custom_table_rows, 'hidden', 'bodySources'];
+            check(r && r.schema === 1 && r.branch === c.branch && r.story === c.story && typeof r.id === 'string' && Object.keys(r).every(k => fields.includes(k)) && FIELDS.custom_table_rows.every(k => k in r), '历史表行非法');
+            check(get('custom_table_defs', r.owner).branch === c.branch && get('custom_table_rows', r.id).owner === r.owner, '历史表行身份跨范围');
+            check(r.values && typeof r.values === 'object' && !Array.isArray(r.values) && Object.values(r.values).every(v => ['string', 'number', 'boolean'].includes(typeof v) && (typeof v !== 'number' || Number.isFinite(v))) && typeof r.deleted === 'boolean' && (r.hidden === undefined || typeof r.hidden === 'boolean') && Number.isSafeInteger(r.version) && r.version >= 0, '历史表单元格非法');
+            memoryRefs(r, r.sources);
+            if (r.bodySources !== undefined) { check(Array.isArray(r.bodySources), '历史表正文引用非法'); for (const source of r.bodySources) ref(source, r.story); }
+        }
+    }
+    for (const b of maps.branches.values()) {
+        check(b.tableHistoryGap === undefined || typeof b.tableHistoryGap === 'boolean', '表格历史缺口标记非法');
+        const history = [...maps.table_history.values()].filter(c => c.branch === b.id);
+        if (!b.tableHead) { check(!history.length && b.tableHistoryGap === undefined, '表格历史缺少采用版本'); continue; }
+        const head = get('table_history', b.tableHead);
+        check(head.branch === b.id && head.gap === b.tableHistoryGap, '表格采用版本跨分支或缺口不一致');
+        const reachable = new Set<string>();
+        let cursor = head;
+        while (cursor) { reachable.add(cursor.id); cursor = cursor.previous ? get('table_history', cursor.previous) : null; }
+        check(history.every(c => reachable.has(c.id)), '未提交孤立表格历史');
+        const stateDefs = new Map<string, any>(), stateRows = new Map<string, any>(), chain = [];
+        cursor = head;
+        while (cursor) { chain.push(cursor); if (cursor.checkpoint) break; cursor = cursor.parent ? get('table_history', cursor.parent) : null; }
+        for (const commit of chain.reverse()) {
+            for (const def of commit.defs) stateDefs.set(def.id, def);
+            for (const record of commit.rows) stateRows.set(record.id, record);
+        }
+        const stable = (value: any): any => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+            ? Object.fromEntries(Object.keys(value).sort().map(k => [k, stable(value[k])])) : value;
+        const semantic = (value: any, definition: boolean) => stable(Object.fromEntries(Object.entries(value)
+            .filter(([key]) => !['version', ...(definition ? ['dataVersion', 'updated'] : [])].includes(key))));
+        for (const [store, state, definition] of [['custom_table_defs', stateDefs, true], ['custom_table_rows', stateRows, false]] as const) {
+            for (const [id, expected] of state) {
+                const actual = get(store, id);
+                check(JSON.stringify(semantic(actual, definition)) === JSON.stringify(semantic(expected, definition)), '表格当前值与采用历史不一致');
+            }
+            for (const actual of maps[store].values()) if (actual.branch === b.id && !state.has(actual.id)) check(actual.deleted === true, '未版本化的当前表值');
+        }
+    }
     for (const r of maps.library_meta.values()) {
         if (r.id === 'retired-source-bindings' && pack.version >= 9) continue;
         if (pack.version >= 8 && r.id === 'archive-deletions') {
@@ -317,12 +378,12 @@ export async function restoreLibrary(value: unknown, activate = true): Promise<L
     try {
         await lib.transaction(STORES, 'readwrite', async (tx) => {
             for (const store of STORES)
-                for (const record of pack.data[store])
+                for (const record of pack.data[store] ?? [])
                     await tx.add(store, record);
         });
         // Verify the persisted round-trip before changing the active selector.
         const restored = await exportLibrary(lib);
-        check(await fingerprint(restored.data) === await fingerprint(pack.data), '恢复后对象不一致');
+        check(await fingerprint(restored.data) === await fingerprint(Object.fromEntries(STORES.map(store => [store, pack.data[store] ?? []]))), '恢复后对象不一致');
         if (activate)
             await activateLibrary(lib);
         return lib;

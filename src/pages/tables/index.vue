@@ -360,6 +360,7 @@ onBeforeUnmount(() => {
     </header>
     <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
     <p v-if="dailyState.tableError" class="mn-warning" role="alert">{{ dailyState.tableError }}</p>
+    <p v-if="branch?.tableHistoryGap" class="mn-warning" role="status">此位置没有完整表格历史；未带入未来表值。旧基线和撤离版本仍保留在核心备份中。</p>
     <p v-if="loading" class="mn-muted" role="status">正在读取表格…</p>
     <template v-if="screen === 'list'">
       <p class="mn-muted">让摘要 AI 顺手更新你的记录。点表名打开；右键、长按或点 ··· 管理表格。</p>

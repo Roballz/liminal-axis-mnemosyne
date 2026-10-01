@@ -665,7 +665,7 @@ test("manual backfill runs while automatic filling is disabled, sends original d
     false,
   );
   const pack = await exportLibrary(lib);
-  expect(pack.version).toBe(10);
+  expect(pack.version).toBe(11);
   const restored = await restoreLibrary(pack, false);
   expect(
     (await restored.all<TableRow>("custom_table_rows"))[0].bodySources,
@@ -721,7 +721,7 @@ test("editing backfilled source invalidates raw dependent table rows and last fl
   ctx.chat[0].mes = "改变后的正文";
   invalidateDaily();
   const v = await syncDaily();
-  expect((await readTables(lib, v.branch))[0].rows).toHaveLength(0);
+  expect(await readTables(lib, v.branch)).toHaveLength(0); // Table creation also lies after the rewritten source prefix.
   expect((await tableLastFloors(lib, v.branch)).floors[def.id]).toBeUndefined();
 });
 test("backfill rejects late response after host change and invalid floor ranges before paying", async () => {
