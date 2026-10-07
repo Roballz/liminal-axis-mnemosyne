@@ -31,6 +31,7 @@ it('标签随摘要版本导出恢复，纯标签编辑不破坏上层总结和�
     const text = renderPersistentEvents([card]);
     expect(text).toContain('进行中的事件链');
     expect(text).toContain(output.latestProgress.text);
+    expect(text).toContain(`e1. [事件] 玉佩归还 · 最新进展：2026/9/25 10:30 ${output.latestProgress.text}`);
     expect(text).not.toContain(output.overview);
     const pack = await exportLibrary(lib);
     expect(pack.version).toBe(11);
@@ -91,6 +92,7 @@ it('旧概要不因缺短进展而待更新，手改进展验证成员、时间�
     view = await capture(lib, branch.id);
     let card = (await eventView(lib, view)).cards[0];
     expect(card.meta.latestProgress).toBeUndefined();
+    expect(renderPersistentEvents([card])).toBe('进行中的事件链:\ne1. [事件] 旧事件 · 尚未填写最新进展');
     expect(eventPending(card)).toBe(false);
     const patch = { ...card.meta, latestProgress: { version: 1 as const, text: '2026/9/25 10:30 已确认归还时间'.padEnd(100, '续'), memory, time: '不可信时间' } };
     await expect(editEvent(lib, view, id, { ...patch, latestProgress: { ...patch.latestProgress, memory: other } })).rejects.toThrow('有效关联摘要');
@@ -101,8 +103,13 @@ it('旧概要不因缺短进展而待更新，手改进展验证成员、时间�
     expect(card.meta.overview).toBe('原有概要');
     expect(card.meta.latestProgress).toEqual({ ...patch.latestProgress, time: '2026/9/25 10:30' });
     const text = renderPersistentEvents([card, { ...card, chain: { ...card.chain, id: 'ev_other' }, meta: { ...card.meta, title: '暂搁事件', status: 'dormant' } }]);
-    expect(text).toContain('e1. [事件] 旧事件');
-    expect(text).toContain('e2. [事件] 暂搁事件');
+    expect(text).toBe([
+      `进行中的事件链:\ne1. [事件] 旧事件 · 最新进展：2026/9/25 10:30 ${patch.latestProgress.text}`,
+      `暂搁的事件链:\ne2. [事件] 暂搁事件 · 最新进展：2026/9/25 10:30 ${patch.latestProgress.text}`,
+    ].join('\n\n'));
+    expect(renderPersistentEvents([{ ...card, meta: { ...card.meta,
+      latestProgress: { ...card.meta.latestProgress!, time: '', text: '已确认归还时间' },
+    } }])).toBe('进行中的事件链:\ne1. [事件] 旧事件 · 最新进展：已确认归还时间');
     expect(text).not.toContain(id);
     expect(text).not.toContain('ev_other');
     expect(text).toContain(patch.latestProgress.text);
@@ -113,6 +120,7 @@ it('旧概要不因缺短进展而待更新，手改进展验证成员、时间�
     view = await capture(lib, branch.id);
     card = (await eventView(lib, view)).cards[0];
     expect(card.meta.latestProgress).toBeNull();
+    expect(renderPersistentEvents([card])).toBe('进行中的事件链:\ne1. [事件] 旧事件 · 暂无明确进展');
     expect(eventPending(card)).toBe(false);
     await editEvent(lib, view, id, card.meta, { memory: other, active: true, kind: 'progress' });
     card = (await eventView(lib, await capture(lib, branch.id))).cards[0];

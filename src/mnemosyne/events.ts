@@ -501,7 +501,7 @@ export function renderPersistentEvents(cards: EventCard[]): string {
         if (!group.length) return [];
         return [`${label}:\n${group.map(c => {
             const p = c.meta.latestProgress;
-            return `e${++index}. [事件] ${c.meta.title} · ${p ? `${p.time} ${p.text}`.trim() : c.meta.latestProgress === null ? '暂无明确进展' : '尚未填写最新进展'}`;
+            return `e${++index}. [事件] ${c.meta.title} · ${p ? `最新进展：${`${p.time} ${p.text}`.trim()}` : c.meta.latestProgress === null ? '暂无明确进展' : '尚未填写最新进展'}`;
         }).join('\n')}`];
     }).join('\n\n');
 }
