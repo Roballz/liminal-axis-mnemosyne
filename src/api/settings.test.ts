@@ -38,3 +38,17 @@ it('旧本地存储迁移缺字段时默认关闭', async () => {
   expect(apiSettings.summarySuccessPreviewEnabled).toBe(false);
   expect((mock.ctx.extensionSettings.mnemosyne_daily as any).summarySuccessPreviewEnabled).toBe(false);
 });
+it('正文边界旧配置默认、非法值回退与保存重载', async () => {
+  mock.ctx.extensionSettings.mnemosyne_daily = { bodyStartTag: '<bad>', bodyEndTag: 5 };
+  let settings = await import('./settings'); settings.hydrateSettings();
+  expect(settings.apiSettings.bodyStartTag).toBe('bbs_start');
+  expect(settings.apiSettings.bodyEndTag).toBe('bbs_end');
+  settings.apiSettings.bodyStartTag = 'globalTime'; settings.apiSettings.bodyEndTag = 'endTime';
+  await (await import('vue')).nextTick();
+  const saved = JSON.parse(JSON.stringify(mock.ctx.extensionSettings.mnemosyne_daily));
+  expect(saved).toMatchObject({ bodyStartTag: 'globalTime', bodyEndTag: 'endTime' });
+  vi.resetModules(); mock.ctx.extensionSettings = { mnemosyne_daily: saved };
+  settings = await import('./settings'); settings.hydrateSettings();
+  expect(settings.apiSettings.bodyStartTag).toBe('globalTime');
+  expect(settings.apiSettings.bodyEndTag).toBe('endTime');
+});

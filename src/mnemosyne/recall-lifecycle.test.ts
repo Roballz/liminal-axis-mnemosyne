@@ -332,3 +332,12 @@ test('缓存存在但档案权限/绑定校验失败时不复用旧文本', asyn
   expect(injected()).toBe('');
   expect(recallDebug.status).not.toContain('复用缓存');
 });
+
+test.each(['bodyStartTag', 'bodyEndTag'] as const)('正文边界 %s 改动使同轮召回缓存失效', async key => {
+  await runVectorRecall(); await runVectorRecall();
+  expect(recallDebug.status).toContain('复用缓存');
+  api.apiSettings[key] = key === 'bodyStartTag' ? 'globalTime' : 'endTime';
+  await runVectorRecall();
+  expect(recallDebug.status).not.toContain('复用缓存');
+  expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(2);
+});

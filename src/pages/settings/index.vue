@@ -1206,6 +1206,13 @@ function exportPublicApiDocument() {
         <p v-else class="bbs-field-hint">暂无自定义标签。仅内置清洗(思维链、注释、物品旁注等)生效。</p>
       </Collapsible>
 
+      <Collapsible title="正文起止标签" :open="false">
+        <p class="bbs-field-hint">只填标签名，不带尖括号。默认 bbs_start / bbs_end；自定义示例 globalTime / endTime。仅裁剪发送给模型的正文，不改存档、时间解析或时间提示词。</p>
+        <label>起始标签 <input v-model.trim="apiSettings.bodyStartTag" class="bbs-input" placeholder="bbs_start" /></label>
+        <label>结束标签 <input v-model.trim="apiSettings.bodyEndTag" class="bbs-input" placeholder="bbs_end" /></label>
+        <p class="bbs-field-hint">自定义边界保留最后一组完整起始标签至随后第一组完整结束标签（含标签与完整内容）。缺少一端时仅裁另一端；两端倒序或同名则不裁。支持大小写、属性和跨行；空值或非法名称使用默认值。不要把边界标签同时加入整块删除名单。</p>
+      </Collapsible>
+
       <!-- 自定义提示词 -->
       <Collapsible title="自定义提示词" :open="false">
         <ul class="bbs-prompt-list">

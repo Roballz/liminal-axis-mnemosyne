@@ -1,5 +1,5 @@
 import { EVENT_PROGRESS_MAX_CHARS, EVENT_APPEND_MAX_CHARS, EVENT_APPEND_PROMPT_MAX_CHARS } from '@/memory/limits';
-import { splitTimeLabel } from '@/memory/timeTag';
+import { cleanBody, splitTimeLabel } from '@/memory/timeTag';
 import type { EventHint } from '@/memory/contextTags';
 import { sourceContent, sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { parseStrictJson } from './json';
@@ -212,9 +212,15 @@ export async function prepareEventBatch(lib: Library, view: CapturedView, maxMem
         keywords: c.meta.keywords, overview: c.progress.map(p => p.text) }));
     const directory = JSON.stringify(catalog);
     check(directory.length + EVENT_PROMPT.length <= maxChars, '事件目录过大/任务暂停：全量目录超出预算，未裁剪任何事件');
-    const input = memories.map(m => ({ memory_revision_id: m.id, text: m.content, source_declaration: m.declaration,
-        sources: m.inputRefs.map(r => ({ ...r, content: sourceContent(view, r) })),
-        current_anchor_body: view.sources.get(view.refs.find(r => r.message === m.anchor)?.revision ?? '')?.content ?? null }));
+    const input = memories.map(m => {
+        const anchor = view.sources.get(view.refs.find(r => r.message === m.anchor)?.revision ?? '')?.content;
+        return { memory_revision_id: m.id, text: m.content, source_declaration: m.declaration,
+            sources: m.inputRefs.map(r => {
+                const content = sourceContent(view, r);
+                return { ...r, content: content == null ? content : cleanBody(content) };
+            }),
+            current_anchor_body: anchor == null ? null : cleanBody(anchor) };
+    });
     const prompt = `${EVENT_PROMPT}\n全量合法事件目录：${directory}\n本批材料：${JSON.stringify(input)}`;
     check(prompt.length <= maxChars, '本批材料超过预算，请缩小摘要批量上限');
     check(await current(lib,view),'事件准备期间视图已改变');

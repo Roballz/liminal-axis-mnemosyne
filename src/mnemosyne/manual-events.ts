@@ -1,4 +1,4 @@
-import { splitTimeLabel } from '@/memory/timeTag';
+import { cleanBody, splitTimeLabel } from '@/memory/timeTag';
 /** Human-selected membership; models can only describe the selected chain. */
 import { sourceContent } from './source-equivalence';
 import { reactive } from "vue";
@@ -166,6 +166,7 @@ export async function prepareFloorEvent(
   const host = hostVersion(),
     generation = dailyState.generation;
   const messages = await eventCreationContext(floor, view);
+  const body = view.sources.get(view.refs[floor].revision)?.content;
   messages.push(
     {
       role: "system",
@@ -178,7 +179,7 @@ export async function prepareFloorEvent(
       content: JSON.stringify({
         intent,
         floor,
-        body: view.sources.get(view.refs[floor].revision)?.content,
+        body: body == null ? body : cleanBody(body),
         summary: memory.content,
         id: memory.id,
         storyTime: memory.storyTime,
@@ -260,10 +261,10 @@ async function requestEventOverview(
       storyTime: m.storyTime,
       sources: [
         ...new Map(
-          refs.map((r) => [
-            r.revision,
-            { ...r, body: sourceContent(view, r) },
-          ]),
+          refs.map((r) => {
+            const body = sourceContent(view, r);
+            return [r.revision, { ...r, body: body == null ? body : cleanBody(body) }] as const;
+          }),
         ).values(),
       ],
     };

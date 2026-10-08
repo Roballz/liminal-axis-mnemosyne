@@ -279,6 +279,9 @@ export interface ApiSettings {
    * 旁注等格式。改动对**召回时**即时生效(向量库存的是原文,召回再清洗),无需重建索引。
    */
   customStripTags: string[];
+  /** 正文裁剪边界（仅模型输入，不改变时间解析或原文）；空值使用内置标签。 */
+  bodyStartTag: string;
+  bodyEndTag: string;
   /** 全局变量模板:所有角色所有聊天共享的初始 JSON 结构 + 说明(值仍每聊天独立)。见 memory 的 VarTier。 */
   varsGlobalTemplate: VarTemplate;
   /** 角色变量模板:键=角色卡 avatar 文件名,值=该角色所有聊天共享的初始模板(值仍每聊天独立)。 */
@@ -406,6 +409,8 @@ function defaults(): ApiSettings {
     batchMaxChars: 30000,
     batchMaxFloors: 10,
     customStripTags: [],
+    bodyStartTag: 'bbs_start',
+    bodyEndTag: 'bbs_end',
     varsGlobalTemplate: { json: {}, meaning: '', rule: '' },
     varsTemplateByChar: {},
   };
@@ -550,6 +555,8 @@ function normalize(raw: unknown): ApiSettings {
       ),
     )
     : [];
+  merged.bodyStartTag = normalizeBodyTag(merged.bodyStartTag, 'bbs_start');
+  merged.bodyEndTag = normalizeBodyTag(merged.bodyEndTag, 'bbs_end');
   // 变量模板:全局深规整;角色按 avatar 键逐份规整(丢弃空模板的键,保持存储干净)
   merged.varsGlobalTemplate = normalizeTemplate((raw as Partial<ApiSettings>).varsGlobalTemplate);
   const rawByChar = (raw as Partial<ApiSettings>).varsTemplateByChar;
@@ -569,6 +576,11 @@ function normalize(raw: unknown): ApiSettings {
  * 用黑名单(而非白名单)剔除会破坏标签语法/正则的危险字符:尖括号、斜杠、空白、正则元字符;
  * 中文及其它 unicode 字母一律保留(用户可能写 <雪><状态栏> 这类中文标签)。
  */
+export function normalizeBodyTag(raw: unknown, fallback: string): string {
+  const tag = typeof raw === 'string' ? raw.trim() : '';
+  return /^[\p{L}_][\p{L}\p{N}_:-]*$/u.test(tag) ? tag : fallback;
+}
+
 export function sanitizeTagName(raw: string): string {
   return String(raw ?? '')
     .trim()
@@ -674,6 +686,8 @@ function applyInto(target: ApiSettings, src: ApiSettings): void {
   target.batchMaxChars = src.batchMaxChars;
   target.batchMaxFloors = src.batchMaxFloors;
   target.customStripTags = src.customStripTags;
+  target.bodyStartTag = src.bodyStartTag;
+  target.bodyEndTag = src.bodyEndTag;
   target.varsGlobalTemplate = src.varsGlobalTemplate;
   target.varsTemplateByChar = src.varsTemplateByChar;
 }

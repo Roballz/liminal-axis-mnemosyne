@@ -269,7 +269,7 @@ export async function runVectorRecall(signal?: AbortSignal): Promise<void> {
 
   // 同一轮重复进入必须一起等待；新一轮则取消旧任务，不能被悬挂的布尔锁直接放行。
   const key = JSON.stringify([database, currentChatId(), recallHostVersion(), apiSettings.vector,
-    apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags]);
+    apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags, apiSettings.bodyStartTag, apiSettings.bodyEndTag]);
   if (activeRecall?.key === key && !activeRecall.controller.signal.aborted) return activeRecall.promise;
   cancelActiveRecall('已开始新一轮召回，旧任务已取消');
   const run = { key, controller: new AbortController(), promise: Promise.resolve() };
@@ -322,7 +322,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const scopes = recallScopes();
   const sourceChat = currentChatId();
   const settingsKey = () => JSON.stringify([apiSettings.vector.recall, apiSettings.vector.knowledge, embeddingIdentity(),
-    apiSettings.vector.queryRewrite, apiSettings.vector.rerank, apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags,
+    apiSettings.vector.queryRewrite, apiSettings.vector.rerank, apiSettings.keepRecent, apiSettings.autoHideEnabled, apiSettings.customStripTags, apiSettings.bodyStartTag, apiSettings.bodyEndTag,
     apiSettings.vector.queryRewriteMaxTokens, apiSettings.vector.queryRewriteJailbreak, apiSettings.prompts.jailbreak]);
   const settingsAtStart = settingsKey();
   const sourceKey = buildRecallCacheKey(chat, cfg);

@@ -1,3 +1,4 @@
+import { cleanBody } from '@/memory/timeTag';
 import { reactive } from "vue";
 import { getContext } from "@/st/context";
 import { activeLibrary, type Library } from "./db";
@@ -146,8 +147,11 @@ export async function runTableBackfill(
           return { ...input, def: { ...input.def, ai: true }, rows: input.rows.filter(row => row.sources.every(id => valid.get(id) === 'valid')) };
         });
         const prompt = summaryTablesPrompt(inputs), refs = view.refs.slice(start, end + 1);
-        const body = refs.map((ref, i) => ({ floor: start + i, role: view.sources.get(ref.revision)?.role,
-          body: getContext()?.chat[start + i]?.extra?.bbs_omit ? null : view.sources.get(ref.revision)?.content }));
+        const body = refs.map((ref, i) => {
+          const source = view.sources.get(ref.revision);
+          return { floor: start + i, role: source?.role,
+            body: getContext()?.chat[start + i]?.extra?.bbs_omit ? null : source ? cleanBody(source.content) : undefined };
+        });
         const user = prompt.user + "\n【所选正文，null为番外不填写】\n" + JSON.stringify(body);
         const system = prompt.system + "\n这是独立补表，只返回根对象 customTables，包含所有选中的表；不生成摘要或修改其他状态。历史范围可能与已填内容重叠：已有内容不另建、不重复更新或追加；只补充缺失事实。";
         check(system.length + user.length <= maxChars, "补表完整材料超过预算，未发送；请减少每批楼数或可见表内容");

@@ -875,3 +875,50 @@ test('editing a table while reviewing its response rejects the old response with
   });
   expect(sender).toHaveBeenCalledTimes(1); expect(await lib.all('table_receipts')).toHaveLength(0);
 });
+
+test('all event model paths and independent backfill clean source payloads without changing archives or raw guards', async () => {
+  const previous = { start: apiSettings.bodyStartTag, end: apiSettings.bodyEndTag, strip: apiSettings.customStripTags };
+  try {
+    apiSettings.bodyStartTag = 'globalTime'; apiSettings.bodyEndTag = 'endTime'; apiSettings.customStripTags = ['smalltalk'];
+    const time = '2086年04月23日·🌸·星期二·10:49·薄云晴·16°C·{拍摄日}';
+    for (const message of ctx.chat) message.mes = `外部前缀<globalTime>${time}</globalTime>${message.mes}<smalltalk>秘密小剧场</smalltalk><endTime>2086/04/23 10:55</endTime>外部尾缀`;
+    const view = await syncDaily();
+    const archived = JSON.stringify([...view.sources]);
+    const refs = JSON.stringify(view.refs);
+    const checkMessages = (messages: unknown) => {
+      const prompt = JSON.stringify(messages);
+      expect(prompt).toContain(time); expect(prompt).toContain('正文细节');
+      for (const noise of ['秘密小剧场', '外部前缀', '外部尾缀']) expect(prompt).not.toContain(noise);
+    };
+    const { prepareEventBatch, commitEventBatch } = await import('./events');
+    const batch = (await prepareEventBatch(lib, view, 20, 200000))!;
+    checkMessages(batch.prompt);
+    // Policy changes alter only model input, never operation identity or raw source refs.
+    apiSettings.bodyStartTag = 'unusedStart';
+    const sameOperation = (await prepareEventBatch(lib, view, 20, 200000))!;
+    expect(sameOperation.operation).toBe(batch.operation);
+    apiSettings.bodyStartTag = 'globalTime';
+    await commitEventBatch(lib, batch, { decisions: batch.memories.map(m => ({ memory: m.id, result: 'none' })), events: [] });
+    expect(await prepareEventBatch(lib, await syncDaily(), 20, 200000)).toBeNull();
+    const sender = vi.fn(async messages => { checkMessages(messages); return answer; });
+    const draft = await prepareFloorEvent(1, '约会', 200000, sender);
+    const id = await draft.confirm(draft.raw);
+    await joinFloorEvent(3, id);
+    await updateEventOverview(lib, await syncDaily(), id, 200000, sender);
+    const rewritten = await prepareEventRewrite(id, '精简', 200000, sender);
+    const def = await table();
+    await runTableBackfill([{ table: def.id, start: 0, end: 3 }], 200000, async messages => {
+      checkMessages(messages); return JSON.stringify({ customTables: [{ table_id: def.id, add: [], update: [] }] });
+    });
+    const after = await syncDaily();
+    expect(JSON.stringify([...after.sources])).toBe(archived);
+    expect(JSON.stringify(after.refs)).toBe(refs);
+    expect(ctx.chat[1].mes).toContain('秘密小剧场');
+    // Even edits solely to stripped text remain raw provenance changes and reject late output.
+    ctx.chat[1].mes = ctx.chat[1].mes.replace('秘密小剧场', '已编辑小剧场');
+    await syncDaily();
+    await expect(rewritten.confirm(rewritten.raw)).rejects.toThrow();
+  } finally {
+    apiSettings.bodyStartTag = previous.start; apiSettings.bodyEndTag = previous.end; apiSettings.customStripTags = previous.strip;
+  }
+});

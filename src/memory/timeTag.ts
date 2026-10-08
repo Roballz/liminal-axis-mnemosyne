@@ -9,7 +9,7 @@
  * 标签**留在正文里**(发副 API、发主模型续写都带着),只用 ST 正则在「显示层」隐藏 —— 真删会让时间再次失同步。
  */
 
-import { apiSettings } from '@/api/settings';
+import { apiSettings, normalizeBodyTag } from '@/api/settings';
 import { getContext, type STMessage } from '@/st/context';
 import { stripBaiBaiImageTags } from './imageTag';
 import type { LeafExtra } from './types';
@@ -293,6 +293,23 @@ function readManagedTagText(mes: string, tag: string): string | null {
   return block ? s.slice(start + block.innerStart, start + block.innerEnd).trim() : null;
 }
 
+/** Custom boundaries require complete tag blocks; malformed/reversed pairs never erase the body.
+ * Values and markup remain verbatim. This is not a story-time parser. */
+function clampCustomBody(s: string, startTag: string, endTag: string): string {
+  if (startTag.toLowerCase() === endTag.toLowerCase()) return s; // ambiguous boundary roles
+  const blocks = (tag: string) => {
+    const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const open = `<${escaped}(?=[\\s>])(?![^>]*[/]\\s*>)[^>]*>`;
+    // Do not pair an unmatched outer opening with a nested opening's closing tag.
+    return [...s.matchAll(new RegExp(`${open}(?:(?!${open})[\\s\\S])*?</${escaped}\\s*>`, 'gi'))];
+  };
+  const starts = blocks(startTag), ends = blocks(endTag);
+  const start = starts.at(-1);
+  const end = ends.find(m => m.index! >= (start ? start.index! + start[0].length : 0));
+  if (start && ends.length && !end) return s; // reversed / ambiguous pair
+  return s.slice(start?.index ?? 0, end ? end.index! + end[0].length : s.length);
+}
+
 export function clampToTimeTags(mes: string): string {
   let s = String(mes ?? '')
     .replace(RE_THINK_BLOCK, '') // 思维链
@@ -302,15 +319,22 @@ export function clampToTimeTags(mes: string): string {
   s = stripCustomTags(s); // 用户自定义标签
   s = stripManagedTags(s); // 仅清理插件托管的尾部旁注
 
-  // 最后一个 <bbs_start> 的位置:全局扫一遍取末次
-  const startRe = new RegExp(`<${START_TAG}\\b`, 'gi');
-  let lastStart = -1;
-  for (let m = startRe.exec(s); m; m = startRe.exec(s)) lastStart = m.index;
-  if (lastStart >= 0) s = s.slice(lastStart);
-  // 第一个 </bbs_end>(在已裁过前缀的串里找)
-  const endMatch = s.match(new RegExp(`</${END_TAG}>`, 'i'));
-  if (endMatch && endMatch.index !== undefined) {
-    s = s.slice(0, endMatch.index + endMatch[0].length);
+  const startTag = normalizeBodyTag(apiSettings.bodyStartTag, START_TAG);
+  const endTag = normalizeBodyTag(apiSettings.bodyEndTag, END_TAG);
+  if (startTag.toLowerCase() !== START_TAG || endTag.toLowerCase() !== END_TAG) {
+    s = clampCustomBody(s, startTag, endTag);
+  } else {
+    // 内置默认保持历史裁剪行为。
+    // 最后一个 <bbs_start> 的位置:全局扫一遍取末次
+    const startRe = new RegExp(`<${START_TAG}\\b`, 'gi');
+    let lastStart = -1;
+    for (let m = startRe.exec(s); m; m = startRe.exec(s)) lastStart = m.index;
+    if (lastStart >= 0) s = s.slice(lastStart);
+    // 第一个 </bbs_end>(在已裁过前缀的串里找)
+    const endMatch = s.match(new RegExp(`</${END_TAG}>`, 'i'));
+    if (endMatch && endMatch.index !== undefined) {
+      s = s.slice(0, endMatch.index + endMatch[0].length);
+    }
   }
   // 规范空白(原由 stripHtml 负责,现内置)
   return s
