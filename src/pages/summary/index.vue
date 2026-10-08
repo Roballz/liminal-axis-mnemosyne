@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SummaryResponsePanel from "@/components/SummaryResponsePanel.vue";
 import { PLAN_TEXT_MAX_CHARS } from '@/memory/limits';
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import Icon from '@/components/Icon.vue';
@@ -287,7 +288,9 @@ async function doResummarize() {
   try {
     const made = await resummarizeNow();
     // 有报错优先显示错误(如未指派总结渠道);否则按生成条数给反馈
-    if (engineState.lastError) {
+    if (made === 'pending') {
+      resummaryHint.value = '返回已准备好，预览确认后才保存';
+    } else if (engineState.lastError) {
       resummaryHint.value = '';
     } else if (made > 0) {
       resummaryHint.value = `已生成 ${made} 条总结`;
@@ -1160,6 +1163,7 @@ provide(SUMMARY_CTX, {
     </div>
 
     <p v-if="engineState.lastError" class="bbs-error">{{ engineState.lastError }}</p>
+    <SummaryResponsePanel history-only />
 
     <!-- 默认视图:根倒序,逐层展开由 SummaryNode 递归承载(grid 高度过渡,不脱流、无闪烁) -->
     <div v-if="!searching && !selectMode && rootNodes.length" class="bbs-summary-list">

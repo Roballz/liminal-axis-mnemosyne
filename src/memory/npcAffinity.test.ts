@@ -1,3 +1,4 @@
+import { summaryResponses } from './summary-response';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as client from '@/api/client';
 import * as settings from '@/api/settings';
@@ -6,7 +7,7 @@ import type { STContext, STMessage } from '@/st/context';
 import * as notices from '@/st/toast';
 import { classifyNpcPresence, deriveMemory, editLeafFull, editNpc, finalizeDelta, setNpcFollow, upsertNpc } from './apply';
 import { createNewChatWithCarryover } from './carryover';
-import { currentSummaryPromise, summarizeFloor } from './engine';
+import { recoverSummaryResponse, currentSummaryPromise, summarizeFloor } from './engine';
 import * as inject from './inject';
 import { affinityLevelFromInput, applyNpcAffinity, cleanNpcAffinityLevel, fmtNpcAffinity, fmtNpcSummaryList, NPC_AFFINITY_BRIEFING } from './npcRelations';
 import { buildSummaryPrompt, RULE_NPC_AFFINITY } from './prompts';
@@ -224,6 +225,7 @@ describe('离场同步与在场对账', () => {
       npcs: { update: [{ name: '厨师', follow: false, location: '' }] },
     }));
     await summarizeFloor(1);
+    await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
     const material = vi.mocked(client.requestViaMainApi).mock.calls[0][0].map(m => m.content).join('\n');
     expect(material).toContain('厨师〔同区域〕'); // 厨师在厨房:相对主角当前节点(房间)是同区域
     expect(material).toContain('同伴〔在场〕 [随行]');
@@ -326,6 +328,7 @@ describe('实际摘要入口与跨对话继承', () => {
       npcs: { update: [{ name, affinityInner: 2, affinityNote: '相救表现出更深在意,外在仍冷淡' }] },
     }));
     await summarizeFloor(1);
+    await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
     const request = vi.mocked(client.requestViaMainApi).mock.calls[0][0].map(m => m.content).join('\n');
     expect(request).toContain('内心好感:有好感;外在态度:冷淡疏远');
     expect(request).toContain('性格:嘴硬、护短');
@@ -334,6 +337,7 @@ describe('实际摘要入口与跨对话继承', () => {
     const third = message(); delete third.extra!.bbs_leaf; chat.push(third);
     vi.mocked(client.requestViaMainApi).mockResolvedValue(JSON.stringify({ summary: '一起喝茶。', timeStart: '2026/9/13 10:05', timeEnd: '2026/9/13 10:10' }));
     await summarizeFloor(2);
+    await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
     expect(memory.npcs[0]).toMatchObject({ affinityInner: 2, affinityOuter: -1, affinityNote: '相救表现出更深在意,外在仍冷淡' });
   });
   it('带数据创建新对话保留窗口前未知/中性和窗口内单侧更新,不改源聊天', async () => {

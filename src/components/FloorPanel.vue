@@ -647,6 +647,7 @@ async function confirmRegenerate() {
   if (summaryActionDisabled.value) return;
   const ok = await regenerateFloor(props.floor);
   regenerateConfirmOpen.value = false;
+  if (ok === 'pending') return;
   if (ok) {
     toast(`楼层 #${props.floor} 摘要已重新生成`, 'success');
     return;

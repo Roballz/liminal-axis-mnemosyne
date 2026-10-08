@@ -1,3 +1,4 @@
+import { requestSummaryResponse, applySummaryResponse, summaryResponses, type SummaryResponse } from './summary-response';
 import { generatedTags, type EventHint } from './contextTags';
 import { describePlanWrite } from './plan-write';
 import { eventHintsBefore } from '@/mnemosyne/events';
@@ -712,8 +713,7 @@ export async function summarizeFloor(floor: number): Promise<void> {
   const chat = ctx.chat ?? [];
   if (importedHistoryCovers(floor)) return;
   if (!isAiFloor(chat[floor]) || leafValid(chat[floor])) return;
-  await runSummary(floor);
-  await afterSummaryHideAndInject(chat);
+  await runSummary(floor, { preview: true, checkResummary: false });
 }
 
 /**
@@ -722,7 +722,7 @@ export async function summarizeFloor(floor: number): Promise<void> {
  * 重摘保留叶子 id,避免后续计划引用失效;包含该叶子的上层总结会在落叶时失效移除。
  * 此操作只重做当前叶子,不额外触发上层总结请求。
  */
-export async function regenerateFloor(floor: number): Promise<boolean> {
+export async function regenerateFloor(floor: number): Promise<boolean | 'pending'> {
   if (!engineActiveHere()) return false;
   if (busy) return false;
   const ctx = getContext();
@@ -732,12 +732,9 @@ export async function regenerateFloor(floor: number): Promise<boolean> {
   const oldLeaf = getLeaf(chat[floor]);
   if (!oldLeaf) return false;
 
-  try {
-    await runSummary(floor, { replaceLeaf: oldLeaf, checkResummary: false });
-    return getLeaf(chat[floor]) !== oldLeaf && !engineState.lastError;
-  } finally {
-    await afterSummaryHideAndInject(chat);
-  }
+  await runSummary(floor, { replaceLeaf: oldLeaf, checkResummary: false, preview: true });
+  if (!engineState.lastError && summaryResponses[0]?.attempts.at(-1)?.kind === 'ready') return 'pending';
+  return getLeaf(chat[floor]) !== oldLeaf && !engineState.lastError;
 }
 
 /**
@@ -998,29 +995,51 @@ function resolveSender(
   return { send: messages => requestViaMainApi(messages), label: '主 API(主界面当前在用)' };
 }
 
-/**
- * 发请求并解析,失败自动重试。失败 = 请求抛错 或 解析函数抛错(JSON 无效/缺字段)。
- * 最多重试 apiSettings.summaryMaxRetries 次(默认 1),即「首试 + N 次重试」共 N+1 次尝试。
- * 全部失败则抛出最后一次的错误,由调用方写 lastError。
- */
-async function sendAndParse<T>(
-  send: (messages: ChatMsg[]) => Promise<string>,
-  messages: ChatMsg[],
-  parse: (raw: string) => T,
-): Promise<T> {
-  const maxRetries = Math.max(0, apiSettings.summaryMaxRetries | 0);
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return parse(await send(messages));
-    } catch (e) {
-      lastErr = e;
-      if (attempt < maxRetries) {
-        console.log(`[柏宝书] 第 ${attempt + 1} 次尝试失败,重试:`, e instanceof Error ? e.message : String(e));
-      }
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+/** Snapshot actual prompt inputs before any asynchronous evidence/context reads. */
+function summaryResponseGuard(chat: STMessage[], end = chat.length - 1, dependencies = memory.summaries.map(s => s.id)) {
+  const scope = hostScope(), messages = chat.slice(0, end + 1);
+  const fingerprint = () => JSON.stringify([
+    chat.slice(0, end + 1).map(m => [m.mes, m.is_user, !!m.is_system && !m.extra?.bbs_hidden,
+      m.swipe_id, m.extra?.bbs_omit, m.extra?.bbs_leaf]),
+    dependencies.map(id => memory.summaries.find(s => s.id === id) ?? null),
+    dependencies.map(id => memory.summaries.filter(s => s.childIds?.includes(id)).map(s => s.id).sort()),
+    apiSettings.summaryOnlyMode,
+  ]);
+  const source = fingerprint();
+  return () => {
+    if (!engineActiveHere() || getContext()?.chat !== chat || hostScope() !== scope ||
+        messages.some((m, i) => chat[i] !== m) || fingerprint() !== source)
+      throw new Error('聊天、楼层或摘要来源已改变；保留返回供查看，但不能应用旧结果');
+  };
+}
+/** Later independent floors may have committed. Rebase only unchanged inputs onto the same branch. */
+async function responseEvidence(original: Awaited<ReturnType<typeof captureSummaryEvidence>>, targets: number[], guard: () => void) {
+  guard();
+  if (!original) return original;
+  const fresh = await captureSummaryEvidence(targets, original.dependencies);
+  guard();
+  if (!fresh || fresh.view.branch.id !== original.view.branch.id ||
+      JSON.stringify(fresh.inputRefs) !== JSON.stringify(original.inputRefs) ||
+      !original.dependencies.every(summaryAllowed))
+    throw new Error('摘要来源或分支已改变，不能复用旧返回');
+  return fresh;
+}
+function trackedSummary<T>(title: string, sender: { send: (messages: ChatMsg[]) => Promise<string> },
+  messages: ChatMsg[], parse: (raw: string) => T, apply: (value: T) => Promise<void>, guard: () => void, preview = false) {
+  return requestSummaryResponse({ title, scope: hostScope(), send: sender.send, messages, parse, apply, guard, preview,
+    retries: Math.max(0, apiSettings.summaryMaxRetries | 0) });
+}
+/** Explicit user confirmation only; reuse the captured parser and write path without sending. */
+export async function recoverSummaryResponse(record: SummaryResponse, text: string) {
+  if (busy || engineState.running) throw new Error('请等当前摘要任务结束后再确认');
+  const chat = getContext()?.chat;
+  if (!chat || record.scope !== hostScope()) throw new Error('请回到本次请求所属聊天');
+  busy = true; engineState.running = true;
+  try {
+    await applySummaryResponse(record, text);
+    engineState.lastError = '';
+    await afterSummaryHideAndInject(chat);
+  } finally { busy = false; engineState.running = false; }
 }
 
 /**
@@ -1031,6 +1050,7 @@ async function sendAndParse<T>(
  * 注:早退(busy/非 AI 楼等)也会经历「置 p → 立即 finally 清回 null」,只是 p 几乎瞬间 resolve,不构成有效在飞。
  */
 interface RunSummaryOptions {
+  preview?: boolean;
   replaceLeaf?: LeafExtra;
   checkResummary?: boolean;
   /** 内部启动屏障:摘要上下文准备完毕、即将调用 API 时触发。 */
@@ -1221,7 +1241,7 @@ async function summarizeFloorWork(
   chat: STMessage[],
   aiFloor: number,
   sender: { send: (messages: ChatMsg[]) => Promise<string>; label: string },
-  options: Pick<RunSummaryOptions, 'replaceLeaf' | 'onRequestStart'> = {},
+  options: Pick<RunSummaryOptions, 'replaceLeaf' | 'onRequestStart' | 'preview'> = {},
 ): Promise<void> {
   const ctx = getContext();
   if (!ctx) throw new Error('无 ST 上下文');
@@ -1231,7 +1251,10 @@ async function summarizeFloorWork(
 
   const covered = options.replaceLeaf ? coveredBeforeFloor(chat, aiFloor) : coveredSet(chat);
   const targets = floorTargets(chat, aiFloor, covered);
-  const mnEvidence = await captureSummaryEvidence(targets, selectHistoryNodesBefore(memory.summaries, chat, targets[0]).map(n=>n.id));
+  const dependencies = selectHistoryNodesBefore(memory.summaries, chat, targets[0]).map(n => n.id);
+  const responseGuard = summaryResponseGuard(chat, aiFloor, dependencies);
+  const mnEvidence = await captureSummaryEvidence(targets, dependencies);
+  responseGuard();
   const { prompt, charCard, persona, worldInfo, stateBefore, events } = await floorSummaryContext(chat, aiFloor, targets, mnEvidence?.view);
 
   const tableRequest = await prepareSummaryTables(mnEvidence?.view, chat, [aiFloor]);
@@ -1250,35 +1273,39 @@ async function summarizeFloorWork(
     { role: 'assistant', content: prefill },
   );
   options.onRequestStart?.();
-  let tablePlan: ReturnType<typeof parseSummaryTableResult> = null;
-  const delta = await sendAndParse(sender.send, messages, raw => {
-    console.log('[柏宝书] 摘要原始返回(未清洗):\n', raw);
+  await trackedSummary(`单楼摘要 #${aiFloor}`, sender, messages, raw => {
     const d = extractJsonObject<SummaryDelta>(raw);
     const summary = llmString(d?.summary);
     if (!d || !summary) {
-      throw new Error(raw.trim() ? '摘要失败:AI道歉或掉格式' : '摘要失败:AI空回');
+      throw new Error(raw.trim() ? '摘要失败:无法解析 JSON 或缺少非空字符串 summary' : '摘要失败:AI空回');
     }
-    tablePlan = parseSummaryTableResult((d as any).customTables, tableRequest);
-    return { ...d, summary } as SummaryDelta & { summary: string };
-  });
+    const tablePlan = parseSummaryTableResult((d as any).customTables, tableRequest);
+    return { delta: { ...d, summary } as SummaryDelta & { summary: string }, tablePlan };
+  }, async ({ delta, tablePlan }) => {
+    const evidence = await responseEvidence(mnEvidence, targets, responseGuard);
+    if (tableRequest && (chat.findLastIndex(isAiFloor) !== aiFloor || evidence?.view.branch.tableHead !== tableRequest.tableHead))
+      throw new Error('当前最新楼层或表格历史已改变，旧填表返回不能应用');
+    if (evidence && JSON.stringify(await eventHintsBefore(await activeLibrary(), evidence.view, targets[0])) !== JSON.stringify(events))
+      throw new Error('请求使用的事件材料已改变，不能复用旧返回');
+    await validateSummaryTableResult(tablePlan);
+    responseGuard();
+    assertSummaryEvidence(evidence);
+    const commitVisibleSummary = beginVisibleSummaryCommit(aiFloor);
+    applyLeafForFloor(chat, aiFloor, delta, stateBefore, options.replaceLeaf, events);
+    attachSummaryEvidence(chat, aiFloor, evidence, targets);
+    attachTableResult(chat, aiFloor, tablePlan);
+    commitVisibleSummary();
+    const saved = getLeaf(chat[aiFloor])!;
+    engineState.lastPlanWrite = { scope: hostScope(), floor: aiFloor, leafId: saved.id,
+      text: describePlanWrite(delta.plans, saved.delta.plans) };
+    engineState.lastRunAt = Date.now();
 
-  await validateSummaryTableResult(tablePlan);
-  assertSummaryEvidence(mnEvidence);
-  const commitVisibleSummary = beginVisibleSummaryCommit(aiFloor);
-  applyLeafForFloor(chat, aiFloor, delta, stateBefore, options.replaceLeaf, events);
-  attachSummaryEvidence(chat, aiFloor, mnEvidence, targets);
-  attachTableResult(chat, aiFloor, tablePlan);
-  commitVisibleSummary();
-  const saved = getLeaf(chat[aiFloor])!;
-  engineState.lastPlanWrite = { scope: hostScope(), floor: aiFloor, leafId: saved.id,
-    text: describePlanWrite(delta.plans, saved.delta.plans) };
-  engineState.lastRunAt = Date.now();
-
-  // 立刻反映到派生与注入;落盘走防抖(隐藏由收尾的 syncWindowHiddenState 统一负责)
-  recomputeDerived();
-  refreshInjection();
-  scheduleLeafFlush();
-  scheduleVectorIndex(); // 新叶子 → 防抖同步进向量库(失败静默,不影响摘要)
+    // 立刻反映到派生与注入;落盘走防抖(隐藏由收尾的 syncWindowHiddenState 统一负责)
+    recomputeDerived();
+    refreshInjection();
+    scheduleLeafFlush();
+    scheduleVectorIndex(); // 新叶子 → 防抖同步进向量库(失败静默,不影响摘要)
+  }, responseGuard, options.preview);
 }
 
 async function runSummaryInner(aiFloor: number, options: RunSummaryOptions = {}): Promise<void> {
@@ -1390,7 +1417,10 @@ async function summarizeBatchWork(
     allTargets.push(...targets);
     segments.push(`━━ 第 ${idx + 1} 楼 ━━\n${renderMessages(chat, targets, ctx.name1, ctx.name2)}`);
   });
-  const mnEvidence = await captureSummaryEvidence(allTargets, selectHistoryNodesBefore(memory.summaries, chat, beforeIndex).map(n=>n.id));
+  const dependencies = selectHistoryNodesBefore(memory.summaries, chat, beforeIndex).map(n => n.id);
+  const responseGuard = summaryResponseGuard(chat, Math.max(...block), dependencies);
+  const mnEvidence = await captureSummaryEvidence(allTargets, dependencies);
+  responseGuard();
   const content = segments.join('\n\n');
 
   // 世界书按整块合并正文激活一次(省去逐楼激活)
@@ -1428,13 +1458,11 @@ async function summarizeBatchWork(
   );
 
   // 解析 { floors: [...] };校验长度等于块楼数(缺楼/多楼都算失败,触发重试/回退)
-  let tablePlan: ReturnType<typeof parseSummaryTableResult> = null;
-  const list = await sendAndParse(sender.send, messages, raw => {
-    console.log('[柏宝书] 批量摘要原始返回(未清洗):\n', raw);
+  await trackedSummary(`批量摘要 #${block.join("、#")}`, sender, messages, raw => {
     const d = extractJsonObject<{ floors?: SummaryDelta[] }>(raw);
     const floors = d?.floors;
     if (!Array.isArray(floors) || !floors.length) {
-      throw new Error(raw.trim() ? '批量摘要失败:AI道歉或掉格式' : '批量摘要失败:AI空回');
+      throw new Error(raw.trim() ? '批量摘要失败:无法解析 JSON 或缺少 floors 数组' : '批量摘要失败:AI空回');
     }
     if (floors.length !== block.length) {
       throw new Error(`批量摘要失败:返回 ${floors.length} 楼,期望 ${block.length} 楼`);
@@ -1447,35 +1475,41 @@ async function summarizeBatchWork(
     if (cleaned.some(f => !f)) {
       throw new Error('批量摘要失败:有楼层缺 summary');
     }
-    tablePlan = parseSummaryTableResult((d as any).customTables, tableRequest);
-    return cleaned as Array<SummaryDelta & { summary: string }>;
-  });
+    const tablePlan = parseSummaryTableResult((d as any).customTables, tableRequest);
+    return { list: cleaned as Array<SummaryDelta & { summary: string }>, tablePlan };
+  }, async ({ list, tablePlan }) => {
+    const evidence = await responseEvidence(mnEvidence, allTargets, responseGuard);
+    if (tableRequest && (!block.includes(chat.findLastIndex(isAiFloor)) || evidence?.view.branch.tableHead !== tableRequest.tableHead))
+      throw new Error('当前最新楼层或表格历史已改变，旧填表返回不能应用');
+    if (evidence && JSON.stringify(await eventHintsBefore(await activeLibrary(), evidence.view, beforeIndex)) !== JSON.stringify(events))
+      throw new Error('请求使用的事件材料已改变，不能复用旧返回');
+    await validateSummaryTableResult(tablePlan);
+    responseGuard();
+    assertSummaryEvidence(evidence);
+    // 逐楼落叶(块内顺序,严格按 block 升序)。批量只取 summary + 起止时间:
+    // 显式剥掉 items/plans/location —— 这些跨多楼难保顺序正确(易致计划/时间错乱),
+    // 即便 AI 不听话硬产了也丢弃。结构化数据交给后续正常的逐楼自动摘要。
+    block.forEach((f, idx) => {
+      const r = list[idx];
+      const lean: SummaryDelta = {
+        summary: r.summary,
+        tags: r.tags,
+        timeStart: r.timeStart,
+        timeEnd: r.timeEnd,
+      };
+      const sb = deriveMemory(chat, f);
+      applyLeafForFloor(chat, f, lean, sb, undefined, events);
+      attachSummaryEvidence(chat, f, evidence, floorTargets(chat, f, covered));
+      attachTableResult(chat, f, null);
+    });
 
-  await validateSummaryTableResult(tablePlan);
-  assertSummaryEvidence(mnEvidence);
-  // 逐楼落叶(块内顺序,严格按 block 升序)。批量只取 summary + 起止时间:
-  // 显式剥掉 items/plans/location —— 这些跨多楼难保顺序正确(易致计划/时间错乱),
-  // 即便 AI 不听话硬产了也丢弃。结构化数据交给后续正常的逐楼自动摘要。
-  block.forEach((f, idx) => {
-    const r = list[idx];
-    const lean: SummaryDelta = {
-      summary: r.summary,
-      tags: r.tags,
-      timeStart: r.timeStart,
-      timeEnd: r.timeEnd,
-    };
-    const sb = deriveMemory(chat, f);
-    applyLeafForFloor(chat, f, lean, sb, undefined, events);
-    attachSummaryEvidence(chat, f, mnEvidence, floorTargets(chat, f, covered));
-    attachTableResult(chat, f, null);
-  });
-
-  attachTableResult(chat, block.at(-1)!, tablePlan);
-  engineState.lastRunAt = Date.now();
-  recomputeDerived();
-  refreshInjection();
-  scheduleLeafFlush();
-  scheduleVectorIndex();
+    attachTableResult(chat, block.at(-1)!, tablePlan);
+    engineState.lastRunAt = Date.now();
+    recomputeDerived();
+    refreshInjection();
+    scheduleLeafFlush();
+    scheduleVectorIndex();
+  }, responseGuard);
 }
 
 /**
@@ -1648,7 +1682,9 @@ function rootsAtLevel(level: number, chat: STMessage[]): RootView[] {
  * 用 AI 把这批的**叙事文本**融合成一条上层节点,childIds 收纳它们(底层全部保留)。
  * 一次调用会向上连锁(加叶子→可能生 L1→可能生 L2…),按各层阈值递归。
  */
-export async function checkResummary(): Promise<number> {
+export function checkResummary(preview: true): Promise<number | 'pending'>;
+export function checkResummary(preview?: false): Promise<number>;
+export async function checkResummary(preview = false): Promise<number | 'pending'> {
   if (!engineActiveHere()) return 0;
   const ctx = getContext();
   if (!ctx) return 0;
@@ -1677,6 +1713,8 @@ export async function checkResummary(): Promise<number> {
     }
 
     const batch = roots.slice(0, threshold);
+    const sources = collectSelectableNodes(chat);
+    const responseGuard = summaryResponseGuard(chat, Math.max(-1, ...batch.map(n => sources.get(n.id)?.floorHi ?? chat.length - 1)), batch.map(n => n.id));
     const { content, hints } = joinNodesForResummary(batch);
     // 传**输出层级**(level+1):L1(普通总结,300-500字)/ L2+(二次总结,字数随输入动态)
     const prompt = buildResummaryPrompt({ user: ctx.name1, char: ctx.name2, content, level: level + 1 });
@@ -1691,35 +1729,40 @@ export async function checkResummary(): Promise<number> {
         { role: 'system', content: RESUMMARY_THINKING_CHECKLIST },
         { role: 'assistant', content: RESUMMARY_THINKING_PREFILL },
       );
+      const evidence = await captureSummaryEvidence([], batch.map(n => n.id));
+      responseGuard();
       // 发请求 + 解析,失败按设置重试(请求报错或 JSON 无效/缺 summary 都算失败)
-      const delta = await sendAndParse(sender.send, messages, raw => {
-        console.log('[柏宝书] 总结原始返回(未清洗):\n', raw);
+      await trackedSummary(`${preview ? "手动" : "自动"} L${level + 1} 总结`, sender, messages, raw => {
         const d = extractJsonObject<{ summary?: string }>(raw);
         const summary = llmString(d?.summary);
         if (!summary) {
           // 输出层级 level+1:为 1 是普通总结,≥2 是二次总结;有文本=掉格式,空白=空回
           const what = level + 1 === 1 ? '总结' : '二次总结';
-          throw new Error(raw.trim() ? `${what}失败:AI道歉或掉格式` : `${what}失败:AI空回`);
+          throw new Error(raw.trim() ? `${what}失败:无法解析 JSON 或缺少非空字符串 summary` : `${what}失败:AI空回`);
         }
         return { summary };
-      });
-
-      // 生成上层节点收纳这批(**不删 batch**),时间戳取批内最新,排在它们之后
-      const newCreatedAt = Math.max(...batch.map(s => s.createdAt)) + 1;
-      // 起止时间:batch 已按时间升序 → 首个有起始的作 start,末个有结束的作 end
-      const timeStart = batch.find(s => s.timeStart)?.timeStart;
-      const timeEnd = [...batch].reverse().find(s => s.timeEnd)?.timeEnd;
-      addSummary({
-        text: delta.summary.trim(),
-        level: level + 1,
-        childIds: batch.map(s => s.id),
-        auto: true,
-        createdAt: newCreatedAt,
-        timeStart,
-        timeEnd,
-      });
-      made += 1;
-      refreshInjection();
+      }, async delta => {
+        const fresh = await responseEvidence(evidence, [], responseGuard);
+        responseGuard();
+        assertSummaryEvidence(fresh);
+        // 生成上层节点收纳这批(**不删 batch**),时间戳取批内最新,排在它们之后
+        const newCreatedAt = Math.max(...batch.map(s => s.createdAt)) + 1;
+        // 起止时间:batch 已按时间升序 → 首个有起始的作 start,末个有结束的作 end
+        const timeStart = batch.find(s => s.timeStart)?.timeStart;
+        const timeEnd = [...batch].reverse().find(s => s.timeEnd)?.timeEnd;
+        addSummary({
+          text: delta.summary.trim(),
+          level: level + 1,
+          childIds: batch.map(s => s.id),
+          auto: true,
+          createdAt: newCreatedAt,
+          timeStart,
+          timeEnd,
+        });
+        made += 1;
+        refreshInjection();
+      }, responseGuard, preview);
+      if (preview) return 'pending';
       // 不 break:继续外层 for,上一层可能也攒够了 → 连锁压更高层
     } catch (e) {
       engineState.lastError = e instanceof Error ? e.message : String(e);
@@ -1791,7 +1834,7 @@ function collectSelectableNodes(chat: STMessage[]): Map<string, SelectableNode> 
  *  - 生成节点 auto=false 标手动。busy 互斥,收尾同 resummarizeNow + 隐藏/注入。
  * 返回 { made, error }:made=1 成功,0 未生成(error 说明原因)。
  */
-export async function summarizeSelected(nodeIds: string[]): Promise<{ made: number; error?: string }> {
+export async function summarizeSelected(nodeIds: string[]): Promise<{ made: number; error?: string; pending?: boolean }> {
   if (!engineActiveHere()) return { made: 0, error: '插件未在当前聊天生效' };
   if (busy) return { made: 0, error: '正忙,请稍后再试' };
   if (nodeIds.length < 2) return { made: 0, error: '至少选择两条才能合并' };
@@ -1836,6 +1879,7 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
   const sender = resolveSender('resummary');
   if ('error' in sender) return { made: 0, error: sender.error };
 
+  const responseGuard = summaryResponseGuard(chat, Math.max(...picked.map(n => n.floorHi)), picked.map(n => n.id));
   const level = Math.max(...picked.map(n => n.level)) + 1;
   const { content, hints } = joinNodesForResummary(picked);
   const prompt = buildResummaryPrompt({ user: ctx.name1, char: ctx.name2, content, level });
@@ -1853,30 +1897,34 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
       { role: 'system', content: RESUMMARY_THINKING_CHECKLIST },
       { role: 'assistant', content: RESUMMARY_THINKING_PREFILL },
     );
-    const delta = await sendAndParse(sender.send, messages, raw => {
-      console.log('[柏宝书] 强制总结原始返回(未清洗):\n', raw);
+    const evidence = await captureSummaryEvidence([], picked.map(n => n.id));
+    responseGuard();
+    await trackedSummary(`手动合并 L${level} 总结`, sender, messages, raw => {
       const d = extractJsonObject<{ summary?: string }>(raw);
       const summary = llmString(d?.summary);
       if (!summary) {
         const what = level === 1 ? '总结' : '二次总结';
-        throw new Error(raw.trim() ? `${what}失败:AI道歉或掉格式` : `${what}失败:AI空回`);
+        throw new Error(raw.trim() ? `${what}失败:无法解析 JSON 或缺少非空字符串 summary` : `${what}失败:AI空回`);
       }
       return { summary };
-    });
-
-    // 时间范围:picked 已按楼层升序 → 首个有起始的作 start,末个有结束的作 end(同 checkResummary)
-    const timeStart = picked.find(s => s.timeStart)?.timeStart;
-    const timeEnd = [...picked].reverse().find(s => s.timeEnd)?.timeEnd;
-    addSummary({
-      text: delta.summary.trim(),
-      level,
-      childIds: picked.map(s => s.id),
-      auto: false, // 手动合并
-      timeStart,
-      timeEnd,
-    });
-    engineState.lastRunAt = Date.now();
-    recomputeDerived();
+    }, async delta => {
+      const fresh = await responseEvidence(evidence, [], responseGuard);
+      responseGuard();
+      assertSummaryEvidence(fresh);
+      // 时间范围:picked 已按楼层升序 → 首个有起始的作 start,末个有结束的作 end(同 checkResummary)
+      const timeStart = picked.find(s => s.timeStart)?.timeStart;
+      const timeEnd = [...picked].reverse().find(s => s.timeEnd)?.timeEnd;
+      addSummary({
+        text: delta.summary.trim(),
+        level,
+        childIds: picked.map(s => s.id),
+        auto: false, // 手动合并
+        timeStart,
+        timeEnd,
+      });
+      engineState.lastRunAt = Date.now();
+      recomputeDerived();
+    }, responseGuard, true);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     engineState.lastError = msg;
@@ -1885,8 +1933,7 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
     busy = false;
     engineState.running = false;
   }
-  await afterSummaryHideAndInject(chat);
-  return { made: 1 };
+  return { made: 0, pending: true };
 }
 
 /**
@@ -1894,14 +1941,14 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
  * 与自动路径同一套阈值/连锁逻辑(checkResummary),但带 busy 互斥,
  * 避免与正在跑的摘要/总结撞车。返回新生成的总结条数(0 = 未达阈值,什么都没做)。
  */
-export async function resummarizeNow(): Promise<number> {
+export async function resummarizeNow(): Promise<number | 'pending'> {
   if (!engineActiveHere()) return 0;
   if (busy) return 0;
   busy = true;
   engineState.running = true;
   engineState.lastError = '';
   try {
-    return await checkResummary();
+    return await checkResummary(true);
   } finally {
     busy = false;
     engineState.running = false;
@@ -2047,19 +2094,24 @@ export async function regenerateHigherSummary(hostId: string): Promise<void> {
   if(picked.some(n=>!n))throw new Error('下级来源缺失，不能重建');
   const nodes=picked as SelectableNode[];
   const sender=resolveSender('resummary');if('error' in sender)throw new Error(sender.error);
+  const responseGuard = summaryResponseGuard(ctx.chat, Math.max(...nodes.map(n => n.floorHi)), [target.id, ...target.childIds]);
   const evidence=await captureSummaryEvidence([],target.childIds);
+  responseGuard();
   const {content,hints}=joinNodesForResummary(nodes);
   const prompt=buildResummaryPrompt({user:ctx.name1,char:ctx.name2,content,level:target.level});
   busy=true;engineState.running=true;
   try {
     const messages:ChatMsg[]=[{role:'system',content:prompt.system},{role:'user',content:prompt.user+hints},
       {role:'system',content:RESUMMARY_THINKING_CHECKLIST},{role:'assistant',content:RESUMMARY_THINKING_PREFILL}];
-    const result=await sendAndParse(sender.send,messages,raw=>{
+    await trackedSummary(`重建 L${target.level} 总结`,sender,messages,raw=>{
       const parsed=extractJsonObject<{summary?:string}>(raw);const text=llmString(parsed?.summary);
       if(!text)throw new Error('重建返回缺少摘要');return text;
-    });
-    assertSummaryEvidence(evidence);
-    target.text=result;target.createdAt=Date.now();saveMemory();recomputeDerived();
-    await syncDaily();refreshInjection();
+    }, async result => {
+      const fresh = await responseEvidence(evidence, [], responseGuard);
+      responseGuard();
+      assertSummaryEvidence(fresh);
+      target.text=result;target.createdAt=Date.now();saveMemory();recomputeDerived();
+      await syncDaily();refreshInjection();
+    }, responseGuard, true);
   } finally {busy=false;engineState.running=false;}
 }

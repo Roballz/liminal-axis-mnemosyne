@@ -1,15 +1,35 @@
+import * as summaryTables from '@/mnemosyne/summary-tables';
+import * as bridge from '@/mnemosyne/bridge';
+import { summaryResponses, summaryResponseUi } from './summary-response';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as client from '@/api/client';
 import * as settings from '@/api/settings';
 import * as context from '@/st/context';
 import type { STContext, STMessage } from '@/st/context';
 import * as notices from '@/st/toast';
-import { batchBackfill, checkResummary, currentSummaryPromise, engineState, handleGenerationIntercept, maybeSummarizePrevAi, syncHiddenNow, openingPendingFloor, planBatches, summarizeFloor, summarizeSelected } from './engine';
+import { recoverSummaryResponse, regenerateFloor, batchBackfill, checkResummary, currentSummaryPromise, engineState, handleGenerationIntercept, maybeSummarizePrevAi, syncHiddenNow, openingPendingFloor, planBatches, summarizeFloor as prepareSummaryFloor, summarizeSelected as prepareSelected, resummarizeNow } from './engine';
 import { selectInjectionNodes } from './inject';
 import { buildBatchThinking, buildResummaryPrompt, buildSummaryThinking, RESUMMARY_THINKING_CHECKLIST, RESUMMARY_THINKING_PREFILL, RULE_SUMMARY_COMPOSITION, SUMMARY_OUTPUT_PROTOCOL } from './prompts';
 import { renderSourceHints, SOURCE_HINTS_HEADER } from './sourceHints';
 import { flushLeavesNow, loadMemory, memory } from './store';
 import { createEmptyMemory, type LeafExtra, type SummaryDelta } from './types';
+
+// Existing domain tests model a user accepting a valid manual preview.
+async function summarizeFloor(floor: number) {
+  await prepareSummaryFloor(floor);
+  const record = summaryResponses[0], attempt = record?.attempts.at(-1);
+  if (attempt?.kind === 'ready') await recoverSummaryResponse(record, attempt.raw!);
+}
+
+async function summarizeSelected(ids: string[]) {
+  const result = await prepareSelected(ids);
+  if (result.pending) {
+    const record = summaryResponses[0];
+    await recoverSummaryResponse(record, record.attempts.at(-1)!.raw!);
+    return { made: 1 };
+  }
+  return result;
+}
 
 const message = (isUser = false, overrides: Partial<STMessage> = {}): STMessage => ({
   name: isUser ? 'User' : 'Character',
@@ -79,6 +99,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   Object.assign(memory, createEmptyMemory());
   engineState.lastPlanWrite = null;
+  summaryResponses.splice(0);
+  summaryResponseUi.selectedId = 0;
   vi.spyOn(settings, 'engineActiveHere').mockReturnValue(true);
   vi.spyOn(settings, 'getChannelForTask').mockReturnValue(null);
   vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
@@ -694,4 +716,196 @@ describe.each(['automatic', 'manual'] as const)('compression audit output (%s)',
     expect(await compress(ids)).toBe(0);
     expect(memory.summaries).toHaveLength(0);
   });
+});
+
+
+describe('返回复用通过真实摘要写入路径', () => {
+  it('失败返回修好后复用，关窗草稿保留且不新增 API 请求', async () => {
+    const chat = [message(true), message()]; useChat(chat);
+    vi.mocked(client.requestViaMainApi).mockResolvedValue('broken JSON');
+    await summarizeFloor(1);
+    const record = summaryResponses[0];
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+    record.attempts[0].draft = JSON.stringify(summary);
+    const calls = vi.mocked(client.requestViaMainApi).mock.calls.length;
+    await recoverSummaryResponse(record, record.attempts[0].draft);
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(client.requestViaMainApi).toHaveBeenCalledTimes(calls);
+    expect(record.applied).toBe(true);
+    await expect(recoverSummaryResponse(record, JSON.stringify(summary))).rejects.toThrow('不能重复');
+  });
+  it.each(['swipe', 'body', 'leaf', 'chat'] as const)('%s 改变后拒绝修复旧返回', async change => {
+    const chat = [message(true), message()]; useChat(chat);
+    vi.mocked(client.requestViaMainApi).mockResolvedValue('broken');
+    await summarizeFloor(1);
+    const record = summaryResponses[0];
+    if (change === 'swipe') chat[1].swipe_id = 1;
+    if (change === 'body') chat[1].mes = 'Edited source';
+    if (change === 'leaf') chat[1].extra = { bbs_leaf: leaf() };
+    if (change === 'chat') useChat([message(true), message()]);
+    await expect(recoverSummaryResponse(record, JSON.stringify(summary))).rejects.toThrow('已改变');
+    expect(record.applied).toBe(false);
+    expect(chat[1].extra?.bbs_leaf?.text).not.toBe(summary.summary);
+  });
+  it('切换聊天后返回原聊天也不能接收替换过的聊天数组', async () => {
+    const chat = [message(true), message()]; useChat(chat);
+    vi.mocked(client.requestViaMainApi).mockImplementation(async () => {
+      useChat([message(true), message()]);
+      return JSON.stringify(summary);
+    });
+    await summarizeFloor(1);
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+    expect(summaryResponses[0].attempts[0].raw).toBe(JSON.stringify(summary));
+    expect(engineState.lastError).toContain('已改变');
+  });
+  it('重摘失败不改旧摘要；修复后保留 ID 并显式替换', async () => {
+    const old = leaf(), chat = [message(false, { extra: { bbs_leaf: old } })]; useChat(chat);
+    vi.mocked(client.requestViaMainApi).mockResolvedValue('broken');
+    await regenerateFloor(0);
+    expect(chat[0].extra?.bbs_leaf).toBe(old);
+    await recoverSummaryResponse(summaryResponses[0], JSON.stringify(summary));
+    expect(chat[0].extra?.bbs_leaf).toMatchObject({ id: old.id, text: summary.summary });
+  });
+  it('失败合并的子节点已被另一合并收纳时，不能复用建立第二个父节点', async () => {
+    const first = leaf(), second = { ...leaf(), id: 'second-page', text: '第二条' };
+    const chat = [message(false, { extra: { bbs_leaf: first } }), message(true), message(false, { extra: { bbs_leaf: second } })]; useChat(chat);
+    vi.mocked(client.requestViaMainApi).mockResolvedValue('broken');
+    await summarizeSelected([first.id, second.id]);
+    const record = summaryResponses[0];
+    vi.mocked(client.requestViaMainApi).mockResolvedValue(JSON.stringify(summary));
+    expect((await summarizeSelected([first.id, second.id])).made).toBe(1);
+    await expect(recoverSummaryResponse(record, JSON.stringify(summary))).rejects.toThrow('已改变');
+    expect(memory.summaries).toHaveLength(1);
+  });
+  it('后面独立楼层成功后，前面失败返回仍能编辑复用', async () => {
+    const chat = [message(true), message(), message(true), message()]; useChat(chat);
+    vi.mocked(client.requestViaMainApi).mockResolvedValue('broken');
+    await summarizeFloor(1);
+    const first = summaryResponses[0];
+    vi.mocked(client.requestViaMainApi).mockResolvedValue(JSON.stringify({ summary: '后楼成功' }));
+    await summarizeFloor(3);
+    const later = chat[3].extra?.bbs_leaf;
+    await recoverSummaryResponse(first, JSON.stringify(summary));
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(chat[3].extra?.bbs_leaf).toBe(later);
+  });
+  it.each(['single', 'batch'] as const)('%s 在异步证据捕获时源文变化，不发送旧材料', async mode => {
+    const chat = [message(true), message()]; useChat(chat);
+    vi.spyOn(bridge, 'captureSummaryEvidence').mockImplementation(async () => {
+      chat[1].mes += ' source changed';
+      return null;
+    });
+    if (mode === 'single') await summarizeFloor(1); else await batchBackfill();
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+    expect(engineState.lastError).toContain('已改变');
+  });
+  it('整批及逐楼全部失败后可以复用整批返回；不会调用 API', async () => {
+    const chat = [message(true), message(), message(true), message()]; useChat(chat);
+    vi.mocked(client.requestViaMainApi).mockResolvedValue('broken');
+    await batchBackfill();
+    const record = summaryResponses.find(r => r.title.startsWith('批量'))!;
+    const calls = vi.mocked(client.requestViaMainApi).mock.calls.length;
+    await recoverSummaryResponse(record, JSON.stringify({ floors: [summary, { summary: '第二楼' }] }));
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(chat[3].extra?.bbs_leaf?.text).toBe('第二楼');
+    expect(client.requestViaMainApi).toHaveBeenCalledTimes(calls);
+  });
+  it('整批失败但逐楼回退成功后，旧整批返回不可覆盖新摘要', async () => {
+    const chat = [message(true), message()]; useChat(chat);
+    let count = 0;
+    vi.mocked(client.requestViaMainApi).mockImplementation(async () =>
+      ++count <= settings.apiSettings.summaryMaxRetries + 1 ? 'broken' : JSON.stringify(summary));
+    await batchBackfill();
+    const record = summaryResponses.find(r => r.title.startsWith('批量'))!;
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+    await expect(recoverSummaryResponse(record, JSON.stringify({ floors: [{ summary: '旧返回' }] }))).rejects.toThrow('已改变');
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+  });
+});
+
+
+describe('手动成功先预览', () => {
+  it('返回 ready 后释放 busy/currentRun，取消关闭不写；改正确格式后确认才写入', async () => {
+    const chat = [message(true), message()]; useChat(chat);
+    await prepareSummaryFloor(1);
+    const record = summaryResponses[0];
+    expect(record.attempts.at(-1)?.kind).toBe('ready');
+    expect(record.applied).toBe(false);
+    expect(summaryResponseUi.selectedId).toBe(record.id);
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+    expect(engineState.running).toBe(false);
+    expect(currentSummaryPromise()).toBeNull();
+    summaryResponseUi.selectedId = 0; // close/cancel only dismisses the preview
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+    await expect(recoverSummaryResponse(record, '{"summary":null}')).rejects.toThrow('summary');
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+    await recoverSummaryResponse(record, '{"summary":"人工修正"}');
+    expect(chat[1].extra?.bbs_leaf?.text).toBe('人工修正');
+    expect(client.requestViaMainApi).toHaveBeenCalledOnce();
+  });
+  it('手动重摘返回 pending，取消保留原摘要；确认才替换原ID', async () => {
+    const old = leaf(), chat = [message(false, { extra: { bbs_leaf: old } })]; useChat(chat);
+    expect(await regenerateFloor(0)).toBe('pending');
+    const record = summaryResponses[0];
+    expect(chat[0].extra?.bbs_leaf).toBe(old);
+    summaryResponseUi.selectedId = 0;
+    expect(chat[0].extra?.bbs_leaf).toBe(old);
+    await recoverSummaryResponse(record, JSON.stringify(summary));
+    expect(chat[0].extra?.bbs_leaf).toMatchObject({ id: old.id, text: summary.summary });
+  });
+  it('成功预览期间来源变更，确认拒绝迟到写入', async () => {
+    const chat = [message(true), message()]; useChat(chat);
+    await prepareSummaryFloor(1);
+    const record = summaryResponses[0]; chat[1].swipe_id = 1;
+    await expect(recoverSummaryResponse(record, JSON.stringify(summary))).rejects.toThrow('已改变');
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+  });
+});
+
+it('手动合并先预览，取消无父节点；确认编辑结果才建父节点', async () => {
+  const first = leaf(), second = { ...leaf(), id: 'second-page' };
+  const chat = [message(false, { extra: { bbs_leaf: first } }), message(true), message(false, { extra: { bbs_leaf: second } })]; useChat(chat);
+  expect(await prepareSelected([first.id, second.id])).toEqual({ made: 0, pending: true });
+  expect(memory.summaries).toHaveLength(0);
+  expect(engineState.running).toBe(false);
+  const record = summaryResponses[0]; summaryResponseUi.selectedId = 0;
+  expect(memory.summaries).toHaveLength(0);
+  await recoverSummaryResponse(record, '{"summary":"人工合并内容"}');
+  expect(memory.summaries).toHaveLength(1);
+  expect(memory.summaries[0].text).toBe('人工合并内容');
+  expect(client.requestViaMainApi).toHaveBeenCalledOnce();
+});
+
+it('自动及批量成功直接应用，不占用手动预览入口', async () => {
+  const chat = [message(true), message()]; useChat(chat);
+  vi.mocked(client.requestViaMainApi).mockResolvedValue(JSON.stringify({ floors: [summary] }));
+  await batchBackfill();
+  expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+  expect(summaryResponseUi.selectedId).toBe(0);
+  expect(summaryResponses[0].applied).toBe(true);
+});
+it('手动检测总结先准备一条预览，不在确认前连锁创建高层', async () => {
+  const saved = { leafBatchThreshold: settings.apiSettings.leafBatchThreshold, leafKeepRecent: settings.apiSettings.leafKeepRecent };
+  Object.assign(settings.apiSettings, { leafBatchThreshold: 2, leafKeepRecent: 0 });
+  try {
+    const first = leaf(), second = { ...leaf(), id: 'second-page' };
+    useChat([message(false, { extra: { bbs_leaf: first } }), message(true), message(false, { extra: { bbs_leaf: second } })]);
+    expect(await resummarizeNow()).toBe('pending');
+    expect(memory.summaries).toHaveLength(0);
+    expect(engineState.running).toBe(false);
+    await recoverSummaryResponse(summaryResponses[0], JSON.stringify(summary));
+    expect(memory.summaries).toHaveLength(1);
+    expect(client.requestViaMainApi).toHaveBeenCalledOnce();
+  } finally { Object.assign(settings.apiSettings, saved); }
+});
+it('带表格的待确认请求在追加新AI楼后拒绝历史楼改当前表', async () => {
+  const chat = [message(true), message()]; useChat(chat);
+  vi.spyOn(summaryTables, 'prepareSummaryTables').mockResolvedValue({ inputs: [], branch: 'test', system: '', user: '' });
+  vi.spyOn(summaryTables, 'parseSummaryTableResult').mockReturnValue(null);
+  await prepareSummaryFloor(1);
+  const record = summaryResponses[0];
+  chat.push(message(true), message());
+  await expect(recoverSummaryResponse(record, JSON.stringify(summary))).rejects.toThrow('最新楼层');
+  expect(chat[1].extra?.bbs_leaf).toBeUndefined();
 });

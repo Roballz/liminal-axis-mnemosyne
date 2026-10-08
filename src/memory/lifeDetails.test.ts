@@ -1,3 +1,4 @@
+import { summaryResponses } from './summary-response';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as client from '@/api/client';
 import * as settings from '@/api/settings';
@@ -6,7 +7,7 @@ import type { STContext, STMessage } from '@/st/context';
 import * as notices from '@/st/toast';
 import { addLifeDetail, deriveMemory, editNpc, finalizeDelta, removeLifeDetail, removeNpc, updateLifeDetail } from './apply';
 import { createNewChatWithCarryover } from './carryover';
-import { currentSummaryPromise, summarizeFloor } from './engine';
+import { recoverSummaryResponse, currentSummaryPromise, summarizeFloor } from './engine';
 import * as inject from './inject';
 import { fmtLifeDetail, lifeDetailSubject, mergeLifeDetailsOp, sameLifeDetail } from './lifeDetails';
 import { buildSummaryPrompt, fmtLifeDetails, RULE_LIFE_DETAILS } from './prompts';
@@ -226,6 +227,7 @@ describe('实际摘要与跨对话继承', () => {
         update: [{ id: 'd1', text: '煎饼果子可以不加脆饼' }] },
     }));
     await summarizeFloor(1);
+    await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
     const request = vi.mocked(client.requestViaMainApi).mock.calls[0][0].map(m => m.content).join('\n');
     expect(request).toContain(`林舟：${detail().text}`);
     expect(chat[1].extra!.bbs_leaf!.delta.lifeDetails!.add![0].subject).toBe('艾琳');

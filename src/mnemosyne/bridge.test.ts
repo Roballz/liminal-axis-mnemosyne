@@ -1,3 +1,5 @@
+import { summaryResponses } from '@/memory/summary-response';
+import * as hostContext from '@/st/context';
 import { withoutTableHistory } from './fixtures';
 import { summaryEditPrompt, prepareSummaryEditPrompt, resolveSummaryEdit, deferSummaryEdit, bindSummaryEditPrompt } from './summary-edit-prompt';
 import { previewArchiveDeletion } from './archive-deletion';
@@ -7,7 +9,7 @@ import { previewRoleRepairs, confirmRoleRepairs } from './source-role-repair';
 import { exportLibrary, restoreLibrary } from './migration';
 import * as client from '@/api/client';
 import * as api from '@/api/settings';
-import { regenerateHigherSummary } from '@/memory/engine';
+import { recoverSummaryResponse, summarizeFloor, regenerateHigherSummary } from '@/memory/engine';
 import { invalidateSummaryAncestors } from '@/memory/apply';
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
@@ -547,7 +549,11 @@ test('retained higher summaries require an explicit one-level rebuild after a ch
   expect((await statuses(lib,view)).get(view.memories.find(m=>m.hostId==='high')!.id)).toBe('needs_rebuild');
   vi.spyOn(api,'engineActiveHere').mockReturnValue(true);vi.spyOn(api,'getChannelForTask').mockReturnValue(null);
   vi.spyOn(client,'mainApiAvailable').mockReturnValue(true);vi.spyOn(client,'requestViaMainApi').mockResolvedValue('{"summary":"重建后的高层摘要"}');
-  await regenerateHigherSummary('high');view=await syncDaily();
+  await regenerateHigherSummary('high');
+  expect(memory.summaries.find(s => s.id === 'high')!.text).toBe('旧高层摘要');
+  expect(summaryResponses[0].attempts.at(-1)?.kind).toBe('ready');
+  await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
+  view=await syncDaily();
   const high=view.memories.find(m=>m.hostId==='high')!;
   expect(high.content).toBe('重建后的高层摘要');expect((await statuses(lib,view)).get(high.id)).toBe('valid');
   expect(client.requestViaMainApi).toHaveBeenCalledTimes(1);expect(memory.summaries).toHaveLength(1);
@@ -1017,4 +1023,33 @@ test('saved pending host plan is rejected after rollback and committed plan neve
     attachTableResult(ctx.chat, 1, committed); ctx.chat.push(...tail); invalidateDaily(); view = await syncDaily();
     expect((await readTables(lib, view.branch))[0].rows[0].values.v).toBe('旧值');
     expect((await lib.all<any>('table_receipts')).filter(r => r.id === `${committed.operation}:${def.id}`)).toHaveLength(1);
+});
+
+
+test('failed response reuses unchanged B source refs after an independent later floor succeeds', async () => {
+    ctx.chat[1].extra = {};
+    ctx.chat.push(message(true, '后续问题'), message(false, '后续答复'));
+    ctx.name1 = 'User'; ctx.name2 = 'Character';
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    vi.spyOn(hostContext, 'getCheckWorldInfo').mockResolvedValue(null);
+    vi.spyOn(client, 'requestViaMainApi').mockResolvedValue('broken');
+    await syncDaily();
+    await summarizeFloor(1);
+    const record = summaryResponses[0];
+    expect(record.attempts[0].raw).toBe('broken');
+    vi.mocked(client.requestViaMainApi).mockResolvedValue('{"summary":"后楼成功"}');
+    await summarizeFloor(3);
+    await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
+    await syncDaily();
+    const later = ctx.chat[3].extra?.bbs_leaf;
+    expect(later?.text).toBe('后楼成功');
+    await recoverSummaryResponse(record, '{"summary":"前楼修复"}');
+    const view = await syncDaily();
+    expect(ctx.chat[1].extra?.bbs_leaf?.text).toBe('前楼修复');
+    expect(ctx.chat[3].extra?.bbs_leaf).toBe(later);
+    const repaired = view.memories.find(m => m.content === '前楼修复')!;
+    expect(repaired.inputRefs).toEqual(view.refs.slice(0, 2));
+    expect((await statuses(lib, view)).get(repaired.id)).toBe('valid');
 });
