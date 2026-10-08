@@ -59,7 +59,7 @@ const labels = { api: 'API 请求失败（未取得正文）', empty: '返回为
 <template>
   <details v-if="!dialogOnly && records.length" class="bbs-response-history">
     <summary>摘要返回记录（{{ records.length }} 次请求）</summary>
-    <p>仅本次插件会话保留最多 20 次请求的每次尝试，优先保留未应用返回；关闭窗口不会丢失，刷新页面会清空。手动成功返回先预览确认；自动与批量不自动弹窗。</p>
+    <p>仅本次插件会话保留最多 20 次请求的每次尝试，优先保留未应用返回；关闭窗口不会丢失，刷新页面会清空。可在设置中开启“成功后预览编辑”（默认关闭）；失败返回始终可复用。</p>
     <article v-for="record in records" :key="record.id">
       <strong>{{ record.title }}</strong>
       <span v-if="record.running"> · 处理中</span>

@@ -227,7 +227,7 @@ describe('实际摘要与跨对话继承', () => {
         update: [{ id: 'd1', text: '煎饼果子可以不加脆饼' }] },
     }));
     await summarizeFloor(1);
-    await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
+    if (summaryResponses[0].attempts.at(-1)?.kind === 'ready') await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
     const request = vi.mocked(client.requestViaMainApi).mock.calls[0][0].map(m => m.content).join('\n');
     expect(request).toContain(`林舟：${detail().text}`);
     expect(chat[1].extra!.bbs_leaf!.delta.lifeDetails!.add![0].subject).toBe('艾琳');

@@ -1,4 +1,4 @@
-import { summaryResponses } from '@/memory/summary-response';
+import { summaryResponses, summaryResponseUi } from '@/memory/summary-response';
 import * as hostContext from '@/st/context';
 import { withoutTableHistory } from './fixtures';
 import { summaryEditPrompt, prepareSummaryEditPrompt, resolveSummaryEdit, deferSummaryEdit, bindSummaryEditPrompt } from './summary-edit-prompt';
@@ -549,7 +549,9 @@ test('retained higher summaries require an explicit one-level rebuild after a ch
   expect((await statuses(lib,view)).get(view.memories.find(m=>m.hostId==='high')!.id)).toBe('needs_rebuild');
   vi.spyOn(api,'engineActiveHere').mockReturnValue(true);vi.spyOn(api,'getChannelForTask').mockReturnValue(null);
   vi.spyOn(client,'mainApiAvailable').mockReturnValue(true);vi.spyOn(client,'requestViaMainApi').mockResolvedValue('{"summary":"重建后的高层摘要"}');
+  api.apiSettings.summarySuccessPreviewEnabled = true;
   await regenerateHigherSummary('high');
+  api.apiSettings.summarySuccessPreviewEnabled = false;
   expect(memory.summaries.find(s => s.id === 'high')!.text).toBe('旧高层摘要');
   expect(summaryResponses[0].attempts.at(-1)?.kind).toBe('ready');
   await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
@@ -1041,7 +1043,7 @@ test('failed response reuses unchanged B source refs after an independent later 
     expect(record.attempts[0].raw).toBe('broken');
     vi.mocked(client.requestViaMainApi).mockResolvedValue('{"summary":"后楼成功"}');
     await summarizeFloor(3);
-    await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
+    if (summaryResponses[0].attempts.at(-1)?.kind === 'ready') await recoverSummaryResponse(summaryResponses[0], summaryResponses[0].attempts.at(-1)!.raw!);
     await syncDaily();
     const later = ctx.chat[3].extra?.bbs_leaf;
     expect(later?.text).toBe('后楼成功');
@@ -1052,4 +1054,20 @@ test('failed response reuses unchanged B source refs after an independent later 
     const repaired = view.memories.find(m => m.content === '前楼修复')!;
     expect(repaired.inputRefs).toEqual(view.refs.slice(0, 2));
     expect((await statuses(lib, view)).get(repaired.id)).toBe('valid');
+});
+
+
+test('manual higher rebuild saves immediately when success preview is off', async () => {
+  ctx.chat.push(message(true, '第二问'), message(false, '第二段正文'));
+  ctx.chat[3].extra!.bbs_leaf = { id: 'second-leaf', text: '第二条摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+  memory.summaries.push({ id: 'high', text: '旧高层摘要', level: 1, createdAt: 1, auto: true, childIds: ['legacy-leaf', 'second-leaf'] });
+  await syncDaily();
+  api.apiSettings.summarySuccessPreviewEnabled = false;
+  summaryResponseUi.selectedId = 0;
+  vi.spyOn(api, 'engineActiveHere').mockReturnValue(true); vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+  vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true); vi.spyOn(client, 'requestViaMainApi').mockResolvedValue('{"summary":"直接重建"}');
+  await regenerateHigherSummary('high');
+  expect(memory.summaries.find(s => s.id === 'high')!.text).toBe('直接重建');
+  expect(summaryResponses[0].applied).toBe(true);
+  expect(summaryResponseUi.selectedId).toBe(0);
 });

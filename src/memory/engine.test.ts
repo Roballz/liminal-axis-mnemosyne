@@ -99,6 +99,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   Object.assign(memory, createEmptyMemory());
   engineState.lastPlanWrite = null;
+  settings.apiSettings.summarySuccessPreviewEnabled = true;
   summaryResponses.splice(0);
   summaryResponseUi.selectedId = 0;
   vi.spyOn(settings, 'engineActiveHere').mockReturnValue(true);
@@ -114,6 +115,7 @@ afterEach(async () => {
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  settings.apiSettings.summarySuccessPreviewEnabled = false;
 });
 
 function useChat(chat: STMessage[]) {
@@ -908,4 +910,59 @@ it('带表格的待确认请求在追加新AI楼后拒绝历史楼改当前表',
   chat.push(message(true), message());
   await expect(recoverSummaryResponse(record, JSON.stringify(summary))).rejects.toThrow('最新楼层');
   expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+});
+
+
+describe('成功预览开关关闭', () => {
+  beforeEach(() => { settings.apiSettings.summarySuccessPreviewEnabled = false; });
+  it('手动单楼成功直接保存，不弹预览；重摘恢复 boolean 成功', async () => {
+    const chat = [message(true), message()]; useChat(chat);
+    await prepareSummaryFloor(1);
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(summaryResponseUi.selectedId).toBe(0);
+    expect(await regenerateFloor(1)).toBe(true);
+    expect(summaryResponseUi.selectedId).toBe(0);
+  });
+  it('手动合并成功返回 made=1，手动检测也直接保存', async () => {
+    const first = leaf(), second = { ...leaf(), id: 'second-page' };
+    useChat([message(false, { extra: { bbs_leaf: first } }), message(true), message(false, { extra: { bbs_leaf: second } })]);
+    expect(await prepareSelected([first.id, second.id])).toEqual({ made: 1 });
+    expect(memory.summaries).toHaveLength(1);
+    expect(summaryResponseUi.selectedId).toBe(0);
+    const saved = { leafBatchThreshold: settings.apiSettings.leafBatchThreshold, leafKeepRecent: settings.apiSettings.leafKeepRecent };
+    Object.assign(settings.apiSettings, { leafBatchThreshold: 2, leafKeepRecent: 0 });
+    memory.summaries.splice(0);
+    try {
+      expect(await resummarizeNow()).toBe(1);
+      expect(memory.summaries).toHaveLength(1);
+      expect(summaryResponseUi.selectedId).toBe(0);
+    } finally { Object.assign(settings.apiSettings, saved); }
+  });
+  it('失败仍打开原文、保留编辑复用，不被成功开关禁用', async () => {
+    const chat = [message(true), message()]; useChat(chat);
+    vi.mocked(client.requestViaMainApi).mockResolvedValue('broken');
+    await prepareSummaryFloor(1);
+    const record = summaryResponses[0];
+    expect(summaryResponseUi.selectedId).toBe(record.id);
+    expect(record.attempts[0].raw).toBe('broken');
+    const calls = vi.mocked(client.requestViaMainApi).mock.calls.length;
+    await recoverSummaryResponse(record, JSON.stringify(summary));
+    expect(client.requestViaMainApi).toHaveBeenCalledTimes(calls);
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+  });
+  it('请求开始后切换开关不改变该请求模式，关闭开关不自动保存旧待确认草稿', async () => {
+    const chat = [message(true), message()]; useChat(chat);
+    settings.apiSettings.summarySuccessPreviewEnabled = true;
+    vi.mocked(client.requestViaMainApi).mockImplementation(async () => {
+      settings.apiSettings.summarySuccessPreviewEnabled = false;
+      return JSON.stringify(summary);
+    });
+    await prepareSummaryFloor(1);
+    const record = summaryResponses[0];
+    expect(record.attempts.at(-1)?.kind).toBe('ready');
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+    expect(engineState.running).toBe(false);
+    await recoverSummaryResponse(record, JSON.stringify(summary));
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+  });
 });

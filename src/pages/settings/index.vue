@@ -1008,6 +1008,11 @@ function exportPublicApiDocument() {
           <input v-model.number="apiSettings.recentResolvedPlansCount" class="bbs-input bbs-num" type="number" min="0" />
         </label>
         <p class="bbs-field-hint">在状态快照里附带「已完成的计划/悬念」,提醒 AI 别把刚了结的事又当未完成去推进或重复记录;主模型注入与摘要副API同时附带。计划、悬念各取最近这么多条(如填 5 = 最多计划 5 + 悬念 5)。0 为不附带,默认 5。</p>
+        <label class="bbs-switch-row">
+          <span class="bbs-field-label">成功后预览编辑</span>
+          <input v-model="apiSettings.summarySuccessPreviewEnabled" type="checkbox" class="bbs-checkbox" />
+        </label>
+        <p class="bbs-field-hint">默认关闭：手动摘要/总结成功后直接保存。开启后先预览编辑，确认格式正确才保存。仅影响新请求；失败原文与编辑复用始终保留，自动/批量成功不弹窗。</p>
         <label class="bbs-num-row">
           <span class="bbs-field-label">失败重试次数</span>
           <input v-model.number="apiSettings.summaryMaxRetries" class="bbs-input bbs-num" type="number" min="0" />

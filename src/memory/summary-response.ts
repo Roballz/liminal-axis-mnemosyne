@@ -42,7 +42,7 @@ export async function applySummaryResponse(record: SummaryResponse, text: string
   } finally { record.running = false; }
 }
 export async function requestSummaryResponse<T>(options: {
-  scope: string; title: string; retries: number; preview?: boolean;
+  scope: string; title: string; retries: number; preview?: boolean; reviewFailures?: boolean;
   send: (messages: ChatMsg[]) => Promise<string>; messages: ChatMsg[];
   parse: (raw: string) => T; apply: (value: T) => Promise<void>; guard: () => void;
 }): Promise<T> {
@@ -89,7 +89,7 @@ export async function requestSummaryResponse<T>(options: {
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   } finally {
     record.running = false;
-    if (options.preview && record.attempts.length) {
+    if ((options.preview || (options.reviewFailures && !record.applied)) && record.attempts.length) {
       summaryResponseUi.selectedId = record.id;
       summaryResponseUi.attempt = record.attempts.length - 1;
     }

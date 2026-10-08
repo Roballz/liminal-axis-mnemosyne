@@ -713,7 +713,9 @@ export async function summarizeFloor(floor: number): Promise<void> {
   const chat = ctx.chat ?? [];
   if (importedHistoryCovers(floor)) return;
   if (!isAiFloor(chat[floor]) || leafValid(chat[floor])) return;
-  await runSummary(floor, { preview: true, checkResummary: false });
+  const preview = apiSettings.summarySuccessPreviewEnabled;
+  await runSummary(floor, { preview, reviewFailures: true, checkResummary: !preview });
+  if (!preview) await afterSummaryHideAndInject(chat);
 }
 
 /**
@@ -732,8 +734,10 @@ export async function regenerateFloor(floor: number): Promise<boolean | 'pending
   const oldLeaf = getLeaf(chat[floor]);
   if (!oldLeaf) return false;
 
-  await runSummary(floor, { replaceLeaf: oldLeaf, checkResummary: false, preview: true });
-  if (!engineState.lastError && summaryResponses[0]?.attempts.at(-1)?.kind === 'ready') return 'pending';
+  const preview = apiSettings.summarySuccessPreviewEnabled;
+  await runSummary(floor, { replaceLeaf: oldLeaf, checkResummary: false, preview, reviewFailures: true });
+  if (!preview) await afterSummaryHideAndInject(chat);
+  if (preview && !engineState.lastError && summaryResponses[0]?.attempts.at(-1)?.kind === 'ready') return 'pending';
   return getLeaf(chat[floor]) !== oldLeaf && !engineState.lastError;
 }
 
@@ -1025,8 +1029,8 @@ async function responseEvidence(original: Awaited<ReturnType<typeof captureSumma
   return fresh;
 }
 function trackedSummary<T>(title: string, sender: { send: (messages: ChatMsg[]) => Promise<string> },
-  messages: ChatMsg[], parse: (raw: string) => T, apply: (value: T) => Promise<void>, guard: () => void, preview = false) {
-  return requestSummaryResponse({ title, scope: hostScope(), send: sender.send, messages, parse, apply, guard, preview,
+  messages: ChatMsg[], parse: (raw: string) => T, apply: (value: T) => Promise<void>, guard: () => void, preview = false, reviewFailures = false) {
+  return requestSummaryResponse({ title, scope: hostScope(), send: sender.send, messages, parse, apply, guard, preview, reviewFailures,
     retries: Math.max(0, apiSettings.summaryMaxRetries | 0) });
 }
 /** Explicit user confirmation only; reuse the captured parser and write path without sending. */
@@ -1051,6 +1055,7 @@ export async function recoverSummaryResponse(record: SummaryResponse, text: stri
  */
 interface RunSummaryOptions {
   preview?: boolean;
+  reviewFailures?: boolean;
   replaceLeaf?: LeafExtra;
   checkResummary?: boolean;
   /** 内部启动屏障:摘要上下文准备完毕、即将调用 API 时触发。 */
@@ -1241,7 +1246,7 @@ async function summarizeFloorWork(
   chat: STMessage[],
   aiFloor: number,
   sender: { send: (messages: ChatMsg[]) => Promise<string>; label: string },
-  options: Pick<RunSummaryOptions, 'replaceLeaf' | 'onRequestStart' | 'preview'> = {},
+  options: Pick<RunSummaryOptions, 'replaceLeaf' | 'onRequestStart' | 'preview' | 'reviewFailures'> = {},
 ): Promise<void> {
   const ctx = getContext();
   if (!ctx) throw new Error('无 ST 上下文');
@@ -1305,7 +1310,7 @@ async function summarizeFloorWork(
     refreshInjection();
     scheduleLeafFlush();
     scheduleVectorIndex(); // 新叶子 → 防抖同步进向量库(失败静默,不影响摘要)
-  }, responseGuard, options.preview);
+  }, responseGuard, options.preview, options.reviewFailures);
 }
 
 async function runSummaryInner(aiFloor: number, options: RunSummaryOptions = {}): Promise<void> {
@@ -1682,9 +1687,10 @@ function rootsAtLevel(level: number, chat: STMessage[]): RootView[] {
  * 用 AI 把这批的**叙事文本**融合成一条上层节点,childIds 收纳它们(底层全部保留)。
  * 一次调用会向上连锁(加叶子→可能生 L1→可能生 L2…),按各层阈值递归。
  */
-export function checkResummary(preview: true): Promise<number | 'pending'>;
-export function checkResummary(preview?: false): Promise<number>;
-export async function checkResummary(preview = false): Promise<number | 'pending'> {
+export function checkResummary(manual: true): Promise<number | 'pending'>;
+export function checkResummary(manual?: false): Promise<number>;
+export async function checkResummary(manual = false): Promise<number | 'pending'> {
+  const preview = manual && apiSettings.summarySuccessPreviewEnabled;
   if (!engineActiveHere()) return 0;
   const ctx = getContext();
   if (!ctx) return 0;
@@ -1761,7 +1767,7 @@ export async function checkResummary(preview = false): Promise<number | 'pending
         });
         made += 1;
         refreshInjection();
-      }, responseGuard, preview);
+      }, responseGuard, preview, manual);
       if (preview) return 'pending';
       // 不 break:继续外层 for,上一层可能也攒够了 → 连锁压更高层
     } catch (e) {
@@ -1835,6 +1841,7 @@ function collectSelectableNodes(chat: STMessage[]): Map<string, SelectableNode> 
  * 返回 { made, error }:made=1 成功,0 未生成(error 说明原因)。
  */
 export async function summarizeSelected(nodeIds: string[]): Promise<{ made: number; error?: string; pending?: boolean }> {
+  const preview = apiSettings.summarySuccessPreviewEnabled;
   if (!engineActiveHere()) return { made: 0, error: '插件未在当前聊天生效' };
   if (busy) return { made: 0, error: '正忙,请稍后再试' };
   if (nodeIds.length < 2) return { made: 0, error: '至少选择两条才能合并' };
@@ -1924,7 +1931,7 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
       });
       engineState.lastRunAt = Date.now();
       recomputeDerived();
-    }, responseGuard, true);
+    }, responseGuard, preview, true);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     engineState.lastError = msg;
@@ -1933,7 +1940,9 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
     busy = false;
     engineState.running = false;
   }
-  return { made: 0, pending: true };
+  if (preview) return { made: 0, pending: true };
+  await afterSummaryHideAndInject(chat);
+  return { made: 1 };
 }
 
 /**
@@ -2083,6 +2092,7 @@ export function bindEngine(): void {
 
 /** W-01: explicit, one-level rebuild; retained ancestors are not automatically regenerated. */
 export async function regenerateHigherSummary(hostId: string): Promise<void> {
+  const preview = apiSettings.summarySuccessPreviewEnabled;
   if (!engineActiveHere() || busy) throw new Error('摘要引擎未启用或正在运行');
   await syncDaily();
   const target = memory.summaries.find(s => s.id === hostId);
@@ -2112,6 +2122,6 @@ export async function regenerateHigherSummary(hostId: string): Promise<void> {
       assertSummaryEvidence(fresh);
       target.text=result;target.createdAt=Date.now();saveMemory();recomputeDerived();
       await syncDaily();refreshInjection();
-    }, responseGuard, true);
+    }, responseGuard, preview, true);
   } finally {busy=false;engineState.running=false;}
 }
