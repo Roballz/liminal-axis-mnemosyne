@@ -1,13 +1,12 @@
 {
-  "display_name": "Mnemosyne 日用记忆",
+  "display_name": "Mnemosyne 只读救援（普通功能停用）",
   "loading_order": 100,
   "requires": [],
   "optional": [],
-  "js": "dist/index.js?ver=1.3.15",
-  "generate_interceptor": "mnemosyne_generateInterceptor",
-  "author": "Roballz / 柏宝书 upstream",
-  "version": "1.3.15",
-  "homePage": "https://github.com/Roballz/liminal-axis-mnemosyne",
+  "js": "dist/rescue.js?ver=rescue-1",
+  "author": "Roballz",
+  "version": "1.3.15-rescue.1",
   "auto_update": false,
+  "homePage": "https://github.com/Roballz/liminal-axis-mnemosyne",
   "minimum_client_version": "1.12.13"
 }

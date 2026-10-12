@@ -12,7 +12,8 @@
     "test:vector-depth": "node scripts/test-vector-depth.mjs",
     "test:memory": "node scripts/test-memory-regressions.mjs",
     "prewatch": "node scripts/sync-version.mjs",
-    "watch": "vite build --watch --mode development"
+    "watch": "vite build --watch --mode development",
+    "build:rescue": "vite build --config vite.rescue.config.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
