@@ -3,8 +3,8 @@ import { bindSummaryEditPrompt } from '@/mnemosyne/summary-edit-prompt';
 import { bindDaily } from '@/mnemosyne/bridge';
 import { bindDailyJobs } from '@/mnemosyne/jobs';
 import { hydrateSettings } from '@/api/settings';
-import { bindEngine, handleGenerationIntercept } from '@/memory/engine';
-import { runVectorRecall, shouldRecallForType } from '@/memory/vector/recall';
+import { bindEngine } from '@/memory/engine';
+import { prepareGeneration } from '@/memory/generation';
 import { refreshInjection } from '@/memory/inject';
 import { syncTimeTagRegex } from '@/memory/timeTag';
 import { bindChatLifecycle } from '@/memory/store';
@@ -38,17 +38,7 @@ const HOST_ID = 'mnemosyne-app-host';
   abort: (immediately: boolean) => void,
   type: string | undefined,
 ): Promise<void> => {
-  try {
-    // 先走积压拦截:返回 true = 已 abort 本次生成,无需召回(生成不会发生)。
-    const intercepted = await handleGenerationIntercept(type, abort);
-    // 放行且该类型需要召回 → 阻塞式向量召回(写注入槽后再放行生成)。
-    // 召回内部自带向量开关/可用性判断,失败静默降级,绝不影响生成。
-    if (!intercepted && shouldRecallForType(type)) {
-      await runVectorRecall();
-    }
-  } catch (e) {
-    console.error('[柏宝书] 生成拦截器异常(放行本次生成)', e);
-  }
+  await prepareGeneration(abort, type);
 };
 
 /**

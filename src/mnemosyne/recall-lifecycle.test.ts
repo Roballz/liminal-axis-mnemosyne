@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { nextTick } from 'vue';
+import { prepareGeneration } from '@/memory/generation';
+import * as recallScope from '@/memory/vector/scope';
 import { refreshInjection } from '@/memory/inject';
 import { editEvent } from './events';
 import * as api from '@/api/settings';
@@ -340,4 +342,44 @@ test.each(['bodyStartTag', 'bodyEndTag'] as const)('正文边界 %s 改动使同
   await runVectorRecall();
   expect(recallDebug.status).not.toContain('复用缓存');
   expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(2);
+});
+
+
+test.each(['off', 'active', 'no-db', 'no-scope'] as const)('生成前基础注入不依赖向量状态：%s', async mode => {
+  api.apiSettings.vector.enabled = mode !== 'off';
+  if (mode === 'no-db') vi.spyOn(recallScope, 'currentVectorDb').mockReturnValue(null);
+  if (mode === 'no-scope') vi.spyOn(recallScope, 'recallScopes').mockReturnValue([]);
+  // 同一轮的 normal / swipe / regenerate 都经过实际生成准备入口。
+  const reply = message(false, '本轮回答');
+  ctx.chat.push(reply); scheduleDaily(); await syncDaily();
+  expectBaseInjection();
+  const abort = vi.fn();
+  for (const type of ['swipe', 'regenerate', 'normal']) {
+    if (type === 'swipe') { reply.mes = '...'; reply.swipe_id = 1; }
+    else if (type === 'regenerate') ctx.chat.pop();
+    else ctx.chat.push(message(true, '下一轮输入'));
+    scheduleDaily();
+    if (type !== 'normal') {
+      expect(promptText('mnemosyne_memory_history')).toBe('');
+      expect(promptText('mnemosyne_memory_state')).toContain('合成庭院');
+    }
+    await prepareGeneration(abort, type);
+    expectBaseInjection();
+  }
+  expect(abort).not.toHaveBeenCalled();
+  if (mode !== 'active') expect(embed.embedTexts).not.toHaveBeenCalled();
+});
+
+test('生成前归档失败不复用 swipe 已撤销的摘要，仍按原策略放行', async () => {
+  api.apiSettings.vector.enabled = false;
+  ctx.chat.push(message(false, '本轮回答')); scheduleDaily(); await syncDaily();
+  ctx.chat.at(-1)!.mes = '新的 swipe'; ctx.chat.at(-1)!.swipe_id = 1; scheduleDaily();
+  // 真实 syncDaily 读取失败，而不是 mock 掉权限检查。
+  vi.spyOn(lib, 'get').mockRejectedValueOnce(new Error('合成归档读取失败'));
+  const abort = vi.fn(), warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  await prepareGeneration(abort, 'swipe');
+  expect(warning).toHaveBeenCalled();
+  expect(abort).not.toHaveBeenCalled();
+  expect(promptText('mnemosyne_memory_history')).toBe('');
+  expect(promptText('mnemosyne_memory_state')).toContain('合成庭院');
 });
