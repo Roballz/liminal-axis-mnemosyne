@@ -547,18 +547,18 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
 export async function keepSummary(lib: Library, view: CapturedView, memoryId: string, guard: () => boolean = () => true) {
     return keepSummaries(lib, view, [memoryId], guard);
 }
-/** A new human applicability decision, never a replacement for missing generation evidence. */
+/** A new human applicability decision for current L0 summaries; original evidence stays immutable. */
 export async function confirmRecoveredSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true) {
     check(view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length, '只能确认当前完整档案');
     const requested = new Set(memoryIds), byId = new Map(view.memories.map(m => [m.id, m]));
     const positions = new Map(view.refs.map((r, i) => [r.message, i]));
     check(requested.size && requested.size === memoryIds.length, '请选择不重复的摘要');
     const memories = memoryIds.map(id => byId.get(id));
-    check(memories.every((m): m is MemoryRevision => !!m && !!m.sourceRecovery && m.level === 0 &&
-        m.recall && m.visibility === 'public' && !!m.content.trim() && !m.dependencies.length &&
+    check(memories.every((m): m is MemoryRevision => !!m && m.level === 0 &&
+        m.recall && m.visibility === 'public' && !!m.content.trim() &&
         !!m.anchor && positions.has(m.anchor) &&
         view.sources.get(view.refs[positions.get(m.anchor)!].revision)?.role === 'assistant'),
-    '只能人工确认当前已映射、可用的 L0 恢复摘要；其他摘要需分别处理');
+    '只能人工确认当前已映射、可用的 L0 摘要；其他摘要需分别处理');
     check(new Set(memories.map(m => m.owner)).size === memories.length &&
         new Set(memories.map(m => m.anchor)).size === memories.length, '摘要映射重复，请先核对');
     return lib.transaction(STORES, 'readwrite', async tx => {
@@ -577,9 +577,12 @@ export async function confirmRecoveredSummaries(lib: Library, view: CapturedView
             const { sourceRecovery, ...original } = memory;
             return { ...original, ...row('mr'), basis: snapshot.id,
                 // The shared fixed snapshot plus this anchor is the exact manual applicability
-                // prefix. Do not duplicate a long prefix into every recovered L0 revision.
-                inputRefs: [], coverage: [],
-                declaration: `人工核对恢复摘要：确认适用于当前楼层及此前正文；旧生成来源仍缺失，原摘要与来源声明保留（${memory.id}）。`,
+                // prefix. Human confirmation uses current bodies independently of the old
+                // generated summary dependencies, which remain intact on the old revision.
+                inputRefs: [], coverage: [], dependencies: [],
+                declaration: sourceRecovery
+                    ? `人工核对恢复摘要：仅以当前楼层及此前正文为人工确认依据；旧生成来源仍缺失，原摘要、摘要依赖与来源声明保留（${memory.id}）。`
+                    : `人工核对现有摘要：仅以当前楼层及此前正文为人工确认依据；原摘要、生成基线与来源声明保留，旧摘要依赖保留（${memory.id}）。`,
             } satisfies MemoryRevision;
         });
         // Retain the unchanged host fingerprint. A subsequent host observation must prefer this

@@ -5,7 +5,7 @@ import { bindDaily, syncDaily, invalidateDaily, hostVersion, dailyState, confirm
 import { capture, confirmRecoveredSummaries, statuses, keepSummaries, summarySources } from './canonical';
 import * as canonical from './canonical';
 import * as api from '@/api/client';
-import { recoveredSummaryTargets, retainRecoveredSummaries } from './summary-recovery-confirmation';
+import { recoveredSummaryTargets, retainRecoveredSummaries, summaryConfirmationPlan } from './summary-recovery-confirmation';
 import { exportLibrary, restoreLibrary } from './migration';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
@@ -13,6 +13,10 @@ import { normalizeTags } from '@/memory/contextTags';
 import { getLeaf } from '@/memory/apply';
 import { eventView, editEvent } from './events';
 import type { CapturedView } from './model';
+import { summarizeFloor } from '@/memory/engine';
+import { selectHistoryNodesBefore } from '@/memory/inject';
+import * as settings from '@/api/settings';
+import * as hostContext from '@/st/context';
 let lib: Library, ctx: any, dispose: (() => void) | undefined;
 const message = (user: boolean, text: string) => ({ name: user ? 'User' : 'Character', is_user: user, is_system: false, mes: text, extra: {} as any });
 beforeEach(async () => {
@@ -45,6 +49,118 @@ function guardFor(view: CapturedView) {
  const host=hostVersion(),generation=dailyState.generation;
  return ()=>host===hostVersion()&&generation===dailyState.generation;
 }
+test('mixed 24 recovered and 131 ordinary L0 reviews confirm together without replacing original proofs',async()=>{
+ for(let i=0;i<155;i++) {
+  ctx.chat.push(message(true,`synthetic question ${i}`),message(false,`synthetic reply ${i}`));
+  ctx.chat.at(-1).extra.bbs_leaf={id:`mixed-${i}`,text:`synthetic summary ${i}`,delta:{},createdAt:i+1,v:1,swipe:0};
+ }
+ const before=await syncDaily();
+ for(let i=0;i<155;i++) {
+  const leaf=ctx.chat[i*2+1].extra.bbs_leaf;
+  if(i<24) ctx.chat[i*2+1].extra.mnemosyne_summary_evidence_v1={leaf:leaf.id,text:leaf.text,basis:`missing-${i}`,
+   inputRefs:[{message:`missing-message-${i}`,revision:`missing-revision-${i}`}],coverage:[],generationKey:i+1};
+  else if(i%2===0) ctx.chat[i*2+1].extra.mnemosyne_summary_evidence_v1={leaf:leaf.id,text:leaf.text,basis:before.snapshot.id,
+   inputRefs:[before.refs[0],...before.refs.slice(i*2,i*2+2)],coverage:before.refs.slice(i*2,i*2+2),generationKey:i+1};
+ }
+ ctx.chat[0].mes+=' edited';invalidateDaily();const view=await syncDaily(), originals=view.memories;
+ expect(originals.filter(m=>m.sourceRecovery)).toHaveLength(24);
+ expect(originals.filter(m=>!m.sourceRecovery)).toHaveLength(131);
+ expect([...(await statuses(lib,view)).values()].every(s=>s==='needs_review')).toBe(true);
+ expect(recoveredSummaryTargets(view)).toHaveLength(155);
+ const host=JSON.stringify(ctx.chat), captureSpy=vi.spyOn(canonical,'capture'), syncSpy=vi.spyOn(canonical,'synchronize');
+ const apiCall=vi.spyOn(api,'requestCompletion'), mainApiCall=vi.spyOn(api,'requestViaMainApi');ctx.saveChat.mockClear();
+ let next=await retainRecoveredSummaries(view,originals.map(m=>m.id),guardFor(view));
+ expect(next.branch.epoch).toBe(view.branch.epoch+1);expect(captureSpy).toHaveBeenCalledTimes(1);expect(syncSpy).toHaveBeenCalledTimes(1);
+ expect(ctx.saveChat).not.toHaveBeenCalled();expect(apiCall).not.toHaveBeenCalled();expect(mainApiCall).not.toHaveBeenCalled();expect(JSON.stringify(ctx.chat)).toBe(host);
+ expect([...(await statuses(lib,next)).values()].every(s=>s==='valid')).toBe(true);
+ for(const original of originals) {
+  const confirmed=next.memories.find(m=>m.owner===original.owner)!;
+  expect(confirmed.id).not.toBe(original.id);expect(confirmed.basis).toBe(view.snapshot.id);
+  expect(confirmed.inputRefs).toEqual([]);expect(confirmed.coverage).toEqual([]);expect(confirmed.anchor).toBe(original.anchor);
+  expect(confirmed.content).toBe(original.content);expect(confirmed.fingerprint).toBe(original.fingerprint);
+  expect(confirmed.declaration).toContain(original.sourceRecovery?'旧生成来源仍缺失':'原摘要、生成基线与来源声明保留');
+  expect(await lib.get('memory_revisions',original.id)).toEqual(original);
+ }
+ const confirmed=next.memories;
+ const pack=await exportLibrary(lib);dispose?.();lib=await restoreLibrary(pack);dispose=bindDaily();next=await syncDaily();
+ expect(next.memories).toEqual(confirmed);expect([...(await statuses(lib,next)).values()].every(s=>s==='valid')).toBe(true);
+ ctx.chat[0].mes+=' later edit';invalidateDaily();next=await syncDaily();
+ expect([...(await statuses(lib,next)).values()].every(s=>s==='needs_review')).toBe(true);
+},15000);
+test('ordinary L0 reviews keep the same exact-host exclusions as missing-basis recovery',async()=>{
+ const view=await recovered(3,false);
+ const ordinary={...view,memories:view.memories.map(({sourceRecovery,...m})=>m)};
+ expect(recoveredSummaryTargets(ordinary)).toHaveLength(3);
+ ctx.chat[3].extra.bbs_omit=true;ctx.chat[5].extra.bbs_leaf.swipe=1;
+ expect(recoveredSummaryTargets(ordinary).map(m=>m.hostId)).toEqual(['leaf-0']);
+ ctx.chat[1].extra.mnemosyne_message_v1='mismatched-host-key';expect(recoveredSummaryTargets(ordinary)).toEqual([]);
+});
+test('actual engine-generated L0 dependencies remain historical while explicit confirmation uses current bodies',async()=>{
+ const preview=settings.apiSettings.summarySuccessPreviewEnabled;settings.apiSettings.summarySuccessPreviewEnabled=false;
+ vi.spyOn(settings,'engineActiveHere').mockReturnValue(true);vi.spyOn(settings,'getChannelForTask').mockReturnValue(null);
+ vi.spyOn(api,'mainApiAvailable').mockReturnValue(true);vi.spyOn(hostContext,'getCheckWorldInfo').mockResolvedValue(null);
+ const request=vi.spyOn(api,'requestViaMainApi').mockImplementation(async()=>JSON.stringify({summary:`generated summary ${request.mock.calls.length}`}));
+ ctx.name1='User';ctx.name2='Character';
+ try {
+  for(let i=0;i<3;i++)ctx.chat.push(message(true,`engine question ${i}`),message(false,`engine reply ${i}`));
+  for(const floor of [1,3,5]){await summarizeFloor(floor);expect(getLeaf(ctx.chat[floor])).toBeDefined();await syncDaily();}
+  expect(request).toHaveBeenCalledTimes(3);
+  const generated=await syncDaily(), later=generated.memories.find(m=>m.hostId===getLeaf(ctx.chat[5])!.id)!;
+  expect(later.dependencies.length).toBeGreaterThan(0);expect(later.inputRefs.length).toBeGreaterThan(0);
+  memory.summaries.push({id:'generated-higher',text:'higher generated dependency',level:1,createdAt:4,auto:true,childIds:[later.hostId]});
+  invalidateDaily();const withHigher=await syncDaily();
+  const event=await editEvent(lib,withHigher,null,{title:'original generated event',status:'open',keywords:[],overview:'original event overview',summarized:[later.id]},{memory:later.id,active:true,kind:'reference'});
+  ctx.chat[3].extra.mnemosyne_summary_evidence_v1.basis='missing-engine-basis';
+  ctx.chat[0].mes+=' changed';invalidateDaily();const view=await syncDaily();
+  expect(view.memories.filter(m=>m.level===0&&m.dependencies.length)).toHaveLength(2);
+  expect([...(await statuses(lib,view)).values()].every(s=>s==='needs_review'||s==='needs_rebuild')).toBe(true);
+  const host=JSON.stringify(ctx.chat);request.mockClear();ctx.saveChat.mockClear();
+  expect(recoveredSummaryTargets(view)).toHaveLength(3);
+  const next=await retainRecoveredSummaries(view,[view.memories.find(m=>m.owner===later.owner)!.id],guardFor(view));
+  const confirmed=next.memories.find(m=>m.owner===later.owner)!;
+  expect(confirmed.dependencies).toEqual([]);expect(confirmed.inputRefs).toEqual([]);expect(confirmed.coverage).toEqual([]);
+  expect(confirmed.basis).toBe(view.snapshot.id);expect((await statuses(lib,next)).get(confirmed.id)).toBe('valid');
+  expect((await statuses(lib,next)).get(next.memories.find(m=>m.hostId==='generated-higher')!.id)).toBe('needs_rebuild');
+  expect((await eventView(lib,next)).cards.find(c=>c.chain.id===event)?.needsReview).toBe(true);
+  expect(request).not.toHaveBeenCalled();expect(ctx.saveChat).not.toHaveBeenCalled();expect(JSON.stringify(ctx.chat)).toBe(host);
+  for(const old of view.memories) expect(await lib.get('memory_revisions',old.id)).toEqual(old);
+  await exportLibrary(lib);
+  getLeaf(ctx.chat[1])!.text+=' summary-only change';invalidateDaily();const summaryChanged=await syncDaily();
+  expect(summaryChanged.memories.find(m=>m.owner===later.owner)).toEqual(confirmed);
+  expect((await statuses(lib,summaryChanged)).get(confirmed.id)).toBe('valid');
+  ctx.chat[0].mes+=' later body edit';invalidateDaily();const changed=await syncDaily();
+  expect((await statuses(lib,changed)).get(confirmed.id)).toBe('needs_review');
+ } finally {settings.apiSettings.summarySuccessPreviewEnabled=preview;}
+});
+test('155 L0 recovery rows with 131 recorded history dependencies remain one explicit body-confirmation batch',async()=>{
+ for(let i=0;i<155;i++) {
+  ctx.chat.push(message(true,`dependent question ${i}`),message(false,`dependent reply ${i}`));
+  ctx.chat.at(-1).extra.bbs_leaf={id:`dependent-${i}`,text:`dependent summary ${i}`,delta:{},createdAt:i+1,v:1,swipe:0};
+ }
+ await syncDaily();const history=selectHistoryNodesBefore(memory.summaries,ctx.chat,ctx.chat.length);
+ expect(history).toHaveLength(155);
+ for(let i=0;i<155;i++) {
+  const floor=i*2+1,leaf=getLeaf(ctx.chat[floor])!;
+  ctx.chat[floor].extra.mnemosyne_summary_evidence_v1={leaf:leaf.id,text:leaf.text,basis:`missing-dependent-${i}`,
+   inputRefs:[],coverage:[],generationKey:i+1,dependencies:i<24?[]:history.filter(n=>n.msgIndex<floor-1).map(n=>n.id)};
+ }
+ invalidateDaily();const view=await syncDaily();expect(view.memories.filter(m=>m.dependencies.length)).toHaveLength(131);
+ expect(view.memories.filter(m=>m.sourceRecovery)).toHaveLength(155);expect(recoveredSummaryTargets(view)).toHaveLength(155);
+ const next=await retainRecoveredSummaries(view,view.memories.map(m=>m.id),guardFor(view));
+ expect(next.branch.epoch).toBe(view.branch.epoch+1);expect(next.memories.every(m=>!m.dependencies.length)).toBe(true);
+ expect([...(await statuses(lib,next)).values()].every(s=>s==='valid')).toBe(true);
+ for(const old of view.memories)expect(await lib.get('memory_revisions',old.id)).toEqual(old);
+ await exportLibrary(lib);
+},15000);
+test('read-only exclusion counts distinguish exact blockers without exposing summary or source text',async()=>{
+ const view=await recovered(3,true);ctx.chat[3].extra.bbs_omit=true;ctx.chat[5].extra.mnemosyne_message_v1='wrong-host';
+ const plan=summaryConfirmationPlan(view);
+ expect(plan.targets.map(m=>m.hostId)).toEqual(['leaf-0']);
+ expect(Object.fromEntries(plan.exclusions)).toEqual({'宿主楼层已停用':1,'来源消息身份不一致':1,'上层摘要':1});
+ const selected=new Set([view.memories.find(m=>m.hostId==='leaf-1')!.id]);
+ expect(Object.fromEntries(summaryConfirmationPlan(view,selected).exclusions)).toEqual({'宿主楼层已停用':1});
+ expect(JSON.stringify([...plan.exclusions])).not.toContain('synthetic');
+});
 test('155 recovered L0 summaries commit in one epoch without host edits or API calls, preserving evidence and higher review', async()=>{
  const view=await recovered(155,true,1690), before=JSON.stringify(ctx.chat), originals=recoveredSummaryTargets(view);
  const apiCall=vi.spyOn(api,'requestCompletion'), mainApiCall=vi.spyOn(api,'requestViaMainApi');

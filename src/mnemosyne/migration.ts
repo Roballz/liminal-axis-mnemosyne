@@ -143,6 +143,9 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         for (const v of r.entries)
             ref(v);
     }
+    // A legacy predecessor chain is immutable. Settle each acyclic path once,
+    // rather than walking its entire prefix again for every later snapshot.
+    const settledSnapshots = new Set<string>();
     for (const s of maps.history_snapshots.values()) {
         check(Array.isArray(s.blocks) && Number.isSafeInteger(s.length) && s.length >= 0, '快照结构非法');
         check(s.variants === undefined || Array.isArray(s.variants) && s.variants.length === s.length && s.variants.every((v: unknown) => Number.isSafeInteger(v) && Number(v) >= 0), '宿主变体标记非法');
@@ -160,13 +163,14 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             ref(r, s.story);
         if (s.previous)
             check(get('history_snapshots', s.previous).branch === s.branch, '快照前驱跨分支');
-        const seen = new Set();
+        const seen = new Set<string>();
         let cursor = s;
-        while (cursor) {
+        while (cursor && !settledSnapshots.has(cursor.id)) {
             check(!seen.has(cursor.id), '快照循环');
             seen.add(cursor.id);
             cursor = cursor.previous ? get('history_snapshots', cursor.previous) : null;
         }
+        for (const id of seen) settledSnapshots.add(id);
     }
     for (const b of maps.branches.values()) {
         check(get('history_snapshots', b.head).branch === b.id && get('memory_views', b.view).branch === b.id, 'Head/视图不属于分支');
@@ -236,6 +240,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
     }
     for (const m of maps.memories.values())
         check(get('host_bindings', m.owner).story === m.story, '摘要身份跨故事');
+    const settledMemories = new Set<string>();
     for (const m of maps.memory_revisions.values()) {
         if (m.tags !== undefined) {
             check(validTags(m.tags), '摘要标签版本或字段非法');
@@ -269,9 +274,27 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             check(get('source_messages', m.anchor).story === m.story, '摘要锚跨故事');
         for (const dep of m.dependencies)
             check(get('memory_revisions', dep).story === m.story, '摘要依赖跨故事');
-        const walk = (key: string, path: Set<string>) => { check(!path.has(key), '摘要依赖循环'); const next = new Set(path).add(key); for (const d of get('memory_revisions', key).dependencies)
-            walk(d, next); };
-        walk(m.id, new Set());
+        // Recorded history is a shared DAG, not a tree. Visit each revision and
+        // edge once; an iterative active path also handles long legacy chains.
+        if (!settledMemories.has(m.id)) {
+            const path = new Set<string>([m.id]);
+            const stack: { id: string; children: Iterator<string> }[] = [
+                { id: m.id, children: m.dependencies[Symbol.iterator]() },
+            ];
+            while (stack.length) {
+                const frame = stack[stack.length - 1], next = frame.children.next();
+                if (next.done) {
+                    path.delete(frame.id); settledMemories.add(frame.id); stack.pop();
+                    continue;
+                }
+                const dependency = get('memory_revisions', next.value);
+                check(!path.has(dependency.id), '摘要依赖循环');
+                if (!settledMemories.has(dependency.id)) {
+                    path.add(dependency.id);
+                    stack.push({ id: dependency.id, children: dependency.dependencies[Symbol.iterator]() });
+                }
+            }
+        }
     }
     for (const v of maps.memory_views.values())
         for (const [family, key] of Object.entries(v.selections)) {

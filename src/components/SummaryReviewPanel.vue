@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch, onBeforeUnmount, nextTick } from 'vue';
-import { recoveredSummaryTargets, retainRecoveredSummaries } from '@/mnemosyne/summary-recovery-confirmation';
+import { summaryConfirmationPlan, retainRecoveredSummaries } from '@/mnemosyne/summary-recovery-confirmation';
 import { rebuildSummaryOwners } from '@/mnemosyne/summary-review-actions';
 import ModalMask from './ModalMask.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -19,7 +19,12 @@ const busy = ref(false), error = ref(''), notice = ref(''), page = ref(0), confi
 const editing = shallowRef<MemoryRevision | null>(null), draft = ref('');
 const pending = computed(() => view.value?.memories.filter(m => ['needs_review','needs_rebuild'].includes(states.value.get(m.id) ?? '')) ?? []);
 const missingSources = computed(() => pending.value.some(m => !!m.sourceRecovery));
-const recovered = computed(() => view.value ? recoveredSummaryTargets(view.value) : []);
+const confirmationPlan = computed(() => {
+  const ids = new Set(pending.value.map(m => m.id));
+  return view.value ? summaryConfirmationPlan(view.value, ids) : { targets: [], exclusions: new Map<string, number>() };
+});
+const recovered = computed(() => confirmationPlan.value.targets);
+const exclusionSummary = computed(() => [...confirmationPlan.value.exclusions].map(([reason, count]) => `${reason}：${count} 条`).join('；'));
 const recoveredIds = computed(() => new Set(recovered.value.map(m => m.id)));
 const confirmation = shallowRef<{ view: CapturedView; ids: string[]; host: string; generation: number } | null>(null);
 const confirmKeep = computed({ get: () => !!confirmation.value, set: open => { if (!open) confirmation.value = null; } });
@@ -81,7 +86,7 @@ async function keep(ids: string[]) {
 }
 function requestKeep() {
   if (locked.value) return;
-  if (missingSources.value) openRecovery(recovered.value.map(m => m.id));
+  if (recovered.value.length || missingSources.value) openRecovery(recovered.value.map(m => m.id));
   else void run(() => keep(pending.value.map(m => m.id)));
 }
 function openRecovery(ids: string[]) {
@@ -132,11 +137,11 @@ async function rebuild() {
       <p>正文或下级摘要有变化。小修正可保留现有摘要；内容有变化可手改或更新。旧版本和事件链仍保留。</p>
       <p v-if="missingSources">部分摘要的旧生成基线不在当前核心包中，原文和来源标记已保留。核对当前正文后，可逐条或批量人工确认；旧生成证据缺失的声明仍保留。</p>
       <div class="mn-actions">
-        <button :disabled="locked || (missingSources && !recovered.length)" @click="requestKeep">{{ missingSources ? `核对并保留 ${recovered.length} 条现有摘要` : '保留全部现有摘要' }}</button>
+        <button :disabled="locked || (missingSources && !recovered.length)" @click="requestKeep">{{ recovered.length || missingSources ? `核对并保留 ${recovered.length} 条现有摘要` : '保留全部现有摘要' }}</button>
         <button :disabled="locked" @click="confirmUpdate = true">更新受影响摘要</button>
         <button v-if="busy" @click="stopUpdates">停止后续更新</button>
       </div>
-      <p v-if="missingSources && recovered.length < pending.length">其中 {{ pending.length - recovered.length }} 条无法在此批次人工确认，请单独检查来源或下级摘要。</p>
+      <p v-if="exclusionSummary">其中 {{ pending.length - recovered.length }} 条无法在逐楼批次人工确认：{{ exclusionSummary }}。请单独检查来源或下级摘要。</p>
       <details :open="expanded" @toggle="toggleDetails"><summary>逐条查看与处理</summary>
         <template v-if="expanded">
         <article v-for="m in pending.slice(page * 10, (page + 1) * 10)" :key="m.id" class="mn-card">
@@ -152,7 +157,8 @@ async function rebuild() {
     <p v-if="error || loadError" role="alert" class="mn-warning">{{ error || loadError }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <ConfirmDialog v-model:open="confirmKeep" title="人工确认并保留摘要" confirm-text="已核对，保留这些摘要" :busy="busy" busy-text="正在保存…" @confirm="run(confirmRecovery)">
       将保留当前分支选定的 {{ confirmation?.ids.length ?? 0 }} 条逐楼摘要，正文不改，不调用模型。确认表示你已核对每条摘要所在楼层及此前的当前正文，并认可摘要适用于这些内容。
-      将另存人工确认版本，旧摘要及原生成来源缺失声明继续保留；不会把当前正文当成旧生成证据。其他摘要、上层总结和事件仍按各自版本检查。
+      本次以你核对的当前正文为依据；旧生成时引用的摘要和来源保留在旧版本中。
+      将另存人工确认版本，旧摘要、原来源记录及已有的生成来源缺失声明继续保留；不会把当前正文当成旧生成证据。其他摘要、上层总结和事件仍按各自版本检查。
     </ConfirmDialog>
     <ConfirmDialog v-model:open="confirmUpdate" title="更新受影响摘要" confirm-text="确认调用模型" :busy="busy" @confirm="run(rebuild)">
       按依赖顺序重新生成待处理摘要，可能多次调用摘要 API。完成的部分逐条保存，停止或失败会保留已完成部分；不会自动重写事件概要。

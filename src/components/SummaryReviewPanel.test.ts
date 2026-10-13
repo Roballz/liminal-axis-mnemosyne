@@ -11,7 +11,10 @@ vi.mock('@/mnemosyne/bridge', async () => ({
 vi.mock('@/mnemosyne/db', () => ({ activeLibrary: vi.fn(async () => ({})) }));
 vi.mock('@/mnemosyne/canonical', () => ({ keepSummaries: mocks.keep }));
 vi.mock('@/mnemosyne/summary-review-actions', () => ({ rebuildSummaryOwners: vi.fn() }));
-vi.mock('@/mnemosyne/summary-recovery-confirmation', () => ({ recoveredSummaryTargets: (view: any) => view.memories.filter((m: any) => m.sourceRecovery && !m.level), retainRecoveredSummaries: mocks.recover }));
+vi.mock('@/mnemosyne/summary-recovery-confirmation', () => ({ summaryConfirmationPlan: (view: any, ids: Set<string>) => {
+  const pending=view.memories.filter((m:any)=>ids.has(m.id)), high=pending.filter((m:any)=>m.level).length;
+  return {targets:pending.filter((m:any)=>!m.level),exclusions:new Map(high?[['上层摘要',high]]:[])};
+}, retainRecoveredSummaries: mocks.recover }));
 vi.mock('@/memory/engine', async () => ({ engineState: (await import('vue')).reactive({ running: false }) }));
 vi.mock('@/memory/apply', () => ({ editLeafAt: vi.fn(), editSummary: vi.fn(), getLeaf: vi.fn() }));
 vi.mock('./ModalMask.vue', () => ({ default: defineComponent({ props: ['open'], setup: (p, { slots }) => () => p.open ? h('section', slots.default?.()) : null }) }));
@@ -73,13 +76,35 @@ test('bulk recovery is explicit, count-bounded and double confirmation writes on
   const fixture = result(); fixture.view.memories.push({ id: 'high', content: '高层', level: 1, sourceRecovery: {} }); fixture.validity.set('high', 'needs_review');
   mocks.read.mockResolvedValue(fixture);
   const root = mount(); await flush();
-  expect(content(root)).toContain('其中 1 条无法在此批次');
+  expect(content(root)).toContain('其中 1 条无法在逐楼批次');
+  expect(content(root)).toContain('上层摘要：1 条');
   button(root, '核对并保留 155').props.onClick(); await flush();
   expect(mocks.recover).not.toHaveBeenCalled(); expect(content(root)).toContain('不调用模型');
+  expect(content(root)).toContain('旧生成时引用的摘要和来源保留在旧版本中');
   const confirm = button(root, '已核对，保留这些摘要'); confirm.props.onClick(); confirm.props.onClick(); await settleAction();
   expect(mocks.recover).toHaveBeenCalledOnce();
   expect(mocks.recover.mock.calls[0][1]).toHaveLength(155); expect(mocks.recover.mock.calls[0][1]).not.toContain('high');
   expect(mocks.keep).not.toHaveBeenCalled(); expect(content(root)).toContain('已人工确认并保留 155');
+});
+test.each([0,24])('bulk review includes ordinary L0 rows with %s recovered rows but excludes valid and high summaries',async recoveryCount=>{
+  const fixture=result(156,false);
+  for(let i=0;i<recoveryCount;i++) fixture.view.memories[i].sourceRecovery={reason:'missing_basis'};
+  fixture.validity.set('memory-155','valid');
+  fixture.view.memories.push({id:'high',content:'higher summary',level:1});fixture.validity.set('high','needs_review');
+  mocks.read.mockResolvedValue(fixture);const root=mount();await flush();
+  expect(content(root)).toContain('156 条摘要待确认');expect(content(root)).toContain('其中 1 条无法在逐楼批次');
+  button(root,'核对并保留 155').props.onClick();await flush();expect(mocks.recover).not.toHaveBeenCalled();
+  button(root,'已核对，保留这些摘要').props.onClick();await settleAction();
+  expect(mocks.recover).toHaveBeenCalledOnce();expect(mocks.recover.mock.calls[0][1]).toHaveLength(155);
+  expect(mocks.recover.mock.calls[0][1]).not.toContain('memory-155');expect(mocks.recover.mock.calls[0][1]).not.toContain('high');
+  expect(mocks.keep).not.toHaveBeenCalled();
+});
+test('a remaining ordinary high-level queue retains its original strict keep workflow',async()=>{
+  const fixture=result(2,false);fixture.view.memories.forEach((m:any)=>{m.level=1;});mocks.read.mockResolvedValue(fixture);
+  const root=mount();await flush();button(root,'保留全部现有摘要').props.onClick();await settleAction();
+  expect(content(root)).toContain('上层摘要：2 条');
+  expect(mocks.keep).toHaveBeenCalledWith(expect.anything(),fixture.view,['memory-0','memory-1'],expect.any(Function));
+  expect(mocks.recover).not.toHaveBeenCalled();
 });
 test('single recovery opens the same explicit dialog and cancel makes no write', async () => {
   const root = mount(); await flush();
