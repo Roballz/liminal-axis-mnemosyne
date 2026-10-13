@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Icon from "@/components/Icon.vue";
 import { openMemberships, membershipUi } from "@/mnemosyne/event-membership-ui";
 import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
@@ -428,31 +429,25 @@ onBeforeUnmount(() => {
     <SummaryReviewPanel />
     <div class="mn-event-heading">
       <h2>{{ archiveMode ? "归档事件" : "事件" }}</h2>
-      <button v-if="archiveMode" class="mn-back" @click="showArchives(false)">
-        返回事件
-      </button>
-    </div>
-    <div class="mn-event-toolbar">
-      <div class="mn-actions mn-event-primary-actions">
-        <button
-          :disabled="manualEventState.busy"
-          @click="jobState.busy ? stopDailyJob() : run(batch)"
-        >
-          {{ jobState.busy ? "停止" : "批量整理" }}</button
-        ><button
-          class="mn-primary"
-          :disabled="!view || busy || jobState.busy"
-          @click="edit(null)"
-        >
-          新建事件
+      <div class="mn-event-heading-actions">
+        <button class="bbs-add-mini mn-event-icon" type="button" title="刷新" aria-label="刷新" :disabled="busy || loading" @click="queueRefresh">
+          <Icon name="refresh" :size="18" />
         </button>
-        <button :disabled="!view || busy || loading || jobState.busy || manualEventState.busy || membershipUi.loading" @click="openMemberships()">批量加入摘要</button>
-        <button v-if="!archiveMode" @click="showArchives(true)">归档事件</button>
+        <button v-if="view?.branch.fork" class="bbs-add-mini mn-event-icon" type="button" title="重新继承" aria-label="重新继承" :disabled="busy || loading || jobState.busy || manualEventState.busy" @click="run(previewResync)">
+          <Icon name="download" :size="18" />
+        </button>
+        <button class="bbs-add-mini mn-event-icon" type="button" title="新建事件" aria-label="新建事件" :disabled="!view || busy || jobState.busy" @click="edit(null)">
+          <Icon name="plus" :size="18" />
+        </button>
       </div>
-      <div class="mn-actions mn-event-maintenance-actions">
-        <button :disabled="busy || loading" @click="queueRefresh">刷新</button>
-        <button v-if="view?.branch.fork" :disabled="busy || loading || jobState.busy || manualEventState.busy" @click="run(previewResync)">重新继承</button>
-      </div>
+    </div>
+    <div class="mn-actions mn-event-toolbar">
+      <button :disabled="manualEventState.busy" @click="jobState.busy ? stopDailyJob() : run(batch)">
+        {{ jobState.busy ? "停止" : "批量更新" }}
+      </button>
+      <button :disabled="!view || busy || loading || jobState.busy || manualEventState.busy || membershipUi.loading" @click="openMemberships()">批量摘要</button>
+      <button v-if="!archiveMode" class="mn-primary mn-event-archive" @click="showArchives(true)">归档事件</button>
+      <button v-else class="mn-back" @click="showArchives(false)">返回事件</button>
     </div>
     <p v-if="!archiveMode" class="mn-muted">
       在聊天楼层卡片上指定事件链。AI
@@ -467,8 +462,8 @@ onBeforeUnmount(() => {
     <details v-if="!archiveMode" class="mn-card">
       <summary>事件概要自动更新与召回设置</summary>
       <p>
-        自动和批量整理仅更新已有链的待处理成员，每条待更新链一次摘要 API
-        请求；会产生模型费用。关闭自动更新时可使用“批量整理”。
+        自动和批量更新仅更新已有链的待处理成员，每条待更新链一次摘要 API
+        请求；会产生模型费用。关闭自动更新时可使用“批量更新”。
       </p>
       <label
         ><input
@@ -846,32 +841,49 @@ onBeforeUnmount(() => {
 </template>
 <style scoped>
 .mn-event-toolbar {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
   gap: 8px;
   margin: 10px 0;
 }
-.mn-event-toolbar .mn-actions {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  min-width: 0;
-  gap: 8px;
-  margin: 0;
-}
 .mn-event-toolbar button {
   min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  padding: 8px 10px;
+  white-space: nowrap;
+  padding: 8px 6px;
   font-size: 12px;
+}
+.mn-page .mn-event-archive {
+  background: #2563eb;
+  color: #fff;
+  border-color: transparent;
 }
 .mn-event-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  min-width: 0;
+  gap: 8px;
+}
+.mn-event-heading h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mn-event-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.mn-page .mn-event-icon {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--bbs-ink-muted);
 }
 .mn-event-card > summary {
   -webkit-touch-callout: none;
