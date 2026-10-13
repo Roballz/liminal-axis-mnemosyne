@@ -6,7 +6,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
     schema: 1;
     created: number;
     excluded: string[];
@@ -23,7 +23,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
-    const base = { format: 'mnemosyne-daily' as const, version: 12 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 13 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     await validateCurrentData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -51,7 +51,7 @@ export async function validateCurrentData(pack: Omit<Package, 'checksum'>): Prom
     validateStructure(pack, await validateBodyHashes(pack));
 }
 function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: ReadonlyMap<string, string> = new Map()) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     const stores: readonly Store[] = STORES.filter(s => !(s === 'table_history' && pack.version < 11) && !(s === 'source_bodies' && pack.version < 12));
     check(pack.data && Object.keys(pack.data).length === stores.length && Object.keys(pack.data).every(s => stores.includes(s as Store)), '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
@@ -74,6 +74,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             if (pack.version >= 11 && store === 'branches') optional.push('tableHead', 'tableHistoryGap');
             if (pack.version >= 11 && store === 'history_snapshots') optional.push('variants');
             if (pack.version >= 12) optional.push(...(store === 'source_revisions' ? ['bodySchema', 'bodyHash', 'bodyLength'] : store === 'history_snapshots' ? ['snapshotSchema'] : store === 'manifest_blocks' ? ['variants'] : store === 'branches' ? ['legacyHead'] : []));
+            if (pack.version >= 13 && store === 'memory_revisions') optional.push('sourceRecovery');
             const required = store === 'source_revisions' && (r as any).bodySchema === 1 && pack.version >= 12 ? FIELDS[store].filter(k => k !== 'content') : FIELDS[store];
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && required.every(k => k in r), `字段不合法 ${store}`);
@@ -185,7 +186,10 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         const pin = (id: string) => { const s = get('history_snapshots', id); if (s.branch === b.id && s.snapshotSchema === 2) roots.push(s); };
         for (const snapshot of maps.history_snapshots.values()) if (snapshot.branch === b.id && snapshot.snapshotSchema === 2 && b.sourceRoleRepairs?.some((pair: any) => refs(snapshot).some(r => r.revision === pair.before.revision || r.revision === pair.after.revision))) roots.push(snapshot);
         for (const branch of maps.branches.values()) if (branch.fork) pin(branch.fork.snapshot);
-        for (const memory of maps.memory_revisions.values()) pin(memory.basis);
+        for (const memory of maps.memory_revisions.values()) {
+            if (memory.sourceRecovery) pin(memory.sourceRecovery.snapshot);
+            else pin(memory.basis);
+        }
         for (const store of ['reviews', 'event_revisions', 'event_memberships', 'event_progress', 'event_processing_receipts', 'table_receipts', 'table_history'] as Store[])
             for (const record of maps[store].values()) pin(record.snapshot);
         for (const root of roots) {
@@ -236,12 +240,30 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         if (m.tags !== undefined) {
             check(validTags(m.tags), '摘要标签版本或字段非法');
         }
-        check(get('memories', m.owner).story === m.story && get('history_snapshots', m.basis).story === m.story, '摘要跨故事');
+        check(get('memories', m.owner).story === m.story, '摘要跨故事');
         check(typeof m.content === 'string' && typeof m.recall === 'boolean' && ['public', 'private'].includes(m.visibility), '摘要结构非法');
-        const basisRefs = refs(get('history_snapshots', m.basis));
-        for (const r of [...m.inputRefs, ...m.coverage]) {
-            ref(r, m.story);
-            check(basisRefs.some(v => v.message === r.message && v.revision === r.revision), '生成来源不属于基线快照');
+        if (m.sourceRecovery !== undefined) {
+            const recovery = m.sourceRecovery;
+            check(pack.version >= 13 && recovery && Object.keys(recovery).length === 3 && recovery.version === 1 &&
+                recovery.reason === 'missing_basis' && typeof recovery.snapshot === 'string' &&
+                typeof m.basis === 'string' && m.basis && !maps.history_snapshots.has(m.basis), '摘要来源恢复声明非法');
+            check(get('history_snapshots', recovery.snapshot).story === m.story, '摘要恢复观察跨故事');
+            // These are explicitly unresolved historical IDs, never valid canonical sources.
+            // Existing identities still cannot cross stories or contradict each other.
+            check(Array.isArray(m.inputRefs) && Array.isArray(m.coverage), '恢复来源格式非法');
+            for (const r of [...m.inputRefs, ...m.coverage]) {
+                check(r && Object.keys(r).length === 2 && typeof r.message === 'string' && r.message &&
+                    typeof r.revision === 'string' && r.revision, '恢复来源格式非法');
+                const message = maps.source_messages.get(r.message), revision = maps.source_revisions.get(r.revision);
+                check((!message || message.story === m.story) && (!revision || revision.story === m.story && revision.owner === r.message), '恢复来源跨身份/故事');
+            }
+        } else {
+            check(get('history_snapshots', m.basis).story === m.story, '摘要跨故事');
+            const basisRefs = refs(get('history_snapshots', m.basis));
+            for (const r of [...m.inputRefs, ...m.coverage]) {
+                ref(r, m.story);
+                check(basisRefs.some(v => v.message === r.message && v.revision === r.revision), '生成来源不属于基线快照');
+            }
         }
         if (m.anchor)
             check(get('source_messages', m.anchor).story === m.story, '摘要锚跨故事');
@@ -303,7 +325,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             check(r.reviewSchema === 2 && Array.isArray(r.sourceRefs) && Array.isArray(r.coverage) && Array.isArray(r.dependencies), '审核版本非法');
             const memory = get('memory_revisions', r.owner), currentRefs = refs(snapshot);
             const dependencyOnly = memory.level > 0 && !memory.anchor && !memory.inputRefs.length && memory.dependencies.length;
-            const basis = refs(get('history_snapshots', memory.basis));
+            const basis = memory.sourceRecovery ? [] : refs(get('history_snapshots', memory.basis));
             const original = memory.inputRefs.length ? memory.inputRefs : dependencyOnly ? [] : memory.anchor ? basis.slice(0, basis.findIndex(v => v.message === memory.anchor) + 1) : basis;
             const validateSources = (approved: any[], expected: any[]) => {
                 check(JSON.stringify(approved.map(v => v.message)) === JSON.stringify(expected.map(v => v.message)), '审核来源身份不匹配');
@@ -314,7 +336,9 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
                     check(pos > last, '审核来源顺序或版本不匹配'); last = pos;
                 }
             };
-            validateSources(r.sourceRefs, original);
+            // Pre-recovery receipts are retained as audit records, but statuses never lets
+            // any receipt approve a sourceRecovery revision. Their current references stay strict.
+            validateSources(r.sourceRefs, memory.sourceRecovery && !memory.inputRefs.length ? r.sourceRefs : original);
             validateSources(r.coverage, memory.coverage);
             if (!memory.inputRefs.length && !dependencyOnly) check(JSON.stringify(r.sourceRefs) === JSON.stringify(currentRefs.slice(0, r.sourceRefs.length)), '审核前缀不匹配');
             if (r.coverage.length) {

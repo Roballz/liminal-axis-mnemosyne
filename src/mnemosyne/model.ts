@@ -109,6 +109,8 @@ export interface Memory extends Row {
     hostId: string;
 }
 export interface MemoryRevision extends Row {
+    /** Unresolved host evidence after restoring an older core. Original provenance stays intact. */
+    sourceRecovery?: { version: 1; reason: 'missing_basis'; snapshot: string };
     tags?: SummaryTags;
     story: string;
     branch: string;

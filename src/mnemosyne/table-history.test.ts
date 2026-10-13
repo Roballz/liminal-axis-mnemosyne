@@ -250,7 +250,7 @@ test('v10 backup enters baseline-only history and roundtrip never claims old val
             expect(view.branch.tableHistoryGap).toBe(true);
             expect(await readTables(restored, view.branch)).toEqual([]);
             const backup = await exportLibrary(restored);
-            expect(backup.version).toBe(12);
+            expect(backup.version).toBe(13);
             expect((backup.data.table_history as TableCommit[]).some(h => h.rows.some(r => r.values.v === '旧包最新值'))).toBe(true);
         } finally { restored.close(); }
     } finally { f.lib.close(); }

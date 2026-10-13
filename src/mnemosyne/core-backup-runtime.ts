@@ -3,6 +3,15 @@ import { nativeBackupDisk } from '@/st/native-backups';
 import { activeLibrary, ACTIVE_KEY } from './db';
 import { AUTO_BACKUP_INTERVAL, CoreBackups, backupFailure, backupSettings, type BackupSettings } from './core-backups';
 
+export const BACKUP_WAITING_STATUS = '自动备份已启用，等待前台稳定状态';
+/** Display the same archive gates used by startup without changing scheduler policy. */
+export function backupArchiveBlockReason(state: { pending: boolean; error: string; conflict: boolean; tableError: string }): string {
+    if (state.error) return `归档未完成：${state.error}`;
+    if (state.conflict) return '档案绑定冲突，请先核对当前聊天的档案';
+    if (state.tableError) return `表格处理未完成：${state.tableError}`;
+    return state.pending ? '等待当前聊天归档完成' : '';
+}
+
 export const coreBackupState = reactive({
     available: false, enabled: false, keep: 10 as 5 | 10, busy: false,
     status: '尚未检查原生磁盘备份接口', error: '', lastSavedAt: 0,
@@ -21,7 +30,7 @@ export async function getCoreBackups(): Promise<CoreBackups> {
             manager = new CoreBackups(disk);
             Object.assign(coreBackupState, { available: true, enabled: settings.enabled, keep: settings.keep,
                 status: settingsError ? '备份设置无法读取，自动备份已关闭；仍可查看和恢复文件' :
-                    settings.enabled ? '自动备份已启用，等待前台稳定状态' : '自动备份未启用', error: settingsError });
+                    settings.enabled ? BACKUP_WAITING_STATUS : '自动备份未启用', error: settingsError });
             return manager;
         } catch (error) {
             coreBackupState.error = backupFailure(error);
@@ -46,7 +55,7 @@ export async function configureCoreBackups(enabled: boolean, keep: 5 | 10) {
         coreBackupState.status = '备份设置保存结果未确认'; coreBackupState.error = message;
         throw new Error(message);
     }
-    Object.assign(coreBackupState, { enabled, keep, error: '', status: enabled ? '自动备份已启用，等待前台稳定状态' : '自动备份已关闭，旧文件保留' });
+    Object.assign(coreBackupState, { enabled, keep, error: '', status: enabled ? BACKUP_WAITING_STATUS : '自动备份已关闭，旧文件保留' });
     requestCheck?.();
 }
 

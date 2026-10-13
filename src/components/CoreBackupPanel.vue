@@ -5,11 +5,15 @@ import { BACKUP_LOCATION } from '@/st/native-backups';
 import { activeLibrary, ACTIVE_KEY, DB_PREFIX } from '@/mnemosyne/db';
 import { dailyState, invalidateDaily, syncDaily, serializeDailyActivation } from '@/mnemosyne/bridge';
 import { backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
-import { configureCoreBackups, coreBackupState, getCoreBackups } from '@/mnemosyne/core-backup-runtime';
+import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups } from '@/mnemosyne/core-backup-runtime';
 
 const inventory = shallowRef<BackupInventory>({ entries: [], invalid: [] });
 const choice = ref(''), keep = ref<5 | 10>(10), error = ref(''), notice = ref('');
+const loading = ref(false), loadedAt = ref(0);
 const currentLibrary = ref('');
+const blocked = computed(() => coreBackupState.enabled ? backupArchiveBlockReason(dailyState) : '');
+const status = computed(() => blocked.value && coreBackupState.status === BACKUP_WAITING_STATUS
+    ? '自动备份已启用，当前暂缓' : coreBackupState.status);
 const selected = computed(() => inventory.value.entries.find(entry => entry.key === choice.value));
 const restoreAvailable = computed(() => !dailyState.pending || !!dailyState.error);
 const totalBytes = computed(() => inventory.value.entries.reduce((sum, entry) => sum + entry.bytes, 0));
@@ -30,13 +34,17 @@ async function run(task: () => Promise<void>) {
     finally { coreBackupState.busy = false; }
 }
 async function load() {
-    const backups = await getCoreBackups();
-    const result = await backups.inventory();
-    if (disposed) return;
-    inventory.value = result;
-    currentLibrary.value = localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`;
-    keep.value = coreBackupState.keep;
-    if (!result.entries.some(entry => entry.key === choice.value)) choice.value = '';
+    loading.value = true;
+    try {
+        const backups = await getCoreBackups();
+        const result = await backups.inventory();
+        if (disposed) return;
+        inventory.value = result;
+        loadedAt.value = Date.now();
+        currentLibrary.value = localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`;
+        keep.value = coreBackupState.keep;
+        if (!result.entries.some(entry => entry.key === choice.value)) choice.value = '';
+    } finally { loading.value = false; }
 }
 async function configure() {
     const enabled = !coreBackupState.enabled;
@@ -94,10 +102,12 @@ async function restore() {
         <p>备份独立于 WebView 数据库，保存在 TT 数据目录。插件更新不依赖安装文件夹里的副本。</p>
         <p style="overflow-wrap: anywhere">{{ BACKUP_LOCATION }}</p>
         <p class="mn-muted">仅含核心包，不含知识库、字体、向量、密钥或宿主聊天。文件为明文；不发送到网络。无法防止卸载、清除 TT 应用数据或整块磁盘损坏，重要资料仍请另行导出。</p>
-        <p role="status">{{ coreBackupState.status }}</p>
+        <p role="status">{{ status }}</p>
+        <p v-if="blocked" class="mn-warning" role="status">自动备份暂缓：{{ blocked }}。处理后会继续检查；启用状态不代表已写入备份。</p>
         <p v-if="coreBackupState.error || error" class="mn-warning" role="alert">{{ error || coreBackupState.error }}</p>
         <p v-if="notice" role="status">{{ notice }}</p>
-        <button :disabled="coreBackupState.busy" @click="run(load)">检查接口 / 读取备份列表</button>
+        <p v-if="loading" role="status">正在连接原生接口并读取备份列表…</p>
+        <button :disabled="coreBackupState.busy" @click="run(load)">{{ loading ? '正在读取备份列表…' : '读取备份列表' }}</button>
         <template v-if="coreBackupState.available">
             <label>每个库保留的自动备份数
                 <select v-model.number="keep" :disabled="coreBackupState.busy || coreBackupState.enabled">
@@ -107,7 +117,9 @@ async function restore() {
             <button :disabled="coreBackupState.busy" @click="run(configure)">{{ coreBackupState.enabled ? '关闭自动备份' : '启用自动备份' }}</button>
             <p class="mn-muted">前台稳定后开始检查，同一库的自动备份至少间隔 30 分钟；没有变化不重复写入。退到后台或关闭酒馆时停止发起新备份，已经交给宿主的写入可能完成。写入失败会延后重试，旧副本保留；原生接口提供单文件原子发布，但不承诺断电持久化。</p>
             <button :disabled="coreBackupState.busy || dailyState.pending" @click="run(saveManual)">手动保存并设为新起点（不轮换）</button>
-            <p>已验证 {{ inventory.entries.length }} 份，共 {{ size(totalBytes) }}。每个库各保留 {{ coreBackupState.keep }} 份自动备份；手动 / 固定 / 恢复前副本额外保留，可能使总数更多。旧库不会自动清理。</p>
+            <p v-if="loadedAt" role="status">接口读取成功（{{ date(loadedAt) }}）；已验证 {{ inventory.entries.length }} 份，共 {{ size(totalBytes) }}。<template v-if="!inventory.entries.length">当前没有已验证的可恢复备份。</template></p>
+            <p v-else class="mn-muted">尚未读取磁盘备份列表，备份数量未知。</p>
+            <p>每个库各保留 {{ coreBackupState.keep }} 份自动备份；手动 / 固定 / 恢复前副本额外保留，可能使总数更多。旧库不会自动清理。</p>
             <p v-if="inventory.invalid.length" class="mn-warning">{{ inventory.invalid.length }} 份文件无法验证，未删除；不计入上面的已验证数量和大小，也不可用于恢复。</p>
             <BbsSelect v-model="choice" :options="options" aria-label="可恢复的磁盘核心包" />
             <div v-if="selected" class="mn-card">

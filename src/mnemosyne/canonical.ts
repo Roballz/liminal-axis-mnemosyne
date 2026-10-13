@@ -59,6 +59,7 @@ export function sameNarrativeRevision(a: MemoryRevision, b: MemoryRevision): boo
 /** A high summary with recorded children depends on those children, not the entire chat tail. */
 export const dependencyOnly = (m: MemoryRevision) => m.level > 0 && !m.anchor && !m.inputRefs.length && !!m.dependencies.length;
 export async function summarySources(tx: Transaction, memory: MemoryRevision): Promise<SourceRef[]> {
+    check(!memory.sourceRecovery, '旧核心包缺少这条摘要的生成来源；请核对当前正文后手动确认或重新生成，不可直接保留');
     if (memory.inputRefs.length) return memory.inputRefs;
     if (dependencyOnly(memory)) return [];
     const snapshot = await tx.get<Snapshot>('history_snapshots', memory.basis);
@@ -226,6 +227,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
             host: HostMemory;
         }[] = [];
         const sidecars: { revision: MemoryRevision; host: HostMemory }[] = [];
+        let recovered = false;
         for (const [i, item] of observation.memories.entries()) {
             let host = item;
             let family = familyByHost.get(host.hostId);
@@ -268,12 +270,18 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                 };
                 const prior = selectedMemories.get(family.id);
                 if (host.manualEdit && prior && !host.inputRefs) {
-                    const sources = await summarySources(tx, prior);
+                    // A manual save explicitly confirms applicability to the currently displayed
+                    // prefix. It does not recreate the lost generation evidence on the old revision.
+                    const sources = prior.sourceRecovery
+                        ? refs.slice(0, anchor ? refs.findIndex(r => r.message === anchor) + 1 : refs.length)
+                        : await summarySources(tx, prior);
                     const updated = sources.map(r => refs.find(v => v.message === r.message));
                     if (updated.every((r): r is SourceRef => !!r)) {
                         revision.inputRefs = updated;
-                        revision.coverage = prior.coverage.map(r => refs.find(v => v.message === r.message)!).filter(Boolean);
-                        revision.declaration = '人工修订摘要：以当前来源版本确认内容；原生成版本保留。';
+                        revision.coverage = prior.sourceRecovery ? [] : prior.coverage.map(r => refs.find(v => v.message === r.message)!).filter(Boolean);
+                        revision.declaration = prior.sourceRecovery
+                            ? '人工核对恢复摘要：确认适用于当前楼层及此前正文；旧生成来源仍缺失，原摘要与来源声明保留。'
+                            : '人工修订摘要：以当前来源版本确认内容；原生成版本保留。';
                         // Preserve recorded dependency identities, selecting their current version below.
                         if (!host.children.length) host = { ...host, children: await Promise.all(prior.dependencies.map(async id => {
                             const dependency = await tx.get<MemoryRevision>('memory_revisions', id);
@@ -287,7 +295,16 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                     revision.basis = prior.basis;
                 newRevisions.push({ revision, host });
             }
-            if (host.generatedSidecar && host.inputRefs?.some(ref => !refs.some(r => equal(r, ref))) &&
+            if (host.basisSnapshot === revision.basis && !revision.sourceRecovery &&
+                !(await tx.get<Snapshot>('history_snapshots', revision.basis))) {
+                revision = { ...revision, sourceRecovery: { version: 1, reason: 'missing_basis', snapshot: branch.head } };
+                // Newly built revisions are inserted below; existing poisoned identities are
+                // repaired in place so events and historical selections keep their references.
+                const pending = newRevisions.find(item => item.revision.id === revision!.id);
+                if (pending) pending.revision = revision;
+                else { await tx.put('memory_revisions', revision); recovered = true; }
+            }
+            if (!revision.sourceRecovery && host.generatedSidecar && host.inputRefs?.some(ref => !refs.some(r => equal(r, ref))) &&
                 host.inputRefs.every(ref => ref.message === revision!.anchor || refs.some(r => equal(r, ref))))
                 sidecars.push({ revision, host });
             selections[family.id] = revision.id;
@@ -314,7 +331,24 @@ export async function synchronize(lib: Library, observation: HostObservation): P
             await tx.add('memory_views', view);
             branch.view = view.id;
         }
-        if (oldHead !== branch.head || previous?.id !== branch.view) branch.epoch++;
+        // Repair only this branch's summary metadata, including previously committed unselected
+        // revisions. No source text is scanned, and no missing historical record is invented.
+        const bases = new Map<string, Snapshot | undefined>();
+        const hostProofs = new Map<string, HostMemory[]>();
+        for (const host of observation.memories) if (host.basisSnapshot)
+            hostProofs.set(host.hostId, [...(hostProofs.get(host.hostId) ?? []), host]);
+        const history = hostProofs.size ? await tx.all<MemoryRevision>('memory_revisions', 'branch', branch.id) : [];
+        for (const memory of history) {
+            if (memory.sourceRecovery) continue;
+            if (!hostProofs.get(memory.hostId)?.some(host => host.basisSnapshot === memory.basis &&
+                equal(host.inputRefs ?? [], memory.inputRefs) && equal(host.coverage ?? [], memory.coverage))) continue;
+            if (!bases.has(memory.basis)) bases.set(memory.basis, await tx.get<Snapshot>('history_snapshots', memory.basis));
+            if (bases.get(memory.basis)) continue;
+            await tx.put('memory_revisions', { ...memory,
+                sourceRecovery: { version: 1, reason: 'missing_basis', snapshot: branch.head } } as MemoryRevision);
+            recovered = true;
+        }
+        if (oldHead !== branch.head || previous?.id !== branch.view || recovered) branch.epoch++;
         await tx.put('branches', branch);
         if (oldHead !== branch.head) await retireCurrentBodies(tx, branch, priorRefs);
         return branch;
@@ -363,10 +397,10 @@ export type MemoryStatus = 'valid' | 'excluded' | 'needs_review' | 'needs_rebuil
 export async function statuses(lib: Library, view: CapturedView): Promise<Map<string, MemoryStatus>> {
     return lib.transaction(['history_snapshots', 'manifest_blocks', 'reviews', 'memory_revisions'], 'readonly', async (tx) => {
         const snapshots = await Promise.all(
-            [...new Set(view.memories.map((m) => m.basis))].map((key) => tx.get<Snapshot>('history_snapshots', key)),
+            [...new Set(view.memories.filter(m => !m.sourceRecovery).map((m) => m.basis))].map((key) => tx.get<Snapshot>('history_snapshots', key)),
         );
         check(snapshots.every(Boolean), '摘要基线缺失');
-        const unknownBases = new Set(view.memories.filter((m) => !m.inputRefs.length).map((m) => m.basis));
+        const unknownBases = new Set(view.memories.filter((m) => !m.sourceRecovery && !m.inputRefs.length).map((m) => m.basis));
         const legacySnapshots = snapshots.filter((s) => unknownBases.has(s!.id));
         const blocks = await Promise.all(
             [...new Set(legacySnapshots.flatMap((s) => s!.blocks))].map((key) => tx.get<Block>('manifest_blocks', key)),
@@ -436,6 +470,7 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
             if (memory.story !== view.branch.story || memory.branch !== view.branch.id) status = 'out_of_scope';
             else if (!memory.recall || memory.visibility !== 'public') status = 'excluded';
             else if (memory.anchor && !positions.has(memory.anchor)) status = 'out_of_scope';
+            else if (memory.sourceRecovery) status = 'needs_review';
             else {
                 const basis = bases.get(memory.basis)!;
                 const requiredLength = memory.inputRefs.length || dependencyOnly(memory)

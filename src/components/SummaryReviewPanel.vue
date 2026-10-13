@@ -16,6 +16,7 @@ const view = shallowRef<CapturedView | null>(null), states = shallowRef(new Map<
 const busy = ref(false), error = ref(''), notice = ref(''), page = ref(0), confirmUpdate = ref(false);
 const editing = shallowRef<MemoryRevision | null>(null), draft = ref('');
 const pending = computed(() => view.value?.memories.filter(m => ['needs_review','needs_rebuild'].includes(states.value.get(m.id) ?? '')) ?? []);
+const missingSources = computed(() => pending.value.some(m => !!m.sourceRecovery));
 const locked = computed(() => busy.value || props.disabled || engineState.running);
 let host = '', generation = 0, ticket = 0, disposed = false, stopped = false;
 function stopUpdates() { stopped = true; }
@@ -55,7 +56,7 @@ function edit(memory: MemoryRevision) { editing.value = memory; draft.value = me
 async function saveEdit() {
   const captured = await currentView(), memory = editing.value;
   check(memory && draft.value.trim(), '摘要不能为空');
-  if (!memory.level && memory.content === draft.value.trim()) await keep([memory.id]);
+  if (!memory.level && !memory.sourceRecovery && memory.content === draft.value.trim()) await keep([memory.id]);
   else if (memory.level) {
     check(editSummary(memory.hostId, draft.value), '宿主摘要不存在');
     invalidateDaily(); await syncDaily();
@@ -81,16 +82,17 @@ async function rebuild() {
     <template v-if="pending.length">
       <strong>{{ pending.length }} 条摘要待确认</strong>
       <p>正文或下级摘要有变化。小修正可保留现有摘要；内容有变化可手改或更新。旧版本和事件链仍保留。</p>
+      <p v-if="missingSources">部分摘要的旧生成基线不在当前核心包中，原文和来源标记已保留。请先逐条核对当前正文，再手动确认；不会自动把当前正文当作旧生成证据。</p>
       <div class="mn-actions">
-        <button :disabled="locked" @click="run(() => keep(pending.map(m => m.id)))">保留全部现有摘要</button>
+        <button :disabled="locked || missingSources" @click="run(() => keep(pending.map(m => m.id)))">保留全部现有摘要</button>
         <button :disabled="locked" @click="confirmUpdate = true">更新受影响摘要</button>
         <button v-if="busy" @click="stopUpdates">停止后续更新</button>
       </div>
       <details><summary>逐条查看与处理</summary>
         <article v-for="m in pending.slice(page * 10, (page + 1) * 10)" :key="m.id" class="mn-card">
-          <small>L{{ m.level }} · {{ states.get(m.id) === 'needs_rebuild' ? '下级摘要有变化' : '来源待确认' }}</small>
+          <small>L{{ m.level }} · {{ m.sourceRecovery ? '旧生成基线缺失，待人工核对' : states.get(m.id) === 'needs_rebuild' ? '下级摘要有变化' : '来源待确认' }}</small>
           <p class="mn-pre">{{ m.content.slice(0, 300) }}</p>
-          <div class="mn-actions"><button :disabled="locked" @click="run(() => keep([m.id]))">保留此摘要</button><button :disabled="locked" @click="edit(m)">手动修订</button></div>
+          <div class="mn-actions"><button :disabled="locked || !!m.sourceRecovery" @click="run(() => keep([m.id]))">保留此摘要</button><button :disabled="locked" @click="edit(m)">{{ m.sourceRecovery ? '核对并手动确认' : '手动修订' }}</button></div>
         </article>
         <div class="mn-actions"><button :disabled="!page" @click="page--">上一页</button><span>{{ page + 1 }}</span><button :disabled="(page + 1) * 10 >= pending.length" @click="page++">下一页</button></div>
       </details>
@@ -101,7 +103,7 @@ async function rebuild() {
     </ConfirmDialog>
     <ModalMask :open="!!editing" @close="!busy && (editing = null)">
       <form class="mn-dialog" role="dialog" aria-label="修订待审核摘要" @submit.prevent="run(saveEdit)">
-        <header><h3>手动修订摘要</h3></header><div class="mn-dialog-body"><p>保存表示确认这份摘要适用于当前来源。上级摘要和事件概要可分别保留或更新。</p><TableTextField v-model="draft" label="修订摘要正文" :disabled="busy"/><p v-if="error" role="alert">{{ error }}</p></div>
+        <header><h3>手动修订摘要</h3></header><div class="mn-dialog-body"><p v-if="editing?.sourceRecovery">请先核对这条摘要所在楼层及此前正文。保存表示你确认摘要适用于这段当前正文，将另存人工确认版本；旧摘要和缺失的原生成来源声明继续保留。</p><p v-else>保存表示确认这份摘要适用于当前来源。上级摘要和事件概要可分别保留或更新。</p><TableTextField v-model="draft" label="修订摘要正文" :disabled="busy"/><p v-if="error" role="alert">{{ error }}</p></div>
         <footer><button type="button" :disabled="busy" @click="editing = null">取消</button><button class="mn-primary" :disabled="busy || !draft.trim()">保存并确认摘要</button></footer>
       </form>
     </ModalMask>

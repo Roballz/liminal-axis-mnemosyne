@@ -84,3 +84,14 @@ test('pagehide revokes an in-flight automatic-write guard and prevents subsequen
     finish!(); await vi.advanceTimersByTimeAsync(AUTO_BACKUP_INTERVAL * 2);
     expect(save).toHaveBeenCalledTimes(1); expect(vi.getTimerCount()).toBe(0);
 });
+
+test('archive blocker display covers every startup gate without changing saved runtime state', async () => {
+    const { backupArchiveBlockReason } = await import('./core-backup-runtime');
+    const state = { pending: false, error: '', conflict: false, tableError: '' };
+    expect(backupArchiveBlockReason(state)).toBe('');
+    state.pending = true; expect(backupArchiveBlockReason(state)).toContain('等待当前聊天归档完成');
+    state.tableError = '填表待处理'; expect(backupArchiveBlockReason(state)).toContain('填表待处理');
+    state.conflict = true; expect(backupArchiveBlockReason(state)).toContain('档案绑定冲突');
+    state.error = '摘要基线缺失'; expect(backupArchiveBlockReason(state)).toContain('摘要基线缺失');
+    expect(state).toEqual({ pending: true, error: '摘要基线缺失', conflict: true, tableError: '填表待处理' });
+});
