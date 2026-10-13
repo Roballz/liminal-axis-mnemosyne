@@ -1457,5 +1457,5 @@ const groups = computed(() => [
 </style>
 
 <style scoped>
-.bbs-fp-events { padding: 0 10px 7px; max-width: 100%; }
+.bbs-fp-events { display: flex; justify-content: flex-start; margin-top: 8px; padding: 0; min-width: 0; max-width: 100%; }
 </style>

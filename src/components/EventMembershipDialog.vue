@@ -93,7 +93,7 @@ function keyboard(event: KeyboardEvent) {
 </script>
 <template>
   <ModalMask :open="!!session && !membershipPicking" top-layer @close="closeMemberships">
-    <form v-if="session" ref="form" class="mn-dialog mn-membership-dialog" role="dialog" aria-modal="true" tabindex="-1"
+    <form v-if="session" ref="form" class="mn-dialog mn-membership-dialog" :class="{ 'mn-membership-single': session.mode === 'single' }" role="dialog" aria-modal="true" tabindex="-1"
       :aria-label="session.mode === 'single' ? '管理事件链关联' : '批量加入事件链'" @submit.prevent="save" @keydown.stop="keyboard">
       <header><h3>{{ session.mode === 'single' ? `楼层 #${session.floor} 的事件链` : '批量加入事件链' }}</h3>
         <button type="button" :disabled="membershipUi.saving" aria-label="关闭事件链关联" @click="closeMemberships">关闭</button></header>
@@ -119,7 +119,6 @@ function keyboard(event: KeyboardEvent) {
           <p class="mn-muted">批量操作只向下面的一条链加入，不移除摘要原有的其他关联。</p>
         </template>
         <template v-else>
-          <p class="mn-membership-preview">{{ session.rows[0].text.slice(0, 200) }}</p>
           <p v-if="!allowed" class="mn-warning">本楼摘要待审核或不参与记忆；可以解除已有关联，新增前请先处理摘要。</p>
           <p class="mn-muted">勾选加入，取消勾选移除。新建链会和本楼关联一起保存；概要可在事件页更新。</p>
         </template>
@@ -152,15 +151,21 @@ function keyboard(event: KeyboardEvent) {
 </template>
 <style scoped>
 .mn-membership-picking { position: fixed; bottom: max(12px, env(safe-area-inset-bottom)); left: 12px; right: 12px; z-index: 10001; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--bbs-line); border-radius: 10px; background: var(--bbs-bg, #222); color: var(--bbs-ink); box-shadow: 0 4px 18px #0004; }
-.mn-membership-dialog { max-width: 600px; }
-.mn-membership-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.mn-membership-dialog .mn-dialog-body { display: flex; flex-direction: column; gap: 12px; }
-.mn-membership-dialog label { display: flex; flex-direction: column; gap: 6px; }
+.mn-membership-dialog { width: min(600px, calc(100vw - 24px)); max-height: min(92vh, 900px); max-height: min(92dvh, 900px); }
+.mn-membership-single { height: min(760px, 92vh); height: min(760px, 92dvh); }
+.mn-membership-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-shrink: 0; }
+.mn-membership-dialog header h3 { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.mn-membership-dialog header button { flex-shrink: 0; }
+.mn-membership-dialog .mn-dialog-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; padding-top: 12px; }
+.mn-membership-dialog .mn-dialog-body > * { flex-shrink: 0; }
+.mn-membership-dialog label { display: flex; flex-direction: column; gap: 6px; margin: 0; }
 .mn-membership-dialog input:not([type=checkbox]):not([type=radio]) { width: 100%; min-width: 0; box-sizing: border-box; }
 .mn-membership-dialog .mn-member-choice { flex-direction: row; align-items: flex-start; gap: 9px; margin: 0; padding: 8px 0; border-bottom: 1px solid var(--bbs-line); }
 .mn-membership-dialog .mn-member-choice input { flex: 0 0 16px; width: 16px; height: 16px; padding: 0; margin: 4px 0 0; accent-color: var(--bbs-accent); }
-.mn-member-choice span { overflow-wrap: anywhere; }
+.mn-member-choice span { min-width: 0; overflow-wrap: anywhere; }
 .mn-member-choice small { opacity: .7; }
 .mn-membership-rows, .mn-membership-chains { max-height: 240px; overflow-y: auto; }
-.mn-membership-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mn-membership-single .mn-membership-chains { flex: 1 0 180px; max-height: 420px; overscroll-behavior: contain; }
+.mn-membership-dialog .mn-actions { margin: 0; }
+.mn-membership-dialog footer { flex-wrap: wrap; }
 </style>

@@ -1,3 +1,5 @@
+> 1.4.4：修正摘要卡事件链按钮对齐，移除选择框重复摘要、扩大可滚动列表，事件页刷新与重新继承独立放到下方一行。仅调整排版，数据与关联逻辑不变；浏览器及真实手机视觉待验，详见 [本轮回执](notes/v1.4.4-event-mobile-layout-review.md)。
+
 > 1.4.3：核心包校验复用已完成的旧快照路径与共享摘要依赖子图，避免自动备份触发的重复遍历；普通待核对与缺失来源 L0 可同批人工确认，包括有旧摘要依赖的条目。DB3 / 核心包 v13 不变。自动备份先保持关闭，发布更新后的手动保存与手机卡顿仍待验证。详见 [备份校验性能边界](docs/22-backup-validation-performance.md)、[摘要来源恢复](docs/20-summary-source-recovery.md) 与 [本轮回执](notes/v1.4.3-backup-validation-review.md)。
 
 > 1.4.2：缺失生成基线的逐楼摘要支持明确的批量人工确认；合并历史楼层渲染、归档与审核读取，减少聊天页全量重复工作。DB3 / 核心包 v13 不变。TT / Android 性能仍需现场 A/B。详见 [摘要来源恢复](docs/20-summary-source-recovery.md)、[渲染与审核性能边界](docs/21-render-and-review-performance.md) 与 [本轮回执](notes/v1.4.2-bulk-summary-render-review.md)。

@@ -432,23 +432,27 @@ onBeforeUnmount(() => {
         返回事件
       </button>
     </div>
-    <div class="mn-actions mn-event-toolbar">
-      <button :disabled="busy || loading" @click="queueRefresh">刷新</button
-      ><button v-if="view?.branch.fork" :disabled="busy || loading || jobState.busy || manualEventState.busy" @click="run(previewResync)">重新继承</button
-      ><button
-        :disabled="manualEventState.busy"
-        @click="jobState.busy ? stopDailyJob() : run(batch)"
-      >
-        {{ jobState.busy ? "停止" : "批量整理" }}</button
-      ><button
-        class="mn-primary"
-        :disabled="!view || busy || jobState.busy"
-        @click="edit(null)"
-      >
-        新建事件
-      </button>
-      <button :disabled="!view || busy || loading || jobState.busy || manualEventState.busy || membershipUi.loading" @click="openMemberships()">批量加入摘要</button>
-      <button v-if="!archiveMode" @click="showArchives(true)">归档事件</button>
+    <div class="mn-event-toolbar">
+      <div class="mn-actions mn-event-primary-actions">
+        <button
+          :disabled="manualEventState.busy"
+          @click="jobState.busy ? stopDailyJob() : run(batch)"
+        >
+          {{ jobState.busy ? "停止" : "批量整理" }}</button
+        ><button
+          class="mn-primary"
+          :disabled="!view || busy || jobState.busy"
+          @click="edit(null)"
+        >
+          新建事件
+        </button>
+        <button :disabled="!view || busy || loading || jobState.busy || manualEventState.busy || membershipUi.loading" @click="openMemberships()">批量加入摘要</button>
+        <button v-if="!archiveMode" @click="showArchives(true)">归档事件</button>
+      </div>
+      <div class="mn-actions mn-event-maintenance-actions">
+        <button :disabled="busy || loading" @click="queueRefresh">刷新</button>
+        <button v-if="view?.branch.fork" :disabled="busy || loading || jobState.busy || manualEventState.busy" @click="run(previewResync)">重新继承</button>
+      </div>
     </div>
     <p v-if="!archiveMode" class="mn-muted">
       在聊天楼层卡片上指定事件链。AI
@@ -842,12 +846,25 @@ onBeforeUnmount(() => {
 </template>
 <style scoped>
 .mn-event-toolbar {
-  flex-wrap: nowrap;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  gap: 8px;
+  margin: 10px 0;
+}
+.mn-event-toolbar .mn-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 8px;
+  margin: 0;
 }
 .mn-event-toolbar button {
-  white-space: nowrap;
-  padding: 8px 6px;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
   font-size: 12px;
 }
 .mn-event-heading {

@@ -74,9 +74,27 @@ test('chat-card pick return refocuses the remounted form, retains filters and re
 });
 test('single-card create/remove stays a draft until save; popup contains no immediate AI action', async () => {
   const { root, app } = mount(); membershipSession.value = session('single'); await flush();
+  expect(content(root)).not.toContain('灯会合成摘要');
+  expect(nodes(root).find(n => n.type === 'form')!.props.class).toContain('mn-membership-single');
+  expect(nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox')).toHaveLength(20);
   expect(content(root)).not.toContain('立即更新'); expect(content(root)).not.toContain('确认调用');
   nodes(root).find(n => n.type === 'input' && n.props.type === 'checkbox')!.props.onChange(); await flush();
   findButton(root, '新建事件链').props.onClick(); await flush(); field(root, '新事件链名称').props['onUpdate:modelValue']('新建测试'); await flush();
   expect(content(root)).toContain('新增 1 条关联'); expect(content(root)).toContain('移除 1 条关联'); expect(state.commit).not.toHaveBeenCalled();
   findButton(root, '取消').props.onClick(); await flush(); expect(state.commit).not.toHaveBeenCalled(); app.unmount();
+});
+
+test('single-card filters retain selection and close/reopen resets unsaved changes', async () => {
+  const { root, app } = mount(); membershipSession.value = session('single'); await flush();
+  nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox')[1].props.onChange(); await flush();
+  field(root, '查找事件链').props['onUpdate:modelValue']('事件 24'); await flush();
+  expect(nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox')).toHaveLength(1);
+  const form = nodes(root).find(n => n.type === 'form')!;
+  await form.props.onSubmit({ preventDefault() {} });
+  expect(state.commit).toHaveBeenCalledWith(expect.objectContaining({ mode: 'replace', eventIds: ['event-0', 'event-1'], memories: ['m-0'] }));
+  findButton(root, '取消').props.onClick(); await flush();
+  membershipSession.value = session('single'); await flush();
+  expect(nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox')).toHaveLength(20);
+  expect(nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox' && n.props.checked)).toHaveLength(1);
+  app.unmount();
 });
