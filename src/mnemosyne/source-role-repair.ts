@@ -1,3 +1,4 @@
+import { readSource } from './current-body';
 import type { Library, Transaction } from './db';
 import { isRoleOnlyPair, sourceRefMatches } from './source-equivalence';
 import { check, type Block, type Branch, type CapturedView, type Revision, type Snapshot, type SourceRef, type SourceRoleRepair } from './model';
@@ -35,7 +36,7 @@ export async function previewRoleRepairs(lib: Library, view: CapturedView, eligi
 /** Append confirmations in one guarded transaction. Never rewrite originals or broad summary approvals. */
 export async function confirmRoleRepairs(lib: Library, view: CapturedView, candidates: RoleRepairCandidate[], guard: () => boolean) {
     check(candidates.length > 0, '没有可确认的隐藏来源修复');
-    await lib.transaction(['branches', 'source_revisions', 'history_snapshots', 'manifest_blocks'], 'readwrite', async tx => {
+    await lib.transaction(['branches', 'source_revisions', 'source_bodies', 'history_snapshots', 'manifest_blocks'], 'readwrite', async tx => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
         check(guard() && branch && branch.head === view.branch.head && branch.view === view.branch.view && branch.epoch === view.branch.epoch, '视图已改变，请重新预览');
         const historical = await historicalRevisionIds(tx, branch.id);
@@ -43,7 +44,7 @@ export async function confirmRoleRepairs(lib: Library, view: CapturedView, candi
         for (const candidate of candidates) {
             const { before, after, floor } = candidate;
             const old = await tx.get<Revision>('source_revisions', before.revision);
-            const next = await tx.get<Revision>('source_revisions', after.revision);
+            const next = await readSource(tx, after.revision);
             check(old && next && before.message === after.message && old.owner === before.message && next.owner === after.message &&
                 old.story === branch.story && historical.has(old.id) && isRoleOnlyPair(old, next) &&
                 view.refs[floor]?.message === after.message && view.refs[floor]?.revision === after.revision,

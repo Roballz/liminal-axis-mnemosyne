@@ -16,6 +16,9 @@ export function sourceContent(view: CapturedView, ref: SourceRef): string | unde
 }
 export function isRoleOnlyPair(before: Revision, after: Revision): boolean {
     return before.owner === after.owner && before.story === after.story &&
-        before.role === 'system' && after.role === 'assistant' && before.content === after.content &&
+        before.role === 'system' && after.role === 'assistant' &&
+        ((typeof before.content === 'string' && typeof after.content === 'string' && before.content === after.content) ||
+            (before.bodySchema === 1 && after.bodySchema === 1 && typeof before.bodyHash === 'string' &&
+                before.bodyHash === after.bodyHash && Number.isSafeInteger(before.bodyLength) && before.bodyLength === after.bodyLength)) &&
         before.provenance.hostKey === after.provenance.hostKey && before.provenance.swipe === after.provenance.swipe;
 }

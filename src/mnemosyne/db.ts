@@ -1,7 +1,7 @@
 import { STORES, type Store, type Row, check, id } from './model';
 export const DB_PREFIX = 'mnemosyne_daily_';
 export const ACTIVE_KEY = 'mnemosyne_daily_active_v1';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export function request<T>(r: IDBRequest<T>): Promise<T> {
     return new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 }
@@ -77,7 +77,8 @@ export async function activateLibrary(lib: Library) {
     localStorage.setItem(ACTIVE_KEY, lib.db.name);
     const previous = active;
     active = Promise.resolve(lib);
-    if (previous)
-        (await previous).close();
+    // The validated selector switch is already committed. A failed old open (or
+    // obsolete-connection cleanup) must not make restore close the new active library.
+    if (previous) await previous.then(old => { if (old !== lib) old.close(); }).catch(() => {});
 }
 export const freshLibraryName = () => `${DB_PREFIX}${id('lib')}`;

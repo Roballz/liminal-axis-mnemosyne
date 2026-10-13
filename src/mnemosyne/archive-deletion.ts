@@ -1,5 +1,5 @@
 import type { Library } from './db';
-import { exportLibrary, validateData, type Package } from './migration';
+import { exportLibrary, validateCurrentData, type Package } from './migration';
 import { STORES, check, equal, type Binding, type Branch, type Row, type Store, type Revision, type Snapshot, type Mapping } from './model';
 
 export interface DeletionMarker extends Row { value: { version: 1; scopes: string[] } }
@@ -70,6 +70,16 @@ export async function previewArchiveDeletion(lib: Library, branchId: string): Pr
     remove.source_revisions = (data.source_revisions as Revision[]).filter(r => r.story === branch.story &&
         (owners.has(r.provenance.binding) || retiredIds.has(r.provenance.binding)) && !referenced.has(r.id)).map(r => r.id);
     remaining.source_revisions = data.source_revisions.filter(r => !remove.source_revisions.includes(r.id));
+    const currentBodyRefs = new Set<string>();
+    const bySnapshot = new Map(remaining.history_snapshots.map(s => [s.id, s as Snapshot]));
+    const byBlock = new Map(remaining.manifest_blocks.map(b => [b.id, b as import('./model').Block]));
+    for (const savedBranch of remaining.branches as Branch[]) {
+        const head = bySnapshot.get(savedBranch.head); check(head, '保留分支快照缺失');
+        for (const key of head.blocks) { const block = byBlock.get(key); check(block, '保留分支清单缺失');
+            for (const ref of block.entries) currentBodyRefs.add(ref.revision); }
+    }
+    remove.source_bodies = data.source_bodies.filter(b => b.story === branch.story && !currentBodyRefs.has(b.id)).map(b => b.id);
+    remaining.source_bodies = data.source_bodies.filter(b => !remove.source_bodies.includes(b.id));
     const usedOrigins = new Set((remaining.source_revisions as Revision[]).map(r => r.provenance.binding));
     const origins: RetiredSourceBindings = { id: SOURCE_ORIGINS_KEY, schema: 1, value: { version: 1,
         bindings: [...oldOrigins, ...bindings].filter(b => usedOrigins.has(b.id)) } };
@@ -83,7 +93,7 @@ export async function previewArchiveDeletion(lib: Library, branchId: string): Pr
         remaining.stories = data.stories.filter(s => s.id !== branch.story);
     }
     try {
-        validateData({ ...before, data: remaining, counts: Object.fromEntries(STORES.map(s => [s, remaining[s].length])) as Package['counts'] });
+        await validateCurrentData({ ...before, data: remaining, counts: Object.fromEntries(STORES.map(s => [s, remaining[s].length])) as Package['counts'] });
     } catch {
         throw new Error('这个档案的数据仍被其他分支引用，暂时不能删除；其他分支保持不变。');
     }

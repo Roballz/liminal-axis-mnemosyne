@@ -1,3 +1,5 @@
+> 1.4.0：正文当前视图、回复终态守卫、原生磁盘核心包备份和事件链批量成员编辑。DB3 / 核心包 v12 不兼容旧版写入；升级前保留旧包。备份依赖宿主原生 extension.store 能力，缺少接口时停用。详见 [使用说明](docs/daily-memory-user-guide.md)、[当前正文](docs/17-current-body-retention.md) 与 [原生备份](docs/18-native-core-backups.md)。
+
 > 2026-09-24：事件链改为楼层卡片手动归组，AI 只写概要；表列表新增按正文范围批量补表。档案分支操作统一为“继承档案”。状态仍为 implemented_unverified。详见 [使用说明](docs/daily-memory-user-guide.md)。
 
 # Mnemosyne 日用记忆 MVP（W-01）

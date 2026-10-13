@@ -17,7 +17,8 @@ test('108 legacy summaries can need review after one early role change; readonly
     const difference = await reviewDifference(lib, next, next.memories[107].id);
     expect(difference.kind).toBe('role');
     expect(difference.floor).toBe(0);
-    expect(difference.before?.excerpt).toBe(difference.after?.excerpt);
+    expect(difference.before?.excerpt).toBe('此旧版正文未保留');
+    expect(difference.after?.excerpt).toBeDefined();
     expect(difference.explanation).toContain('历史前缀');
     const events = await eventView(lib, next);
     expect(events).toMatchObject({ storedCount: 1, cards: [{ blocked: true }] });
@@ -64,7 +65,8 @@ test('same-text replacement reports identity mismatch without guessing that it i
     const next = await capture(lib, (await synchronize(lib, input)).id);
     const difference = await reviewDifference(lib, next, next.memories[0].id);
     expect(difference.kind).toBe('identity');
-    expect(difference.before?.excerpt).toBe(difference.after?.excerpt);
+    expect(difference.before?.excerpt).toBe('此旧版正文未保留');
+    expect(difference.after?.excerpt).toBeDefined();
     expect(await lib.all('reviews')).toHaveLength(0);
     expect((await statuses(lib, next)).get(view.memories[0].id)).toBe('needs_review');
     lib.close();

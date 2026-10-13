@@ -1,3 +1,4 @@
+import { readSource } from './current-body';
 import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import type { Library } from './db';
 import { snapshotRefs } from './canonical';
@@ -7,8 +8,8 @@ export interface ReviewDifference {
     kind: 'identity' | 'role' | 'text' | 'coverage' | 'dependency' | 'unknown';
     explanation: string;
     floor?: number;
-    before?: { role: Revision['role']; length: number; excerpt: string };
-    after?: { role: Revision['role']; length: number; excerpt: string };
+    before?: { role: Revision['role']; length?: number; excerpt: string };
+    after?: { role: Revision['role']; length?: number; excerpt: string };
 }
 
 /** Local, read-only evidence. Matching text never establishes message identity or compatibility. */
@@ -17,7 +18,7 @@ export async function reviewDifference(lib: Library, view: CapturedView, memoryI
     check(memory, '摘要已不在当前视图，请重新加载');
     if (memory.dependencies.length)
         return { kind: 'dependency', explanation: '这条高层摘要还依赖下级摘要版本。请先查看待审核的 L0 摘要；下级被替换或失效也会使上级待审核或需要重建。' };
-    return lib.transaction(['history_snapshots', 'manifest_blocks', 'source_revisions'], 'readonly', async tx => {
+    return lib.transaction(['history_snapshots', 'manifest_blocks', 'source_revisions', 'source_bodies'], 'readonly', async tx => {
         const basis = await tx.get<Snapshot>('history_snapshots', memory.basis);
         check(basis, '原摘要的来源快照缺失');
         const refs = await snapshotRefs(tx, basis);
@@ -28,16 +29,17 @@ export async function reviewDifference(lib: Library, view: CapturedView, memoryI
             const position = explicit ? positions.get(oldRef.message) : index;
             const nextRef = position === undefined ? undefined : view.refs[position];
             if (sourceRefMatches(view.branch, oldRef, nextRef)) continue;
-            const before = await tx.get<Revision>('source_revisions', oldRef.revision);
+            const descriptor = await tx.get<Revision>('source_revisions', oldRef.revision);
+            const before = await readSource(tx, oldRef.revision) ?? descriptor;
             check(before, '原正文版本缺失');
             const after = nextRef ? view.sources.get(nextRef.revision) : undefined;
             const kind = oldRef.message !== nextRef?.message ? 'identity' : before.role !== after?.role ? 'role' : 'text';
-            const oldChars = Array.from(before.content), newChars = Array.from(after?.content ?? '');
+            const oldChars = Array.from(before.content ?? ''), newChars = Array.from(after?.content ?? '');
             let offset = 0;
             while (offset < oldChars.length && offset < newChars.length && oldChars[offset] === newChars[offset]) offset++;
             const start = before.content === after?.content ? 0 : Math.max(0, offset - 24);
-            const preview = (source: Revision) => ({ role: source.role, length: Array.from(source.content).length,
-                excerpt: JSON.stringify(Array.from(source.content).slice(start, start + 100).join('')) });
+            const preview = (source: Revision) => ({ role: source.role, length: source.content === undefined ? undefined : Array.from(source.content).length,
+                excerpt: source.content === undefined ? '此旧版正文未保留' : JSON.stringify(Array.from(source.content).slice(start, start + 100).join('')) });
             const reason = kind === 'identity'
                 ? '来源消息身份或顺序不一致（也可能被删除）。即使文字相同也不能自动视为同一条消息；下方当前片段仅用于对照。'
                 : kind === 'role' ? '同一条消息的角色分类发生变化。' : '同一条消息的正文版本发生变化，片段从首个文字差异附近展示。';

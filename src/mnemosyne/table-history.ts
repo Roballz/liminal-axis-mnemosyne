@@ -1,3 +1,4 @@
+import { snapshotVariants } from './current-body';
 import type { Transaction } from './db';
 import { snapshotRefs } from './canonical';
 import { check, equal, row, type Branch, type Snapshot, type SourceRef, type TableCommit, type TableDef, type TableRow } from './model';
@@ -68,7 +69,7 @@ async function compatible(tx: Transaction, commit: TableCommit, refs: SourceRef[
     check(snapshot, '表格历史来源快照缺失');
     if (!equal((await snapshotRefs(tx, snapshot)).slice(0, commit.cutoff), refs.slice(0, commit.cutoff))) return false;
     // Legacy snapshots cannot attest a non-default swipe identity.
-    const old = snapshot.variants?.slice(0, commit.cutoff) ?? Array(commit.cutoff).fill(0);
+    const old = (await snapshotVariants(tx, snapshot)).slice(0, commit.cutoff);
     const next = variants?.slice(0, commit.cutoff) ?? Array(commit.cutoff).fill(0);
     return equal(old, next);
 }
@@ -110,6 +111,10 @@ export async function reconcileTableHistory(tx: Transaction, branch: Branch, ref
     const prior = (await tx.get<TableCommit>('table_history', branch.tableHead))!;
     const target = await compatibleTableHead(tx, prior.id, refs, variants);
     if (target?.id === prior.id) return;
+    // Repeated edits after the same rollback do not create another table transition.
+    // Real writes create a new write head, so their later rollback remains recorded.
+    if (prior.kind === 'restore' && prior.parent === (target?.id ?? null) &&
+        !prior.defs.length && !prior.rows.length && prior.gap === (!target || target.gap)) return;
     await adoptProjection(tx, branch, await tableStateAt(tx, target?.id ?? null));
     const commit: TableCommit = { ...row('th'), story: branch.story, branch: branch.id,
         previous: prior.id, parent: target?.id ?? null, snapshot: branch.head, cutoff: refs.length,

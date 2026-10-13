@@ -1,3 +1,4 @@
+import { readSource } from './current-body';
 import type { Library } from './db';
 import { snapshotRefs, type HostMessage } from './canonical';
 import { STORES, check, equal, type Binding, type Branch, type Mapping, type MemoryView, type Revision, type Snapshot } from './model';
@@ -30,7 +31,7 @@ export async function previewReconnect(lib: Library, branchId: string, scope: st
         check(refs.length > 0 && refs.length <= messages.length, '当前聊天比原档案短或原档案为空，不能作为改名接回');
         check(new Set(messages.map(m => m.key)).size === messages.length && messages.every(m => m.key), '当前聊天缺少唯一消息身份，不能只按文字接回');
         const mappings = new Map((await tx.all<Mapping>('message_mappings', 'owner', binding.id)).map(m => [m.hostKey, m.message]));
-        const revisions = await Promise.all(refs.map(ref => tx.get<Revision>('source_revisions', ref.revision)));
+        const revisions = await Promise.all(refs.map(ref => readSource(tx, ref.revision)));
         for (let i = 0; i < refs.length; i++) {
             const identityMatches = mappings.get(messages[i].key) === refs[i].message;
             const bodyMatches = revisions[i]?.content === messages[i].content;

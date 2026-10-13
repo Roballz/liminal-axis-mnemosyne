@@ -2,7 +2,7 @@ import type { SummaryTags } from '@/memory/contextTags';
 /** Daily-library v1 is independent of the older B provider's physical protocol. */
 export const SCHEMA = 1;
 export const STORES = [
-    'stories', 'branches', 'source_messages', 'source_revisions', 'history_snapshots',
+    'stories', 'branches', 'source_messages', 'source_revisions', 'source_bodies', 'history_snapshots',
     'manifest_blocks', 'host_bindings', 'message_mappings', 'memories', 'memory_revisions',
     'memory_views', 'reviews', 'event_chains', 'event_revisions', 'event_memberships',
     'event_progress', 'event_processing_receipts', 'custom_table_defs', 'custom_table_rows',
@@ -24,6 +24,8 @@ export interface Story extends Row {
     created: number;
 }
 export interface Branch extends Row {
+    /** Immutable pre-current-only chain; retained until separately authorized migration. */
+    legacyHead?: string;
     tableHead?: string;
     tableHistoryGap?: boolean;
     /** Explicit, branch-local confirmation; historical records remain immutable. */
@@ -52,7 +54,11 @@ export interface Revision extends Row {
     story: string;
     owner: string;
     role: 'user' | 'assistant' | 'system';
-    content: string;
+    /** Present only for legacy archival rows. Current-only text lives in source_bodies. */
+    content?: string;
+    bodySchema?: 1;
+    bodyHash?: string;
+    bodyLength?: number;
     fingerprint: string;
     provenance: {
         binding: string;
@@ -61,10 +67,18 @@ export interface Revision extends Row {
         swipe: number;
     };
 }
+export interface SourceBody extends Row {
+    story: string;
+    owner: string;
+    content: string;
+}
+export interface CurrentRevision extends Revision { content: string }
 export interface Block extends Row {
+    variants?: number[];
     entries: SourceRef[];
 }
 export interface Snapshot extends Row {
+    snapshotSchema?: 2;
     /** Observed host swipe indexes, not invented stable variant identities. */
     variants?: number[];
     story: string;
@@ -136,7 +150,7 @@ export interface CapturedView {
     snapshot: Snapshot;
     refs: SourceRef[];
     selection: MemoryView;
-    sources: Map<string, Revision>;
+    sources: Map<string, CurrentRevision>;
     memories: MemoryRevision[];
     cutoff: number;
 }

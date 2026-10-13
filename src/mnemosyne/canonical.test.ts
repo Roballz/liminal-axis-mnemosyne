@@ -25,7 +25,7 @@ describe('canonical identity and immutable selections', () => {
         expect(result).toEqual(branch);
         lib.close();
     });
-    test('editing an old floor archives a revision and requires review without rewriting provenance', async () => {
+    test('editing an old floor retires its body but keeps source evidence and requires review', async () => {
         const { lib, input, view } = await fixture();
         const original = view.memories[0];
         input.messages[1].content += '正文编辑';
@@ -33,7 +33,8 @@ describe('canonical identity and immutable selections', () => {
         const next = await capture(lib, branch.id);
         expect(next.refs[1].message).toBe(view.refs[1].message);
         expect(next.refs[1].revision).not.toBe(view.refs[1].revision);
-        expect((await lib.get<Revision>('source_revisions', view.refs[1].revision))?.content).toBe(view.sources.get(view.refs[1].revision)?.content);
+        expect((await lib.get<Revision>('source_revisions', view.refs[1].revision))?.bodyHash).toBe(view.sources.get(view.refs[1].revision)?.bodyHash);
+        expect(await lib.get('source_bodies', view.refs[1].revision)).toBeUndefined();
         expect((await statuses(lib, next)).get(original.id)).toBe('needs_review');
         expect(next.memories[0].inputRefs).toEqual([]);
         expect(next.memories[0].basis).toBe(original.basis);

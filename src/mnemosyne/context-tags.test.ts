@@ -34,7 +34,7 @@ it('标签随摘要版本导出恢复，纯标签编辑不破坏上层总结和�
     expect(text).toContain(`e1. [事件] 玉佩归还 · 最新进展：2026/9/25 10:30 ${output.latestProgress.text}`);
     expect(text).not.toContain(output.overview);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(11);
+    expect(pack.version).toBe(12);
     const restored = await restoreLibrary(pack, false);
     try { expect((await exportLibrary(restored)).data).toEqual(pack.data); } finally { restored.close(); }
 

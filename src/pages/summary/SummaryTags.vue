@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FloorEventAction from "@/components/FloorEventAction.vue";
 import { computed, inject, ref } from 'vue';
 import { SUMMARY_CTX } from './ctx';
 import ModalMask from '@/components/ModalMask.vue';
@@ -19,7 +20,7 @@ const tags = computed(() => {
 // One validated directory per page revision, never one full chat serialization per card.
 const events = inject(SUMMARY_CTX)!.events;
 const links = computed(() => [
-  ...(tags.value?.eventIds.length ? events.value.filter(e => tags.value!.eventIds.includes(e.id)).map(e => `事件 · ${e.title}`) : []),
+  ...(tags.value?.eventIds.length ? events.value.filter(e => tags.value!.eventIds.includes(e.id)).map(e => `相关事件 · ${e.title}`) : []),
 ]);
 const opened = ref(false), busy = ref(false), publicOnly = ref(false);
 const participants = ref(''), reason = ref(''), eventIds = ref<string[]>([]);
@@ -73,6 +74,7 @@ async function save() {
     </button>
     <button class="bbs-tag-public" type="button" :class="{ 'is-on': tags?.public }" :aria-pressed="!!tags?.public" :title="tags?.public?.reason || '标为公开并填写原因'" :disabled="busy" @click.stop="togglePublic">公开</button>
   </div>
+  <FloorEventAction :floor="floor" :leaf-id="leafId" />
   <div v-if="links.length" class="bbs-tag-links"><span v-for="link in links" :key="link">{{ link }}</span></div>
   <ModalMask :open="opened" @close="opened = false">
     <div class="bbs-modal bbs-tags-modal" role="dialog" aria-modal="true" :aria-label="publicOnly ? '公开理由' : '编辑摘要标签'" @click.stop>

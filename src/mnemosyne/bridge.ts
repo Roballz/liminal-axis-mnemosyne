@@ -1,3 +1,5 @@
+import { membershipProjection, type MembershipProjection } from './event-memberships';
+import { ReplyFinality, ReplyFinalityError } from './reply-finality';
 import { toast } from '@/st/toast';
 import { archiveWasDeleted, allowArchiveCreation, commitArchiveDeletion, type ArchiveDeletionPlan } from './archive-deletion';
 import { normalizeTags, type SummaryTags, type EventHint } from '@/memory/contextTags';
@@ -51,6 +53,7 @@ interface DailyCache {
     tableText: string;
     eventText: string;
     eventHints: EventHint[];
+    memberships: MembershipProjection;
     library: string;
     reviewCount: number;
 }
@@ -64,6 +67,11 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 let savedHost = '';
 let scheduledHost = '';
 const autoForkAttempted = new Set<string>();
+const replyFinality = new ReplyFinality(() => {
+    const ctx = getContext();
+    return { scope: hostScope(), chat: ctx?.chat ?? [], processor: ctx?.streamingProcessor,
+        errorLabel: `[${ctx?.translate?.('API Error', 'API Error') || 'API Error'}]` };
+});
 const MESSAGE_KEY = 'mnemosyne_message_v1';
 const BINDING_KEY = 'mnemosyne_binding_v1';
 const EVIDENCE_KEY = 'mnemosyne_summary_evidence_v1';
@@ -111,6 +119,7 @@ export function hostVersion(): string {
             m.extra?.[TABLE_OUTPUT_KEY],
         ]),
         memory.summaries,
+        replyFinality.revision,
     ]);
 }
 /** 只有引擎同步提交的可见近期补摘可以沿用版本；正文编辑始终得到新版本。 */
@@ -131,7 +140,7 @@ export function beginVisibleSummaryCommit(floor: number): () => void {
     // 既有记忆若实际依赖此楼，仍走完整失效；不把“可见”当成跳过来源校验的理由。
     if (!ref || projection.view.memories.some(m => m.anchor === ref.message ||
         [...m.inputRefs, ...m.coverage].some(r => r.message === ref.message))) return () => {};
-    const before = hostVersion();
+    const before = hostVersion(), originalText = message.mes;
     const version = parallelHost?.host === before ? parallelHost.version : before;
     return () => {
         if (getContext()?.chat !== ctx.chat || ctx.chat[floor] !== message || message.is_system || !leafValid(message)) return;
@@ -141,6 +150,7 @@ export function beginVisibleSummaryCommit(floor: number): () => void {
         if (!b || [0, 1, 3, 4].some(i => JSON.stringify(a[i]) !== JSON.stringify(b[i]))) return;
         prior[1][floor] = b;
         if (JSON.stringify(prior) !== after) return; // 不吞掉同时发生的其他楼/高层摘要修改。
+        replyFinality.reconcileDerived(floor, originalText);
         parallelHost = { host: after, version };
         injectionCache = { ...projection, host: after };
         scheduledHost = after;
@@ -152,7 +162,7 @@ export function beginVisibleSummaryCommit(floor: number): () => void {
 function appendedProjection(host: string): DailyCache | null {
     if (!injectionCache) return null;
     const before = JSON.parse(injectionCache.host), after = JSON.parse(host);
-    if (before[0] !== after[0] || JSON.stringify(before[2]) !== JSON.stringify(after[2]) ||
+    if (before[0] !== after[0] || before[3] !== after[3] || JSON.stringify(before[2]) !== JSON.stringify(after[2]) ||
         after[1].length <= before[1].length ||
         JSON.stringify(before[1]) !== JSON.stringify(after[1].slice(0, before[1].length))) return null;
     return { ...injectionCache, host };
@@ -227,6 +237,7 @@ export async function dailyBranch(): Promise<Branch | null> {
 
 /** Read-only review UI: reuse the archived projection after checking its exact live version. */
 export async function readDailyReview() {
+    if (!(await replyFinality.assertArchivable(false))()) throw new ReplyFinalityError();
     const host = hostVersion(), generation = dailyState.generation, lib = await activeLibrary();
     const branch = await dailyBranch();
     if (!branch) return null;
@@ -245,13 +256,33 @@ async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, vie
     const { cards, validity } = await eventView(lib, view);
     check(await current(lib, view), '事件状态已改变，请重试');
     const safe = cards.filter(c => !c.needsReview && !c.blocked);
-    return { validity, eventText: renderPersistentEvents(safe), eventHints: safe.map(c => ({
+    return { validity, memberships: membershipProjection(view, cards), eventText: renderPersistentEvents(safe), eventHints: safe.map(c => ({
         id: c.chain.id, title: c.meta.title, status: c.meta.status,
         latest: c.meta.latestProgress ? `${c.meta.latestProgress.time} ${c.meta.latestProgress.text}`.trim() : undefined,
     })) };
 }
 export function persistentEventText(): string {
     return readableProjection()?.eventText ?? '';
+}
+/** Read the already archived context without cold capture/synchronization or body reads.
+ * A cold/stale archive must finish its normal sync first; opening a picker never starts it.
+ */
+export async function readDailyMembershipContext() {
+    if (!(await replyFinality.assertArchivable(false))()) throw new ReplyFinalityError();
+    const host = hostVersion(), generation = dailyState.generation, lib = await activeLibrary();
+    const prior = cache ?? lastCache;
+    check(prior && prior.host === host && prior.library === lib.db.name &&
+        (getContext()?.chatMetadata[BINDING_KEY] as { branch?: string } | undefined)?.branch === prior.view.branch.id,
+        '档案尚未同步完成，请等待“已归档”后重试');
+    const branch = await lib.get<Branch>('branches', prior.view.branch.id);
+    check(branch && branch.head === prior.view.branch.head && branch.view === prior.view.branch.view,
+        '档案正在更新，请稍后重新打开');
+    check(host === hostVersion() && generation === dailyState.generation && lib === await activeLibrary(), '聊天已改变，请重新打开');
+    return { view: { ...prior.view, branch }, lib, host, generation };
+}
+/** UI membership is independent of recall eligibility; null means not currently verified. */
+export function currentMembershipHints(): MembershipProjection | null {
+    return readableProjection()?.memberships ?? null;
 }
 export function currentEventHints(): EventHint[] {
     return readableProjection()?.eventHints ?? [];
@@ -285,6 +316,16 @@ function projectView(view: CapturedView, validity: Map<string, MemoryStatus>) {
         reviewCount: [...validity.values()].filter((v) => v === 'needs_review' || v === 'needs_rebuild').length,
     };
 }
+/** Drain/serialize source synchronization during a library activation. This is not
+ * a global lock for independent event/table writers. Never await syncDaily inside
+ * action: any refresh belongs after this promise resolves. Settled errors do not
+ * prevent recovery merely because dailyState.pending remains latched. */
+export function serializeDailyActivation<T>(action: () => Promise<T>): Promise<T> {
+    const job = serial.catch(() => {}).then(action);
+    serial = job;
+    return job;
+}
+
 export async function syncDaily(): Promise<CapturedView> {
     const job = serial
         .catch(() => {})
@@ -292,6 +333,8 @@ export async function syncDaily(): Promise<CapturedView> {
             const ctx = getContext();
             const scope = hostScope();
             check(ctx && scope, '请先打开聊天');
+            if (!(await replyFinality.assertArchivable())()) throw new ReplyFinalityError();
+            check(getContext()?.chat === ctx.chat && hostScope() === scope, '聊天已改变');
             const lib = await activeLibrary();
             if (injectionCache?.library !== lib.db.name) injectionCache = null;
             if (await archiveWasDeleted(lib, scope)) {
@@ -407,6 +450,8 @@ export async function syncDaily(): Promise<CapturedView> {
                 dailyState.conflict = true;
                 throw new Error('聊天名称或绑定已改变：若只是改名，请接回原档案；若创建了新分支，请明确选择新故事或继承。不自动猜测分支。');
             }
+            if (!(await replyFinality.assertArchivable())()) throw new ReplyFinalityError();
+            check(getContext()?.chat === ctx.chat && hostScope() === scope, '聊天已改变');
             dailyState.conflict = false;
             const beforeIds = hostVersion();
             let dirty = false;
@@ -586,9 +631,10 @@ export async function syncDaily(): Promise<CapturedView> {
     serial = job;
     return job.catch((error) => {
         dailyState.pending = true;
-        dailyState.status = 'pending · 可重试';
+        dailyState.status = error instanceof ReplyFinalityError ? '回复未确认 · 暂不归档' : 'pending · 可重试';
         dailyState.error = String(error.message ?? error);
         cache = null;
+        if (error instanceof ReplyFinalityError) injectionCache = null;
         throw error;
     });
 }
@@ -725,6 +771,7 @@ export async function confirmBinding(branchId: string) {
     return reconnectArchive(await previewArchiveReconnect(branchId));
 }
 export function bindDaily() {
+    replyFinality.reset();
     installed = true;
     savedHost = '';
     scheduledHost = '';
@@ -733,30 +780,55 @@ export function bindDaily() {
     parallelHost = null;
     const ctx = getContext();
     if (!ctx) return;
-    const handlers: {
-        event: string;
-        callback: () => void;
-    }[] = [];
-    for (const key of [
-        'CHAT_CHANGED',
-        'MESSAGE_EDITED',
-        'MESSAGE_DELETED',
-        'MESSAGE_SWIPED',
-        'MESSAGE_SENT',
-        'CHARACTER_MESSAGE_RENDERED',
-        'GENERATION_ENDED',
-    ]) {
+    const handlers: { event: string; callback: (...args: any[]) => void }[] = [];
+    const on = (key: string, action?: (...args: any[]) => void | Promise<void>) => {
         const event = ctx.eventTypes[key];
-        if (event) {
-            ctx.eventSource.on(event, scheduleDaily);
-            handlers.push({ event, callback: scheduleDaily });
-        }
-    }
+        if (!event) return;
+        const callback = (...args: any[]) => {
+            if (!action) return scheduleDaily();
+            const result = action(...args);
+            if (key === 'STREAM_TOKEN_RECEIVED' && !result) return;
+            scheduleDaily(); // Revoke projection before any asynchronous receipt work.
+            if (result) return result.then(scheduleDaily, (error) => {
+                invalidateDaily('回复状态无法确认');
+                dailyState.error = String(error);
+            });
+        };
+        ctx.eventSource.on(event, callback);
+        handlers.push({ event, callback });
+    };
+    for (const key of ['MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_SENT']) on(key);
+    on('CHAT_CHANGED', () => replyFinality.reset());
+    on('GENERATION_STARTED', (...args) => replyFinality.start(...args));
+    on('STREAM_TOKEN_RECEIVED', () => replyFinality.streaming());
+    on('CHARACTER_MESSAGE_RENDERED', () => replyFinality.observe());
+    on('MESSAGE_RECEIVED', (floor) => replyFinality.received(floor));
+    on('GENERATION_STOPPED', () => replyFinality.stop());
+    on('GENERATION_ENDED', () => replyFinality.end());
+    on('MESSAGE_EDITED', (floor) => replyFinality.editStarted(floor));
+    // UPDATED must consume the trusted confirmation below; the event alone is not acceptance.
+    on('MESSAGE_UPDATED', (floor) => replyFinality.edited(floor));
+    // TT also emits EDITED/UPDATED for slash commands and automatic output revision.
+    // Only a real click on its confirmation button authorizes a quarantined fragment.
+    const confirmEdit = (event: Event) => {
+        if (!event.isTrusted) return;
+        const button = (event.target as Element | null)?.closest?.('.mes_edit_done');
+        if (!button) { replyFinality.cancelEdit(); return; }
+        const element = button.closest('.mes'), id = element?.getAttribute('mesid');
+        const editor = element?.querySelector<HTMLTextAreaElement>('.edit_textarea');
+        if (id !== null && id !== undefined && /^\d+$/.test(id) && editor) {
+            const ctx = getContext();
+            const text = ctx?.powerUserSettings?.trim_spaces ? editor.value.trim() : editor.value;
+            replyFinality.confirmEdit(Number(id), text);
+        } else replyFinality.cancelEdit();
+    };
+    if (typeof document !== 'undefined') document.addEventListener('click', confirmEdit, true);
     const unwatch = watch(() => derivedMeta.rev, scheduleDaily);
     scheduleDaily();
     return () => {
         installed = false;
         unwatch();
+        if (typeof document !== 'undefined') document.removeEventListener('click', confirmEdit, true);
         if (timer) clearTimeout(timer);
         for (const h of handlers) ctx.eventSource.off?.(h.event, h.callback);
         cache = null;
@@ -780,6 +852,8 @@ export function attachSummaryEvidence(
     if (!evidence) return;
     const leaf = getLeaf(chat[floor]);
     if (!leaf) return;
+    const original = evidence.view.sources.get(evidence.view.refs[floor]?.revision);
+    if (original && getContext()?.chat === chat) replyFinality.reconcileDerived(floor, original.content);
     const previous = chat[floor].extra![EVIDENCE_KEY] as { generationKey?: number } | undefined;
     delete chat[floor].extra![MANUAL_KEY];
     chat[floor].extra![EVIDENCE_KEY] = {

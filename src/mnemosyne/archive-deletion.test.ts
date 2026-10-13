@@ -110,3 +110,24 @@ test('parent can reuse a child-first exact source version; deleting the child re
     expect((await lib.get<any>('library_meta', 'retired-source-bindings')).value.bindings).toEqual([]);
     await exportLibrary(lib); lib.close();
 });
+
+test('editing a reused source after deleting its originating child retires body without breaking origin evidence', async () => {
+    const { lib, branch, input, view } = await fixture(1);
+    try {
+        input.memories = [];
+        const child = await forkBranch(lib, view, 'retired-origin-child');
+        const childInput = structuredClone(input); childInput.scope = 'retired-origin-child';
+        childInput.messages[0].content = '子线新正文';
+        await synchronize(lib, childInput);
+        const shared = (await capture(lib, child.id)).refs[0];
+        input.messages[0].content = childInput.messages[0].content;
+        await synchronize(lib, input);
+        await commitArchiveDeletion(lib, await previewArchiveDeletion(lib, child.id), () => true);
+        input.messages[0].content = '父线后续正文';
+        await synchronize(lib, input);
+        expect(await lib.get('source_bodies', shared.revision)).toBeUndefined();
+        const restored = await restoreLibrary(await exportLibrary(lib), false);
+        expect((await capture(restored, branch.id)).sources.size).toBe(2);
+        restored.close();
+    } finally { lib.close(); }
+});

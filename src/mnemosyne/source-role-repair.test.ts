@@ -72,7 +72,7 @@ test.each(['content', 'identity', 'swipe', 'role'])('same-text repair rejects an
     await confirmRoleRepairs(lib, view, candidates, () => true);
     const pack = await exportLibrary(lib);
     const old = pack.data.source_revisions.find(r => r.id === candidates[0].before.revision) as any;
-    if (kind === 'content') old.content += '不同正文';
+    if (kind === 'content') old.bodyHash = 'f'.repeat(64);
     if (kind === 'swipe') old.provenance.swipe++;
     if (kind === 'role') old.role = 'user';
     if (kind === 'identity') (pack.data.branches.find(r => r.id === view.branch.id) as any).sourceRoleRepairs[0].after = view.refs[3];

@@ -1,3 +1,4 @@
+import { readSource, snapshotVariants, retireCurrentBodies } from './current-body';
 import { ensureTableHistory, reconcileTableHistory, inheritTableHistory } from './table-history';
 import { eventView } from './events';
 import { inheritForkMemory } from './fork-memory';
@@ -83,14 +84,18 @@ export async function snapshotRefs(tx: Transaction, snapshot: Snapshot): Promise
 async function publishSnapshot(tx: Transaction, branch: Branch, refs: SourceRef[], variants?: number[]): Promise<string> {
     const prior = branch.head ? await tx.get<Snapshot>('history_snapshots', branch.head) : undefined;
     const old = prior ? await snapshotRefs(tx, prior) : [];
-    if (prior && equal(old, refs) && equal(prior.variants ?? Array(old.length).fill(0), variants ?? Array(refs.length).fill(0))) return prior.id;
+    const oldVariants = prior ? await snapshotVariants(tx, prior) : [];
+    const nextVariants = variants ?? Array(refs.length).fill(0);
+    if (prior && equal(old, refs) && equal(oldVariants, nextVariants)) return prior.id;
+    if (prior && prior.snapshotSchema !== 2 && !branch.legacyHead) branch.legacyHead = prior.id;
     const blocks: string[] = [];
     // Reuse unchanged 128-reference blocks; appends do not copy entire histories.
     for (let offset = 0; offset < refs.length; offset += 128) {
         const entries = refs.slice(offset, offset + 128);
-        if (prior && equal(entries, old.slice(offset, offset + 128))) blocks.push(prior.blocks[offset / 128]);
+        if (prior?.snapshotSchema === 2 && equal(entries, old.slice(offset, offset + 128)) &&
+            equal(nextVariants.slice(offset, offset + 128), oldVariants.slice(offset, offset + 128))) blocks.push(prior.blocks[offset / 128]);
         else {
-            const block: Block = { ...row('hm'), entries };
+            const block: Block = { ...row('hm'), story: branch.story, owner: `current:${branch.id}`, entries, variants: nextVariants.slice(offset, offset + 128) };
             await tx.add('manifest_blocks', block);
             blocks.push(block.id);
         }
@@ -99,11 +104,13 @@ async function publishSnapshot(tx: Transaction, branch: Branch, refs: SourceRef[
         ...row('hs'),
         story: branch.story,
         branch: branch.id,
-        previous: prior?.id ?? null,
+        snapshotSchema: 2,
+        owner: `current:${branch.id}`,
+        previous: null,
         blocks,
         length: refs.length,
         created: Date.now(),
-        ...(variants ? { variants } : {}),
+
     };
     await tx.add('history_snapshots', snapshot);
     return snapshot.id;
@@ -114,6 +121,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
         '消息映射身份重复，需要人工核对',
     );
     const hashes = await Promise.all(observation.messages.map((m) => fingerprint([m.role, m.content])));
+    const bodyHashes = await Promise.all(observation.messages.map((m) => fingerprint(m.content)));
     const memoryHashes = await Promise.all(observation.memories.map((m) => fingerprint(m)));
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const bindings = await tx.all<Binding>('host_bindings');
@@ -161,12 +169,14 @@ export async function synchronize(lib: Library, observation: HostObservation): P
             if (
                 !revision ||
                 revision.fingerprint !== hashes[i] ||
-                revision.content !== host.content ||
+                (revision.bodySchema === 1 ? revision.bodyHash !== bodyHashes[i] || revision.bodyLength !== host.content.length : revision.content !== host.content) ||
                 revision.role !== host.role
             ) {
                 const history = await tx.all<Revision>('source_revisions', 'owner', mapping.message);
                 revision = history.find(
-                    (r) => r.fingerprint === hashes[i] && r.content === host.content && r.role === host.role,
+                    (r) => r.story === branch.story && r.owner === mapping.message && r.provenance.hostKey === host.key &&
+                        r.fingerprint === hashes[i] && r.role === host.role && (r.bodySchema === 1
+                            ? r.bodyHash === bodyHashes[i] && r.bodyLength === host.content.length : r.content === host.content),
                 );
             }
             if (!revision) {
@@ -175,12 +185,16 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                     story: branch.story,
                     owner: mapping.message,
                     role: host.role,
-                    content: host.content,
+                    bodySchema: 1,
+                    bodyHash: bodyHashes[i],
+                    bodyLength: host.content.length,
                     fingerprint: hashes[i],
                     provenance: { binding: binding.id, hostKey: host.key, index: i, swipe: host.swipe },
                 };
                 await tx.add('source_revisions', revision);
             }
+            if (revision.bodySchema === 1 && priorSources.get(mapping.message)?.id !== revision.id) await tx.put('source_bodies', { id: revision.id, schema: 1,
+                story: branch.story, owner: mapping.message, content: host.content } as import('./model').SourceBody);
             const ref = { message: mapping.message, revision: revision.id };
             refs.push(ref);
             byHost.set(host.key, ref);
@@ -302,6 +316,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
         }
         if (oldHead !== branch.head || previous?.id !== branch.view) branch.epoch++;
         await tx.put('branches', branch);
+        if (oldHead !== branch.head) await retireCurrentBodies(tx, branch, priorRefs);
         return branch;
     });
 }
@@ -323,16 +338,16 @@ export async function capture(
         check(Number.isInteger(length) && length >= 0 && length <= refs.length, '截止点无效');
         // Queue independent requests together, rather than one native IDB round-trip per record.
         const [sourceRows, memoryRows] = await Promise.all([
-            Promise.all(refs.slice(0, length).map((ref) => tx.get<Revision>('source_revisions', ref.revision))),
+            Promise.all(refs.slice(0, length).map((ref) => readSource(tx, ref.revision))),
             Promise.all(
                 Object.values(selection.selections).map((key) => tx.get<MemoryRevision>('memory_revisions', key)),
             ),
         ]);
-        check(sourceRows.every(Boolean), '正文版本缺失');
+        check(sourceRows.every(Boolean), snapshot.id === branch.head ? '当前正文版本缺失' : '此历史版本的正文未保留；请选择当前分支正文');
         check(memoryRows.every(Boolean), '摘要版本缺失');
         const sources = new Map(sourceRows.map((r) => [r!.id, r!]));
         const memories = memoryRows as MemoryRevision[];
-        return { branch, snapshot, refs: refs.slice(0, length), selection, sources, memories, cutoff: length };
+        return { branch, snapshot: { ...snapshot, variants: await snapshotVariants(tx, snapshot) }, refs: refs.slice(0, length), selection, sources, memories, cutoff: length };
     });
 }
 export async function current(lib: Library, view: CapturedView): Promise<boolean> {
@@ -513,6 +528,7 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const liveParent = await tx.get<Branch>('branches', parent.branch.id);
         check(equal(liveParent, parent.branch), '父分支已改变，请重新选择分支');
+        for (const ref of parent.refs) check(await readSource(tx, ref.revision), '分叉来源正文已不再保留，请重新选择当前分支');
         for (const card of events.cards)
             check(equal(await tx.get('event_chains', card.chain.id), card.chain), '父事件已改变，请重新选择分支');
         check(guard(), '聊天已改变，请重新选择分支');

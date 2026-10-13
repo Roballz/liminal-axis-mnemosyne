@@ -14,7 +14,7 @@ import { invalidateSummaryAncestors } from '@/memory/apply';
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import { Library, activateLibrary, freshLibraryName } from './db';
-import { bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices, hiddenRoleRepairRefs, dailyBranch, previewArchiveReconnect, reconnectArchive, deleteDailyArchive, chooseNewStory, readDailyReview } from './bridge';
+import { serializeDailyActivation, beginVisibleSummaryCommit, bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices, hiddenRoleRepairRefs, dailyBranch, previewArchiveReconnect, reconnectArchive, deleteDailyArchive, chooseNewStory, readDailyReview } from './bridge';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
 import { type STContext, type STMessage } from '@/st/context';
@@ -357,7 +357,7 @@ test('legacy hidden-role misclassification recovers child events and highest sum
     expect(history).not.toContain('一级压缩');
     expect(await eventRows()).toEqual(recordsBefore);
     expect(await lib.all('memory_revisions')).toEqual(memoriesBefore);
-    expect(await lib.all('source_revisions')).toHaveLength(revisionCount);
+    expect(await lib.all('source_revisions')).toHaveLength(revisionCount - 1); // Unpinned transient role descriptor is reclaimed.
     expect(await lib.all('reviews')).toEqual([]);
     expect(await capture(lib, parent.branch.id)).toEqual(parent);
     // Fixing visibility must still reject an actual later source edit.
@@ -418,7 +418,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect((await syncDaily()).branch.sourceRoleRepairs).toHaveLength(1);
     expect(dailyState.review).toBe(0);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(11);
+    expect(pack.version).toBe(12);
     const restored = await restoreLibrary(pack);
     lib = restored;
     dispose?.(); dispose = bindDaily();
@@ -1070,4 +1070,143 @@ test('manual higher rebuild saves immediately when success preview is off', asyn
   expect(memory.summaries.find(s => s.id === 'high')!.text).toBe('直接重建');
   expect(summaryResponses[0].applied).toBe(true);
   expect(summaryResponseUi.selectedId).toBe(0);
+});
+
+function bindFinalityEvents() {
+    dispose?.();
+    const handlers = new Map<string, ((...args: any[]) => unknown)[]>();
+    const keys = ['GENERATION_STARTED', 'GENERATION_STOPPED', 'GENERATION_ENDED', 'CHARACTER_MESSAGE_RENDERED',
+        'MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_SENT', 'CHAT_CHANGED'];
+    ctx.eventTypes = Object.fromEntries(keys.map(key => [key, key])) as any;
+    ctx.eventSource = { on: (key, fn) => handlers.set(key, [...(handlers.get(key) ?? []), fn]), off: () => {} };
+    dispose = bindDaily();
+    return async (key: string, ...args: any[]) => { for (const callback of handlers.get(key) ?? []) await callback(...args); };
+}
+
+test('live and stopped candidates never publish a partial current body or expose the old archive as host-current', async () => {
+    const emit = bindFinalityEvents(), original = await syncDaily();
+    await emit('GENERATION_STARTED', 'normal');
+    expect((await syncDaily()).refs).toEqual(original.refs); // Generation interception can still archive stable prior context.
+    ctx.chat.push(message(true, '新问题'), message(false, '尚未完成正文'));
+    ctx.streamingProcessor = { messageId: 3, isFinished: false, isStopped: false, abortController: { signal: { aborted: false } } };
+    await emit('CHARACTER_MESSAGE_RENDERED', 3);
+    await expect(syncDaily()).rejects.toThrow('暂不归档');
+    expect((await capture(lib, original.branch.id)).refs).toEqual(original.refs);
+    expect(canonicalLeaves()).toEqual([]);
+    await expect(readDailyReview()).rejects.toThrow('暂不归档');
+    ctx.streamingProcessor.isFinished = true; ctx.streamingProcessor.abortController.signal.aborted = true;
+    await emit('GENERATION_ENDED'); await emit('MESSAGE_RECEIVED', 3);
+    await expect(syncDaily()).rejects.toThrow('暂不归档');
+    const exported = JSON.stringify(await exportLibrary(lib));
+    expect(exported).not.toContain('尚未完成正文');
+    expect(dailyState.error).toContain('暂不归档');
+});
+
+test('only trusted explicit confirmation click plus matching edit events accepts stopped text; automatic and synthetic saves do not', async () => {
+    let click: ((e: Event) => void) | undefined;
+    const remove = vi.fn();
+    vi.stubGlobal('document', { addEventListener: (event: string, callback: (e: Event) => void) => { if (event === 'click') click = callback; },
+        removeEventListener: remove, querySelector: () => null, getElementById: () => null });
+    const emit = bindFinalityEvents(); await syncDaily();
+    await emit('GENERATION_STARTED', 'normal'); ctx.chat.push(message(false, '手停保留片段'));
+    ctx.streamingProcessor = { messageId: 2, isFinished: true, abortController: { signal: { aborted: true } } };
+    await emit('GENERATION_ENDED'); await emit('MESSAGE_RECEIVED', 2);
+    const editor = { value: ctx.chat[2].mes };
+    const element = { getAttribute: () => '2', querySelector: () => editor };
+    const button = { closest: () => element };
+    const event = (trusted: boolean) => ({ isTrusted: trusted, target: { closest: () => button } }) as unknown as Event;
+    click!(event(false)); await emit('MESSAGE_EDITED', 2); await emit('MESSAGE_UPDATED', 2);
+    await expect(syncDaily()).rejects.toThrow('暂不归档');
+    click!(event(true)); // Trusted touch-generated click and mouse click share this native Event contract.
+    await emit('MESSAGE_EDITED', 2); await emit('MESSAGE_UPDATED', 2);
+    const saved = await syncDaily();
+    expect(saved.sources.get(saved.refs[2].revision)?.content).toBe('手停保留片段');
+    dispose?.(); expect(remove).toHaveBeenCalledWith('click', click, true);
+});
+
+test('a normal completed current generation archives, while an appended localized API marker quarantines the replacement', async () => {
+    const emit = bindFinalityEvents(); await syncDaily();
+    await emit('GENERATION_STARTED', 'normal'); ctx.chat.push(message(false, '完成后的新剧情'));
+    ctx.streamingProcessor = { messageId: 2, isFinished: true, abortController: { signal: { aborted: false } } };
+    await emit('GENERATION_ENDED'); await emit('MESSAGE_RECEIVED', 2);
+    const completed = await syncDaily(); expect(completed.refs).toHaveLength(3);
+    ctx.translate = () => 'API 错误';
+    await emit('GENERATION_STARTED', 'regenerate'); ctx.chat[2].mes = '部分故事\n[API 错误]\n请求失败';
+    ctx.streamingProcessor = { messageId: 2, isFinished: true, abortController: { signal: { aborted: false } } };
+    await emit('GENERATION_ENDED'); await emit('MESSAGE_RECEIVED', 2);
+    await expect(syncDaily()).rejects.toThrow('疑似 API 错误');
+    expect((await capture(lib, completed.branch.id)).refs).toEqual(completed.refs);
+    expect(canonicalLeaves()).toEqual([]);
+});
+
+test('completed reply receipt remains compatible with the verified visible-summary sidecar commit', async () => {
+    const emit = bindFinalityEvents(); await syncDaily();
+    await emit('GENERATION_STARTED', 'normal'); ctx.chat.push(message(false, '新剧情原文'));
+    ctx.streamingProcessor = { messageId: 2, isFinished: true, abortController: { signal: { aborted: false } } };
+    await emit('GENERATION_ENDED'); await emit('MESSAGE_RECEIVED', 2); await syncDaily();
+    const committed = beginVisibleSummaryCommit(2);
+    ctx.chat[2].extra!.bbs_leaf = { id: 'new-visible-summary', text: '经过验证的摘要', delta: {}, createdAt: 1, v: 1, swipe: 0 };
+    ctx.chat[2].mes += '<bbs_items>已提交旁注</bbs_items>';
+    committed();
+    const saved = await syncDaily();
+    expect(saved.sources.get(saved.refs[2].revision)?.content).toContain('已提交旁注');
+    expect(dailyState.pending).toBe(false);
+});
+
+test('leaving and returning to the same chat array cannot revive an old generation with a late received event', async () => {
+    const emit = bindFinalityEvents(), original = await syncDaily();
+    let chatId = 'synthetic'; ctx.getCurrentChatId = () => chatId;
+    await emit('GENERATION_STARTED', 'normal'); ctx.chat.push(message(false, '旧生成的未完成片段'));
+    ctx.streamingProcessor = { messageId: 2, isFinished: false, abortController: { signal: { aborted: false } } };
+    await emit('CHARACTER_MESSAGE_RENDERED', 2);
+    const savedMessages = [...ctx.chat];
+    chatId = 'other-chat'; ctx.chat.splice(0, ctx.chat.length, message(false, '另一个聊天'));
+    await emit('CHAT_CHANGED');
+    chatId = 'synthetic'; ctx.chat.splice(0, ctx.chat.length, ...savedMessages);
+    await emit('CHAT_CHANGED');
+    ctx.streamingProcessor.isFinished = true;
+    await emit('MESSAGE_RECEIVED', 2); await emit('GENERATION_ENDED');
+    await expect(syncDaily()).rejects.toThrow('暂不归档');
+    expect(dailyState.status).toBe('回复未确认 · 暂不归档');
+    expect((await capture(lib, original.branch.id)).refs).toEqual(original.refs);
+});
+
+test('library activation waits for the actual source writer and permits recovery after a settled failure', async () => {
+    const order: string[] = [];
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(ctx.saveChat).mockImplementationOnce(async () => {
+        order.push('writer'); enter(); await held; order.push('failed'); throw new Error('合成保存失败');
+    });
+    const writing = syncDaily();
+    const failed = expect(writing).rejects.toThrow('合成保存失败');
+    await entered;
+    const activation = serializeDailyActivation(async () => {
+        expect(dailyState.pending).toBe(true); // A settled error is not an active writer.
+        order.push('activation'); return 'new-library';
+    });
+    await Promise.resolve(); expect(order).toEqual(['writer']);
+    release(); await failed;
+    await expect(activation).resolves.toBe('new-library');
+    expect(order).toEqual(['writer', 'failed', 'activation']);
+    await expect(syncDaily()).resolves.toMatchObject({ refs: expect.any(Array) }); // Outside queue: no self-deadlock.
+});
+
+test('a surviving host binding with an empty active database can recover a valid package despite latched archive error', async () => {
+    const original = await syncDaily(), pack = await exportLibrary(lib), originalBinding = structuredClone(ctx.chatMetadata.mnemosyne_binding_v1);
+    const empty = await Library.open(freshLibraryName());
+    lib.close(); lib = empty; await activateLibrary(empty); invalidateDaily();
+    await expect(syncDaily()).rejects.toThrow('绑定已改变');
+    expect(dailyState.pending).toBe(true);
+    expect(ctx.chatMetadata.mnemosyne_binding_v1).toEqual(originalBinding);
+    await serializeDailyActivation(async () => {
+        const restored = await restoreLibrary(pack);
+        lib.close(); lib = restored;
+    });
+    invalidateDaily(); // Never sync recursively from the activation callback.
+    const recovered = await syncDaily();
+    expect(recovered.refs).toEqual(original.refs);
+    expect(recovered.branch.id).toBe(original.branch.id);
+    expect(dailyState.pending).toBe(false);
 });

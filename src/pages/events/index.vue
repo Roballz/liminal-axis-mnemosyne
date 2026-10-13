@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { openMemberships, membershipUi } from "@/mnemosyne/event-membership-ui";
 import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import { apiSettings } from "@/api/settings";
@@ -446,6 +447,7 @@ onBeforeUnmount(() => {
       >
         新建事件
       </button>
+      <button :disabled="!view || busy || loading || jobState.busy || manualEventState.busy || membershipUi.loading" @click="openMemberships()">批量加入摘要</button>
       <button v-if="!archiveMode" @click="showArchives(true)">归档事件</button>
     </div>
     <p v-if="!archiveMode" class="mn-muted">
@@ -583,7 +585,8 @@ onBeforeUnmount(() => {
               · 概要待更新</span
             ></span
           ><span class="mn-actions"
-            ><button
+            ><button :disabled="busy || jobState.busy || manualEventState.busy || membershipUi.loading" @click.stop.prevent="openMemberships({ eventId: card.chain.id })">批量加入</button>
+            <button
               :disabled="busy || jobState.busy"
               @click.stop.prevent="edit(card)"
             >

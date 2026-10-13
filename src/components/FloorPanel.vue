@@ -699,8 +699,9 @@ const groups = computed(() => [
           <span v-if="summarizingHere" class="bbs-fp-spinner"></span>
           <Icon v-else name="search" />
         </button>
-        <FloorEventAction :floor="floor" :disabled="busy || engineState.running || omit || !valid" />
+
       </header>
+      <div class="bbs-fp-events" @click.stop><FloorEventAction :floor="floor" :disabled="busy || engineState.running || omit || !valid" /></div>
 
       <!-- 卡片体 = 抽屉(grid 高度过渡) -->
       <div class="bbs-fp-drawer" :class="{ 'is-open': expanded }">
@@ -1453,4 +1454,8 @@ const groups = computed(() => [
     animation-duration: 1.4s;
   }
 }
+</style>
+
+<style scoped>
+.bbs-fp-events { padding: 0 10px 7px; max-width: 100%; }
 </style>

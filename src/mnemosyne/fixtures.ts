@@ -28,11 +28,34 @@ export async function batchFixture(count = 5) {
 
 /** Remove only fields unavailable in pre-table-history package fixtures. */
 export function withoutTableHistory(pack: import('./migration').Package) {
+    // Construct an actual old-format synthetic package, never just relabel v12 rows.
+    const bodies = new Map((pack.data.source_bodies ?? []).map(r => [r.id, r as import('./model').SourceBody]));
+    for (const revision of pack.data.source_revisions as import('./model').Revision[]) {
+        if (revision.bodySchema === 1) {
+            const body = bodies.get(revision.id);
+            if (!body) throw new Error('Legacy fixture requires retained source text');
+            revision.content = body.content;
+            delete revision.bodySchema; delete revision.bodyHash; delete revision.bodyLength;
+        }
+    }
+    delete (pack.data as Partial<typeof pack.data>).source_bodies;
+    delete (pack.counts as Partial<typeof pack.counts>).source_bodies;
     delete (pack.data as Partial<typeof pack.data>).table_history;
     delete (pack.counts as Partial<typeof pack.counts>).table_history;
     for (const branch of pack.data.branches as import('./model').Branch[]) {
-        delete branch.tableHead; delete branch.tableHistoryGap;
+        delete branch.tableHead; delete branch.tableHistoryGap; delete branch.legacyHead;
+        const snapshots = (pack.data.history_snapshots as import('./model').Snapshot[])
+            .filter(s => s.branch === branch.id && s.id !== branch.head).sort((a, b) => a.created - b.created || a.id.localeCompare(b.id));
+        const head = (pack.data.history_snapshots as import('./model').Snapshot[]).find(s => s.id === branch.head);
+        if (head) snapshots.push(head);
+        let previous: string | null = null;
+        for (const snapshot of snapshots) { snapshot.previous = previous; previous = snapshot.id; }
     }
-    for (const snapshot of pack.data.history_snapshots as import('./model').Snapshot[]) delete snapshot.variants;
+    for (const snapshot of pack.data.history_snapshots as import('./model').Snapshot[]) {
+        delete snapshot.variants; delete snapshot.snapshotSchema; delete snapshot.owner;
+    }
+    for (const block of pack.data.manifest_blocks as import('./model').Block[]) {
+        delete block.variants; delete block.owner;
+    }
     return pack;
 }

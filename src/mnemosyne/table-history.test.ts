@@ -196,12 +196,12 @@ test('new core backup rejects missing history, cross-branch heads and cyclic pre
     } finally { f.lib.close(); }
 });
 
-test('physical v1 upgrade adds history store without replacing existing object stores', async () => {
+test('physical v1 upgrade adds history and current body stores without replacing legacy data or allowing old writers', async () => {
     const name = freshLibraryName();
     await new Promise<void>((resolve, reject) => {
         const request = indexedDB.open(name, 1);
         request.onupgradeneeded = () => {
-            for (const store of STORES.filter(s => s !== 'table_history')) {
+            for (const store of STORES.filter(s => s !== 'table_history' && s !== 'source_bodies')) {
                 const native = request.result.createObjectStore(store, { keyPath: 'id' });
                 for (const key of ['story', 'branch', 'owner']) native.createIndex(key, key);
             }
@@ -210,8 +210,15 @@ test('physical v1 upgrade adds history store without replacing existing object s
         request.onsuccess = () => { request.result.close(); resolve(); }; request.onerror = () => reject(request.error);
     });
     const lib = await Library.open(name);
-    expect(lib.db.version).toBe(2); expect((await lib.get('stories', 'preserved'))?.id).toBe('preserved');
-    expect(await lib.all('table_history')).toEqual([]); lib.close();
+    expect(lib.db.version).toBe(3); expect((await lib.get('stories', 'preserved'))?.id).toBe('preserved');
+    expect(await lib.all('table_history')).toEqual([]);
+    expect(await lib.all('source_bodies')).toEqual([]); lib.close();
+    const oldOpenError = await new Promise<DOMException | null>(resolve => {
+        const old = indexedDB.open(name, 2);
+        old.onerror = () => resolve(old.error);
+        old.onsuccess = () => { old.result.close(); resolve(null); };
+    });
+    expect(oldOpenError?.name).toBe('VersionError');
 });
 
 test('child archive deletion removes only its table history and preserves parent restore path', async () => {
@@ -243,7 +250,7 @@ test('v10 backup enters baseline-only history and roundtrip never claims old val
             expect(view.branch.tableHistoryGap).toBe(true);
             expect(await readTables(restored, view.branch)).toEqual([]);
             const backup = await exportLibrary(restored);
-            expect(backup.version).toBe(11);
+            expect(backup.version).toBe(12);
             expect((backup.data.table_history as TableCommit[]).some(h => h.rows.some(r => r.values.v === '旧包最新值'))).toBe(true);
         } finally { restored.close(); }
     } finally { f.lib.close(); }

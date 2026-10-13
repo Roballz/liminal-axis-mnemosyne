@@ -6,7 +6,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
     schema: 1;
     created: number;
     excluded: string[];
@@ -23,13 +23,14 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
-    const base = { format: 'mnemosyne-daily' as const, version: 11 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 12 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
-    validateData(base);
+    await validateCurrentData(base);
     return { ...base, checksum: await fingerprint(base) };
 }
 const FIELDS: Record<Store, string[]> = {
     stories: ['created'], branches: ['head', 'view', 'epoch', 'fork'], source_messages: [],
+    source_bodies: ['content'],
     source_revisions: ['role', 'content', 'fingerprint', 'provenance'], history_snapshots: ['previous', 'blocks', 'length', 'created'],
     manifest_blocks: ['entries'], host_bindings: ['scope', 'generation', 'intent'], message_mappings: ['message', 'hostKey'],
     memories: ['hostId'], memory_revisions: ['content', 'fingerprint', 'basis', 'inputRefs', 'coverage', 'dependencies', 'declaration', 'level', 'anchor', 'storyTime', 'recall', 'visibility', 'seed', 'hostId'],
@@ -44,13 +45,20 @@ const FIELDS: Record<Store, string[]> = {
     library_meta: ['value'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
-    const stores: readonly Store[] = pack.version < 11 ? STORES.filter(s => s !== 'table_history') : STORES;
+    validateStructure(pack);
+}
+export async function validateCurrentData(pack: Omit<Package, 'checksum'>): Promise<void> {
+    validateStructure(pack, await validateBodyHashes(pack));
+}
+function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: ReadonlyMap<string, string> = new Map()) {
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    const stores: readonly Store[] = STORES.filter(s => !(s === 'table_history' && pack.version < 11) && !(s === 'source_bodies' && pack.version < 12));
     check(pack.data && Object.keys(pack.data).length === stores.length && Object.keys(pack.data).every(s => stores.includes(s as Store)), '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
-        const rows = store === 'table_history' && pack.version < 11 ? [] : pack.data[store];
-        check(Array.isArray(rows) && (store === 'table_history' && pack.version < 11 || rows.length === pack.counts[store]), `计数错误 ${store}`);
+        const omitted = !stores.includes(store);
+        const rows = omitted ? [] : pack.data[store];
+        check(Array.isArray(rows) && (omitted || rows.length === pack.counts[store]), `计数错误 ${store}`);
         maps[store] = new Map();
         for (const r of rows) {
             check(r && r.schema === 1 && typeof r.id === 'string' && r.id && !maps[store].has(r.id), `非法或重复ID ${store}`);
@@ -65,8 +73,10 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
             if (pack.version >= 10 && store === 'event_chains') optional.push('inheritance');
             if (pack.version >= 11 && store === 'branches') optional.push('tableHead', 'tableHistoryGap');
             if (pack.version >= 11 && store === 'history_snapshots') optional.push('variants');
+            if (pack.version >= 12) optional.push(...(store === 'source_revisions' ? ['bodySchema', 'bodyHash', 'bodyLength'] : store === 'history_snapshots' ? ['snapshotSchema'] : store === 'manifest_blocks' ? ['variants'] : store === 'branches' ? ['legacyHead'] : []));
+            const required = store === 'source_revisions' && (r as any).bodySchema === 1 && pack.version >= 12 ? FIELDS[store].filter(k => k !== 'content') : FIELDS[store];
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
-            check(Object.keys(r).every(k => fields.includes(k)) && FIELDS[store].every(k => k in r), `字段不合法 ${store}`);
+            check(Object.keys(r).every(k => fields.includes(k)) && required.every(k => k in r), `字段不合法 ${store}`);
             maps[store].set(r.id, r);
         }
     }
@@ -75,6 +85,13 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
         check(r && Object.keys(r).length === 2, 'SourceRef格式错误');
         const m = get('source_messages', r.message), v = get('source_revisions', r.revision);
         check(v.owner === m.id && v.story === m.story && (!story || m.story === story), '来源跨身份/故事');
+    };
+    const roleRevision = (id: string) => {
+        const revision = get('source_revisions', id);
+        const body = maps.source_bodies.get(id);
+        if (body) return { ...revision, content: body.content };
+        const digest = legacyDigests.get(id);
+        return digest ? { ...revision, bodySchema: 1, bodyHash: digest, bodyLength: revision.content.length } : revision;
     };
     const refs = (snapshot: any): any[] => snapshot.blocks.flatMap((b: string) => get('manifest_blocks', b).entries);
     for (const store of STORES)
@@ -104,19 +121,38 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
         }
     }
     for (const r of maps.source_revisions.values()) {
-        check(['user', 'assistant', 'system'].includes(r.role) && typeof r.content === 'string', '正文结构无效');
+        check(['user', 'assistant', 'system'].includes(r.role), '正文结构无效');
+        if (r.bodySchema !== undefined || r.bodyHash !== undefined || r.bodyLength !== undefined) {
+            check(r.bodySchema === 1 && !('content' in r) && typeof r.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(r.fingerprint) && typeof r.bodyHash === 'string' && /^[a-f0-9]{64}$/.test(r.bodyHash) && Number.isSafeInteger(r.bodyLength) && r.bodyLength >= 0, '正文描述符非法');
+        } else check(typeof r.content === 'string', '正文结构无效');
         check(get('source_messages', r.owner).story === r.story, '正文身份跨故事');
         const origin = maps.host_bindings.get(r.provenance.binding) ?? retiredBindings.get(r.provenance.binding);
         check(origin && origin.story === r.story, '正文来源绑定缺失或跨故事');
     }
+    const currentBodies = new Set<string>();
+    for (const branch of maps.branches.values()) for (const source of refs(get('history_snapshots', branch.head))) currentBodies.add(source.revision);
+    for (const body of maps.source_bodies.values()) {
+        check(currentBodies.has(body.id), '非当前正文载荷不得保留');
+        const revision = get('source_revisions', body.id);
+        check(Object.keys(body).every(k => ['id', 'schema', 'story', 'owner', 'content'].includes(k)) && revision.bodySchema === 1 && body.owner === revision.owner && body.story === revision.story && typeof body.content === 'string' && body.content.length === revision.bodyLength, '正文载荷非法');
+    }
     for (const r of maps.manifest_blocks.values()) {
         check(Array.isArray(r.entries) && r.entries.length <= 128, '历史块过大');
+        check(r.variants === undefined || Array.isArray(r.variants) && r.variants.length === r.entries.length && r.variants.every((v: unknown) => Number.isSafeInteger(v) && Number(v) >= 0), '块变体标记非法');
         for (const v of r.entries)
             ref(v);
     }
     for (const s of maps.history_snapshots.values()) {
         check(Array.isArray(s.blocks) && Number.isSafeInteger(s.length) && s.length >= 0, '快照结构非法');
         check(s.variants === undefined || Array.isArray(s.variants) && s.variants.length === s.length && s.variants.every((v: unknown) => Number.isSafeInteger(v) && Number(v) >= 0), '宿主变体标记非法');
+        check(s.snapshotSchema === undefined || s.snapshotSchema === 2 && s.owner === `current:${s.branch}` && s.previous === null && s.variants === undefined, '当前快照结构非法');
+        if (s.snapshotSchema === 2) {
+            check(typeof s.branch === 'string' && get('branches', s.branch).story === s.story, '当前快照分支非法');
+            for (const id of s.blocks) {
+                const block = get('manifest_blocks', id);
+                check(block.owner === s.owner && block.story === s.story, '当前快照块归属非法');
+            }
+        }
         const all = refs(s);
         check(all.length === s.length && new Set(all.map(r => r.message)).size === all.length, '快照计数/消息重复');
         for (const r of all)
@@ -135,10 +171,29 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
         check(get('history_snapshots', b.head).branch === b.id && get('memory_views', b.view).branch === b.id, 'Head/视图不属于分支');
         check(Number.isSafeInteger(b.epoch) && b.epoch >= 0, '分支版本非法');
         const reachable = new Set<string>();
-        let cursor = get('history_snapshots', b.head);
-        while (cursor) {
-            reachable.add(cursor.id);
-            cursor = cursor.previous ? get('history_snapshots', cursor.previous) : null;
+        const head = get('history_snapshots', b.head);
+        for (const source of refs(head)) {
+            const revision = get('source_revisions', source.revision);
+            check(revision.bodySchema !== 1 || maps.source_bodies.has(revision.id), '当前正文载荷缺失');
+        }
+        const roots = [head];
+        if (b.legacyHead !== undefined) {
+            const legacy = get('history_snapshots', b.legacyHead);
+            check(legacy.branch === b.id && legacy.snapshotSchema === undefined, '旧历史基线非法');
+            roots.push(legacy);
+        }
+        const pin = (id: string) => { const s = get('history_snapshots', id); if (s.branch === b.id && s.snapshotSchema === 2) roots.push(s); };
+        for (const snapshot of maps.history_snapshots.values()) if (snapshot.branch === b.id && snapshot.snapshotSchema === 2 && b.sourceRoleRepairs?.some((pair: any) => refs(snapshot).some(r => r.revision === pair.before.revision || r.revision === pair.after.revision))) roots.push(snapshot);
+        for (const branch of maps.branches.values()) if (branch.fork) pin(branch.fork.snapshot);
+        for (const memory of maps.memory_revisions.values()) pin(memory.basis);
+        for (const store of ['reviews', 'event_revisions', 'event_memberships', 'event_progress', 'event_processing_receipts', 'table_receipts', 'table_history'] as Store[])
+            for (const record of maps[store].values()) pin(record.snapshot);
+        for (const root of roots) {
+            let cursor = root;
+            while (cursor && !reachable.has(cursor.id)) {
+                reachable.add(cursor.id);
+                cursor = cursor.previous ? get('history_snapshots', cursor.previous) : null;
+            }
         }
         check([...maps.history_snapshots.values()].filter(s => s.branch === b.id).every(s => reachable.has(s.id)), '未提交孤立快照');
         if (b.sourceRoleRepairSchema !== undefined || b.sourceRoleRepairs !== undefined) {
@@ -150,7 +205,7 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
                 ref(pair.before, b.story); ref(pair.after, b.story);
                 const key = JSON.stringify([pair.before, pair.after]);
                 check(!pairs.has(key) && historical.has(pair.before.revision) && historical.has(pair.after.revision) &&
-                    isRoleOnlyPair(get('source_revisions', pair.before.revision), get('source_revisions', pair.after.revision)), '来源角色修复跨身份、正文或分支');
+                    isRoleOnlyPair(roleRevision(pair.before.revision), roleRevision(pair.after.revision)), '来源角色修复跨身份、正文或分支');
                 pairs.add(key);
             }
         }
@@ -371,7 +426,7 @@ export function validateData(pack: Omit<Package, 'checksum'>) {
 }
 export async function restoreLibrary(value: unknown, activate = true): Promise<Library> {
     const pack = value as Package;
-    validateData(pack);
+    await validateCurrentData(pack);
     const { checksum, ...base } = pack;
     check(typeof checksum === 'string' && await fingerprint(base) === checksum, '迁移包校验和错误');
     const lib = await Library.open(freshLibraryName());
@@ -392,4 +447,29 @@ export async function restoreLibrary(value: unknown, activate = true): Promise<L
         lib.close();
         throw error;
     } // no overwrite or automatic purge
+}
+
+/** Hashes are checked outside IDB before restore writes or returning an export. */
+async function validateBodyHashes(pack: Omit<Package, 'checksum'>): Promise<Map<string, string>> {
+    check(pack?.data && Array.isArray(pack.data.source_revisions) && Array.isArray(pack.data.branches), '迁移模块不完整');
+    const revisions = new Map(pack.data.source_revisions.map(r => [r.id, r as any]));
+    check(pack.data.source_bodies === undefined || Array.isArray(pack.data.source_bodies), '正文载荷非法');
+    for (const body of pack.data.source_bodies ?? []) {
+        const revision = revisions.get(body.id);
+        check(revision, `引用缺失 source_revisions/${body.id}`);
+        check(typeof (body as any).content === 'string', '正文载荷非法');
+        check(await fingerprint((body as any).content) === revision.bodyHash, '正文载荷摘要不匹配');
+        check(await fingerprint([revision.role, (body as any).content]) === revision.fingerprint, '正文角色摘要不匹配');
+    }
+    // Legacy text is never rewritten. Only role-repair endpoints need transient digests.
+    const legacyDigests = new Map<string, string>();
+    for (const branch of pack.data.branches as any[]) {
+        if (!Array.isArray(branch.sourceRoleRepairs)) continue;
+        for (const pair of branch.sourceRoleRepairs) for (const endpoint of [pair?.before, pair?.after]) {
+            const revision = revisions.get(endpoint?.revision);
+            if (revision?.bodySchema === undefined && typeof revision?.content === 'string' && !legacyDigests.has(revision.id))
+                legacyDigests.set(revision.id, await fingerprint(revision.content));
+        }
+    }
+    return legacyDigests;
 }

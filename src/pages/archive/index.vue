@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
+import CoreBackupPanel from '@/components/CoreBackupPanel.vue';
 import { shallowRef, ref, watch, computed, onBeforeUnmount } from 'vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import {
@@ -367,6 +368,7 @@ async function copyKnowledge() {
         <button :disabled="busy" @click="run(applyDeletion)">永久删除这个聊天档案</button>
       </div>
     </details>
+    <CoreBackupPanel />
     <details class="mn-card">
       <summary>数据包边界与恢复</summary>
       <p>核心包：正文/摘要及历史版本、事件与回执、自定义表、宿主映射、非秘密设置。</p>
@@ -422,7 +424,7 @@ async function copyKnowledge() {
           <strong>只读检查：{{ difference.value.floor !== undefined && difference.value.floor >= 0 ? `原来源楼层 #${difference.value.floor}` : '来源与依赖' }}</strong>
           <p>{{ difference.value.explanation }}</p>
           <template v-for="side in (['before', 'after'] as const)" :key="side">
-            <p v-if="difference.value[side]">{{ side === 'before' ? '原版本' : '当前对照' }} · {{ roleNames[difference.value[side]!.role] }} · {{ difference.value[side]!.length }} 字</p>
+            <p v-if="difference.value[side]">{{ side === 'before' ? '原版本' : '当前对照' }} · {{ roleNames[difference.value[side]!.role] }}<template v-if="difference.value[side]!.length !== undefined"> · {{ difference.value[side]!.length }} 字</template></p>
             <pre v-if="difference.value[side]">{{ difference.value[side]!.excerpt }}</pre>
           </template>
           <small>片段仅在本机显示；引号和反斜线用于显示换行、空格等差异。这里只展示首处差异，没有自动确认兼容。</small>

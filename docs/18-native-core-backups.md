@@ -1,0 +1,56 @@
+# 原生磁盘核心包备份
+
+状态：implemented_unverified。实现和合成测试不等于 Android 手机现场验收；未执行用户手机读写、恢复或清理。
+
+## 宿主契约
+
+按 Darkatse/TauriTavern 精确提交 `007abf7f1edfff275cf2a0182bf19179bcef087a` 核对：
+
+- [公共 Extension API](https://github.com/Darkatse/TauriTavern/blob/007abf7f1edfff275cf2a0182bf19179bcef087a/docs/API/Extension.md)
+- [前端适配](https://github.com/Darkatse/TauriTavern/blob/007abf7f1edfff275cf2a0182bf19179bcef087a/src/tauri/main/api/extension-store.js)
+- [原生仓库](https://github.com/Darkatse/TauriTavern/blob/007abf7f1edfff275cf2a0182bf19179bcef087a/src-tauri/crates/tt-adapter-storage-core/src/repositories/file_extension_store_repository.rs)
+
+使用 `window.__TAURITAVERN__.api.extension.store` 的 `setBlob/getBlob/listBlobKeys/deleteBlob/tryGetJson/setJson`。命名空间固定为 `mnemosyne-core-backups`，文件表为 `snapshots-v1`，设置表为 `settings-v1`。真实相对路径为 `data_root/_tauritavern/extension-store/mnemosyne-core-backups/blobs/snapshots-v1/`；不硬编码 Android 绝对路径。
+
+这是原生数据根目录中的独立文件，非 WebView IndexedDB/OPFS，也非插件安装目录。没有 HTTP 上传或云端兜底，没有修改 TT。宿主临时分块接收后原子发布单个文件；接口没有跨文件事务或断电持久化保证。原生删除没有垃圾箱。
+
+## 触发、轮换与边界
+
+- 默认关闭，用户在“档案 / 迁移 → 本机磁盘核心包备份”明确启用；启用说明本机明文存储和旧自动文件永久轮换。
+- 前台 30 秒稳定等待后检查；正常检查间隔至少 30 分钟，库内容摘要不变不写新文件。导出日期不参与内容摘要。
+- 归档 pending/error/conflict/tableError 时延后。前台隐藏或 pagehide 停止新工作，撤销后续轮换；已提交宿主的原生写入不能保证取消。
+- 写入失败按 5/10/20/30 分钟退避。仅一个定时器和一次在途检查，不累积每次消息变化的写入队列。
+- 每个源库独立银行：默认保留 10 份（可选 5 份）自动文件。文件名包含库哈希、时间、随机 UUID。恢复产生新库，不轮换原库银行。
+- 手动保存、新起点、固定副本及恢复前保护文件不自动删除，因此多个库或保护副本会令总数超过 10；面板展示已验证文件数量和总字节。没有自动清理历史库、插件目录或用户手动导出文件。
+- 只对本功能严格命名、封装归属、源库和完整校验均匹配的自动文件执行轮换。新文件完整读回验证、保留集逐份验证后才删除多余旧自动文件；任何验证或 I/O 异常都保留旧文件并显示警告。
+- 全空库、领域无效包、身份减少或当前分支消息消失均停止自动备份和轮换；当前正文替换不等于消息身份变化。合理删除后可明确手动保存为新起点，旧手动保护文件仍保留。
+
+## 一致性与恢复
+
+核心包复用 `exportLibrary()` 的全 store 单次 readonly 事务，之后做领域、正文哈希和包校验。封装再校验来源库、时间及内容摘要。任何读目录失败都不是空目录；设置读取损坏时只关闭自动写入，文件列表和明确恢复仍可使用。
+
+列表可由文件重建，不依赖一个全局索引。会话内只缓存已验证预览信息；选择恢复或固定时重新读全文件并验证。首次列表依次校验文件，避免同时持有全部备份。
+
+恢复需明确确认，先保护当前非空库，再通过 `restoreLibrary(value, false)` 写新库并验证；激活前重新核对页面、选择、原活动库、pending、generation/revision/tableRevision。原库不删除。保护当前库失败需要额外明确同意才能继续。恢复后的普通宿主归档同步会更新当前正文，确认框明确说明；磁盘所选快照保持原样。
+
+保护旧库和切换新库排在桥接既有 source-sync 串行队列中，等待真实写入结束；pending 错误锁存不被当成仍有写入。后续普通同步在退出队列边界后执行，避免自等待。没有引入覆盖所有派生写入的全局写锁：恢复守卫另外检测公开版本变化，原库保留。不得宣称这是所有宿主/插件写入的跨系统事务或全局暂停。
+
+## 大小与隐私
+
+仅核心包；不含知识库文件、字体、向量、API 密钥和宿主聊天文件。文件明文，仅通过本机原生接口落盘。应用卸载、清除 TT 数据或磁盘损坏仍可能删除它们，不替代异机备份。
+
+单文件安全上限 64 MiB（包含封装）；过大时停止写入/轮换并提示手动导出。宿主 API 未提供容量预检，不能声称已验证有足够剩余空间。全库一致导出、JSON 校验仍有整包内存成本，Android 真实峰值内存和低空间错误需现场单独验证。
+
+### TT 原生导出的范围
+
+精确版本的 [data_archive/export.rs](https://github.com/Darkatse/TauriTavern/blob/007abf7f1edfff275cf2a0182bf19179bcef087a/src-tauri/crates/tt-adapter-archive/src/data_archive/export.rs) 中，`run_export_data_archive` 递归遍历整个 `data_root`，排除项只有聊天备份临时文件和文档 `.staging`；因此这些核心包文件会落在完整 ZIP 的 `data/_tauritavern/extension-store/mnemosyne-core-backups/...`。这是固定源码结论，未做用户手机实导出验证。建议完成一次备份并停止写入后，再用 TT 完整数据导出，将 ZIP 另存到自己的安全位置；宿主导出不是本插件各文件的跨文件快照。
+
+单用户 `run_export_user_backup_archive` 的根目录仅为 `data_root/<handle>`（通常 `default-user`），不包含同级 `_tauritavern/extension-store`，不能替代上述完整导出。完整导出可能包含 `secrets.json` 等凭据，应作为敏感个人备份保管，不可公开分享。
+
+## 本轮验收
+
+专用 Vitest 覆盖默认关闭、精确 native API 门禁、固定命名空间、空库、不同库银行、时间间隔、内容去重、保留集损坏、磁盘满、写入读回损坏、列举/读取失败、数量/当前正文截短、文件名冲突、恢复版本守卫、等待期间过期、前后台/关闭与失败退避。测试只使用合成核心库和内存文件适配器。
+
+未运行：真实 TT Android 原生磁盘写入/读回、杀进程/断电、低空间手机、系统文件权限、原生 UI 点击和真实用户资料恢复。集成 typecheck/build/test 结果由最终交付回执记录，不以宿主源码分析替代手机 verified。
+
+2026-10-12 冻结副本集成结果：`vue-tsc --noEmit`、`npm run build` 通过；`npm test` 为 51 个文件 / 685 个 Vitest 测试通过，另有时间标签 810、向量深度 12、记忆回归 53 条断言通过。生产构建只有既有的大 chunk 提示。该副本包含 current-body、回复终态守卫、磁盘备份及恢复串行边界，不含其后新增的事件成员 UI。
