@@ -1,5 +1,5 @@
 import { engineActiveHere } from '@/api/settings';
-import { dailyInstalled, hostScope, syncDaily } from '@/mnemosyne/bridge';
+import { dailyInstalled, hostScope, syncDaily, preparePromptHistory } from '@/mnemosyne/bridge';
 import { getContext } from '@/st/context';
 import { handleGenerationIntercept } from './engine';
 import { refreshInjection } from './inject';
@@ -29,7 +29,14 @@ export async function prepareGeneration(abort: (immediately: boolean) => void, t
       refreshInjection();
     }
     await runVectorRecall();
-    sameChat();
+    if (!sameChat()) return;
+    // Optional recall may attempt another full sync. Recover the read-only prefix
+    // afterwards, without ever accepting the not-yet-created swipe as an archive.
+    if (engineActiveHere() && dailyInstalled()) {
+      const prepared = await preparePromptHistory(type);
+      if (!sameChat()) return;
+      if (prepared) refreshInjection();
+    }
   } catch (error) {
     if (!sameChat()) return;
     console.error('[柏宝书] 生成拦截器异常(放行本次生成)', error);

@@ -62,6 +62,8 @@ let cache: DailyCache | null = null;
 let lastCache: DailyCache | null = null;
 // 已验证的基础注入投影独立于正在写入的档案缓存；只沿已证明无关的变化续用。
 let injectionCache: DailyCache | null = null;
+// This grants historical text only, never current archive/body/table/recall access.
+let promptHistory: { allowed: Set<string>; current: () => boolean } | null = null;
 let parallelHost: { host: string; version: string } | null = null;
 let serial: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -183,6 +185,7 @@ export function hiddenRoleRepairRefs(view: CapturedView): SourceRef[] {
     });
 }
 export function invalidateDaily(reason = '档案视图已更新', hostNotification = false) {
+    promptHistory = null;
     const scope = hostScope();
     if (dailyState.scope !== scope) reason = '已切换聊天';
     scheduledHost = hostVersion();
@@ -224,8 +227,38 @@ export function dailyInstalled() {
 }
 export function summaryPermission(): (hostId: string) => boolean {
     if (!installed) return () => true;
-    const allowed = readableProjection()?.allowed ?? new Set<string>();
+    const allowed = readableProjection()?.allowed ?? (promptHistory?.current() ? promptHistory.allowed : new Set<string>());
     return (hostId) => allowed.has(hostId);
+}
+/** Restore only unaffected, verified history at the uncreated-swipe prompt boundary.
+ * The archive remains pending; this path performs no host or database writes. */
+export async function preparePromptHistory(type: string | undefined): Promise<boolean> {
+    if (type !== 'swipe' || !installed || readableProjection()) return false;
+    return serializeDailyActivation(async () => {
+        promptHistory = null;
+        const prior = lastCache, chat = getContext()?.chat, host = hostVersion(), epoch = bindingEpoch;
+        if (!prior || !chat) return false;
+        const prefix = await replyFinality.assertPromptPrefix(type);
+        if (!prefix) return false;
+        const before = JSON.parse(prior.host), after = JSON.parse(host);
+        // A different preceding message, summary payload or binding is not a swipe-only change.
+        if (before[0] !== after[0] || before[1].length !== after[1].length ||
+            prior.view.refs.length !== chat.length || JSON.stringify(before[2]) !== JSON.stringify(after[2]) ||
+            JSON.stringify(before[1].slice(0, prefix.cutoff)) !== JSON.stringify(after[1].slice(0, prefix.cutoff))) return false;
+        const library = activeLibrary(), lib = await library;
+        const currentHost = () => installed && bindingEpoch === epoch && getContext()?.chat === chat &&
+            hostVersion() === host && activeLibrary() === library && lastCache === prior && prefix.current() &&
+            (getContext()?.chatMetadata[BINDING_KEY] as { branch?: string; scope?: string } | undefined)?.branch === prior.view.branch.id &&
+            (getContext()?.chatMetadata[BINDING_KEY] as { scope?: string } | undefined)?.scope === hostScope();
+        if (!currentHost() || lib.db.name !== prior.library || await archiveWasDeleted(lib, hostScope())) return false;
+        const view = await capture(lib, prior.view.branch.id, prefix.cutoff);
+        if (!currentHost() || view.branch.head !== prior.view.branch.head || view.branch.view !== prior.view.branch.view ||
+            view.branch.epoch !== prior.view.branch.epoch) return false;
+        const validity = await statuses(lib, view);
+        if (!await current(lib, view) || !currentHost()) return false;
+        promptHistory = { allowed: projectView(view, validity).allowed, current: currentHost };
+        return true;
+    });
 }
 export function summaryAllowed(hostId: string): boolean {
     return summaryPermission()(hostId);
@@ -813,6 +846,7 @@ export function bindDaily() {
     scheduledHost = '';
     lastCache = null;
     injectionCache = null;
+    promptHistory = null;
     parallelHost = null;
     const ctx = getContext();
     if (!ctx) return;
@@ -893,6 +927,7 @@ export function bindDaily() {
         for (const h of handlers) ctx.eventSource.off?.(h.event, h.callback);
         cache = null;
         injectionCache = null;
+        promptHistory = null;
         parallelHost = null;
     };
     disposeDaily = dispose;
@@ -962,6 +997,7 @@ async function forkCurrentChat(parentId: string, prefixLength: number, ctx: NonN
     cache = null;
     lastCache = null;
     injectionCache = null;
+    promptHistory = null;
     check(guard(), '分支已保存；聊天已切换，请返回后刷新');
     ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
     await ctx.saveMetadata();

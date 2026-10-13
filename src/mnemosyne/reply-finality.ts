@@ -21,7 +21,7 @@ export interface ReplyHost {
 }
 interface Receipt { version: 1; epoch: number; scope: string; floor: number; swipe: number; hash: string; state: State }
 interface Run {
-    epoch: number; scope: string; chat: ReplyMessage[]; floor: number; page?: number;
+    epoch: number; scope: string; chat: ReplyMessage[]; floor: number; page?: number; type?: string;
     before?: { message: ReplyMessage; text: string; swipe: number };
     stopped: boolean; ended: boolean; received?: { message: ReplyMessage; text: string; swipe: number };
     processor?: ReplyHost['processor'];
@@ -55,7 +55,7 @@ export class ReplyFinality {
         const rewrites = ['swipe', 'regenerate', 'continue'].includes(type ?? '') && tail && assistant(tail);
         const floor = rewrites ? h.chat.length - 1 : h.chat.length;
         const m = h.chat[floor];
-        this.run = { epoch: ++this.epoch, scope: h.scope, chat: h.chat, floor,
+        this.run = { epoch: ++this.epoch, scope: h.scope, chat: h.chat, floor, type,
             ...(m ? { before: { message: m, text: m.mes, swipe: swipe(m) } } : {}),
             stopped: false, ended: false };
         this.revision++;
@@ -190,7 +190,27 @@ export class ReplyFinality {
         this.writes.add(write);
         void write.then(() => this.writes.delete(write), () => this.writes.delete(write));
     }
+    /** Read-only prompt use only. The uncreated last swipe is never archive evidence. */
+    async assertPromptPrefix(type: string | undefined) {
+        const run = this.current(), h = this.host(), cutoff = h.chat.length - 1;
+        const eligible = () => {
+            const now = this.host(), m = now.chat[cutoff], p = now.processor;
+            return type === 'swipe' && !!run && this.current(run) === run && run.type === 'swipe' &&
+                !run.ended && !run.stopped && run.floor === cutoff && cutoff > 0 && now.chat.length === cutoff + 1 &&
+                !!run.before && run.before.message === m && run.before.text === m.mes &&
+                run.before.swipe === swipe(m) && this.uncreatedSwipe(m) &&
+                !(p?.messageId === cutoff && !p.isFinished && !p.isStopped && !p.abortController?.signal?.aborted);
+        };
+        if (!eligible()) return null;
+        const unchanged = await this.assertRange(false, cutoff);
+        const current = () => eligible() && unchanged();
+        if (!current()) throw new ReplyFinalityError();
+        return { cutoff, current };
+    }
     async assertArchivable(observe = true) {
+        return this.assertRange(observe);
+    }
+    private async assertRange(observe: boolean, cutoff?: number) {
         await Promise.all([...this.writes]);
         if (observe) await this.observe();
         const h = this.host(), run = this.current(), revision = this.revision;
@@ -206,7 +226,7 @@ export class ReplyFinality {
                 snapshot.every((s, i) => now.chat[i] === s.message && s.text === s.message.mes && s.swipe === swipe(s.message) &&
                     s.role === assistant(s.message) && s.uncreated === this.uncreatedSwipe(s.message) && s.receipt === JSON.stringify(s.message.extra?.[REPLY_FINALITY_KEY]));
         };
-        for (let floor = 0; floor < h.chat.length; floor++) {
+        for (let floor = 0; floor < (cutoff ?? h.chat.length); floor++) {
             const m = h.chat[floor];
             if (!assistant(m)) continue;
             if (this.uncreatedSwipe(m)) throw new ReplyFinalityError();

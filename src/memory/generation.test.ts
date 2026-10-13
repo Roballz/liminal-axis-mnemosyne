@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@/api/settings', () => ({ engineActiveHere: () => mocks.active }));
 vi.mock('@/mnemosyne/bridge', () => ({ hostScope: () => mocks.scope,
-  dailyInstalled: () => mocks.installed, syncDaily: mocks.sync }));
+  dailyInstalled: () => mocks.installed, syncDaily: mocks.sync, preparePromptHistory: vi.fn().mockResolvedValue(false) }));
 vi.mock('@/st/context', () => ({ getContext: () => ({ chat: mocks.chat }) }));
 vi.mock('./engine', () => ({ handleGenerationIntercept: mocks.backlog }));
 vi.mock('./inject', () => ({ refreshInjection: mocks.refresh }));

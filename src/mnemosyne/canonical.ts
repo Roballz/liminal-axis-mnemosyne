@@ -472,7 +472,7 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
             }
             if (!memory) continue;
             if (review.reviewSchema !== 2) {
-                if (review.snapshot === view.snapshot.id) compatible.set(memory.id, review);
+                if (view.cutoff === view.snapshot.length && review.snapshot === view.snapshot.id) compatible.set(memory.id, review);
                 continue;
             }
             const approved = review.sourceRefs!;
