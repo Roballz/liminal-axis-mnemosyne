@@ -12,6 +12,7 @@ import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings
 import type { TaskType } from '@/api/settings';
 import type { STMessage, WorldInfoEntry } from '@/st/context';
 import { getContext, getCheckWorldInfo, getEjsTemplate, setMessageText } from '@/st/context';
+import { chatRenderBatch } from '@/st/render-batch';
 import { toast } from '@/st/toast';
 import { addSummary, classifyNpcPresence, deriveMemory, finalizeDelta, fmtVarOpsInline, getLeaf, invalidateSummaryAncestors, itemChangesOf, leafValid, makeLeafId, pruneBrokenComps, syncItemLogFromMessage } from './apply';
 import { extractJsonObject } from './json';
@@ -1999,17 +2000,54 @@ function reactToChatMutation(syncHidden = false): void {
  *  - MESSAGE_DELETED:同上,并同步一次滑动隐藏/取消隐藏。
  *  - CHAT_CHANGED:store 负责重载,这里刷新注入。
  */
-export function bindEngine(): void {
+let disposeEngine: (() => void) | undefined;
+export function bindEngine(): (() => void) | undefined {
+  disposeEngine?.();
   const ctx = getContext();
   if (!ctx?.eventSource || !ctx?.eventTypes) return;
   const es = ctx.eventSource;
   const et = ctx.eventTypes;
+  let active = true;
+  const handlers: { event: string; callback: (...args: any[]) => void }[] = [];
+  const watches: (() => void)[] = [];
+  const deferred = new Set<ReturnType<typeof setTimeout>>();
+  const rendered = chatRenderBatch(recomputeDerived);
+  const on = (event: string, callback: (...args: any[]) => void) => {
+    const guarded = (...args: any[]) => { if (active) callback(...args); };
+    es.on(event, guarded);
+    handlers.push({ event, callback: guarded });
+  };
+  const later = (action: () => void) => {
+    const chat = getContext()?.chat, scope = hostScope();
+    const timer = setTimeout(() => {
+      deferred.delete(timer);
+      if (active && getContext()?.chat === chat && hostScope() === scope) action();
+    }, 0);
+    deferred.add(timer);
+  };
+  const clearPending = () => {
+    rendered.cancel();
+    for (const timer of deferred) clearTimeout(timer);
+    deferred.clear();
+    if (reactTimer !== null) clearTimeout(reactTimer);
+    reactTimer = null;
+  };
+  const dispose = () => {
+    if (!active) return;
+    active = false;
+    clearPending();
+    for (const h of handlers) es.off?.(h.event, h.callback);
+    for (const stop of watches) stop();
+    if (typeof window !== 'undefined') window.removeEventListener?.('pagehide', dispose);
+  };
+  disposeEngine = dispose;
+  if (typeof window !== 'undefined') window.addEventListener?.('pagehide', dispose, { once: true });
 
   normalizeBacklogNotices(ctx.chat ?? []);
   console.log('[柏宝书] bindEngine 执行,监听', et.USER_MESSAGE_RENDERED, et.GENERATION_STARTED);
 
   // 发新消息:此刻末尾 AI 是「上一条已定稿」的回复,从最早缺口开始顺序追赶到它。
-  es.on(et.USER_MESSAGE_RENDERED, () => {
+  on(et.USER_MESSAGE_RENDERED, () => {
     console.log('[柏宝书] USER_MESSAGE_RENDERED → 摘上一条 AI');
     void maybeSummarizePrevAi(false);
   });
@@ -2019,7 +2057,7 @@ export function bindEngine(): void {
   // ⚠️ 这里放行的 type(quiet/impersonate/continue)必须与 handleGenerationIntercept 第一道闸严格一致——
   //    两者口径一旦不同步,重生/翻页会出现「补摘」与「正文生成」并行(见拦截器注释的「关键时序/口径」)。
   if (et.GENERATION_STARTED) {
-    es.on(et.GENERATION_STARTED, (type?: string, _opts?: unknown, dryRun?: boolean) => {
+    on(et.GENERATION_STARTED, (type?: string, _opts?: unknown, dryRun?: boolean) => {
       if (dryRun) return;
       if (type === 'quiet' || type === 'impersonate' || type === 'continue') return; // 非真实新回复
       const chat = getContext()?.chat ?? [];
@@ -2030,64 +2068,66 @@ export function bindEngine(): void {
   }
 
   // 以下三事件只让数据/UI 跟随,不主动生成摘要。
-  if (et.MESSAGE_SWIPED) es.on(et.MESSAGE_SWIPED, () => reactToChatMutation());
+  if (et.MESSAGE_SWIPED) on(et.MESSAGE_SWIPED, () => reactToChatMutation());
   // 编辑消息:先把该楼正文里 <bbs_items> 旁注的改动反向同步回叶子 delta(用户手改物品),
   // 再走通用善后(清坏链/重算/刷新)。延迟一拍确保 ST 已把编辑写回 chat[messageId].mes。
   if (et.MESSAGE_EDITED) {
-    es.on(et.MESSAGE_EDITED, (messageId?: number) => {
-      setTimeout(() => {
+    on(et.MESSAGE_EDITED, (messageId?: number) => {
+      later(() => {
         if (typeof messageId === 'number') {
           try { syncItemLogFromMessage(messageId); } catch (e) { console.warn('[柏宝书] 物品旁注反解析失败', e); }
         }
         reactToChatMutation();
-      }, 0);
+      });
     });
   }
-  if (et.MESSAGE_DELETED) es.on(et.MESSAGE_DELETED, () => reactToChatMutation(true));
+  if (et.MESSAGE_DELETED) on(et.MESSAGE_DELETED, () => reactToChatMutation(true));
 
   // AI 新回复落定:不一定会触发摘要(自动摘要关闭 / 它不是「上一条 AI」),
   // 但「未摘要楼层」列表必须跟上新增的 AI 楼,故无条件重算一次派生缓存(不发请求)。
-  if (et.CHARACTER_MESSAGE_RENDERED) es.on(et.CHARACTER_MESSAGE_RENDERED, () => recomputeDerived());
+  if (et.CHARACTER_MESSAGE_RENDERED) on(et.CHARACTER_MESSAGE_RENDERED, () => rendered.schedule());
 
   if (et.CHAT_CHANGED) {
-    es.on(et.CHAT_CHANGED, () => {
+    on(et.CHAT_CHANGED, () => {
+      clearPending();
       // 记忆重载由 store 的 CHAT_CHANGED 监听负责;此处仅在其后刷新注入
       clearRecallInjection('已切换聊天'); // 切聊天先抹掉上个聊天的召回残留
-      setTimeout(() => {
+      later(() => {
         normalizeBacklogNotices(getContext()?.chat ?? []);
         refreshInjection();
-      }, 0);
+      });
     });
   }
 
   // 总开关切换:关闭→清掉已注入的记忆槽(不动已隐藏楼层与已存摘要,符合「已有数据不处理」);
   // 开启→把当前记忆重新注入回上下文。仅响应切换,不在首帧触发。
-  watch(
+  watches.push(watch(
     () => apiSettings.enabled,
     on => (on ? refreshInjection() : clearInjection()),
-  );
+  ));
 
   // 自动摘要开关切换:时间标签(隐藏正则 + 固定提示词)随它启停,不再独立开关。
-  watch(
+  watches.push(watch(
     () => apiSettings.autoSummaryEnabled,
     () => {
       syncTimeTagRegex();
       refreshInjection();
     },
-  );
+  ));
 
   // 切换自动隐藏只刷新注入与召回缓存，不立即改动任何楼层隐藏状态。
-  watch(() => apiSettings.autoHideEnabled, () => {
+  watches.push(watch(() => apiSettings.autoHideEnabled, () => {
     invalidateRecallCache();
     clearRecallInjection('自动隐藏设置已改变');
     refreshInjection();
-  });
+  }));
 
   // 仅摘要模式切换后立即刷新持久化的 ST 提示槽;正文中的既有旁注不主动清理。
-  watch(
+  watches.push(watch(
     () => apiSettings.summaryOnlyMode,
     () => refreshInjection(),
-  );
+  ));
+  return dispose;
 }
 
 /** W-01: explicit, one-level rebuild; retained ancestors are not automatically regenerated. */

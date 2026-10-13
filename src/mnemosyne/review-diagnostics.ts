@@ -16,7 +16,7 @@ export interface ReviewDifference {
 export async function reviewDifference(lib: Library, view: CapturedView, memoryId: string): Promise<ReviewDifference> {
     const memory = view.memories.find(m => m.id === memoryId);
     check(memory, '摘要已不在当前视图，请重新加载');
-    if (memory.sourceRecovery) return { kind: 'unknown', explanation: '旧核心包中缺少这条摘要的生成基线。摘要正文和原来源标记已保留，但当前正文不能替代当时的生成证据。请核对后手动确认，或明确选择重新生成；不能直接批量保留。' };
+    if (memory.sourceRecovery) return { kind: 'unknown', explanation: '旧核心包中缺少这条摘要的生成基线。摘要正文和原来源标记已保留，但当前正文不能替代当时的生成证据。可在上方明确核对并保留当前 L0 摘要，另存人工确认版本；也可手动修订或明确选择重新生成。' };
     if (memory.dependencies.length)
         return { kind: 'dependency', explanation: '这条高层摘要还依赖下级摘要版本。请先查看待审核的 L0 摘要；下级被替换或失效也会使上级待审核或需要重建。' };
     return lib.transaction(['history_snapshots', 'manifest_blocks', 'source_revisions', 'source_bodies'], 'readonly', async tx => {

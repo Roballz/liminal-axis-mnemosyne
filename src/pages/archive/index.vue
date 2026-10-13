@@ -10,7 +10,7 @@ import {
   chooseNewStory,
   confirmFork,
   invalidateDaily,
-  dailyBranch,
+  readDailyReview,
   dailyCurrent,
   hostScope,
   hostVersion,
@@ -21,7 +21,7 @@ import {
 } from '@/mnemosyne/bridge';
 import { archiveDeletionChoices, previewArchiveDeletion, type ArchiveDeletionPlan } from '@/mnemosyne/archive-deletion';
 import { activeLibrary } from '@/mnemosyne/db';
-import { capture, statuses, keepSummary } from '@/mnemosyne/canonical';
+import { keepSummary } from '@/mnemosyne/canonical';
 import { reviewDifference, type ReviewDifference } from '@/mnemosyne/review-diagnostics';
 import { previewRoleRepairs, confirmRoleRepairs, type RoleRepairCandidate } from '@/mnemosyne/source-role-repair';
 import { exportLibrary, restoreLibrary } from '@/mnemosyne/migration';
@@ -89,6 +89,7 @@ function clearReviews() {
 watch(() => dailyState.scope, () => { clearReviews(); reconnectChoices.value = []; reconnectChoice.value = ''; reconnectPreview.value = null; error.value = ''; notice.value = ''; }, { flush: 'sync' });
 onBeforeUnmount(() => { disposed = true; clearReviews(); });
 async function run(fn: () => Promise<unknown>) {
+  if (busy.value) return;
   busy.value = true;
   error.value = '';
   notice.value = '';
@@ -159,15 +160,15 @@ async function applyDeletion() {
 async function loadReviews() {
   clearReviews();
   const ticket = reviewRun;
-  const stamp = { host: hostVersion(), generation: dailyState.generation, scope: hostScope(), library: await activeLibrary() };
   check(!dailyState.pending && !dailyState.conflict, '请等当前聊天归档完成后再读取；本按钮不会触发归档');
-  const branch = await dailyBranch();
-  check(branch, '当前聊天尚未绑定已有档案');
-  const view = await capture(stamp.library, branch.id);
-  const states = await statuses(stamp.library, view);
-  const valid = await dailyCurrent(view, stamp.host, stamp.generation) && stamp.library === await activeLibrary();
+  // Reuse the same exactly checked projection as the top review panel. Opening
+  // diagnostics must not clone every source body a second time after archival.
+  const result = await readDailyReview();
+  check(result, '当前聊天尚未绑定已有档案');
   if (disposed || ticket !== reviewRun) return;
-  check(valid && stamp.host === hostVersion() && stamp.generation === dailyState.generation, '聊天已改变，请重新加载待审核项');
+  const { view, validity: states, host, generation, lib: library } = result;
+  const stamp = { host, generation, scope: hostScope(), library };
+  check(host === hostVersion() && generation === dailyState.generation, '聊天已改变，请重新加载待审核项');
   reviewView.value = view;
   reviewStates.value = states;
   reviewStamp = stamp;
@@ -253,7 +254,7 @@ async function copyKnowledge() {
 </script>
 <template>
   <section class="mn-page">
-    <SummaryReviewPanel />
+    <SummaryReviewPanel :disabled="busy" />
     <h2>Mnemosyne 档案 / 迁移</h2>
     <p class="mn-muted">查看归档状态，备份或恢复本机资料。日常阅读和编辑摘要，请用原生摘要页。</p>
     <div class="mn-card mn-status" role="status">
@@ -430,8 +431,9 @@ async function copyKnowledge() {
           <small>片段仅在本机显示；引号和反斜线用于显示换行、空格等差异。这里只展示首处差异，没有自动确认兼容。</small>
         </div>
         <div class="mn-actions">
+          <p v-if="m.sourceRecovery">原生成基线缺失：请使用本页上方“核对并保留”按钮进行人工确认。</p>
           <button
-            v-if="['needs_review', 'needs_rebuild'].includes(reviewStates.get(m.id) ?? '')"
+            v-if="!m.sourceRecovery && ['needs_review', 'needs_rebuild'].includes(reviewStates.get(m.id) ?? '')"
             :disabled="busy"
             @click="run(() => review(m.id, 'keep'))"
           >

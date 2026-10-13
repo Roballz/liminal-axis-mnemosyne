@@ -93,9 +93,6 @@ function attachStyles(root: ShadowRoot): void {
 
 /* ============ 注入 / 清理 ============ */
 
-function currentChatLen(): number {
-  return getContext()?.chat?.length ?? 0;
-}
 function mesEl(idx: number): HTMLElement | null {
   return document.querySelector(`.mes[mesid="${idx}"]`);
 }
@@ -104,13 +101,16 @@ function activeNow(): boolean {
 }
 
 /** 给某楼注入 FloorPanel(幂等)。 */
-function injectFloor(idx: number): void {
+function injectFloor(idx: number, el: Element | null = mesEl(idx)): void {
   const chat = getContext()?.chat ?? [];
   if (!isRealAiReply(chat[idx])) return;
 
-  const el = mesEl(idx);
   if (!el) return;
-  if (el.getAttribute(MARK_ATTR) === '1' && mountedByFloor.has(idx)) return; // 已挂
+  const previous = mountedByFloor.get(idx);
+  if (previous?.host.isConnected && el.contains(previous.host)) return;
+  // TT may replace a message before the observer runs. Dispose the old app
+  // before replacing the map entry, otherwise detached reactive watchers leak.
+  if (previous) removeFloor(idx);
 
   // 移除该楼可能残留的旧 host(mesid 复用/重渲)
   el.querySelectorAll(`.${HOST_CLASS}`).forEach(n => n.remove());
@@ -153,43 +153,48 @@ function rebuildAll(): void {
   document.querySelectorAll(`.${HOST_CLASS}`).forEach(n => n.remove());
   document.querySelectorAll(`.mes[${MARK_ATTR}]`).forEach(n => n.removeAttribute(MARK_ATTR));
   if (!activeNow()) return;
-  const len = currentChatLen();
-  const chat = getContext()?.chat ?? [];
-  for (let i = 0; i < len; i++) if (isRealAiReply(chat[i])) injectFloor(i);
+  scanMissing(); // Only rendered messages need a DOM lookup / mounted panel.
 }
 
 /** 补挂 DOM 里已有 .mes 但尚未挂载的 AI 楼(首屏、批量加载)。 */
 function scanMissing(): void {
   if (!activeNow()) return;
+  // Clean detached apps first so this same pass can remount their replacement.
+  for (const [idx, mounted] of mountedByFloor) if (!mounted.host.isConnected) removeFloor(idx);
   const chat = getContext()?.chat ?? [];
   document.querySelectorAll('.mes[mesid]').forEach(el => {
     const idx = Number((el as HTMLElement).getAttribute('mesid'));
-    if (Number.isFinite(idx) && isRealAiReply(chat[idx]) && !mountedByFloor.has(idx)) injectFloor(idx);
+    if (Number.isFinite(idx) && isRealAiReply(chat[idx])) injectFloor(idx, el);
   });
 }
 
 /* ============ 事件 ============ */
 
-function onRendered(idx: unknown): void {
-  if (!activeNow()) return;
-  const i = Number(idx);
-  setTimeout(() => {
-    if (Number.isFinite(i)) injectFloor(i);
-    scanMissing(); // 兜底补漏
-    bumpTick(); // 摘要可能刚生成,通知已挂组件重读
-  }, 50);
+// Loading history can emit CHARACTER_MESSAGE_RENDERED once per visible message.
+// Merge the burst into one DOM scan and one shared reactive tick.
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let needsScan = false, needsTick = false, needsRebuild = false;
+function queueRefresh(scan: boolean, tick: boolean, rebuild = false, delay = 50): void {
+  if (!enabled || (!activeNow() && !rebuild)) return;
+  needsScan ||= scan; needsTick ||= tick; needsRebuild ||= rebuild;
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    const scan = needsScan, tick = needsTick, rebuild = needsRebuild;
+    needsScan = needsTick = needsRebuild = false;
+    // A chat switch must dispose the previous chat even when the destination
+    // excludes this engine. rebuildAll itself only remounts in an active chat.
+    if (rebuild) rebuildAll();
+    else if (activeNow() && scan) scanMissing();
+    if (activeNow() && tick) bumpTick();
+  }, delay);
 }
-
-function onSwiped(idx: unknown): void {
-  if (!activeNow()) return;
-  const i = Number(idx);
-  setTimeout(() => {
-    if (!Number.isFinite(i)) return;
-    // 翻页:叶子可能失效/换页,组件重读即可(host 不必重建)
-    if (!mountedByFloor.has(i)) injectFloor(i);
-    bumpTick();
-  }, 50);
+function cancelRefresh(): void {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = null; needsScan = needsTick = needsRebuild = false;
 }
+function onRendered(): void { queueRefresh(true, true); }
+function onSwiped(): void { queueRefresh(true, true); }
 
 function bindEvents(): void {
   const ctx = getContext();
@@ -202,47 +207,27 @@ function bindEvents(): void {
     bound.add(name);
   };
   on(et.CHARACTER_MESSAGE_RENDERED, onRendered);
-  on(et.USER_MESSAGE_RENDERED, () => activeNow() && setTimeout(scanMissing, 50));
+  on(et.USER_MESSAGE_RENDERED, () => queueRefresh(true, false));
   on(et.MESSAGE_SWIPED, onSwiped);
-  on(et.MESSAGE_DELETED, () => activeNow() && setTimeout(rebuildAll, 50));
-  on(et.MESSAGE_UPDATED, () => activeNow() && setTimeout(bumpTick, 50));
-  on(et.MESSAGE_EDITED, () => activeNow() && setTimeout(bumpTick, 50));
-  on(et.CHAT_CHANGED, () => setTimeout(rebuildAll, 80));
-  if (et.MORE_MESSAGES_LOADED) on(et.MORE_MESSAGES_LOADED, () => activeNow() && setTimeout(scanMissing, 50));
+  on(et.MESSAGE_DELETED, () => queueRefresh(true, true, true));
+  on(et.MESSAGE_UPDATED, () => queueRefresh(false, true));
+  on(et.MESSAGE_EDITED, () => queueRefresh(false, true));
+  on(et.CHAT_CHANGED, () => queueRefresh(true, true, true, 80));
+  if (et.MORE_MESSAGES_LOADED) on(et.MORE_MESSAGES_LOADED, () => queueRefresh(true, false));
 }
 
 /** 盯聊天区:ST 重渲消息时补挂被冲掉的 host。防抖避免流式生成期高频触发。 */
-let obTimer: ReturnType<typeof setTimeout> | null = null;
 function startObserver(): void {
   if (observer) return;
   const chatEl = document.getElementById('chat');
   if (!chatEl) return;
-  observer = new MutationObserver(() => {
-    if (!activeNow() || obTimer) return;
-    obTimer = setTimeout(() => {
-      obTimer = null;
-      if (!activeNow()) return;
-      scanMissing();
-      // 校正:host 已从 DOM 脱离(被 ST 重建)但仍在表里 → 卸掉,清标记待补挂
-      for (const [idx, m] of mountedByFloor) {
-        if (!m.host.isConnected) {
-          m.app.unmount();
-          mountedByFloor.delete(idx);
-          mesEl(idx)?.removeAttribute(MARK_ATTR);
-        }
-      }
-    }, 200);
-  });
+  observer = new MutationObserver(() => queueRefresh(true, false, false, 200));
   observer.observe(chatEl, { childList: true, subtree: true });
 }
-
 function stopObserver(): void {
   observer?.disconnect();
   observer = null;
-  if (obTimer) {
-    clearTimeout(obTimer);
-    obTimer = null;
-  }
+  cancelRefresh();
 }
 
 /* ============ 对外 ============ */

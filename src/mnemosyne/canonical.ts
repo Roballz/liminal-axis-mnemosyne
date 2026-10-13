@@ -72,6 +72,31 @@ export interface HostObservation {
     messages: HostMessage[];
     memories: HostMemory[];
 }
+/** Hash before the write transaction: exact tag-only host edits retain all selected provenance. */
+async function tagOnlyRevisions(lib: Library, observation: HostObservation) {
+    const selected = await lib.transaction(['host_bindings', 'branches', 'memory_views', 'memory_revisions'], 'readonly', async tx => {
+        const binding = (await tx.all<Binding>('host_bindings')).find(b => !b.detached && b.scope === observation.scope);
+        const branch = binding && await tx.get<Branch>('branches', binding.branch);
+        const selection = branch?.view && await tx.get<MemoryView>('memory_views', branch.view);
+        return selection ? await Promise.all(Object.values(selection.selections).map(id => tx.get<MemoryRevision>('memory_revisions', id))) : [];
+    });
+    const byHost = new Map(selected.filter((m): m is MemoryRevision => !!m).map(m => [m.hostId, m]));
+    const matches = await Promise.all(observation.memories.map(async host => {
+        const prior = byHost.get(host.hostId);
+        if (!prior || prior.level !== 0 || prior.dependencies.length || equal(prior.tags, host.tags)) return null;
+        // Production observations place optional tags after content. Preserve an existing slot,
+        // and support caller-built observations that placed that optional property at the end.
+        const entries = Object.entries(host).filter(([key]) => key !== 'tags');
+        const at = Object.keys(host).indexOf('tags');
+        const positions = at >= 0 ? [at] : [entries.findIndex(([key]) => key === 'content') + 1, entries.length];
+        const candidates = prior.tags === undefined ? [Object.fromEntries(entries)] : positions.map(position => {
+            const restored = entries.slice(); restored.splice(position, 0, ['tags', prior.tags]);
+            return Object.fromEntries(restored);
+        });
+        return (await Promise.all(candidates.map(fingerprint))).includes(prior.fingerprint) ? prior : null;
+    }));
+    return new Map(matches.filter((m): m is MemoryRevision => !!m).map(m => [m.hostId, m]));
+}
 export async function snapshotRefs(tx: Transaction, snapshot: Snapshot): Promise<SourceRef[]> {
     const refs: SourceRef[] = [];
     for (const key of snapshot.blocks) {
@@ -124,6 +149,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
     const hashes = await Promise.all(observation.messages.map((m) => fingerprint([m.role, m.content])));
     const bodyHashes = await Promise.all(observation.messages.map((m) => fingerprint(m.content)));
     const memoryHashes = await Promise.all(observation.memories.map((m) => fingerprint(m)));
+    const tagUpdates = await tagOnlyRevisions(lib, observation);
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const bindings = await tx.all<Binding>('host_bindings');
         let binding = bindings.find((b) => !b.detached && b.scope === observation.scope);
@@ -238,7 +264,11 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                 familyByHost.set(host.hostId, family);
             }
             let revision = selectedMemories.get(family.id);
-            if (!revision || revision.fingerprint !== memoryHashes[i]) {
+            if (revision && revision.fingerprint !== memoryHashes[i] && tagUpdates.get(host.hostId)?.id === revision.id) {
+                // Prefer the exact selected provenance over an older same-host-fingerprint row.
+                // Retagging back must not randomly select the original quarantined revision.
+                revision = undefined;
+            } else if (!revision || revision.fingerprint !== memoryHashes[i]) {
                 const revisions = await tx.all<MemoryRevision>('memory_revisions', 'owner', family.id);
                 revision = revisions.find((r) => r.fingerprint === memoryHashes[i]);
             }
@@ -269,7 +299,12 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                     hostId: host.hostId,
                 };
                 const prior = selectedMemories.get(family.id);
-                if (host.manualEdit && prior && !host.inputRefs) {
+                if (prior && tagUpdates.get(host.hostId)?.id === prior.id) {
+                    const { tags, ...original } = prior;
+                    revision = { ...original, id: revision.id, fingerprint: memoryHashes[i],
+                        ...(host.tags ? { tags: host.tags } : {}) };
+                }
+                else if (host.manualEdit && prior && !host.inputRefs) {
                     // A manual save explicitly confirms applicability to the currently displayed
                     // prefix. It does not recreate the lost generation evidence on the old revision.
                     const sources = prior.sourceRecovery
@@ -511,6 +546,55 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
 }
 export async function keepSummary(lib: Library, view: CapturedView, memoryId: string, guard: () => boolean = () => true) {
     return keepSummaries(lib, view, [memoryId], guard);
+}
+/** A new human applicability decision, never a replacement for missing generation evidence. */
+export async function confirmRecoveredSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true) {
+    check(view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length, '只能确认当前完整档案');
+    const requested = new Set(memoryIds), byId = new Map(view.memories.map(m => [m.id, m]));
+    const positions = new Map(view.refs.map((r, i) => [r.message, i]));
+    check(requested.size && requested.size === memoryIds.length, '请选择不重复的摘要');
+    const memories = memoryIds.map(id => byId.get(id));
+    check(memories.every((m): m is MemoryRevision => !!m && !!m.sourceRecovery && m.level === 0 &&
+        m.recall && m.visibility === 'public' && !!m.content.trim() && !m.dependencies.length &&
+        !!m.anchor && positions.has(m.anchor) &&
+        view.sources.get(view.refs[positions.get(m.anchor)!].revision)?.role === 'assistant'),
+    '只能人工确认当前已映射、可用的 L0 恢复摘要；其他摘要需分别处理');
+    check(new Set(memories.map(m => m.owner)).size === memories.length &&
+        new Set(memories.map(m => m.anchor)).size === memories.length, '摘要映射重复，请先核对');
+    return lib.transaction(STORES, 'readwrite', async tx => {
+        const branch = await tx.get<Branch>('branches', view.branch.id);
+        check(guard() && branch && branch.epoch === view.branch.epoch && branch.head === view.snapshot.id &&
+            branch.view === view.selection.id, '视图已改变，请刷新后重新确认');
+        const [snapshot, selection, stored] = await Promise.all([
+            tx.get<Snapshot>('history_snapshots', branch.head),
+            tx.get<MemoryView>('memory_views', branch.view),
+            Promise.all(memories.map(m => tx.get<MemoryRevision>('memory_revisions', m.id))),
+        ]);
+        check(snapshot && selection && equal(await snapshotRefs(tx, snapshot), view.refs) &&
+            stored.every((m, i) => equal(m, memories[i]) && selection.selections[memories[i].owner] === m!.id),
+        '摘要或正文已改变，请刷新后重新确认');
+        const revisions = memories.map(memory => {
+            const { sourceRecovery, ...original } = memory;
+            return { ...original, ...row('mr'), basis: snapshot.id,
+                // The shared fixed snapshot plus this anchor is the exact manual applicability
+                // prefix. Do not duplicate a long prefix into every recovered L0 revision.
+                inputRefs: [], coverage: [],
+                declaration: `人工核对恢复摘要：确认适用于当前楼层及此前正文；旧生成来源仍缺失，原摘要与来源声明保留（${memory.id}）。`,
+            } satisfies MemoryRevision;
+        });
+        // Retain the unchanged host fingerprint. A subsequent host observation must prefer this
+        // selected manual revision, without rewriting the host text, sidecar or original evidence.
+        const next: MemoryView = { ...row('mv'), branch: branch.id, selections: { ...selection.selections } };
+        for (const revision of revisions) next.selections[revision.owner] = revision.id;
+        await Promise.all(revisions.map(revision => tx.add('memory_revisions', revision)));
+        await tx.add('memory_views', next);
+        branch.view = next.id;
+        branch.epoch++;
+        await tx.put('branches', branch);
+        // One final live-host check for the whole batch, still inside the abortable transaction.
+        check(guard(), '视图已改变，未保存本次确认；请刷新后重新确认');
+        return revisions;
+    });
 }
 /** Explicit approval; immutable generation provenance is never rewritten. */
 export async function keepSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true) {

@@ -4,7 +4,7 @@
  *
  * 形态:一张与摘要页同源的卡片(.bbs-summary-card 语言)。
  *   - 卡片头(锚点):严格单行 —— 楼号 + 摘要预览 + 番外键 + 单楼摘要键。
- *   - 卡片体(抽屉):grid 0fr↔1fr 高度过渡(同 SummaryNode.vue,内容常驻不脱流,无闪烁)。
+ *   - 卡片体(抽屉):按需挂载，折叠时不创建隐藏的全文与变动标签。
  *     变动按类型分组、以「标签流」横向排列。
  *
  * 编辑:**逐条就地编辑**。点摘要正文 / 时间 / 地点 / 某条变动标签,就地展开该单元的输入框,
@@ -81,7 +81,7 @@ const summaryActionTitle = computed(() => {
 
 const previewText = computed(() => {
   if (omit.value) return '不计入记忆';
-  if (valid.value && leaf.value?.text) return leaf.value.text;
+  if (valid.value && leaf.value?.text) return leaf.value.text.length > 240 ? `${leaf.value.text.slice(0, 240)}…` : leaf.value.text;
   return valid.value ? '(无摘要正文)' : '待摘要';
 });
 const previewMuted = computed(() => omit.value || !(valid.value && leaf.value?.text));
@@ -706,7 +706,7 @@ const groups = computed(() => [
       <!-- 卡片体 = 抽屉(grid 高度过渡) -->
       <div class="bbs-fp-drawer" :class="{ 'is-open': expanded }">
         <div class="bbs-fp-drawer-inner">
-          <div class="bbs-fp-drawer-body">
+          <div v-if="expanded" class="bbs-fp-drawer-body">
             <p v-if="omit" class="bbs-fp-note">此楼已标为番外,以下数据不参与记忆;取消番外即恢复。</p>
 
             <template v-if="leaf">

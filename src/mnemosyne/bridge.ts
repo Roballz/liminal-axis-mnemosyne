@@ -10,6 +10,7 @@ import { TABLE_OUTPUT_KEY } from './summary-tables';
 /** The only daily-library module that observes the ST host. */
 import { reactive, watch } from 'vue';
 import { getContext, type STMessage } from '@/st/context';
+import { chatRenderBatch } from '@/st/render-batch';
 import { derivedMeta, memory } from '@/memory/store';
 import { getLeaf, leafValid } from '@/memory/apply';
 import { apiSettings } from '@/api/settings';
@@ -64,6 +65,9 @@ let injectionCache: DailyCache | null = null;
 let parallelHost: { host: string; version: string } | null = null;
 let serial: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | undefined;
+let bindingEpoch = 0;
+let automaticSync: Promise<unknown> | undefined;
+let automaticAgain = false;
 let savedHost = '';
 let scheduledHost = '';
 const autoForkAttempted = new Set<string>();
@@ -327,15 +331,22 @@ export function serializeDailyActivation<T>(action: () => Promise<T>): Promise<T
 }
 
 export async function syncDaily(): Promise<CapturedView> {
+    return syncDailyGuarded(() => true);
+}
+/** Automatic notifications may wait behind a writer; check their binding again
+ * when they actually start. Direct user/request-time sync keeps its own barrier. */
+async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> {
     const job = serial
         .catch(() => {})
         .then(async () => {
+            check(isActive(), '归档通知已取消');
             const ctx = getContext();
             const scope = hostScope();
             check(ctx && scope, '请先打开聊天');
             if (!(await replyFinality.assertArchivable())()) throw new ReplyFinalityError();
-            check(getContext()?.chat === ctx.chat && hostScope() === scope, '聊天已改变');
+            check(isActive() && getContext()?.chat === ctx.chat && hostScope() === scope, '聊天已改变');
             const lib = await activeLibrary();
+            check(isActive(), '归档通知已取消');
             if (injectionCache?.library !== lib.db.name) injectionCache = null;
             if (await archiveWasDeleted(lib, scope)) {
                 dailyState.conflict = true;
@@ -363,7 +374,7 @@ export async function syncDaily(): Promise<CapturedView> {
                         const validity = await statuses(lib, view),
                             inputs = await readTables(lib, live);
                         check(
-                            observedHost === hostVersion() && generation === dailyState.generation,
+                            observedHost === hostVersion() && isActive() && generation === dailyState.generation,
                             '聊天已改变，请重试',
                         );
                         cache = {
@@ -380,10 +391,10 @@ export async function syncDaily(): Promise<CapturedView> {
                         dailyState.revision++;
                     }
                     check(
-                        observedHost === hostVersion() && observedGeneration === dailyState.generation,
+                        observedHost === hostVersion() && isActive() && observedGeneration === dailyState.generation,
                         '聊天已改变，请重试',
                     );
-                    check(observedHost === hostVersion() && observedGeneration === dailyState.generation, '聊天已改变');
+                    check(observedHost === hostVersion() && isActive() && observedGeneration === dailyState.generation, '聊天已改变');
                     lastCache = injectionCache = cache;
                     Object.assign(dailyState, {
                         pending: false,
@@ -416,7 +427,7 @@ export async function syncDaily(): Promise<CapturedView> {
             // The host's explicit parent marker distinguishes a branch from a rename.
             if (!activeBinding && !inherited?.independent && typeof parentName === 'string' && parentName && !autoForkAttempted.has(attempt)) {
                 autoForkAttempted.add(attempt);
-                const guard = () => observedHost === hostVersion() && observedGeneration === dailyState.generation && getContext()?.chatMetadata === ctx.chatMetadata;
+                const guard = () => observedHost === hostVersion() && isActive() && observedGeneration === dailyState.generation && getContext()?.chatMetadata === ctx.chatMetadata;
                 try {
                     const owner = JSON.parse(scope)[0];
                     const candidates = bindings.filter(b => !b.detached && b.scope === JSON.stringify([owner, parentName]));
@@ -451,7 +462,7 @@ export async function syncDaily(): Promise<CapturedView> {
                 throw new Error('聊天名称或绑定已改变：若只是改名，请接回原档案；若创建了新分支，请明确选择新故事或继承。不自动猜测分支。');
             }
             if (!(await replyFinality.assertArchivable())()) throw new ReplyFinalityError();
-            check(getContext()?.chat === ctx.chat && hostScope() === scope, '聊天已改变');
+            check(isActive() && getContext()?.chat === ctx.chat && hostScope() === scope, '聊天已改变');
             dailyState.conflict = false;
             const beforeIds = hostVersion();
             let dirty = false;
@@ -543,7 +554,7 @@ export async function syncDaily(): Promise<CapturedView> {
                 delete ctx.chatMetadata.mnemosyne_ids_pending;
             }
             check(
-                scope === hostScope() && generation === dailyState.generation && host === hostVersion(),
+                scope === hostScope() && isActive() && generation === dailyState.generation && host === hostVersion(),
                 '聊天在归档期间改变，待重试',
             );
             ctx.chatMetadata.mnemosyne_archive_v1 = { status: 'pending', scope };
@@ -551,7 +562,7 @@ export async function syncDaily(): Promise<CapturedView> {
             const branch = await synchronize(lib, observation);
             savedHost = host;
             check(
-                scope === hostScope() && generation === dailyState.generation && host === hostVersion(),
+                scope === hostScope() && isActive() && generation === dailyState.generation && host === hostVersion(),
                 '归档已保存；界面已变化，请重试当前聊天',
             );
             ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
@@ -559,7 +570,7 @@ export async function syncDaily(): Promise<CapturedView> {
             await ctx.saveMetadata();
             let view = await capture(lib, branch.id);
             let validity = await statuses(lib, view);
-            check(host === hostVersion() && generation === dailyState.generation, '归档完成；当前视图已变化');
+            check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
             dailyState.tableError = '';
             const receipts = new Set((await lib.all('table_receipts', 'branch', branch.id)).map((r) => r.id));
             for (const [floor, message] of ctx.chat.entries()) {
@@ -578,13 +589,13 @@ export async function syncDaily(): Promise<CapturedView> {
                 const source = view.memories.find((m) => m.hostId === saved.leaf && validity.get(m.id) === 'valid');
                 if (!source) continue;
                 try {
-                    check(host === hostVersion() && generation === dailyState.generation, '聊天已改变');
+                    check(host === hostVersion() && isActive() && generation === dailyState.generation, '聊天已改变');
                     await commitSummaryTables(
                         lib,
                         view,
                         saved.plan,
                         [source.id],
-                        () => host === hostVersion() && generation === dailyState.generation,
+                        () => host === hostVersion() && isActive() && generation === dailyState.generation,
                     );
                 } catch (error) {
                     dailyState.tableError = `摘要已保存，#${floor} 楼填表待处理：${String((error as Error).message)}。可刷新重试；若表已改动，请重新生成该楼摘要以替代旧请求。`;
@@ -599,7 +610,7 @@ export async function syncDaily(): Promise<CapturedView> {
                 validity = await statuses(lib, view);
             }
             const inputs = await readTables(lib, view.branch);
-            check(host === hostVersion() && generation === dailyState.generation, '归档完成；当前视图已变化');
+            check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
             cache = {
                 view,
                 ...projectView(view, validity),
@@ -611,7 +622,7 @@ export async function syncDaily(): Promise<CapturedView> {
                     new Set(view.memories.filter((m) => validity.get(m.id) === 'valid').map((m) => m.id)),
                 ),
             };
-            check(host === hostVersion() && generation === dailyState.generation, '聊天已改变');
+            check(host === hostVersion() && isActive() && generation === dailyState.generation, '聊天已改变');
             lastCache = injectionCache = cache;
             Object.assign(dailyState, {
                 branch: branch.id,
@@ -630,6 +641,7 @@ export async function syncDaily(): Promise<CapturedView> {
         });
     serial = job;
     return job.catch((error) => {
+        if (!isActive()) throw error; // A superseded automatic job cannot change the new view.
         dailyState.pending = true;
         dailyState.status = error instanceof ReplyFinalityError ? '回复未确认 · 暂不归档' : 'pending · 可重试';
         dailyState.error = String(error.message ?? error);
@@ -669,9 +681,28 @@ export function scheduleDaily() {
     if (!installed) return;
     // 派生重算和宿主事件只是通知；同一内容重复通知不应撤销正在等待的召回。
     if (hostVersion() !== scheduledHost) invalidateDaily('当前聊天的正文或摘要已更新', true);
-    if (timer) clearTimeout(timer);
+    // First notification sets the deadline. Repeated renders must not postpone
+    // archiving indefinitely; syncDaily still captures/validates the latest body.
+    if (automaticSync) { automaticAgain = true; return; }
+    if (timer !== undefined) return;
+    const chat = getContext()?.chat, scope = hostScope(), epoch = bindingEpoch;
+    const current = () => installed && bindingEpoch === epoch && getContext()?.chat === chat && hostScope() === scope;
     timer = setTimeout(() => {
-        void syncDaily().catch(() => {});
+        timer = undefined;
+        if (!current()) return;
+        automaticAgain = false;
+        // Backpressure: at most one automatic job, even behind a slow writer.
+        // New notifications request just one latest-state pass after it settles.
+        const job = syncDailyGuarded(current).catch(() => {});
+        automaticSync = job;
+        void job.finally(() => {
+            if (automaticSync !== job) return;
+            automaticSync = undefined;
+            if (automaticAgain && installed) {
+                automaticAgain = false;
+                scheduleDaily();
+            }
+        });
     }, 200);
 }
 export async function dailyCapture(cutoff?: number) {
@@ -770,7 +801,12 @@ export async function reconnectArchive(preview: Awaited<ReturnType<typeof previe
 export async function confirmBinding(branchId: string) {
     return reconnectArchive(await previewArchiveReconnect(branchId));
 }
+let disposeDaily: (() => void) | undefined;
 export function bindDaily() {
+    disposeDaily?.();
+    bindingEpoch++;
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
     replyFinality.reset();
     installed = true;
     savedHost = '';
@@ -780,16 +816,33 @@ export function bindDaily() {
     parallelHost = null;
     const ctx = getContext();
     if (!ctx) return;
+    let active = true, eventEpoch = 0;
+    const rendered = chatRenderBatch(scheduleDaily);
     const handlers: { event: string; callback: (...args: any[]) => void }[] = [];
     const on = (key: string, action?: (...args: any[]) => void | Promise<void>) => {
         const event = ctx.eventTypes[key];
         if (!event) return;
         const callback = (...args: any[]) => {
+            if (!active) return;
+            if (key === 'CHAT_CHANGED') {
+                eventEpoch++;
+                bindingEpoch++;
+                rendered.cancel();
+                if (timer !== undefined) clearTimeout(timer);
+                timer = undefined;
+            }
             if (!action) return scheduleDaily();
+            const epoch = eventEpoch, chat = getContext()?.chat, scope = hostScope();
+            const current = () => active && epoch === eventEpoch && getContext()?.chat === chat && hostScope() === scope;
+            // Finality observation remains immediate. Only render-triggered
+            // whole-chat comparisons are batched; permissions and request-time
+            // sync still validate exact live content, without a timed cache.
+            const notify = key === 'CHARACTER_MESSAGE_RENDERED' ? () => rendered.schedule() : scheduleDaily;
             const result = action(...args);
             if (key === 'STREAM_TOKEN_RECEIVED' && !result) return;
-            scheduleDaily(); // Revoke projection before any asynchronous receipt work.
-            if (result) return result.then(scheduleDaily, (error) => {
+            notify();
+            if (result) return result.then(() => { if (current()) notify(); }, (error) => {
+                if (!current()) return;
                 invalidateDaily('回复状态无法确认');
                 dailyState.error = String(error);
             });
@@ -825,16 +878,26 @@ export function bindDaily() {
     if (typeof document !== 'undefined') document.addEventListener('click', confirmEdit, true);
     const unwatch = watch(() => derivedMeta.rev, scheduleDaily);
     scheduleDaily();
-    return () => {
+    const dispose = () => {
+        if (!active) return;
+        active = false;
+        bindingEpoch++;
+        automaticAgain = false;
+        rendered.cancel();
         installed = false;
         unwatch();
         if (typeof document !== 'undefined') document.removeEventListener('click', confirmEdit, true);
-        if (timer) clearTimeout(timer);
+        if (timer !== undefined) clearTimeout(timer);
+        timer = undefined;
+        if (typeof window !== 'undefined') window.removeEventListener?.('pagehide', dispose);
         for (const h of handlers) ctx.eventSource.off?.(h.event, h.callback);
         cache = null;
         injectionCache = null;
         parallelHost = null;
     };
+    disposeDaily = dispose;
+    if (typeof window !== 'undefined') window.addEventListener?.('pagehide', dispose, { once: true });
+    return dispose;
 }
 export async function captureSummaryEvidence(indices: number[], dependencies: string[] = []) {
     if (!installed) return null;
