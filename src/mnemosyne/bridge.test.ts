@@ -1,6 +1,8 @@
+import * as backupRuntime from './core-backup-runtime';
+import { CoreBackups } from './core-backups';
 import { summaryResponses, summaryResponseUi } from '@/memory/summary-response';
 import * as hostContext from '@/st/context';
-import { withoutTableHistory } from './fixtures';
+import { withoutTableHistory, observation } from './fixtures';
 import { summaryEditPrompt, prepareSummaryEditPrompt, resolveSummaryEdit, deferSummaryEdit, bindSummaryEditPrompt } from './summary-edit-prompt';
 import { previewArchiveDeletion } from './archive-deletion';
 import { fingerprint } from './model';
@@ -25,6 +27,7 @@ import { buildHistoryInjectionText, selectInjectionNodes } from '@/memory/inject
 let lib: Library, ctx: STContext, dispose: (() => void) | undefined;
 const message = (user: boolean, text: string): STMessage => ({ name: user ? 'User' : 'Character', is_user: user, is_system: false, mes: text, extra: {} });
 beforeEach(async () => {
+    backupRuntime.coreBackupState.enabled = false; backupRuntime.coreBackupState.available = false;
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => storage.set(k, v), removeItem: (k: string) => storage.delete(k) });
     Object.assign(memory, createEmptyMemory());
@@ -1209,4 +1212,151 @@ test('a surviving host binding with an empty active database can recover a valid
     expect(recovered.refs).toEqual(original.refs);
     expect(recovered.branch.id).toBe(original.branch.id);
     expect(dailyState.pending).toBe(false);
+});
+
+
+function enableDeletionDisk() {
+    const files = new Map<string, Blob>();
+    const disk = { list: vi.fn(async () => [...files.keys()]),
+        read: vi.fn(async (key: string) => files.get(key)!),
+        write: vi.fn(async (key: string, blob: Blob) => { files.set(key, blob); }),
+        remove: vi.fn(async (key: string) => { files.delete(key); }),
+        readSettings: vi.fn(async () => undefined), writeSettings: vi.fn(async () => {}) };
+    const backups = new CoreBackups(disk);
+    vi.spyOn(backupRuntime, 'getCoreBackups').mockResolvedValue(backups);
+    // The helper's lexical manager lookup is separately mocked at the method seam.
+    vi.spyOn(CoreBackups.prototype, 'protectCurrentDeletion').mockImplementation(function (library, expected, guard) {
+        return originalProtect.call(backups, library, expected, guard);
+    });
+    vi.spyOn(CoreBackups.prototype, 'protectArchiveDeletion').mockImplementation((library, plan, guard) => originalArchiveProtect.call(backups, library, plan, guard));
+    vi.spyOn(CoreBackups.prototype, 'completeArchiveDeletion').mockImplementation((library, plan, guard) => originalArchiveComplete.call(backups, library, plan, guard));
+    Object.assign(backupRuntime.coreBackupState, { enabled: true, available: true, settingsVerified: true });
+    return { disk, backups, files };
+}
+const originalProtect = CoreBackups.prototype.protectCurrentDeletion;
+const originalArchiveProtect = CoreBackups.prototype.protectArchiveDeletion;
+const originalArchiveComplete = CoreBackups.prototype.completeArchiveDeletion;
+
+test('deletion hook exports latest archived core before reconciliation without a previous scheduled file', async () => {
+    const old = await syncDaily();
+    const { disk, files } = enableDeletionDisk();
+    // getCoreBackups lexical lookup needs a native adapter, with the same fake files.
+    vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store: {
+        listBlobKeys: async () => [...files.keys()], getBlob: async ({ key }: any) => files.get(key),
+        setBlob: async ({ key, data }: any) => disk.write(key, data), deleteBlob: async () => {},
+        tryGetJson: async () => ({ found: true, value: { schema: 1, enabled: true, keep: 10 } }), setJson: async () => {},
+    } } } });
+    const warning = vi.fn(); Object.assign(window, { toastr: { warning } });
+    ctx.chat.pop(); invalidateDaily();
+    const current = await syncDaily();
+    expect(current.refs).toHaveLength(1); expect(current.memories).toHaveLength(0);
+    expect(files.size).toBe(1);
+    const pack = JSON.parse(await [...files.values()][0].text()).pack;
+    expect(pack.data.source_bodies.some((b: any) => b.id === old.refs[1].revision)).toBe(true);
+    expect(pack.data.memory_revisions.some((m: any) => m.id === old.memories[0].id)).toBe(true);
+    expect(await lib.get('source_bodies', old.refs[1].revision)).toBeUndefined();
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('应用本次删除前'), '柏宝书', { escapeHtml: true });
+});
+
+test('failed deletion protection leaves old body/head and explicit retry resumes once verified', async () => {
+    const old = await syncDaily(); const { disk, backups } = enableDeletionDisk();
+    disk.write.mockRejectedValueOnce(new Error('ENOSPC'));
+    ctx.chat.pop(); invalidateDaily();
+    await expect(syncDaily()).rejects.toThrow('删除前保护未完成');
+    expect((await lib.get<any>('branches', old.branch.id)).head).toBe(old.branch.head);
+    expect(await lib.get('source_bodies', old.refs[1].revision)).toBeDefined();
+    backupRuntime.retryDeletionProtection();
+    const current = await syncDaily(); expect(current.refs).toHaveLength(1);
+    expect((await backups.inventory()).entries).toHaveLength(1);
+});
+
+test('host changes during deletion disk IO cannot apply stale deletion', async () => {
+    const old = await syncDaily(); const { disk, files } = enableDeletionDisk();
+    disk.write.mockImplementationOnce(async (key, blob) => { files.set(key, blob); ctx.chat.push(message(false, '新的回复')); });
+    ctx.chat.pop(); invalidateDaily();
+    await expect(syncDaily()).rejects.toThrow();
+    expect((await lib.get<any>('branches', old.branch.id)).head).toBe(old.branch.head);
+    expect(await lib.get('source_bodies', old.refs[1].revision)).toBeDefined();
+});
+
+test('empty observation and regenerated identities cannot erase the current archive', async () => {
+    const old = await syncDaily(); const { disk } = enableDeletionDisk();
+    ctx.chat = []; invalidateDaily(); await expect(syncDaily()).rejects.toThrow('无法确认正常删除');
+    ctx.chat = [message(true, '替代消息')]; invalidateDaily(); await expect(syncDaily()).rejects.toThrow('无法确认正常删除');
+    expect((await lib.get<any>('branches', old.branch.id)).head).toBe(old.branch.head);
+    expect(disk.write).not.toHaveBeenCalled();
+});
+
+test('refresh bursts after deletion export once; append and unchanged refreshes never export protection', async () => {
+    await syncDaily(); const { disk } = enableDeletionDisk();
+    ctx.chat.push(message(true, '新增问题')); invalidateDaily();
+    await Promise.all(Array.from({ length: 20 }, () => syncDaily()));
+    expect(disk.write).not.toHaveBeenCalled();
+    ctx.chat.pop(); invalidateDaily();
+    await Promise.all(Array.from({ length: 20 }, () => syncDaily()));
+    expect(disk.write).toHaveBeenCalledTimes(1);
+    await Promise.all(Array.from({ length: 20 }, () => syncDaily()));
+    expect(disk.write).toHaveBeenCalledTimes(1);
+});
+
+test('render bursts after protection failure do not repeatedly export; manual retry clears cooldown', async () => {
+    await syncDaily(); const { disk } = enableDeletionDisk();
+    disk.write.mockRejectedValue(new Error('ENOSPC'));
+    const protect = vi.mocked(CoreBackups.prototype.protectCurrentDeletion);
+    ctx.chat.pop(); invalidateDaily();
+    for (let i = 0; i < 20; i++) await expect(syncDaily()).rejects.toThrow('删除前保护未完成');
+    expect(protect).toHaveBeenCalledTimes(1); expect(disk.write).toHaveBeenCalledTimes(1);
+    backupRuntime.retryDeletionProtection();
+    await expect(syncDaily()).rejects.toThrow('删除前保护未完成');
+    expect(protect).toHaveBeenCalledTimes(2);
+});
+
+test('pending native write keeps the old archive intact until protection readback completes', async () => {
+    const old = await syncDaily(); const { disk, files } = enableDeletionDisk();
+    let release!: () => void, started!: () => void;
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    disk.write.mockImplementationOnce(async (key, value) => {
+        started(); await new Promise<void>(resolve => { release = resolve; }); files.set(key, value);
+    });
+    ctx.chat.pop(); invalidateDaily(); const job = syncDaily();
+    await entered;
+    expect((await lib.get<any>('branches', old.branch.id)).head).toBe(old.branch.head);
+    expect(await lib.get('source_bodies', old.refs[1].revision)).toBeDefined();
+    release(); expect((await job).refs).toHaveLength(1);
+});
+
+
+test('explicit archive-delete entry protects before mutation and resumes the remaining current archive', async () => {
+    const current = await syncDaily();
+    const disposable = await canonical.synchronize(lib, observation(1, 'disposable-test-archive'));
+    const plan = await previewArchiveDeletion(lib, disposable.id);
+    const { disk, backups } = enableDeletionDisk();
+    disk.write.mockRejectedValueOnce(new Error('ENOSPC'));
+    await expect(deleteDailyArchive(lib, plan, () => true)).rejects.toThrow('ENOSPC');
+    expect(await lib.get('branches', disposable.id)).toBeDefined();
+    await deleteDailyArchive(lib, plan, () => true);
+    expect(await lib.get('branches', disposable.id)).toBeUndefined();
+    expect(await lib.get('branches', current.branch.id)).toBeDefined();
+    expect(dailyState.pending).toBe(false);
+    const entries = (await backups.inventory()).entries;
+    expect(entries.some(e => e.kind === 'before-archive-deletion')).toBe(true);
+    expect(entries.some(e => e.kind === 'after-archive-deletion')).toBe(true);
+});
+
+test('post-delete disk failure reports completed deletion and permits protected-baseline recovery without old auto file', async () => {
+    await syncDaily();
+    const disposable = await canonical.synchronize(lib, observation(1, 'disposable-test-archive'));
+    const plan = await previewArchiveDeletion(lib, disposable.id);
+    const { disk, files, backups } = enableDeletionDisk();
+    disk.write.mockImplementation(async (key, blob) => {
+        if (key.startsWith('after-archive-deletion-')) throw new Error('ENOSPC');
+        files.set(key, blob);
+    });
+    await deleteDailyArchive(lib, plan, () => true);
+    expect(await lib.get('branches', disposable.id)).toBeUndefined();
+    expect(backupRuntime.coreBackupState.error).toContain('档案删除已完成');
+    const approval = await backups.previewArchiveLoss(lib);
+    expect(approval.previous.kind).toBe('before-archive-deletion');
+    disk.write.mockImplementation(async (key, blob) => { files.set(key, blob); });
+    expect((await backups.acceptArchiveLoss(lib, approval, () => true)).state).toBe('saved');
 });

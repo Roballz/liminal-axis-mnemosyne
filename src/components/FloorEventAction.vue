@@ -21,10 +21,14 @@ const entries = computed(() => {
   const id = props.leafId ?? getLeaf(getContext()?.chat?.[props.floor])?.id;
   return id ? membershipBadges.value?.get(id) ?? [] : [];
 });
-const label = computed(() => entries.value.length
-  ? `事件链：${entries.value[0].title}${entries.value.length > 1 ? ` +${entries.value.length - 1}` : ''}`
-  : membershipBadges.value ? '加入事件链' : '事件链 · 待刷新');
-const detail = computed(() => entries.value.map(item => `${item.title}${item.archived ? '（已归档）' : ''}${item.needsReview ? '（待审核）' : ''}`).join('、'));
+// A missing projection is unknown/stale, never evidence of no formal memberships.
+const label = computed(() => membershipUi.loading ? '事件链 · 加载中'
+  : !membershipBadges.value ? '事件链 · 待刷新'
+  : entries.value.length ? `关联事件链:${entries.value.map(item => item.title).join('，')}`
+  : '本楼层尚未加入事件链');
+const muted = computed(() => membershipUi.loading || !membershipBadges.value || !entries.value.length);
+const detail = computed(() => entries.value.map(item => `${item.title}${item.archived ? '（已归档）' : ''}${item.needsReview ? '（待审核）' : ''}`).join('，'));
+const actionLabel = computed(() => `管理本楼层事件链关联：${label.value}`);
 const blocked = computed(() => membershipUi.loading || membershipUi.saving || manualEventState.busy || jobState.busy || (props.disabled && !entries.value.length));
 </script>
 <template>
@@ -32,13 +36,25 @@ const blocked = computed(() => membershipUi.loading || membershipUi.saving || ma
     <input type="checkbox" :checked="!!pickingRow && membershipSelected.has(pickingRow.id)" :disabled="!pickingRow?.valid || membershipUi.saving"
       @change="pickingRow && toggleMembershipRow(pickingRow.id)" />加入选择
   </label>
-  <button v-else class="mn-floor-event bbs-btn bbs-btn-sm" type="button" aria-haspopup="dialog" :disabled="blocked"
-    :title="detail || label" :aria-label="label" @click.stop="open" @keydown.stop>
-    <Icon name="events" :size="14" /><span>{{ label }}</span>
-  </button>
+  <div v-else class="mn-floor-event-row">
+    <span class="mn-floor-event-text" :class="{ 'is-muted': muted }" :title="detail || label">{{ label }}</span>
+    <span class="mn-floor-event-actions">
+      <button class="mn-floor-event" type="button" aria-haspopup="dialog" :disabled="blocked"
+        :title="actionLabel" :aria-label="actionLabel" @click.stop="open" @keydown.stop>
+        <Icon name="events" :size="14" />
+      </button>
+    </span>
+  </div>
 </template>
 <style scoped>
 .mn-floor-pick { display: inline-flex; align-items: center; gap: 8px; padding: 5px; font-size: 12px; }
-.mn-floor-event { display: inline-flex; align-items: center; justify-content: flex-start; gap: 5px; min-width: 0; max-width: 100%; }
-.mn-floor-event span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn-floor-event-row { display: grid; grid-template-columns: minmax(0, 1fr) var(--mn-floor-actions-width, 60px); align-items: start; gap: 8px; width: 100%; min-width: 0; }
+.mn-floor-event-text { min-width: 0; padding-top: 4px; font-size: 12px; line-height: 18px; text-align: left; color: var(--bbs-ink); font-style: normal; white-space: normal; overflow-wrap: anywhere; }
+:global(.bbs-root[data-theme='night'] .mn-floor-event-text:not(.is-muted)) { color: #fff; }
+.mn-floor-event-text.is-muted { color: var(--bbs-ink-soft); font-style: italic; }
+.mn-floor-event-actions { display: flex; justify-content: center; }
+.mn-floor-event { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--bbs-radius-sm); background: transparent; color: var(--bbs-ink-muted); cursor: pointer; }
+.mn-floor-event:hover:not(:disabled) { color: var(--bbs-accent); background: var(--bbs-surface-2); }
+.mn-floor-event:focus-visible { outline: 2px solid var(--bbs-accent); outline-offset: 2px; }
+.mn-floor-event:disabled { opacity: 0.5; cursor: default; }
 </style>

@@ -124,7 +124,9 @@ test('a changed source rejects confirmation and keeps the actionable error after
 test('cancel during asynchronous revalidation revokes that exact confirmation session', async () => {
   const root = mount(); await flush(); button(root, '核对并保留 155').props.onClick(); await flush();
   let resolve!: (value: boolean) => void; mocks.current.mockImplementation(() => new Promise(done => { resolve = done; }));
-  button(root, '已核对，保留这些摘要').props.onClick(); await settleAction();
+  button(root, '已核对，保留这些摘要').props.onClick();
+  // Wait for the asynchronous guard itself, not a fixed 5 ms under suite load.
+  await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
   button(root, '取消').props.onClick(); resolve(true); await settleAction();
   expect(mocks.recover).not.toHaveBeenCalled();
 });

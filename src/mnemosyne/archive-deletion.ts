@@ -112,3 +112,18 @@ export async function commitArchiveDeletion(lib: Library, plan: ArchiveDeletionP
         check(guard(), '聊天已改变，本次删除已撤销');
     });
 }
+
+/** Exact post-commit data used only to authorize the new backup baseline. */
+export function archiveDeletionResult(plan: ArchiveDeletionPlan): Package['data'] {
+    const data = Object.fromEntries(STORES.map(store => [store,
+        plan.before.data[store].filter(row => !plan.remove[store].includes(row.id))])) as Package['data'];
+    const prior = data.library_meta.find(row => row.id === DELETIONS_KEY) as DeletionMarker | undefined;
+    data.library_meta = [...data.library_meta.filter(row => row.id !== SOURCE_ORIGINS_KEY && row.id !== DELETIONS_KEY),
+        plan.origins, { id: DELETIONS_KEY, schema: 1, value: { version: 1,
+            scopes: [...new Set([...(prior?.value.scopes ?? []), ...plan.scopes])] } } as DeletionMarker];
+    return data;
+}
+export function sameArchiveData(left: Package['data'], right: Package['data']): boolean {
+    return STORES.every(store => equal([...left[store]].sort((a, b) => a.id.localeCompare(b.id)),
+        [...right[store]].sort((a, b) => a.id.localeCompare(b.id))));
+}

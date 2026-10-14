@@ -141,7 +141,7 @@ async function publishSnapshot(tx: Transaction, branch: Branch, refs: SourceRef[
     await tx.add('history_snapshots', snapshot);
     return snapshot.id;
 }
-export async function synchronize(lib: Library, observation: HostObservation): Promise<Branch> {
+export async function synchronize(lib: Library, observation: HostObservation, protection?: { branch?: Branch; binding?: Binding; isCurrent(): boolean }): Promise<Branch> {
     check(
         observation.scope && new Set(observation.messages.map((m) => m.key)).size === observation.messages.length,
         '消息映射身份重复，需要人工核对',
@@ -151,8 +151,15 @@ export async function synchronize(lib: Library, observation: HostObservation): P
     const memoryHashes = await Promise.all(observation.memories.map((m) => fingerprint(m)));
     const tagUpdates = await tagOnlyRevisions(lib, observation);
     return lib.transaction(STORES, 'readwrite', async (tx) => {
+        if (protection?.branch) {
+            const live = await tx.get<Branch>('branches', protection.branch.id);
+            check(live && live.head === protection.branch.head && live.view === protection.branch.view &&
+                live.epoch === protection.branch.epoch && protection.isCurrent(), '删除保护后档案或聊天已变化，请重新保存保护包');
+        }
         const bindings = await tx.all<Binding>('host_bindings');
         let binding = bindings.find((b) => !b.detached && b.scope === observation.scope);
+        if (protection) check(JSON.stringify(binding) === JSON.stringify(protection.binding),
+            '删除保护后绑定已变化，未应用删除');
         let branch: Branch;
         if (!binding) {
             const story = { ...row('st'), created: Date.now() };
@@ -247,6 +254,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                 .map((m) => [m.owner, m]),
         );
         const selections: Record<string, string> = {};
+        const selectionRevisions = new Map<string, MemoryRevision>();
         const hostRevisions = new Map<string, string>();
         const newRevisions: {
             revision: MemoryRevision;
@@ -343,6 +351,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                 host.inputRefs.every(ref => ref.message === revision!.anchor || refs.some(r => equal(r, ref))))
                 sidecars.push({ revision, host });
             selections[family.id] = revision.id;
+            selectionRevisions.set(revision.id, revision);
             hostRevisions.set(host.hostId, revision.id);
         }
         for (const { revision, host } of newRevisions) {
@@ -361,6 +370,32 @@ export async function synchronize(lib: Library, observation: HostObservation): P
                     snapshot: branch.head, decision: 'compatible', origin: 'generated_sidecar', created: Date.now(),
                     reviewSchema: 2, sourceRefs, coverage, dependencies: revision.dependencies } as Review);
         }
+        // Current-source eligibility must hold on every reconciliation: otherwise
+        // host higher summaries could resurrect a deleted floor on the next append.
+        // Check message identities only, never revision equality (swipes keep their
+        // historical review semantics). All immutable rows/sibling views survive.
+        const currentMessages = new Set(refs.map(ref => ref.message));
+        // Mapping identities survive ordinary source deletion. Only their absence
+        // from the head proves removal from THIS binding; declared missing-basis
+        // recovery refs may never have existed locally and must remain reviewable.
+        const observedMessages = new Set(maps.map(mapping => mapping.message));
+        const removedMessage = (message: string) => observedMessages.has(message) && !currentMessages.has(message);
+        const affected = new Map<string, boolean>();
+        const visiting = new Set<string>();
+        const hasMissingSource = async (id: string): Promise<boolean> => {
+            if (affected.has(id)) return affected.get(id)!;
+            check(!visiting.has(id), '摘要依赖存在循环，删除归档已停止');
+            visiting.add(id);
+            const revision = selectionRevisions.get(id) ?? await tx.get<MemoryRevision>('memory_revisions', id);
+            check(revision, '删除归档的摘要依赖缺失');
+            let removed = !!revision.anchor && removedMessage(revision.anchor) ||
+                [...revision.inputRefs, ...revision.coverage].some(ref => removedMessage(ref.message));
+            if (!removed) for (const dependency of revision.dependencies) {
+                if (await hasMissingSource(dependency)) { removed = true; break; }
+            }
+            visiting.delete(id); affected.set(id, removed); return removed;
+        };
+        for (const [family, id] of Object.entries(selections)) if (await hasMissingSource(id)) delete selections[family];
         if (!previous || !equal(previous.selections, selections)) {
             const view: MemoryView = { ...row('mv'), branch: branch.id, selections };
             await tx.add('memory_views', view);
@@ -386,6 +421,7 @@ export async function synchronize(lib: Library, observation: HostObservation): P
         if (oldHead !== branch.head || previous?.id !== branch.view || recovered) branch.epoch++;
         await tx.put('branches', branch);
         if (oldHead !== branch.head) await retireCurrentBodies(tx, branch, priorRefs);
+        if (protection) check(protection.isCurrent(), '删除归档期间聊天已变化，本次事务回滚');
         return branch;
     });
 }

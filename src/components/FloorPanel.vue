@@ -915,6 +915,8 @@ const groups = computed(() => [
    (默认继承自 .bbs-summary-card 的 surface,这里覆盖成 bg。)
    收起态更紧凑:收窄内边距,楼号行本就矮,大留白会显空。展开态恢复常规 padding。 */
 .bbs-fp-card {
+  /* Two 26px header actions with an 8px gap; the event icon sits below their midpoint. */
+  --mn-floor-actions-width: 60px;
   background: var(--bbs-bg);
   padding: 9px 12px;
 }

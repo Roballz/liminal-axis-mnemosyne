@@ -268,3 +268,22 @@ test('refresh failure reports that the atomic manual confirmation was already sa
  expect(current.memories[0].sourceRecovery).toBeUndefined();expect(current.branch.epoch).toBe(view.branch.epoch+1);
  expect(await lib.get('memory_revisions',original.id)).toEqual(original);expect(dailyState.pending).toBe(true);
 });
+
+test('missing historical recovery proofs remain reviewable while proven deleted anchors stay excluded across later syncs', async () => {
+ const before=await recovered(2,true);
+ expect(before.memories.filter(m=>m.sourceRecovery)).toHaveLength(2);
+ const higher=before.memories.find(m=>m.hostId==='higher')!;
+ // Delete the unrelated second assistant; missing-basis evidence of the first
+ // leaf was never observed locally and must not be mistaken for this deletion.
+ ctx.chat.splice(3,1);invalidateDaily();let current=await syncDaily();
+ expect(current.memories.map(m=>m.hostId).sort()).toEqual(['higher','leaf-0']);
+ expect(recoveredSummaryTargets(current).map(m=>m.hostId)).toEqual(['leaf-0']);
+ // Now the first leaf's real mapped anchor is removed. Its higher dependent
+ // must disappear even though that leaf also has declared unknown old proofs.
+ ctx.chat.splice(1,1);invalidateDaily();current=await syncDaily();
+ expect(current.memories).toEqual([]);
+ ctx.chat.push(message(true,'unrelated later append'));invalidateDaily();current=await syncDaily();
+ expect(current.memories).toEqual([]);
+ expect(await lib.get('memory_revisions',higher.id)).toEqual(higher);
+ await exportLibrary(lib);
+});

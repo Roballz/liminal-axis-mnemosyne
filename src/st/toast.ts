@@ -6,17 +6,18 @@
 type ToastType = 'info' | 'success' | 'warning' | 'error';
 
 interface Toastr {
-  info: (msg: string, title?: string) => void;
-  success: (msg: string, title?: string) => void;
-  warning: (msg: string, title?: string) => void;
-  error: (msg: string, title?: string) => void;
+  info: (msg: string, title?: string, options?: { escapeHtml: boolean }) => void;
+  success: (msg: string, title?: string, options?: { escapeHtml: boolean }) => void;
+  warning: (msg: string, title?: string, options?: { escapeHtml: boolean }) => void;
+  error: (msg: string, title?: string, options?: { escapeHtml: boolean }) => void;
 }
 
-export function toast(message: string, type: ToastType = 'info'): void {
+export function toast(message: string, type: ToastType = 'info', escapeHtml = false): void {
   try {
     const t = (window as unknown as { toastr?: Toastr }).toastr;
     if (t && typeof t[type] === 'function') {
-      t[type](message, '柏宝书');
+      if (escapeHtml) t[type](message, '柏宝书', { escapeHtml: true });
+      else t[type](message, '柏宝书');
       return;
     }
   } catch {

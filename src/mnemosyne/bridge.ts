@@ -1,3 +1,4 @@
+import { protectDeletionBeforeSync, protectArchiveBeforeDeletion, completeArchiveBackup } from './core-backup-runtime';
 import { membershipProjection, type MembershipProjection } from './event-memberships';
 import { ReplyFinality, ReplyFinalityError } from './reply-finality';
 import { toast } from '@/st/toast';
@@ -17,7 +18,7 @@ import { apiSettings } from '@/api/settings';
 import { resolveKeepStart } from '@/memory/engine';
 import { clearRecallInjection } from '@/memory/vector/recall';
 import { refreshInjection } from '@/memory/inject';
-import { activeLibrary } from './db';
+import { activeLibrary, ACTIVE_KEY } from './db';
 import {
     capture,
     synchronize,
@@ -378,6 +379,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             check(ctx && scope, '请先打开聊天');
             if (!(await replyFinality.assertArchivable())()) throw new ReplyFinalityError();
             check(isActive() && getContext()?.chat === ctx.chat && hostScope() === scope, '聊天已改变');
+            const deletionSelector = localStorage.getItem(ACTIVE_KEY), deletionChat = ctx.chat;
             const lib = await activeLibrary();
             check(isActive(), '归档通知已取消');
             if (injectionCache?.library !== lib.db.name) injectionCache = null;
@@ -592,7 +594,12 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             );
             ctx.chatMetadata.mnemosyne_archive_v1 = { status: 'pending', scope };
             await ctx.saveMetadata();
-            const branch = await synchronize(lib, observation);
+            const deletionTables = dailyState.tableRevision;
+            const deletionGuard = () => scope === hostScope() && isActive() && generation === dailyState.generation && host === hostVersion() &&
+                getContext()?.chat === deletionChat && localStorage.getItem(ACTIVE_KEY) === deletionSelector && dailyState.tableRevision === deletionTables;
+            const protectedBranch = await protectDeletionBeforeSync(lib, observation, deletionGuard, lastCache?.library === lib.db.name ? lastCache.view : undefined);
+            check(deletionGuard(), '聊天在删除保护期间改变，待重试');
+            const branch = await synchronize(lib, observation, protectedBranch ? { ...protectedBranch, isCurrent: deletionGuard } : undefined);
             savedHost = host;
             check(
                 scope === hostScope() && isActive() && generation === dailyState.generation && host === hostVersion(),
@@ -1023,7 +1030,9 @@ export async function deleteDailyArchive(lib: Awaited<ReturnType<typeof activeLi
     const job = serial.catch(() => {}).then(async () => {
         const guard = () => isCurrent() && scope === hostScope() && generation === dailyState.generation;
         check(lib === await activeLibrary() && guard(), '聊天或数据库已改变，请重新预览删除');
+        const protectedArchive = await protectArchiveBeforeDeletion(lib, plan, guard);
         await commitArchiveDeletion(lib, plan, guard);
+        if (protectedArchive) await completeArchiveBackup(lib, plan, guard);
         cache = lastCache = injectionCache = null;
         invalidateDaily('档案已删除');
         if (plan.scopes.includes(scope)) {
@@ -1035,5 +1044,8 @@ export async function deleteDailyArchive(lib: Awaited<ReturnType<typeof activeLi
         }
     });
     serial = job;
-    return job;
+    await job;
+    if (!plan.scopes.includes(scope)) {
+        try { await syncDaily(); } catch { /* Deletion succeeded; normal archive status reports any refresh blocker. */ }
+    }
 }

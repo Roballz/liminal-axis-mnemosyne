@@ -95,3 +95,27 @@ test('archive blocker display covers every startup gate without changing saved r
     state.error = '摘要基线缺失'; expect(backupArchiveBlockReason(state)).toContain('摘要基线缺失');
     expect(state).toEqual({ pending: true, error: '摘要基线缺失', conflict: true, tableError: '填表待处理' });
 });
+
+test('verified protection uses native escaped nonblocking toast once and keeps a retrievable path', async () => {
+    vi.resetModules();
+    const warning = vi.fn(); vi.stubGlobal('window', { toastr: { warning } });
+    const runtime = await import('./core-backup-runtime');
+    const entry = { key: 'before-deletion-test.json', snapshotAt: 1800000000000 } as any;
+    runtime.reportDeletionProtection(entry, true);
+    runtime.reportDeletionProtection(entry, true);
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('snapshots-v1/before-deletion-test.json'), '柏宝书', { escapeHtml: true });
+    expect(runtime.coreBackupState.protectionNotice).toContain('应用本次删除前');
+    vi.stubGlobal('window', {});
+    expect(() => runtime.reportDeletionProtection({ ...entry, key: 'other.json' }, true)).not.toThrow();
+});
+
+test('explicit retry resets failure backoff without clearing validation or creating extra timers', async () => {
+    vi.useFakeTimers();
+    const run = vi.fn().mockRejectedValueOnce(new Error('ENOSPC')).mockResolvedValue(undefined);
+    const scheduler = createBackupScheduler({ visible: () => true, enabled: () => true, ready: () => true, run, error: vi.fn() });
+    scheduler.request(); await vi.advanceTimersByTimeAsync(30_000);
+    for (let i = 0; i < 100; i++) scheduler.retry();
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(30_000); expect(run).toHaveBeenCalledTimes(2); scheduler.stop();
+});

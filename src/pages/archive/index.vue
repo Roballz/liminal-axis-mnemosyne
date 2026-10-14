@@ -150,7 +150,7 @@ async function inspectDeletion() {
 async function applyDeletion() {
   const preview = deletionPreview.value;
   check(preview, '请先预览删除范围');
-  if (!confirm(`永久删除这个聊天档案？\n${preview.plan.labels.join('\n')}\n包括其正文、摘要、事件链和自定义表。不会删除宿主聊天，也不会删除其他聊天档案。此操作不能撤销。`)) return;
+  if (!confirm(`永久删除这个聊天档案？\n${preview.plan.labels.join('\n')}\n包括其正文、摘要、事件链和自定义表。不会删除宿主聊天，也不会删除其他聊天档案。删除不能逐项撤销。若已启用自动备份，会先保存并验证完整核心包保护副本；失败则不删除。恢复该副本会恢复整个核心库，而非只撤销此档案。`)) return;
   await deleteDailyArchive(preview.lib, preview.plan, () => !disposed && deletionPreview.value === preview);
   clearReviews();
   reconnectChoices.value = []; reconnectPreview.value = null;
