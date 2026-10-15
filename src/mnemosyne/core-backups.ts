@@ -9,6 +9,7 @@ export const AUTO_BACKUP_INTERVAL = 30 * 60 * 1000;
 export const BACKUP_MAX_BYTES = 64 * 1024 * 1024;
 const OWNER = 'mnemosyne-core-backup-v1';
 const KEY = /^(auto|manual|pinned|before-restore|before-deletion|before-archive-deletion|after-archive-deletion)-v1-(\d{13})-([a-f0-9]{16})-([a-f0-9-]{36})\.json$/;
+export type BackupGuard = () => boolean | Promise<boolean>;
 type Kind = 'auto' | 'manual' | 'pinned' | 'before-restore' | 'before-deletion' | 'before-archive-deletion' | 'after-archive-deletion';
 // A content-addressed suffix makes uncertain-write retry O(1) full-file reads,
 // independent of how many permanent deletion protections have accumulated.
@@ -144,6 +145,9 @@ export class CoreBackups {
     private previews = new Map<string, BackupPreview>();
     constructor(readonly disk: BackupDisk, private now = () => Date.now(), private uuid = () => crypto.randomUUID()) {}
 
+    /** Reserve the same writer queue for off-thread work; never nest this around save(). */
+    runExclusive<T>(task: () => Promise<T>): Promise<T> { return this.serial(task); }
+
     private serial<T>(task: () => Promise<T>): Promise<T> {
         const result = this.running.then(task);
         this.running = result.catch(() => {});
@@ -191,7 +195,7 @@ export class CoreBackups {
         return result;
     }
 
-    save(lib: Library, kind: 'auto' | 'manual' | 'before-restore', keep: 5 | 10 = 10, isCurrent = () => true, onProtected?: (entry: BackupPreview) => void): Promise<BackupOutcome> {
+    save(lib: Library, kind: 'auto' | 'manual' | 'before-restore', keep: 5 | 10 = 10, isCurrent: BackupGuard = () => true, onProtected?: (entry: BackupPreview) => void): Promise<BackupOutcome> {
         return this.serial(async () => {
             check([5, 10].includes(keep), '仅支持保留最近 5 或 10 份自动备份');
             const keys = await this.keys();
@@ -208,7 +212,7 @@ export class CoreBackups {
             if (kind === 'before-restore' && pack.counts.stories === 0 && pack.counts.branches === 0)
                 return { state: 'empty' };
             assertNonempty(pack);
-            check(isCurrent(), '档案仍在变化，本次备份已取消');
+            check((await isCurrent()), '档案仍在变化，本次备份已取消');
             const deletion = previous ? inspectLoss(previous, pack, lib.db.name) : false;
             if (deletion && previous) {
                 // Reuse a verified protection after an uncertain write or interrupted
@@ -223,7 +227,7 @@ export class CoreBackups {
                 }
                 if (!protectedEntry) protectedEntry = await this.publish(previous.pack, lib.db.name,
                     'before-deletion', previous.dataDigest, keys, isCurrent);
-                check(isCurrent(), '删除前保护已保存；当前档案已改变，暂缓新起点和轮换');
+                check((await isCurrent()), '删除前保护已保存；当前档案已改变，暂缓新起点和轮换');
                 onProtected?.(protectedEntry);
             }
             const digest = await fingerprint(pack.data);
@@ -241,12 +245,12 @@ export class CoreBackups {
                 }
                 for (const key of automatic.slice(keep)) {
                     if (key === entry.key) continue;
-                    check(isCurrent(), '档案状态改变，保留新备份并暂停轮换');
+                    check((await isCurrent()), '档案状态改变，保留新备份并暂停轮换');
                     // Only valid, exact-owner automatic files may be retired. Unknown or
                     // damaged files stay untouched even if this exceeds the retention cap.
                     const old = await this.read(key);
                     check(old.file.kind === 'auto' && old.file.sourceLibrary === lib.db.name, '轮换文件归属不匹配');
-                    check(isCurrent(), '档案状态改变，保留新备份并暂停轮换');
+                    check((await isCurrent()), '档案状态改变，保留新备份并暂停轮换');
                     await this.disk.remove(key);
                     this.previews.delete(key);
                 }
@@ -258,11 +262,11 @@ export class CoreBackups {
     }
 
     /** Export the still-current database before destructive reconciliation begins. */
-    protectCurrentDeletion(lib: Library, expected: Branch, isCurrent = () => true): Promise<BackupPreview> {
+    protectCurrentDeletion(lib: Library, expected: Branch, isCurrent: BackupGuard = () => true): Promise<BackupPreview> {
         return this.serial(async () => {
             const pack = await exportLibrary(lib);
             const branch = (pack.data.branches as Branch[]).find(b => b.id === expected.id);
-            check(branch && branch.head === expected.head && branch.view === expected.view && branch.epoch === expected.epoch && isCurrent(),
+            check(branch && branch.head === expected.head && branch.view === expected.view && branch.epoch === expected.epoch && (await isCurrent()),
                 '删除保护期间档案已变化，请重试；尚未应用删除');
             assertNonempty(pack);
             const digest = await fingerprint(pack.data), keys = await this.keys();
@@ -270,11 +274,11 @@ export class CoreBackups {
             const existing = keys.find(k => k.startsWith('before-deletion-') && KEY.exec(k)![3] === bank && k.endsWith(protectionSuffix(digest)));
             if (existing) {
                 const saved = await this.read(existing);
-                check(saved.file.dataDigest === digest && isCurrent(), '删除保护内容或聊天已变化，请重试');
+                check(saved.file.dataDigest === digest && (await isCurrent()), '删除保护内容或聊天已变化，请重试');
                 return saved.entry;
             }
             const entry = await this.publish(pack, lib.db.name, 'before-deletion', digest, keys, isCurrent);
-            check(isCurrent(), '删除保护已保存；聊天已变化，尚未应用删除');
+            check((await isCurrent()), '删除保护已保存；聊天已变化，尚未应用删除');
             return entry;
         });
     }
@@ -367,7 +371,7 @@ export class CoreBackups {
         });
     }
 
-    private async publish(pack: Package, sourceLibrary: string, kind: Kind, dataDigest: string, keys: string[], isCurrent = () => true): Promise<BackupPreview> {
+    private async publish(pack: Package, sourceLibrary: string, kind: Kind, dataDigest: string, keys: string[], isCurrent: BackupGuard = () => true): Promise<BackupPreview> {
         const savedAt = this.now();
         const bank = (await fingerprint(sourceLibrary)).slice(0, 16);
         const suffix = (kind === 'before-deletion' || kind === 'before-archive-deletion') ? protectionSuffix(dataDigest) : `${this.uuid()}.json`;
@@ -377,7 +381,7 @@ export class CoreBackups {
         const file: BackupFile = { ...base, checksum: await fingerprint(base) };
         const blob = new Blob([JSON.stringify(file)], { type: 'application/json' });
         check(blob.size <= BACKUP_MAX_BYTES, '核心包超过 64 MiB 安全读取上限；未写入或轮换备份，请手动导出');
-        check(isCurrent(), '档案仍在变化，本次备份已取消');
+        check((await isCurrent()), '档案仍在变化，本次备份已取消');
         await this.disk.write(key, blob); // TT stages and atomically publishes this unique file.
         const persisted = await this.read(key);
         check(persisted.entry.checksum === file.checksum && persisted.entry.bytes === blob.size, '新备份读回不一致，旧备份保留');

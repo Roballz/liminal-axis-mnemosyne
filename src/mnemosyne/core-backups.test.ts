@@ -398,3 +398,13 @@ test('archive-loss acceptance rejects changed current data, stale baseline, and 
     disk.files.set(latest.previous.key, new Blob(['corrupt']));
     await expect(backups.previewArchiveLoss(lib)).rejects.toThrow(); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
 });
+
+
+test('asynchronous worker guards are awaited, never accepted as a truthy Promise', async () => {
+    const { lib, branch } = await fixture(1), disk = new Disk(), backups = new CoreBackups(disk);
+    const guard = vi.fn(async () => false);
+    await expect(backups.save(lib, 'auto', 5, guard)).rejects.toThrow('已取消');
+    await expect(backups.protectCurrentDeletion(lib, branch, guard)).rejects.toThrow('尚未应用删除');
+    expect(guard).toHaveBeenCalledTimes(2);
+    expect(disk.write).not.toHaveBeenCalled(); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
+});

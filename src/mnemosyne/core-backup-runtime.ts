@@ -1,3 +1,4 @@
+import { runBackupWorker } from './backup-worker-client';
 import { reactive, watch } from 'vue';
 import { toast } from '@/st/toast';
 import { BACKUP_LOCATION, nativeBackupDisk } from '@/st/native-backups';
@@ -22,6 +23,10 @@ export const coreBackupState = reactive({
     status: '尚未检查原生磁盘备份接口', error: '', lastSavedAt: 0, protectionNotice: '', settingsVerified: false,
 });
 const notifiedProtections = new Set<string>();
+function reportPendingNative(message: string) {
+    coreBackupState.error = message;
+    coreBackupState.status = '后台处理已停止，等待原生磁盘操作确认';
+}
 export function reportDeletionProtection(entry: BackupPreview, current = false) {
     const message = `检测到正文消失被删除，已自动备份最近核心包，路径：${BACKUP_LOCATION}${entry.key}。核心包时间：${new Date(entry.snapshotAt).toLocaleString()}；${current ? '已在应用本次删除前导出当前已归档核心库。' : '这是最近已保存的完整核心包，不保证包含删除前尚未备份的楼层。'}`;
     if (notifiedProtections.has(entry.key)) return;
@@ -42,7 +47,9 @@ export async function protectDeletionBeforeSync(lib: Library, input: HostObserva
     if (deletionFailure?.library === lib.db.name && Date.now() < deletionFailure.retryAt) throw new Error(deletionFailure.message);
     try {
         if (!coreBackupState.settingsVerified) throw new Error('自动备份设置未确认，不能安全应用正文删除；请先重新确认备份设置');
-        const entry = await (await getCoreBackups()).protectCurrentDeletion(lib, expected.branch, isCurrent);
+        const backups = await getCoreBackups();
+        const entry = await backups.runExclusive(() => runBackupWorker(backups.disk,
+            { kind: 'protect-deletion', library: lib.db.name, expected: expected.branch }, isCurrent, undefined, undefined, reportPendingNative)) as BackupPreview;
         reportDeletionProtection(entry, true);
         deletionFailure = undefined;
         coreBackupState.error = '';
@@ -190,9 +197,10 @@ export function bindCoreBackups(ready: () => boolean, revision: () => unknown = 
             try {
                 const backups = await getCoreBackups(), lib = await activeLibrary();
                 const selected = localStorage.getItem(ACTIVE_KEY), stamp = revision();
-                const result = await backups.save(lib, 'auto', coreBackupState.keep,
+                const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
+                    { kind: 'auto', library: lib.db.name, keep: coreBackupState.keep },
                     () => alive && ready() && document.visibilityState === 'visible' && coreBackupState.enabled &&
-                        selected === localStorage.getItem(ACTIVE_KEY) && stamp === revision(), entry => reportDeletionProtection(entry));
+                        selected === localStorage.getItem(ACTIVE_KEY) && stamp === revision(), entry => reportDeletionProtection(entry), undefined, reportPendingNative)) as import('./core-backups').BackupOutcome;
                 coreBackupState.error = '';
                 if (result.state === 'saved') {
                     coreBackupState.lastSavedAt = result.entry.savedAt;

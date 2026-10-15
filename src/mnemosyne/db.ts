@@ -20,11 +20,13 @@ export class Transaction {
 }
 export class Library {
     private constructor(readonly db: IDBDatabase) { }
-    static open(name = `${DB_PREFIX}default`): Promise<Library> {
+    static open(name = `${DB_PREFIX}default`, existingOnly = false): Promise<Library> {
         check(name.startsWith(DB_PREFIX), '不是 Mnemosyne 库');
         return new Promise((resolve, reject) => {
             const r = indexedDB.open(name, DB_VERSION);
             r.onupgradeneeded = () => {
+                // Backup workers must never create an empty database or migrate a live one.
+                if (existingOnly) { r.transaction!.abort(); return; }
                 for (const name of STORES) {
                     if (r.result.objectStoreNames.contains(name)) continue;
                     const s = r.result.createObjectStore(name, { keyPath: 'id' });

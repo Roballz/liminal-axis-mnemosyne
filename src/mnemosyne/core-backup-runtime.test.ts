@@ -68,10 +68,10 @@ test('pagehide revokes an in-flight automatic-write guard and prevents subsequen
     vi.stubGlobal('window', win); vi.stubGlobal('document', doc);
     vi.stubGlobal('localStorage', { getItem: () => null });
     vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
-    const db = await import('./db'), core = await import('./core-backups');
+    const db = await import('./db'), worker = await import('./backup-worker-client');
     vi.spyOn(db, 'activeLibrary').mockResolvedValue({ db: { name: 'mnemosyne_daily_default' } } as any);
     let guard: (() => boolean) | undefined, finish: (() => void) | undefined;
-    const save = vi.spyOn(core.CoreBackups.prototype, 'save').mockImplementation(async (_lib, _kind, _keep, current) => {
+    const save = vi.spyOn(worker, 'runBackupWorker').mockImplementation(async (_disk, _job, current) => {
         guard = current;
         await new Promise<void>(resolve => { finish = resolve; });
         return { state: 'unchanged' };

@@ -1,3 +1,4 @@
+import * as backupWorker from './backup-worker-client';
 import * as backupRuntime from './core-backup-runtime';
 import { CoreBackups } from './core-backups';
 import { summaryResponses, summaryResponseUi } from '@/memory/summary-response';
@@ -1224,6 +1225,14 @@ function enableDeletionDisk() {
         readSettings: vi.fn(async () => undefined), writeSettings: vi.fn(async () => {}) };
     const backups = new CoreBackups(disk);
     vi.spyOn(backupRuntime, 'getCoreBackups').mockResolvedValue(backups);
+    // Exercise the unchanged full protection implementation through the worker seam.
+    // Worker transport/failure/Blob boundaries have independent tests.
+    vi.spyOn(backupWorker, 'runBackupWorker').mockImplementation(async (_disk, job, guard) => {
+        if (job.kind !== 'protect-deletion') throw new Error('Unexpected worker job');
+        const snapshot = await Library.open(job.library, true);
+        try { return await backups.protectCurrentDeletion(snapshot, job.expected, guard); }
+        finally { snapshot.close(); }
+    });
     // The helper's lexical manager lookup is separately mocked at the method seam.
     vi.spyOn(CoreBackups.prototype, 'protectCurrentDeletion').mockImplementation(function (library, expected, guard) {
         return originalProtect.call(backups, library, expected, guard);
