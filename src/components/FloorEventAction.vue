@@ -21,10 +21,11 @@ const entries = computed(() => {
   const id = props.leafId ?? getLeaf(getContext()?.chat?.[props.floor])?.id;
   return id ? membershipBadges.value?.get(id) ?? [] : [];
 });
+const names = computed(() => entries.value.map(item => item.title).join('，'));
 // A missing projection is unknown/stale, never evidence of no formal memberships.
 const label = computed(() => membershipUi.loading ? '事件链 · 加载中'
   : !membershipBadges.value ? '事件链 · 待刷新'
-  : entries.value.length ? `关联事件链:${entries.value.map(item => item.title).join('，')}`
+  : entries.value.length ? `关联事件:${names.value}`
   : '本楼层尚未加入事件链');
 const muted = computed(() => membershipUi.loading || !membershipBadges.value || !entries.value.length);
 const detail = computed(() => entries.value.map(item => `${item.title}${item.archived ? '（已归档）' : ''}${item.needsReview ? '（待审核）' : ''}`).join('，'));
@@ -37,7 +38,10 @@ const blocked = computed(() => membershipUi.loading || membershipUi.saving || ma
       @change="pickingRow && toggleMembershipRow(pickingRow.id)" />加入选择
   </label>
   <div v-else class="mn-floor-event-row">
-    <span class="mn-floor-event-text" :class="{ 'is-muted': muted }" :title="detail || label">{{ label }}</span>
+    <span class="mn-floor-event-text" :class="{ 'is-muted': muted, 'is-linked': !muted }" :title="detail || label">
+      <template v-if="!muted"><span class="mn-floor-event-label">关联事件:</span><span class="mn-floor-event-names">{{ names }}</span></template>
+      <template v-else>{{ label }}</template>
+    </span>
     <span class="mn-floor-event-actions">
       <button class="mn-floor-event" type="button" aria-haspopup="dialog" :disabled="blocked"
         :title="actionLabel" :aria-label="actionLabel" @click.stop="open" @keydown.stop>
@@ -48,8 +52,12 @@ const blocked = computed(() => membershipUi.loading || membershipUi.saving || ma
 </template>
 <style scoped>
 .mn-floor-pick { display: inline-flex; align-items: center; gap: 8px; padding: 5px; font-size: 12px; }
-.mn-floor-event-row { display: grid; grid-template-columns: minmax(0, 1fr) var(--mn-floor-actions-width, 60px); align-items: start; gap: 8px; width: 100%; min-width: 0; }
-.mn-floor-event-text { min-width: 0; padding-top: 4px; font-size: 12px; line-height: 18px; text-align: left; color: var(--bbs-ink); font-style: normal; white-space: normal; overflow-wrap: anywhere; }
+.mn-floor-event-row { display: grid; grid-template-columns: minmax(0, 1fr) var(--mn-floor-actions-width, 60px); align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 26px; }
+.mn-floor-event-text { min-width: 0; font-size: 12px; line-height: 18px; text-align: left; color: var(--bbs-ink); font-style: normal; white-space: normal; overflow-wrap: anywhere; }
+.mn-floor-event-text.is-linked { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; column-gap: 4px; }
+.mn-floor-event-label { white-space: nowrap; }
+/* A stable compact size keeps wrapped names readable without layout measurement or font-size oscillation. */
+.mn-floor-event-names { min-width: 0; font-size: 11px; line-height: 16px; }
 :global(.bbs-root[data-theme='night'] .mn-floor-event-text:not(.is-muted)) { color: #fff; }
 .mn-floor-event-text.is-muted { color: var(--bbs-ink-soft); font-style: italic; }
 .mn-floor-event-actions { display: flex; justify-content: center; }

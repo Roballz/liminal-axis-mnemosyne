@@ -46,6 +46,8 @@ test('known empty uses italic status, ignoring legacy event tags, and an icon-on
   const root = mount();
   expect(content(status(root))).toBe('本楼层尚未加入事件链');
   expect(status(root).props.class).toContain('is-muted');
+  expect(status(root).props.class).not.toContain('is-linked');
+  expect(nodes(root).some(n => String(n.props.class).includes('mn-floor-event-label'))).toBe(false);
   expect(content(action(root))).toBe('');
   expect(action(root).props['aria-haspopup']).toBe('dialog');
   expect(action(root).props['aria-label']).toContain('管理本楼层事件链关联');
@@ -56,8 +58,11 @@ test('all formal chain names remain visible, including long names and review met
   const names = ['非常长的事件链名称'.repeat(30), 'AnotherLongUnbrokenChainName'.repeat(30), '事件链三'];
   badges.value = new Map([['leaf-0', names.map((title, i) => ({ title, archived: i === 0, needsReview: i === 1 }))]]);
   const root = mount();
-  expect(content(status(root))).toBe(`关联事件链:${names.join('，')}`);
+  expect(content(status(root))).toBe(`关联事件:${names.join('，')}`);
   expect(status(root).props.class).not.toContain('is-muted');
+  expect(status(root).props.class).toContain('is-linked');
+  expect(content(nodes(root).find(n => n.props.class === 'mn-floor-event-label')!)).toBe('关联事件:');
+  expect(content(nodes(root).find(n => n.props.class === 'mn-floor-event-names')!)).toBe(names.join('，'));
   expect(status(root).props.title).toContain('（已归档）');
   expect(status(root).props.title).toContain('（待审核）');
 });
@@ -65,6 +70,7 @@ test('stale and loading projections never claim empty membership or show stale n
   badges.value = new Map([['leaf-0', [{ title: '旧事件链' }]]]);
   const root = mount(); badges.value = null; await flush();
   expect(content(status(root))).toBe('事件链 · 待刷新');
+  expect(status(root).props.class).not.toContain('is-linked');
   expect(content(root)).not.toContain('旧事件链');
   membershipUi.loading = true; await flush();
   expect(content(status(root))).toBe('事件链 · 加载中');
@@ -100,14 +106,22 @@ test.each([320, 360])('CSS layout contract at %ipx reserves a non-overlapping ac
   const css = descriptor.styles[0].content;
   const panel = parse(readFileSync(new URL('./FloorPanel.vue', import.meta.url), 'utf8')).descriptor.styles.map(s => s.content).join('\n');
   expect(css).toContain('grid-template-columns: minmax(0, 1fr) var(--mn-floor-actions-width, 60px)');
+  expect(css).toMatch(/mn-floor-event-row \{[^}]*align-items: center/);
+  expect(css).toMatch(/mn-floor-event-text\.is-linked \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);[^}]*align-items: center/);
+  expect(css).toMatch(/mn-floor-event-label \{[^}]*white-space: nowrap/);
+  expect(css).toMatch(/mn-floor-event-names \{[^}]*min-width: 0;[^}]*font-size: 11px;[^}]*line-height: 16px/);
+  expect(css).toMatch(/mn-floor-event-text \{[^}]*font-size: 12px/);
   const compiled = compileStyle({ source: css, filename: 'FloorEventAction.vue', id: 'data-v-test', scoped: true });
   expect(compiled.errors).toEqual([]);
   expect(compiled.code).toContain(".bbs-root[data-theme='night'] .mn-floor-event-text:not(.is-muted) { color: #fff;");
   expect(css).toContain('overflow-wrap: anywhere'); expect(css).toContain('white-space: normal');
   expect(css).not.toContain('text-overflow: ellipsis'); expect(css).not.toContain('position: absolute');
+  expect(css).not.toContain('line-clamp');
   expect(css).toMatch(/mn-floor-event-actions \{[^}]*justify-content: center/);
   expect(panel).toContain('--mn-floor-actions-width: 60px');
   // Existing card insets + grid gap + fixed action rail leave positive wrapping space.
   expect(width - 2 * 14 - 8 - 60).toBeGreaterThan(200);
+  // The fixed label is separate from the smaller names, which can wrap within the remaining width.
+  expect(width - 2 * 14 - 8 - 60 - 5 * 12 - 4).toBeGreaterThan(150);
   expect(60 / 2).toBe((26 / 2 + (26 + 8 + 26 / 2)) / 2);
 });

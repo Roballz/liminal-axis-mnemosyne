@@ -3,6 +3,7 @@ import * as backupRuntime from './core-backup-runtime';
 import { CoreBackups } from './core-backups';
 import { summaryResponses, summaryResponseUi } from '@/memory/summary-response';
 import * as hostContext from '@/st/context';
+import * as bridge from './bridge';
 import { withoutTableHistory, observation } from './fixtures';
 import { summaryEditPrompt, prepareSummaryEditPrompt, resolveSummaryEdit, deferSummaryEdit, bindSummaryEditPrompt } from './summary-edit-prompt';
 import { previewArchiveDeletion } from './archive-deletion';
@@ -992,15 +993,14 @@ test('edit popup update delegates to the existing floor regeneration and preserv
 
 test('edit event opens the external prompt with setting enabled, and chat switching cancels a queued prompt', async () => {
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    const emit = bindFinalityEvents();
     await syncDaily(); api.apiSettings.summaryEditPromptEnabled = true;
-    ctx.eventTypes.MESSAGE_EDITED = 'synthetic-edit';
     const stopPrompt = bindSummaryEditPrompt()!;
-    const edited = vi.mocked(ctx.eventSource.on).mock.calls.find(([event]) => event === 'synthetic-edit')![1];
-    ctx.chat[0].mes += '正文编辑'; invalidateDaily(); edited(0);
+    ctx.chat[0].mes += '正文编辑'; await emit('MESSAGE_EDITED', 0); await emit('MESSAGE_UPDATED', 0);
     await new Promise(resolve => setTimeout(resolve, 450));
     expect(summaryEditPrompt.open).toBe(true);
     await resolveSummaryEdit('later');
-    edited(0); ctx.getCurrentChatId = () => 'switched-away'; invalidateDaily();
+    await emit('MESSAGE_EDITED', 0); ctx.getCurrentChatId = () => 'switched-away'; invalidateDaily(); await emit('MESSAGE_UPDATED', 0);
     await new Promise(resolve => setTimeout(resolve, 450));
     expect(summaryEditPrompt.open).toBe(false);
     stopPrompt(); api.apiSettings.summaryEditPromptEnabled = false;
@@ -1080,7 +1080,7 @@ function bindFinalityEvents() {
     dispose?.();
     const handlers = new Map<string, ((...args: any[]) => unknown)[]>();
     const keys = ['GENERATION_STARTED', 'GENERATION_STOPPED', 'GENERATION_ENDED', 'CHARACTER_MESSAGE_RENDERED',
-        'MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_SENT', 'CHAT_CHANGED'];
+        'MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_DELETED', 'MESSAGE_SENT', 'CHAT_CHANGED'];
     ctx.eventTypes = Object.fromEntries(keys.map(key => [key, key])) as any;
     ctx.eventSource = { on: (key, fn) => handlers.set(key, [...(handlers.get(key) ?? []), fn]), off: () => {} };
     dispose = bindDaily();
@@ -1368,4 +1368,131 @@ test('post-delete disk failure reports completed deletion and permits protected-
     expect(approval.previous.kind).toBe('before-archive-deletion');
     disk.write.mockImplementation(async (key, blob) => { files.set(key, blob); });
     expect((await backups.acceptArchiveLoss(lib, approval, () => true)).state).toBe('saved');
+});
+
+
+async function nativeEditFixture() {
+    let captureClick: ((e: Event) => void) | undefined;
+    vi.stubGlobal('document', { addEventListener: (event: string, fn: (e: Event) => void) => { if (event === 'click') captureClick = fn; },
+        removeEventListener: vi.fn(), querySelector: () => null, getElementById: () => null });
+    const emit = bindFinalityEvents(), original = await syncDaily();
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    api.apiSettings.summaryEditPromptEnabled = true;
+    const stopPrompt = bindSummaryEditPrompt()!;
+    const click = (floor: number, text: string, trusted = true) => {
+        const element = { getAttribute: () => String(floor), querySelector: () => ({ value: text }) };
+        const button = { closest: () => element };
+        captureClick!({ isTrusted: trusted, target: { closest: () => button } } as unknown as Event);
+    };
+    const close = () => { stopPrompt(); api.apiSettings.summaryEditPromptEnabled = false; deferSummaryEdit(); };
+    return { emit, original, click, close };
+}
+
+test.each(['keep', 'update'] as const)('native error-suffix deletion waits for UPDATED then allows manual %s despite missing UI END', async action => {
+    const { emit, original, click, close } = await nativeEditFixture();
+    try {
+        const fullBody = '已经完整输出并由用户核对的正文';
+        ctx.translate = () => 'API错误';
+        await emit('GENERATION_STARTED', 'regenerate');
+        ctx.chat[1].mes = `${fullBody}\n[API错误]\nstream failed after content`;
+        ctx.streamingProcessor = { messageId: 1, isFinished: true, isStopped: false,
+            abortController: { signal: { aborted: false } } };
+        await emit('MESSAGE_RECEIVED', 1);
+        const key = 'mnemosyne_reply_finality_v1';
+        expect((ctx.chat[1].extra![key] as any).state).toBe('uncertain');
+        await expect(syncDaily()).rejects.toThrow('暂不归档');
+        ctx.streamingProcessor = null;
+        // Replace a stale gray dialog from a previous attempt, then let host
+        // content preparation take longer than the old fixed 350ms delay.
+        Object.assign(summaryEditPrompt, { open: true, count: 0, error: '旧的未确认状态' });
+        click(1, fullBody); ctx.chat[1].mes = fullBody;
+        await emit('MESSAGE_EDITED', 1);
+        await new Promise(resolve => setTimeout(resolve, 400));
+        expect(summaryEditPrompt.open).toBe(false);
+        expect((ctx.chat[1].extra![key] as any).state).toBe('uncertain');
+        await emit('MESSAGE_UPDATED', 1);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        expect((ctx.chat[1].extra![key] as any).state).toBe('edited');
+        expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' });
+        expect(await lib.all('reviews')).toEqual([]);
+        expect((await readDailyReview())!.view.memories[0].content).toBe('合成旧摘要');
+        const engine = await import('@/memory/engine');
+        const regenerate = vi.spyOn(engine, 'regenerateFloor').mockImplementation(async floor => {
+            const evidence = await captureSummaryEvidence([0, 1]);
+            ctx.chat[floor].extra!.bbs_leaf!.text = '用户选择更新后的摘要';
+            attachSummaryEvidence(ctx.chat, floor, evidence, [0, 1]); invalidateDaily(); return true;
+        });
+        await resolveSummaryEdit(action);
+        expect(summaryEditPrompt.open).toBe(false);
+        if (action === 'keep') {
+            expect(regenerate).not.toHaveBeenCalled();
+            expect((await statuses(lib, await syncDaily())).get(original.memories[0].id)).toBe('valid');
+        } else {
+            expect(regenerate).toHaveBeenCalledExactlyOnceWith(1);
+            expect((await syncDaily()).memories[0].content).toBe('用户选择更新后的摘要');
+        }
+    } finally { close(); }
+});
+
+test.each(['defer', 'disabled', 'chat', 'swipe', 'generation'])('late UPDATED does not reopen after %s invalidates the pending prompt', async changed => {
+    const { emit, click, close } = await nativeEditFixture();
+    try {
+        click(0, '修改后的用户消息'); ctx.chat[0].mes = '修改后的用户消息'; await emit('MESSAGE_EDITED', 0);
+        if (changed === 'defer') deferSummaryEdit();
+        if (changed === 'disabled') api.apiSettings.summaryEditPromptEnabled = false;
+        if (changed === 'chat') { ctx.getCurrentChatId = () => 'another-chat'; await emit('CHAT_CHANGED'); }
+        if (changed === 'swipe') ctx.chat[0].swipe_id = 1;
+        if (changed === 'generation') await emit('GENERATION_STARTED', 'normal');
+        await emit('MESSAGE_UPDATED', 0);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        expect(summaryEditPrompt.open).toBe(false);
+    } finally { close(); }
+});
+
+test('ordinary user edits still prompt once; duplicate UPDATED cannot reopen a dismissed prompt', async () => {
+    const { emit, click, close } = await nativeEditFixture();
+    try {
+        click(0, '用户明确修订的问题'); ctx.chat[0].mes = '用户明确修订的问题';
+        await emit('MESSAGE_EDITED', 0); await emit('MESSAGE_UPDATED', 0);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' });
+        deferSummaryEdit(); await emit('MESSAGE_UPDATED', 0);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        expect(summaryEditPrompt.open).toBe(false);
+    } finally { close(); }
+});
+
+
+test.each(['generation', 'swipe', 'deletion'])('settled edit prompt is cancelled before its timer by %s', async changed => {
+    const { emit, click, close } = await nativeEditFixture();
+    try {
+        click(0, '保存后的问题'); ctx.chat[0].mes = '保存后的问题';
+        await emit('MESSAGE_EDITED', 0); await emit('MESSAGE_UPDATED', 0);
+        if (changed === 'generation') await emit('GENERATION_STARTED', 'normal');
+        if (changed === 'swipe') { ctx.chat[0].swipe_id = 1; await emit('MESSAGE_SWIPED', 0); }
+        if (changed === 'deletion') { ctx.chat.pop(); await emit('MESSAGE_DELETED', 1); }
+        await new Promise(resolve => setTimeout(resolve, 250));
+        expect(summaryEditPrompt.open).toBe(false);
+    } finally { close(); }
+});
+
+test.each(['generation', 'swipe', 'defer'])('in-flight prompt preparation cannot reopen after %s', async changed => {
+    const { emit, click, close } = await nativeEditFixture();
+    let release!: () => void, entered!: () => void;
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    const checking = new Promise<void>(resolve => { entered = resolve; });
+    const original = bridge.dailyCurrent;
+    vi.spyOn(bridge, 'dailyCurrent').mockImplementationOnce(async (...args) => {
+        const current = await original(...args); entered(); await paused; return current;
+    });
+    try {
+        click(0, '保存后的问题'); ctx.chat[0].mes = '保存后的问题';
+        await emit('MESSAGE_EDITED', 0); await emit('MESSAGE_UPDATED', 0);
+        await checking;
+        if (changed === 'generation') await emit('GENERATION_STARTED', 'normal');
+        if (changed === 'swipe') { ctx.chat[0].swipe_id = 1; await emit('MESSAGE_SWIPED', 0); }
+        if (changed === 'defer') deferSummaryEdit();
+        release(); await new Promise(resolve => setTimeout(resolve, 50));
+        expect(summaryEditPrompt.open).toBe(false);
+    } finally { release(); close(); }
 });

@@ -25,6 +25,7 @@ interface Run {
     before?: { message: ReplyMessage; text: string; swipe: number };
     stopped: boolean; ended: boolean; received?: { message: ReplyMessage; text: string; swipe: number };
     processor?: ReplyHost['processor'];
+    initialProcessor?: ReplyHost['processor'];
 }
 const assistant = (m: ReplyMessage) => !m.is_user && !m.extra?.bbs_internal_notice &&
     !(m.is_system && m.extra?.type && !m.extra?.bbs_hidden);
@@ -46,23 +47,28 @@ export class ReplyFinality {
     private run?: Run;
     private edit?: { scope: string; chat: ReplyMessage[]; floor: number; message: ReplyMessage; swipe: number; expires: number; expectedText: string; text?: string };
     private writes = new Set<Promise<void>>();
+    private editSerial = 0;
     constructor(private host: () => ReplyHost) {}
-    reset() { this.run = undefined; this.edit = undefined; this.revision++; }
+    reset() { this.run = undefined; this.cancelEdit(); this.revision++; }
     start(type?: string, _options?: unknown, dryRun?: boolean) {
         if (dryRun || type === 'quiet' || type === 'impersonate') return;
         const h = this.host(), tail = h.chat.at(-1);
-        this.edit = undefined;
+        this.cancelEdit();
         const rewrites = ['swipe', 'regenerate', 'continue'].includes(type ?? '') && tail && assistant(tail);
         const floor = rewrites ? h.chat.length - 1 : h.chat.length;
         const m = h.chat[floor];
         this.run = { epoch: ++this.epoch, scope: h.scope, chat: h.chat, floor, type,
             ...(m ? { before: { message: m, text: m.mes, swipe: swipe(m) } } : {}),
-            stopped: false, ended: false };
+            stopped: false, ended: false, initialProcessor: h.processor };
         this.revision++;
     }
     private current(run = this.run) {
         const h = this.host();
         return run && run === this.run && run.scope === h.scope && run.chat === h.chat ? run : undefined;
+    }
+    private matchesProcessor(run: Run, p: ReplyHost['processor']) {
+        return !!p && p !== run.initialProcessor && p.messageId === run.floor &&
+            (!run.processor || p === run.processor);
     }
     private candidate(run: Run) {
         if (!run.before) while (run.chat[run.floor]?.is_user) run.floor++;
@@ -75,7 +81,7 @@ export class ReplyFinality {
     private uncreatedSwipe(m: ReplyMessage) {
         return Array.isArray(m.swipes) && swipe(m) >= m.swipes.length;
     }
-    private async stamp(m: ReplyMessage, floor: number, state: State, run?: Run, quiet = false) {
+    private async stamp(m: ReplyMessage, floor: number, state: State, run?: Run, quiet = false, current = () => true) {
         const h = this.host(), text = m.mes, page = swipe(m), epoch = run?.epoch ?? (quiet ? (m.extra?.[REPLY_FINALITY_KEY] as Receipt)?.epoch : undefined) ?? ++this.epoch;
         const receipt: Receipt = { version: 1, epoch, scope: h.scope, floor, swipe: page, hash: '', state };
         m.extra ??= {};
@@ -86,9 +92,10 @@ export class ReplyFinality {
         if (!quiet) this.revision++;
         const hash = await fingerprint(text), now = this.host();
         if (h.scope !== now.scope || h.chat !== now.chat || now.chat[floor] !== m || m.mes !== text || swipe(m) !== page ||
-            m.extra[REPLY_FINALITY_KEY] !== receipt || (run && !this.current(run))) return;
+            m.extra[REPLY_FINALITY_KEY] !== receipt || (run && !this.current(run)) || !current()) return false;
         receipt.hash = hash;
         if (!quiet) this.revision++;
+        return true;
     }
     async observe() {
         let run = this.current();
@@ -102,8 +109,10 @@ export class ReplyFinality {
         const m = this.candidate(run);
         if (!m) return;
         const p = this.host().processor;
-        if (p) run.processor ??= p;
-        if (p?.abortController?.signal?.aborted || p?.isStopped) run.stopped = true;
+        if (this.matchesProcessor(run, p)) {
+            run.processor ??= p;
+            if (p?.abortController?.signal?.aborted || p?.isStopped) run.stopped = true;
+        }
         const receipt = m.extra?.[REPLY_FINALITY_KEY] as Receipt | undefined;
         if (!receipt || receipt.epoch !== run.epoch || (run.stopped && receipt.state !== 'aborted'))
             await this.stamp(m, run.floor, run.stopped ? 'aborted' : 'pending', run);
@@ -112,7 +121,7 @@ export class ReplyFinality {
         const run = this.current(), h = this.host(), p = h.processor;
         if (!run) return this.observe();
         this.candidate(run); // Resolve a newly appended user floor before the assistant.
-        if (!p || p.messageId !== run.floor || p.isFinished || p.isStopped || p.abortController?.signal?.aborted) return;
+        if (!this.matchesProcessor(run, p) || p?.isFinished || p?.isStopped || p?.abortController?.signal?.aborted) return;
         const m = h.chat[run.floor];
         if (!m || (run.page !== undefined && run.page !== swipe(m))) return;
         // STREAM_TOKEN_RECEIVED precedes onProgressStreaming. First token revokes
@@ -128,7 +137,7 @@ export class ReplyFinality {
         const m = this.candidate(run);
         if (!m || floor !== run.floor) return;
         const p = this.host().processor;
-        if ((run.processor && p !== run.processor) || (p?.messageId !== undefined && p.messageId !== floor)) return;
+        if ((run.processor && p !== run.processor) || (p && !this.matchesProcessor(run, p))) return;
         run.processor ??= p;
         run.received = { message: m, text: m.mes, swipe: swipe(m) };
         if (p?.abortController?.signal?.aborted || p?.isStopped) run.stopped = true;
@@ -155,10 +164,11 @@ export class ReplyFinality {
             m.mes === received.text && swipe(m) === received.swipe) await this.received(run.floor);
     }
     confirmEdit(floor: number, expectedText: string) {
+        this.editSerial++;
         const h = this.host(), m = h.chat[floor];
         this.edit = m && assistant(m) ? { scope: h.scope, chat: h.chat, floor, message: m, swipe: swipe(m), expires: Date.now() + 15_000, expectedText } : undefined;
     }
-    cancelEdit() { this.edit = undefined; }
+    cancelEdit() { this.edit = undefined; this.editSerial++; }
     editStarted(floor?: number) {
         const h = this.host(), intent = this.edit, m = typeof floor === 'number' ? h.chat[floor] : undefined;
         if (!m || !intent || Date.now() > intent.expires || intent.scope !== h.scope || intent.chat !== h.chat ||
@@ -170,10 +180,26 @@ export class ReplyFinality {
         const intent = this.edit;
         this.edit = undefined;
         if (!m || !intent || Date.now() > intent.expires || intent.scope !== h.scope || intent.chat !== h.chat || intent.floor !== floor || intent.message !== m || intent.swipe !== swipe(m) || intent.text !== m.mes) return;
-        const run = this.current();
-        if (run && !run.ended && !run.stopped && this.candidate(run)) return;
-        await this.stamp(m, floor!, 'edited');
+        const run = this.current(), serial = this.editSerial;
+        const terminal = (p: ReplyHost['processor']) => !!p &&
+            (p.isFinished === true || p.isStopped === true || p.abortController?.signal?.aborted === true);
+        // UI END can arrive before a stream actually finishes. Native save never
+        // accepts a live processor, even when the old run says ended/stopped.
+        if ((h.processor && !terminal(h.processor)) || (run?.processor && !terminal(run.processor))) return;
+        const received = run?.received, processor = run?.processor;
+        const completedRun = !!run && !!received && !!processor && processor !== run.initialProcessor &&
+            processor.messageId === run.floor && terminal(processor) &&
+            (!h.processor || h.processor === processor) && received.message === run.chat[run.floor] &&
+            received.swipe === swipe(run.chat[run.floor]);
+        // A terminal processor tied to this received body is sufficient for an
+        // explicit save; processor=null and a missing END event alone are not.
+        if (run && !run.ended && !run.stopped && this.candidate(run) && !completedRun) return;
+        const current = () => this.editSerial === serial && this.run === run &&
+            this.host().processor === h.processor && !(h.processor && !terminal(h.processor)) &&
+            !(processor && !terminal(processor));
+        if (!await this.stamp(m, floor!, 'edited', undefined, false, current)) return;
         if (run && this.current(run) && run.floor === floor) this.run = undefined;
+        return true;
     }
     /** Only verified plugin-owned summary sidecar hooks may call this. */
     reconcileDerived(floor: number, originalText: string) {

@@ -7,7 +7,7 @@ import { keepSummaries } from './canonical';
 import { dailyState, dailyCurrent, hostScope, hostVersion, invalidateDaily, syncDaily, readDailyReview } from './bridge';
 import { check, type CapturedView } from './model';
 import { rebuildSummaryOwners } from './summary-review-actions';
-import { summaryEditSignal } from './summary-edit-signal';
+import { summaryEditSignal, bodyEditSignal } from './summary-edit-signal';
 
 export const summaryEditPrompt = reactive({ open: false, busy: false, count: 0, error: '', progress: '' });
 let ticket = 0, timer: ReturnType<typeof setTimeout> | undefined;
@@ -25,7 +25,8 @@ export async function prepareSummaryEditPrompt() {
         const result = await readDailyReview();
         if (!result) return;
         const { view, validity, host, generation, lib } = result;
-        if (run !== ticket || scope !== hostScope() || !apiSettings.summaryEditPromptEnabled || !await dailyCurrent(view, host, generation)) return;
+        if (!await dailyCurrent(view, host, generation) || run !== ticket || scope !== hostScope() ||
+            !apiSettings.summaryEditPromptEnabled || !engineActiveHere()) return;
         const ids = view.memories.filter(m => ['needs_review', 'needs_rebuild'].includes(validity.get(m.id) ?? '')).map(m => m.id);
         if (!ids.length) return;
         pending = { view, ids, host, generation, lib };
@@ -62,17 +63,31 @@ export async function resolveSummaryEdit(action: 'keep' | 'update' | 'later') {
     finally { summaryEditPrompt.busy = false; }
 }
 export function bindSummaryEditPrompt() {
-    const ctx = getContext(); if (!ctx) return;
-    const edited = () => {
-        deferSummaryEdit();
+    if (!getContext()) return;
+    const schedule = (scope: string, run: number) => {
         if (!apiSettings.summaryEditPromptEnabled || !engineActiveHere()) return;
-        const scope = hostScope(), run = ticket;
-        // Let the host edit and the existing 200ms derived/archive debounce settle first.
-        timer = setTimeout(() => { if (scope === hostScope() && run === ticket) void prepareSummaryEditPrompt(); }, 350);
+        // Coalesce only after the bridge has consumed UPDATED. This delay is not
+        // evidence that the host finished saving; the paired signal is.
+        timer = setTimeout(() => { if (scope === hostScope() && run === ticket) void prepareSummaryEditPrompt(); }, 200);
     };
-    const event = ctx.eventTypes.MESSAGE_EDITED;
-    if (event) ctx.eventSource.on(event, edited);
-    const unwatchEdit = watch(summaryEditSignal, edited);
-    const unwatch = watch(() => [dailyState.scope, apiSettings.summaryEditPromptEnabled], deferSummaryEdit, { flush: 'sync' });
-    return () => { if (event) ctx.eventSource.off?.(event, edited); unwatchEdit(); unwatch(); deferSummaryEdit(); };
+    let body: { id: number; ticket: number; scope: string } | undefined;
+    const unwatchBody = watch(bodyEditSignal, signal => {
+        if (!signal) return;
+        if (signal.phase === 'cancelled') {
+            body = undefined; deferSummaryEdit();
+        } else if (signal.phase === 'started') {
+            deferSummaryEdit();
+            body = { id: signal.id, ticket, scope: hostScope() };
+        } else if (body?.id === signal.id) {
+            const saved = body; body = undefined;
+            if (saved.ticket === ticket && saved.scope === hostScope()) schedule(saved.scope, saved.ticket);
+        }
+    }, { flush: 'sync' });
+    const unwatchEdit = watch(summaryEditSignal, () => {
+        body = undefined; deferSummaryEdit(); schedule(hostScope(), ticket);
+    });
+    const unwatch = watch(() => [dailyState.scope, apiSettings.summaryEditPromptEnabled], () => {
+        body = undefined; deferSummaryEdit();
+    }, { flush: 'sync' });
+    return () => { unwatchBody(); unwatchEdit(); unwatch(); deferSummaryEdit(); };
 }

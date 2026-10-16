@@ -1,3 +1,4 @@
+import { beginBodyEdit, settleBodyEdit, cancelBodyEdit } from './summary-edit-signal';
 import { protectDeletionBeforeSync, protectArchiveBeforeDeletion, completeArchiveBackup } from './core-backup-runtime';
 import { membershipProjection, type MembershipProjection } from './event-memberships';
 import { ReplyFinality, ReplyFinalityError } from './reply-finality';
@@ -858,6 +859,7 @@ export function bindDaily() {
     const ctx = getContext();
     if (!ctx) return;
     let active = true, eventEpoch = 0;
+    let bodyEdit: { id: number; floor: number; chat: STMessage[]; message: STMessage; text: string; swipe: number; scope: string; epoch: number } | undefined;
     const rendered = chatRenderBatch(scheduleDaily);
     const handlers: { event: string; callback: (...args: any[]) => void }[] = [];
     const on = (key: string, action?: (...args: any[]) => void | Promise<void>) => {
@@ -891,17 +893,35 @@ export function bindDaily() {
         ctx.eventSource.on(event, callback);
         handlers.push({ event, callback });
     };
-    for (const key of ['MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_SENT']) on(key);
-    on('CHAT_CHANGED', () => replyFinality.reset());
-    on('GENERATION_STARTED', (...args) => replyFinality.start(...args));
+    const cancelBody = () => { bodyEdit = undefined; replyFinality.cancelEdit(); cancelBodyEdit(); };
+    for (const key of ['MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_SENT']) on(key, cancelBody);
+    on('CHAT_CHANGED', () => { cancelBody(); replyFinality.reset(); });
+    on('GENERATION_STARTED', (...args) => {
+        const revision = replyFinality.revision; replyFinality.start(...args);
+        if (replyFinality.revision !== revision) cancelBody();
+    });
     on('STREAM_TOKEN_RECEIVED', () => replyFinality.streaming());
     on('CHARACTER_MESSAGE_RENDERED', () => replyFinality.observe());
     on('MESSAGE_RECEIVED', (floor) => replyFinality.received(floor));
     on('GENERATION_STOPPED', () => replyFinality.stop());
     on('GENERATION_ENDED', () => replyFinality.end());
-    on('MESSAGE_EDITED', (floor) => replyFinality.editStarted(floor));
+    on('MESSAGE_EDITED', (floor) => {
+        replyFinality.editStarted(floor);
+        const chat = getContext()?.chat, message = typeof floor === 'number' ? chat?.[floor] : undefined;
+        bodyEdit = chat && message ? { id: beginBodyEdit(), floor, chat, message, text: message.mes,
+            swipe: message.swipe_id ?? 0, scope: hostScope(), epoch: eventEpoch } : undefined;
+    });
     // UPDATED must consume the trusted confirmation below; the event alone is not acceptance.
-    on('MESSAGE_UPDATED', (floor) => replyFinality.edited(floor));
+    on('MESSAGE_UPDATED', async (floor) => {
+        const edit = bodyEdit;
+        await replyFinality.edited(floor);
+        if (!active || !edit || bodyEdit !== edit || edit.floor !== floor || edit.epoch !== eventEpoch ||
+            getContext()?.chat !== edit.chat || hostScope() !== edit.scope || edit.chat[floor] !== edit.message ||
+            edit.message.mes !== edit.text || (edit.message.swipe_id ?? 0) !== edit.swipe) return;
+        bodyEdit = undefined;
+        // Await the completion receipt before allowing the prompt to read review state.
+        settleBodyEdit(edit.id);
+    });
     // TT also emits EDITED/UPDATED for slash commands and automatic output revision.
     // Only a real click on its confirmation button authorizes a quarantined fragment.
     const confirmEdit = (event: Event) => {
@@ -922,6 +942,7 @@ export function bindDaily() {
     const dispose = () => {
         if (!active) return;
         active = false;
+        cancelBody();
         bindingEpoch++;
         automaticAgain = false;
         rendered.cancel();

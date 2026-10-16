@@ -217,3 +217,67 @@ test('multiple confirmations replace intent; consumed intent cannot approve a la
     host.chat[2].mes = '自动改写'; guard.editStarted(2); await guard.edited(2);
     await expect(guard.assertArchivable()).rejects.toThrow('暂不归档');
 });
+
+
+test('terminal processor evidence permits only explicit save after API error when UI END is missing', async () => {
+    const p = stream(); host.chat[2].mes = '完整正文\n[API Error]\n尾部错误'; p.isFinished = true;
+    await guard.received(2); host.processor = null;
+    expect(receipt().state).toBe('uncertain');
+    await expect(guard.assertArchivable()).rejects.toThrow('暂不归档');
+    await save(2, '完整正文');
+    expect(receipt().state).toBe('edited');
+    await expect(guard.assertArchivable()).resolves.toBeTypeOf('function');
+});
+
+test.each(['active-after-end', 'initial-processor', 'replacement-processor', 'wrong-floor', 'no-processor'])('%s cannot provide terminal evidence for native save', async kind => {
+    if (kind === 'initial-processor') host.processor = { ...processor(2), isFinished: true };
+    guard.start(); host.chat.push(message('完整正文\n[API Error]\n错误'));
+    if (kind !== 'no-processor' && kind !== 'initial-processor') host.processor = processor(kind === 'wrong-floor' ? 0 : 2);
+    if (host.processor && kind !== 'active-after-end') host.processor.isFinished = true;
+    if (kind === 'wrong-floor') await guard.observe();
+    else await guard.received(2);
+    if (kind === 'active-after-end') await guard.end();
+    if (kind === 'replacement-processor') host.processor = { ...processor(2), isFinished: true };
+    await save(2, '完整正文');
+    expect(receipt()?.state).not.toBe('edited');
+    await expect(guard.assertArchivable()).rejects.toThrow('暂不归档');
+});
+
+test.each(['generation', 'chat', 'swipe', 'intent', 'processor'])('edit hashing cannot authorize a changed %s', async kind => {
+    const p = stream(); p.isFinished = true; p.isStopped = true; await guard.stop();
+    guard.confirmEdit(2, '已核对正文'); host.chat[2].mes = '已核对正文'; guard.editStarted(2);
+    let release!: (s: string) => void;
+    vi.spyOn(model, 'fingerprint').mockImplementationOnce(() => new Promise(r => { release = r; }));
+    const edited = guard.edited(2), original = host.chat[2];
+    if (kind === 'generation') guard.start('regenerate');
+    if (kind === 'chat') host = { scope: 'chat-b', chat: [message('另一个聊天')] };
+    if (kind === 'swipe') original.swipe_id = 1;
+    if (kind === 'intent') guard.cancelEdit();
+    if (kind === 'processor') host.processor = processor(2);
+    release('not-accepted');
+    expect(await edited).not.toBe(true);
+    expect(receipt(original).hash).toBe('');
+});
+
+
+test.each(['initial-stopped', 'initial-aborted', 'wrong-floor-stopped', 'wrong-floor-aborted', 'replacement-stopped', 'replacement-aborted'])('%s cannot impersonate this generation stopping', async kind => {
+    const stopped = kind.endsWith('stopped');
+    const unrelated = { ...processor(kind.startsWith('wrong-floor') ? 0 : 2), isFinished: true,
+        isStopped: stopped, abortController: { signal: { aborted: !stopped } } };
+    if (kind.startsWith('initial')) host.processor = unrelated;
+    guard.start(); host.chat.push(message('未确认正文\n[API Error]\n错误'));
+    if (kind.startsWith('replacement')) { host.processor = processor(2); await guard.observe(); }
+    host.processor = unrelated;
+    await guard.observe(); await guard.received(2);
+    await save(2, '手改后的正文');
+    expect(receipt()?.state).not.toBe('edited');
+    await expect(guard.assertArchivable()).rejects.toThrow('暂不归档');
+});
+
+
+test('deleted generation candidate cannot crash a native save on an older floor', async () => {
+    const p = stream(); await guard.observe(); p.isFinished = true;
+    host.chat.pop(); host.processor = null;
+    await expect(save(0, '用户核对后的历史正文')).resolves.toBeUndefined();
+    expect(receipt(host.chat[0]).state).toBe('edited');
+});
