@@ -1079,7 +1079,7 @@ test('manual higher rebuild saves immediately when success preview is off', asyn
 function bindFinalityEvents() {
     dispose?.();
     const handlers = new Map<string, ((...args: any[]) => unknown)[]>();
-    const keys = ['GENERATION_STARTED', 'GENERATION_STOPPED', 'GENERATION_ENDED', 'CHARACTER_MESSAGE_RENDERED',
+    const keys = ['GENERATION_STARTED', 'GENERATION_STOPPED', 'GENERATION_ENDED', 'CHARACTER_MESSAGE_RENDERED', 'STREAM_TOKEN_RECEIVED',
         'MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_DELETED', 'MESSAGE_SENT', 'CHAT_CHANGED'];
     ctx.eventTypes = Object.fromEntries(keys.map(key => [key, key])) as any;
     ctx.eventSource = { on: (key, fn) => handlers.set(key, [...(handlers.get(key) ?? []), fn]), off: () => {} };
@@ -1495,4 +1495,68 @@ test.each(['generation', 'swipe', 'defer'])('in-flight prompt preparation cannot
         release(); await new Promise(resolve => setTimeout(resolve, 50));
         expect(summaryEditPrompt.open).toBe(false);
     } finally { release(); close(); }
+});
+
+// Diagnosis only: an ignored earlier error, not the newest edited floor, owns the quarantine.
+test('historical API-error floor keeps native latest save gray; native save on exact old floor restores review', async () => {
+    const { emit, click, close } = await nativeEditFixture();
+    try {
+        const key = 'mnemosyne_reply_finality_v1', fullBody = '旧楼已完整输出的正文';
+        ctx.translate = () => 'API错误';
+        await emit('GENERATION_STARTED', 'regenerate');
+        ctx.chat[1].mes = `${fullBody}\n[API错误]\n尾部错误`;
+        ctx.streamingProcessor = { messageId: 1, isFinished: true, isStopped: false,
+            abortController: { signal: { aborted: false } } };
+        await emit('MESSAGE_RECEIVED', 1); ctx.streamingProcessor = null;
+        // The user continues chatting without handling the old gray prompt.
+        ctx.chat.push(message(true, '后来新的问题'));
+        await emit('GENERATION_STARTED', 'normal');
+        ctx.chat.push(message(false, '最新正常答复'));
+        ctx.streamingProcessor = { messageId: 3, isFinished: true, isStopped: false,
+            abortController: { signal: { aborted: false } } };
+        await emit('MESSAGE_RECEIVED', 3); await emit('GENERATION_ENDED'); ctx.streamingProcessor = null;
+        click(3, '最新编辑后的答复'); ctx.chat[3].mes = '最新编辑后的答复';
+        await emit('MESSAGE_EDITED', 3); await emit('MESSAGE_UPDATED', 3);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        expect((ctx.chat[3].extra![key] as any).state).toBe('edited');
+        expect((ctx.chat[1].extra![key] as any).state).toBe('uncertain');
+        expect(summaryEditPrompt).toMatchObject({ open: true, count: 0 });
+        expect(summaryEditPrompt.error).toContain('暂不归档');
+        expect(summaryEditPrompt.blocker).toMatchObject({ floor: 1, reason: 'api_error' });
+        expect(bridge.dailyReplyBlocker.value).toMatchObject({ floor: 1, reason: 'api_error' });
+        const before = JSON.stringify(ctx.chat), saves = vi.mocked(ctx.saveChat).mock.calls.length;
+        const page = await bridge.readReplyBlockers();
+        expect(page.items.map(item => item.floor)).toEqual([1]);
+        expect(JSON.stringify(ctx.chat)).toBe(before); expect(ctx.saveChat).toHaveBeenCalledTimes(saves);
+        expect(dailyState.pending).toBe(true);
+        expect(await lib.all('reviews')).toEqual([]);
+        // The same native confirmation path supports a historical, non-tail floor.
+        click(1, fullBody); ctx.chat[1].mes = fullBody;
+        await emit('MESSAGE_EDITED', 1); await emit('MESSAGE_UPDATED', 1);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        expect((ctx.chat[1].extra![key] as any).state).toBe('edited');
+        expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' });
+        expect(dailyState.pending).toBe(false);
+        expect(await lib.all('reviews')).toEqual([]); // Explicit body acceptance is not summary acceptance.
+    } finally { close(); }
+});
+
+
+test('ordinary stream-token fast path neither advances diagnostic epoch nor scans history', async () => {
+    const emit = bindFinalityEvents();
+    await emit('GENERATION_STARTED', 'normal'); ctx.chat.push(message(false, '片段'));
+    ctx.streamingProcessor = { messageId: 2, isFinished: false, isStopped: false };
+    await emit('STREAM_TOKEN_RECEIVED');
+    const epoch = bridge.replyDiagnosticEpoch.value;
+    const inspect = vi.spyOn(bridge, 'readReplyBlockers');
+    for (let i = 0; i < 100; i++) { ctx.chat[2].mes += '字'; await emit('STREAM_TOKEN_RECEIVED'); }
+    expect(bridge.replyDiagnosticEpoch.value).toBe(epoch); expect(inspect).not.toHaveBeenCalled();
+});
+
+test('a host edit event invalidates diagnostic continuation without automatically rescanning', async () => {
+    const emit = bindFinalityEvents();
+    ctx.chat.push(...Array.from({ length: 210 }, () => message(true, '后续用户消息')));
+    const page = await bridge.readReplyBlockers(); expect(page.next).toBeDefined();
+    await emit('MESSAGE_EDITED', 0);
+    await expect(bridge.readReplyBlockers(page.next)).rejects.toThrow('重新检查');
 });

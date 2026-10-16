@@ -37,8 +37,24 @@ export const hasTTErrorMarker = (text: string, localizedLabel = '[API Error]') =
         /^(?:\s|:|$)/.test(line.trimStart().slice(label.length))));
 const reason = '当前回复尚未确认完成、已停止或疑似 API 错误，暂不归档；可编辑并保存确认要保留的正文';
 
+export type ReplyBlockerReason = 'streaming' | 'uncreated' | 'pending' | 'aborted' | 'api_error' | 'changed' | 'unknown';
+export const replyBlockerText: Record<ReplyBlockerReason, string> = {
+    streaming: '仍在生成，等待结束后再核对', uncreated: '当前 swipe 尚未形成正文',
+    pending: '未取得完成确认', aborted: '曾停止或中断，尚未人工确认',
+    api_error: '疑似 API 错误，需核对正文', changed: '正文或 swipe 已变化，原确认不再匹配',
+    unknown: '确认记录无法识别，需重新核对',
+};
+/** Temporary, body-free UI evidence. It never grants archival or edit authority. */
+export interface ReplyBlocker { floor: number; swipe: number; reason: ReplyBlockerReason; current: () => boolean }
+export interface ReplyBlockerCursor { offset: number; candidateFloor: number; current: () => boolean }
+export interface ReplyBlockerPage {
+    items: ReplyBlocker[]; examined: number; total: number; next?: ReplyBlockerCursor; current: () => boolean;
+}
 export class ReplyFinalityError extends Error {
-    constructor() { super(reason); this.name = 'ReplyFinalityError'; }
+    constructor(readonly blocker?: ReplyBlocker) {
+        super(blocker ? `楼层 #${blocker.floor}（swipe ${blocker.swipe + 1}）：${replyBlockerText[blocker.reason]}。${reason}` : reason);
+        this.name = 'ReplyFinalityError';
+    }
 }
 
 export class ReplyFinality {
@@ -216,6 +232,74 @@ export class ReplyFinality {
         this.writes.add(write);
         void write.then(() => this.writes.delete(write), () => this.writes.delete(write));
     }
+    private targetCurrent(h: ReplyHost, floor: number) {
+        const m = h.chat[floor], text = m.mes, page = swipe(m), role = assistant(m), uncreated = this.uncreatedSwipe(m);
+        const receipt = JSON.stringify(m.extra?.[REPLY_FINALITY_KEY]), revision = this.revision;
+        return () => {
+            const now = this.host();
+            return now.scope === h.scope && now.chat === h.chat && now.chat[floor] === m && this.revision === revision &&
+                m.mes === text && swipe(m) === page && assistant(m) === role && this.uncreatedSwipe(m) === uncreated &&
+                JSON.stringify(m.extra?.[REPLY_FINALITY_KEY]) === receipt;
+        };
+    }
+    private diagnosticContext(h: ReplyHost) {
+        const run = this.current(), revision = this.revision, total = h.chat.length, processor = h.processor;
+        const state = () => JSON.stringify([processor?.messageId, processor?.isFinished, processor?.isStopped,
+            processor?.abortController?.signal?.aborted, run?.floor, run?.page, run?.ended, run?.stopped]);
+        const observed = state();
+        return () => {
+            const now = this.host();
+            return now.scope === h.scope && now.chat === h.chat && now.chat.length === total && now.errorLabel === h.errorLabel &&
+                now.processor === processor && this.current() === run && this.revision === revision && state() === observed;
+        };
+    }
+    private blocker(h: ReplyHost, floor: number, reason: ReplyBlockerReason): ReplyBlocker {
+        const context = this.diagnosticContext(h), target = this.targetCurrent(h, floor);
+        return { floor, swipe: swipe(h.chat[floor]), reason, current: () => context() && target() };
+    }
+    /** Same classification for the gate and diagnostic pages; no mutation or receipt creation. */
+    private blockerReason(h: ReplyHost, m: ReplyMessage, floor: number, run: Run | undefined, candidate: boolean): ReplyBlockerReason | undefined | Promise<ReplyBlockerReason | undefined> {
+        if (this.uncreatedSwipe(m)) return 'uncreated';
+        const p = h.processor, receipt = m.extra?.[REPLY_FINALITY_KEY] as Receipt | undefined;
+        if (p?.messageId === floor && p.isFinished !== true && !p.isStopped && !p.abortController?.signal?.aborted &&
+            (!run || candidate)) return 'streaming';
+        if (!receipt) return candidate ? 'pending' : hasTTErrorMarker(m.mes, h.errorLabel) ? 'api_error' : undefined;
+        return fingerprint(m.mes).then(hash => {
+            if (receipt.version !== 1) return 'unknown';
+            if (receipt.swipe !== swipe(m) || receipt.hash !== hash) return 'changed';
+            if (receipt.state === 'aborted' || (candidate && run?.stopped && receipt.state !== 'edited')) return 'aborted';
+            if (receipt.state === 'pending') return 'pending';
+            if (receipt.state === 'uncertain') return 'api_error';
+            if (!['complete', 'edited'].includes(receipt.state)) return 'unknown';
+            if (hasTTErrorMarker(m.mes, h.errorLabel) && receipt.state !== 'edited') return 'api_error';
+        });
+    }
+    /** Explicit diagnostic pages only: at most 100 new floors / 10 findings per call.
+     * Page-local exact guards; continuation uses the host lifecycle token, never a retained prefix scan. */
+    async inspectBlockers(cursor?: ReplyBlockerCursor): Promise<ReplyBlockerPage> {
+        const h = this.host(), run = this.current(), total = h.chat.length;
+        const contextCurrent = this.diagnosticContext(h), checks: (() => boolean)[] = [];
+        const current = () => contextCurrent() && checks.every(check => check());
+        let floor = cursor?.offset ?? 0;
+        if (!Number.isSafeInteger(floor) || floor < 0 || floor > total || (cursor && !cursor.current()) || !current()) throw new Error('聊天或正文已变化，请重新检查');
+        // Resolve a pending candidate locally; candidate() would mutate run.floor/page.
+        let runFloor = cursor?.candidateFloor ?? run?.floor ?? -1;
+        const items: ReplyBlocker[] = [], start = floor;
+        for (; floor < total && floor - start < 100 && items.length < 10; floor++) {
+            const m = h.chat[floor], check = this.targetCurrent(h, floor); checks.push(check);
+            if (run && !run.before && floor === runFloor && m.is_user) runFloor++;
+            if (!assistant(m)) continue;
+            const before = run?.before;
+            const candidate = !!run && runFloor === floor && (run.page === undefined || run.page === swipe(m)) &&
+                !(before && before.message === m && before.text === m.mes && before.swipe === swipe(m) && !this.uncreatedSwipe(m));
+            const result = this.blockerReason(h, m, floor, run, candidate);
+            const problem = result instanceof Promise ? await result : result;
+            if (!contextCurrent() || !check()) throw new Error('聊天或正文已变化，请重新检查');
+            if (problem) items.push(this.blocker(h, floor, problem));
+        }
+        if (!current()) throw new Error('聊天或正文已变化，请重新检查');
+        return { items, examined: floor, total, ...(floor < total ? { next: { offset: floor, candidateFloor: runFloor, current: contextCurrent } } : {}), current };
+    }
     /** Read-only prompt use only. The uncreated last swipe is never archive evidence. */
     async assertPromptPrefix(type: string | undefined) {
         const run = this.current(), h = this.host(), cutoff = h.chat.length - 1;
@@ -255,28 +339,11 @@ export class ReplyFinality {
         for (let floor = 0; floor < (cutoff ?? h.chat.length); floor++) {
             const m = h.chat[floor];
             if (!assistant(m)) continue;
-            if (this.uncreatedSwipe(m)) throw new ReplyFinalityError();
-            const receipt = m.extra?.[REPLY_FINALITY_KEY] as Receipt | undefined;
-            const candidate = run && run.floor === floor && this.candidate(run) === m;
-            const p = h.processor;
-            if (p?.messageId === floor && p.isFinished !== true && !p.isStopped && !p.abortController?.signal?.aborted &&
-                (!run || candidate)) throw new ReplyFinalityError();
-            if (!receipt) {
-                if (candidate || hasTTErrorMarker(m.mes, h.errorLabel)) throw new ReplyFinalityError();
-                continue; // Historical unmarked ordinary chat remains supported.
-            }
-            const text = m.mes, page = swipe(m), revision = this.revision;
-            const hash = await fingerprint(text);
-            const now = this.host();
-            if (now.scope !== h.scope || now.chat !== h.chat || now.chat[floor] !== m ||
-                text !== m.mes || page !== swipe(m) || revision !== this.revision) throw new ReplyFinalityError();
-            // Durable receipts travel with an explicit branch copy or floor move. Scope/floor
-            // describe origin; live event correlation above must still match the current run.
-            const matches = receipt.version === 1 && receipt.swipe === swipe(m) && receipt.hash === hash;
-            // Changed or unknown receipts are not historical evidence of finality.
-            if (!matches || !['complete', 'edited'].includes(receipt.state) ||
-                (candidate && run.stopped && receipt.state !== 'edited')) throw new ReplyFinalityError();
-            if (hasTTErrorMarker(m.mes, h.errorLabel) && receipt.state !== 'edited') throw new ReplyFinalityError();
+            const target = this.targetCurrent(h, floor), candidate = !!run && run.floor === floor && this.candidate(run) === m;
+            const result = this.blockerReason(h, m, floor, run, candidate);
+            const problem = result instanceof Promise ? await result : result;
+            if (!target()) throw new ReplyFinalityError();
+            if (problem) throw new ReplyFinalityError(this.blocker(h, floor, problem));
         }
         if (!current()) throw new ReplyFinalityError();
         return current;

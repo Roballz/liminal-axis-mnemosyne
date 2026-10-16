@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ModalMask from './ModalMask.vue';
+import ReplyBlockerPanel from './ReplyBlockerPanel.vue';
 import { summaryEditPrompt as prompt, resolveSummaryEdit, deferSummaryEdit } from '@/mnemosyne/summary-edit-prompt';
 import { engineState } from '@/memory/engine';
 </script>
@@ -10,6 +11,7 @@ import { engineState } from '@/memory/engine';
       <div class="mn-dialog-body">
         <p v-if="prompt.count">当前有 {{ prompt.count }} 条受影响摘要待确认。要保留现有摘要，还是根据编辑后的内容更新？</p>
         <p>更新会调用摘要 API，按依赖顺序逐条保存。过后处理会保留待审核状态，可稍后在扩展内继续。</p>
+        <ReplyBlockerPanel v-if="prompt.blocker" :initial="prompt.blocker" :disabled="prompt.busy" @located="deferSummaryEdit()" />
         <p v-if="prompt.progress" role="status">{{ prompt.progress }}</p>
         <p v-if="prompt.error" role="alert" class="mn-warning">{{ prompt.error }}</p>
       </div>

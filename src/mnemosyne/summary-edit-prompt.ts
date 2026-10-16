@@ -1,4 +1,5 @@
 import { reactive, watch } from 'vue';
+import { ReplyFinalityError, type ReplyBlocker } from './reply-finality';
 import { apiSettings, engineActiveHere } from '@/api/settings';
 import { engineState } from '@/memory/engine';
 import { getContext } from '@/st/context';
@@ -9,17 +10,17 @@ import { check, type CapturedView } from './model';
 import { rebuildSummaryOwners } from './summary-review-actions';
 import { summaryEditSignal, bodyEditSignal } from './summary-edit-signal';
 
-export const summaryEditPrompt = reactive({ open: false, busy: false, count: 0, error: '', progress: '' });
+export const summaryEditPrompt = reactive({ open: false, busy: false, count: 0, error: '', progress: '', blocker: null as ReplyBlocker | null });
 let ticket = 0, timer: ReturnType<typeof setTimeout> | undefined;
 let pending: { view: CapturedView; ids: string[]; host: string; generation: number; lib: Awaited<ReturnType<typeof activeLibrary>> } | null = null;
 export function deferSummaryEdit() {
     ticket++; if (timer) clearTimeout(timer);
-    pending = null; summaryEditPrompt.open = false; summaryEditPrompt.error = '';
+    pending = null; summaryEditPrompt.open = false; summaryEditPrompt.error = ''; summaryEditPrompt.blocker = null;
 }
 export async function prepareSummaryEditPrompt() {
     if (!apiSettings.summaryEditPromptEnabled || !engineActiveHere()) return;
     const run = ++ticket, scope = hostScope();
-    summaryEditPrompt.open = false; pending = null;
+    summaryEditPrompt.open = false; summaryEditPrompt.blocker = null; pending = null;
     try {
         await syncDaily();
         const result = await readDailyReview();
@@ -34,7 +35,7 @@ export async function prepareSummaryEditPrompt() {
     } catch (e) {
         if (run === ticket && scope === hostScope()) {
             pending = null;
-            Object.assign(summaryEditPrompt, { open: true, count: 0, error: (e as Error).message });
+            Object.assign(summaryEditPrompt, { open: true, count: 0, error: (e as Error).message, blocker: e instanceof ReplyFinalityError ? e.blocker ?? null : null });
         }
     }
 }

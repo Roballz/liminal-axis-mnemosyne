@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import ReplyBlockerPanel from "@/components/ReplyBlockerPanel.vue";
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import CoreBackupPanel from '@/components/CoreBackupPanel.vue';
 import { shallowRef, ref, watch, computed, onBeforeUnmount } from 'vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import {
   dailyState,
+  dailyReplyBlocker,
   dailyBranchChoices,
   syncDaily,
   chooseNewStory,
@@ -272,6 +274,7 @@ async function copyKnowledge() {
       >
     </div>
     <p v-if="dailyState.error || error" class="mn-warning" role="alert">{{ error || dailyState.error }}</p>
+    <ReplyBlockerPanel v-if="dailyReplyBlocker" :initial="dailyReplyBlocker" :disabled="busy" />
     <p v-if="notice" role="status">{{ notice }}</p>
     <div class="mn-actions">
       <button :disabled="busy" @click="run(refresh)">{{ busy ? '处理中…' : '刷新 / 重试归档' }}</button

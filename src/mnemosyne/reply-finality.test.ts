@@ -281,3 +281,133 @@ test('deleted generation candidate cannot crash a native save on an older floor'
     await expect(save(0, '用户核对后的历史正文')).resolves.toBeUndefined();
     expect(receipt(host.chat[0]).state).toBe('edited');
 });
+
+// Diagnosis only: v1.4.9 history blocker reported after newer normal replies.
+test.each(['uncertain', 'aborted', 'cleaned-with-stale-receipt'])('old %s floor survives later replies and latest edit; exact old-floor confirmation recovers it', async kind => {
+    host.errorLabel = '[API错误]';
+    const oldProcessor = stream(), oldFloor = 2;
+    host.chat[oldFloor].mes = '早先已完整输出的正文\n[API错误]\n尾部报错';
+    oldProcessor.isFinished = true;
+    if (kind === 'aborted') oldProcessor.abortController.signal.aborted = true;
+    await guard.received(oldFloor);
+    const oldMessage = host.chat[oldFloor];
+    if (kind === 'cleaned-with-stale-receipt') oldMessage.mes = '早先已完整输出的正文';
+    const unchangedReceipt = JSON.stringify(receipt(oldMessage));
+    host.processor = null;
+    // Many ordinary later floors do not retroactively approve an old receipt.
+    for (let i = 0; i < 50; i++) host.chat.push(message(`后续问题 ${i}`, true), message(`后续正常答复 ${i}`));
+    host.chat.push(message('最新问题', true));
+    const latestProcessor = stream(), latestFloor = host.chat.length - 1;
+    host.chat[latestFloor].mes = '最新正常答复'; latestProcessor.isFinished = true;
+    await guard.end(); await guard.received(latestFloor); host.processor = null;
+    await save(latestFloor, '用户修改后的最新答复');
+    expect(receipt(host.chat[latestFloor]).state).toBe('edited');
+    expect(JSON.stringify(receipt(oldMessage))).toBe(unchangedReceipt);
+    await expect(guard.assertArchivable()).rejects.toThrow('暂不归档');
+    // Opening the exact old floor and saving unchanged is an explicit choice too.
+    const oldText = oldMessage.mes;
+    await save(oldFloor);
+    expect(oldMessage.mes).toBe(oldText);
+    expect(receipt(oldMessage).state).toBe('edited');
+    await expect(guard.assertArchivable()).resolves.toBeTypeOf('function');
+});
+
+test.each(['streaming', 'uncreated', 'pending', 'aborted', 'api_error', 'changed', 'unknown'] as const)('read-only diagnosis and archival gate agree on %s floor/swipe/reason', async expected => {
+    host.chat.push(message('待检查正文'));
+    const m = host.chat[2];
+    m.extra![REPLY_FINALITY_KEY] = { version: 1, epoch: 1, scope: host.scope, floor: 2, swipe: 0,
+        state: 'complete', hash: await model.fingerprint(m.mes) };
+    if (expected === 'streaming') host.processor = processor(2);
+    if (expected === 'uncreated') { m.swipe_id = 1; m.swipes = ['旧正文']; }
+    if (expected === 'pending' || expected === 'aborted') receipt(m).state = expected;
+    if (expected === 'api_error') receipt(m).state = 'uncertain';
+    if (expected === 'changed') m.mes += '未确认改动';
+    if (expected === 'unknown') receipt(m).version = 99;
+    const before = JSON.stringify(host), revision = guard.revision;
+    const page = await guard.inspectBlockers();
+    expect(page.items.map(({ floor, swipe, reason }) => ({ floor, swipe, reason }))).toEqual([{ floor: 2, swipe: m.swipe_id ?? 0, reason: expected }]);
+    expect(page.current()).toBe(true); expect(page.next).toBeUndefined();
+    expect(JSON.stringify(host)).toBe(before); expect(guard.revision).toBe(revision);
+    try { await guard.assertArchivable(false); throw new Error('expected quarantine'); }
+    catch (e) { expect(e).toMatchObject({ blocker: { floor: 2, swipe: m.swipe_id ?? 0, reason: expected } }); }
+});
+
+test('diagnostic pages bound new hashing and results, do not observe/stamp, and keep an explicit partial cursor', async () => {
+    host.chat = Array.from({ length: 250 }, (_, i) => ({ ...message(`正文 ${i}`), extra: {
+        [REPLY_FINALITY_KEY]: { version: 1, epoch: 1, scope: host.scope, floor: i, swipe: 0, state: 'complete', hash: 'hash' },
+    } }));
+    const before = JSON.stringify(host), revision = guard.revision;
+    const hash = vi.spyOn(model, 'fingerprint').mockResolvedValue('hash');
+    const observe = vi.spyOn(guard, 'observe'), stamp = vi.spyOn(guard as any, 'stamp'), candidate = vi.spyOn(guard as any, 'candidate');
+    const first = await guard.inspectBlockers();
+    expect(first).toMatchObject({ items: [], examined: 100, total: 250, next: { offset: 100 } });
+    expect(hash).toHaveBeenCalledTimes(100);
+    const second = await guard.inspectBlockers(first.next);
+    expect(second.examined).toBe(200); expect(hash).toHaveBeenCalledTimes(200);
+    expect(observe).not.toHaveBeenCalled(); expect(stamp).not.toHaveBeenCalled(); expect(candidate).not.toHaveBeenCalled();
+    expect(JSON.stringify(host)).toBe(before); expect(guard.revision).toBe(revision);
+    host.chat[0].mes += '前页正文改变';
+    expect(first.current()).toBe(false); // Old page evidence cannot navigate; continuation is not archival authority.
+    const third = await guard.inspectBlockers(second.next);
+    expect(third.examined).toBe(250); expect(hash).toHaveBeenCalledTimes(250);
+    host.chat = Array.from({ length: 40 }, () => message('[API Error]\n待核对'));
+    const issues = await guard.inspectBlockers();
+    expect(issues.items).toHaveLength(10); expect(issues.next?.offset).toBe(10); expect(issues.examined).toBe(10);
+});
+
+test('read-only candidate resolution does not advance the run floor/page or create a receipt', async () => {
+    guard.start(); host.chat.push(message('刚发送的用户消息', true), message('未完成候选'));
+    const before = JSON.stringify((guard as any).run), body = JSON.stringify(host.chat);
+    const page = await guard.inspectBlockers();
+    expect(page.items[0]).toMatchObject({ floor: 3, reason: 'pending' });
+    expect(JSON.stringify((guard as any).run)).toBe(before); expect(JSON.stringify(host.chat)).toBe(body);
+});
+
+test.each(['chat', 'body', 'swipe', 'generation'])('late diagnostic hash cannot expose a stale %s target', async kind => {
+    host.chat[0].extra![REPLY_FINALITY_KEY] = { version: 1, epoch: 1, swipe: 0, state: 'pending', hash: 'hash' };
+    let release!: (s: string) => void;
+    vi.spyOn(model, 'fingerprint').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const pending = guard.inspectBlockers();
+    if (kind === 'chat') host = { scope: 'other', chat: host.chat.slice() };
+    if (kind === 'body') host.chat[0].mes += '新正文';
+    if (kind === 'swipe') host.chat[0].swipe_id = 1;
+    if (kind === 'generation') guard.start();
+    release('hash'); await expect(pending).rejects.toThrow('重新检查');
+});
+
+test('page access stays local across long user-only tails and continuation validation never revisits a prefix', async () => {
+    host.chat = []; guard.start();
+    const touched = new Set<number>();
+    host.chat = new Proxy(host.chat, { get(target, property, receiver) {
+        if (typeof property === 'string' && /^\d+$/.test(property)) touched.add(Number(property));
+        return Reflect.get(target, property, receiver);
+    } });
+    // Start again to bind the proxy identity; all 320 users count toward the page budget.
+    guard.start(); host.chat.push(...Array.from({ length: 320 }, () => message('用户正文', true)), message('等待确认的回复'));
+    let cursor: Awaited<ReturnType<ReplyFinality['inspectBlockers']>>['next'];
+    for (let offset = 0; offset < 300; offset += 100) {
+        touched.clear(); const page = await guard.inspectBlockers(cursor);
+        expect(page.examined).toBe(offset + 100);
+        expect([...touched].every(i => i >= offset && i < offset + 100)).toBe(true);
+        expect(touched.size).toBe(100);
+        cursor = page.next;
+        touched.clear(); expect(cursor!.current()).toBe(true); expect(touched.size).toBe(0);
+    }
+    touched.clear(); const last = await guard.inspectBlockers(cursor);
+    expect(last.items[0]).toMatchObject({ floor: 320, reason: 'pending' });
+    expect(last.next).toBeUndefined(); expect(touched.size).toBe(21);
+});
+
+test('first-error UI evidence validates only its exact target, not the archive gate whole-chat snapshot', async () => {
+    const touched = new Set<number>();
+    host.chat = new Proxy([message('[API Error]\n待确认'), ...Array.from({ length: 300 }, () => message('正常历史正文'))], {
+        get(target, property, receiver) {
+            if (typeof property === 'string' && /^\d+$/.test(property)) touched.add(Number(property));
+            return Reflect.get(target, property, receiver);
+        },
+    });
+    let issue: any;
+    try { await guard.assertArchivable(false); } catch (e) { issue = (e as any).blocker; }
+    touched.clear(); expect(issue.current()).toBe(true); expect([...touched]).toEqual([0]);
+    host.chat[0].mes += '修改'; expect(issue.current()).toBe(false);
+});

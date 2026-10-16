@@ -1,7 +1,7 @@
 import { beginBodyEdit, settleBodyEdit, cancelBodyEdit } from './summary-edit-signal';
 import { protectDeletionBeforeSync, protectArchiveBeforeDeletion, completeArchiveBackup } from './core-backup-runtime';
 import { membershipProjection, type MembershipProjection } from './event-memberships';
-import { ReplyFinality, ReplyFinalityError } from './reply-finality';
+import { ReplyFinality, ReplyFinalityError, type ReplyBlocker, type ReplyBlockerCursor } from './reply-finality';
 import { toast } from '@/st/toast';
 import { archiveWasDeleted, allowArchiveCreation, commitArchiveDeletion, type ArchiveDeletionPlan } from './archive-deletion';
 import { normalizeTags, type SummaryTags, type EventHint } from '@/memory/contextTags';
@@ -10,7 +10,8 @@ import { previewReconnect, commitReconnect } from './binding-recovery';
 import { readTables, renderTableState, commitSummaryTables, type SummaryTablePlan } from './tables';
 import { TABLE_OUTPUT_KEY } from './summary-tables';
 /** The only daily-library module that observes the ST host. */
-import { reactive, watch } from 'vue';
+import { reactive, ref, shallowRef, watch } from 'vue';
+import { locateReply } from '@/st/reply-location';
 import { getContext, type STMessage } from '@/st/context';
 import { chatRenderBatch } from '@/st/render-batch';
 import { derivedMeta, memory } from '@/memory/store';
@@ -80,6 +81,24 @@ const replyFinality = new ReplyFinality(() => {
     return { scope: hostScope(), chat: ctx?.chat ?? [], processor: ctx?.streamingProcessor,
         errorLabel: `[${ctx?.translate?.('API Error', 'API Error') || 'API Error'}]` };
 });
+/** Diagnostic state is temporary and never used as permission to archive. */
+export const dailyReplyBlocker = shallowRef<ReplyBlocker | null>(null);
+export const replyDiagnosticEpoch = ref(0);
+function invalidateReplyDiagnostics() { replyDiagnosticEpoch.value++; dailyReplyBlocker.value = null; }
+export async function readReplyBlockers(cursor?: ReplyBlockerCursor) {
+    const epoch = replyDiagnosticEpoch.value, binding = bindingEpoch;
+    const page = await replyFinality.inspectBlockers(cursor);
+    const current = () => installed && epoch === replyDiagnosticEpoch.value && binding === bindingEpoch && page.current();
+    if (!current()) throw new Error('聊天或正文已变化，请重新检查');
+    const continuation = page.next?.current;
+    const continuing = () => installed && epoch === replyDiagnosticEpoch.value && binding === bindingEpoch && !!continuation?.();
+    return { ...page, current, items: page.items.map(item => ({ ...item, current: () => installed && epoch === replyDiagnosticEpoch.value && binding === bindingEpoch && item.current() })),
+        ...(page.next ? { next: { ...page.next, current: continuing } } : {}) };
+}
+export function locateReplyBlocker(blocker: ReplyBlocker) {
+    const epoch = replyDiagnosticEpoch.value, binding = bindingEpoch;
+    return locateReply(blocker.floor, () => installed && epoch === replyDiagnosticEpoch.value && binding === bindingEpoch && blocker.current());
+}
 const MESSAGE_KEY = 'mnemosyne_message_v1';
 const BINDING_KEY = 'mnemosyne_binding_v1';
 const EVIDENCE_KEY = 'mnemosyne_summary_evidence_v1';
@@ -189,7 +208,7 @@ export function hiddenRoleRepairRefs(view: CapturedView): SourceRef[] {
 export function invalidateDaily(reason = '档案视图已更新', hostNotification = false) {
     promptHistory = null;
     const scope = hostScope();
-    if (dailyState.scope !== scope) reason = '已切换聊天';
+    if (dailyState.scope !== scope) { reason = '已切换聊天'; invalidateReplyDiagnostics(); }
     scheduledHost = hostVersion();
     injectionCache = hostNotification ? appendedProjection(scheduledHost) : null;
     parallelHost = null;
@@ -447,6 +466,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 }
             }
             dailyState.pending = true;
+            dailyReplyBlocker.value = null;
             dailyState.status = '正在归档';
             dailyState.error = '';
             const inherited = ctx.chatMetadata[BINDING_KEY] as
@@ -686,6 +706,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
         dailyState.pending = true;
         dailyState.status = error instanceof ReplyFinalityError ? '回复未确认 · 暂不归档' : 'pending · 可重试';
         dailyState.error = String(error.message ?? error);
+        dailyReplyBlocker.value = error instanceof ReplyFinalityError ? error.blocker ?? null : null;
         cache = null;
         if (error instanceof ReplyFinalityError) injectionCache = null;
         throw error;
@@ -849,6 +870,7 @@ export function bindDaily() {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     replyFinality.reset();
+    invalidateReplyDiagnostics();
     installed = true;
     savedHost = '';
     scheduledHost = '';
@@ -867,6 +889,7 @@ export function bindDaily() {
         if (!event) return;
         const callback = (...args: any[]) => {
             if (!active) return;
+            if (key !== 'CHARACTER_MESSAGE_RENDERED' && key !== 'STREAM_TOKEN_RECEIVED') invalidateReplyDiagnostics();
             if (key === 'CHAT_CHANGED') {
                 eventEpoch++;
                 bindingEpoch++;
@@ -883,6 +906,7 @@ export function bindDaily() {
             const notify = key === 'CHARACTER_MESSAGE_RENDERED' ? () => rendered.schedule() : scheduleDaily;
             const result = action(...args);
             if (key === 'STREAM_TOKEN_RECEIVED' && !result) return;
+            if (key === 'STREAM_TOKEN_RECEIVED') invalidateReplyDiagnostics();
             notify();
             if (result) return result.then(() => { if (current()) notify(); }, (error) => {
                 if (!current()) return;
@@ -942,6 +966,7 @@ export function bindDaily() {
     const dispose = () => {
         if (!active) return;
         active = false;
+        invalidateReplyDiagnostics();
         cancelBody();
         bindingEpoch++;
         automaticAgain = false;
