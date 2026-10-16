@@ -4,21 +4,27 @@ import { getChannelForTask, engineActiveHere } from '@/api/settings';
 import { engineState } from '@/memory/engine';
 import { getContext } from '@/st/context';
 import { activeLibrary } from './db';
-import { capture, current } from './canonical';
-import { syncDaily, dailyState, hostVersion, dailyCurrent } from './bridge';
+import { syncDaily, dailyState, hostScope, hostVersion } from './bridge';
 import { eventView } from './events';
-import { manualEventState, eventPending, updateEventOverview } from './manual-events';
-import { check } from './model';
-export const settings = reactive({ eventsEnabled: false, interval: 40, delay: 0, batchSize: 20, backfillBatchSize: 20, maxChars: 48000,
-    chains: 2, excerptChars: 500, totalChars: 1600, extra: 1 });
+import { manualEventState, eventPending, eventCoverageUpgradeNeeded, updateEventOverview } from './manual-events';
+import { check, type Branch } from './model';
+import { settings, dailySettingsDefaults, eventOverviewMaxChars, eventBatchTokens, eventMaterialMode, EVENT_MATERIAL_MODES } from './event-settings';
+export { settings } from './event-settings';
 export const jobState = reactive({ busy: false, status: '未运行', chars: 0, completed: 0, stopped: false });
 let stop = false;
 export async function loadDailySettings() {
     const stored = await (await activeLibrary()).get<any>('library_meta', 'daily-settings');
-    if (stored)
-        Object.assign(settings, stored.value);
+    Object.assign(settings, dailySettingsDefaults, stored?.value ?? {});
+    if (!EVENT_MATERIAL_MODES.includes(settings.overviewMaterialMode)) settings.overviewMaterialMode = 'both';
+    // Old libraries gain only the new options; no overview text or coverage is rewritten.
+    for (const key of ['overviewMaxChars', 'overviewBatchTokens'] as const) {
+        const max = key === 'overviewMaxChars' ? 20000 : 1000000;
+        const min = key === 'overviewMaxChars' ? 1 : 1000;
+        if (!Number.isSafeInteger(settings[key]) || settings[key] < min || settings[key] > max) settings[key] = dailySettingsDefaults[key];
+    }
 }
 export async function saveDailySettings() {
+    eventOverviewMaxChars(); eventBatchTokens(); eventMaterialMode();
     for (const key of ['interval', 'batchSize', 'backfillBatchSize', 'maxChars'] as const)
         check(Number.isSafeInteger(settings[key]) && settings[key] > 0, '间隔/批量/预算必须为正整数');
     for (const key of ['delay', 'chains', 'excerptChars', 'totalChars'] as const)
@@ -45,19 +51,30 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
         const lib = await activeLibrary();
         const branchId = initial.branch.id;
         const target = initial.cutoff;
-        const host = hostVersion(), generation = dailyState.generation;
+        const host = hostVersion(), scope = hostScope(), generation = dailyState.generation;
         const guard = () => !stop && host === hostVersion() && generation === dailyState.generation;
         const cards = (await eventView(lib, initial)).cards;
         const last = Math.max(0, ...cards.flatMap(c => c.progress.map(p => p.cutoff)));
         if (!manual && target - last < settings.interval) return;
-        const pending = cards.filter(c => !c.blocked && (manual || !c.needsReview) && eventPending(c)).map(c => c.chain.id);
+        const pending = cards.filter(c => !c.blocked && (manual || !c.needsReview) && (eventPending(c) || manual && eventCoverageUpgradeNeeded(c))).map(c => c.chain.id);
         for (const id of pending) {
             if (stop) break;
             check(guard(), '聊天改变，事件任务停止');
-            const view = await capture(lib, branchId, target);
+            // Event commits only advance epoch. Reuse immutable source/memory rows
+            // while their head and selection are identical; never recapture old data silently.
+            const branch = await lib.get<Branch>('branches', branchId);
+            check(branch && branch.story === initial.branch.story && branch.head === initial.branch.head && branch.view === initial.branch.view,
+                '事件任务的正文或摘要视图已改变，请重新开始');
+            const view = { ...initial, branch };
             jobState.status = `更新概要 ${jobState.completed + 1} / ${pending.length}`;
-            const updated = await updateEventOverview(lib, view, id, settings.maxChars,
-                messages => { jobState.chars = JSON.stringify(messages).length; return sender(messages.map(m => m.content).join('\n')); }, guard);
+            let batch = 0;
+            const updated = await updateEventOverview(lib, view, id, settings.overviewBatchTokens,
+                messages => {
+                    const prompt = messages.map(m => m.content).join('\n');
+                    jobState.chars = prompt.length;
+                    jobState.status = `更新概要 ${jobState.completed + 1} / ${pending.length} · 第 ${++batch} 批`;
+                    return sender(prompt);
+                }, guard, manual, () => !stop && scope === hostScope() && generation === dailyState.generation);
             if (updated) jobState.completed++;
         }
         if (!stop) jobState.status = `批量整理完成：更新 ${jobState.completed} 条事件链`;

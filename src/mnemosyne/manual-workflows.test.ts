@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { beforeEach, afterEach, test, expect, vi } from "vitest";
-import { Library, activateLibrary, freshLibraryName } from "./db";
+import { Library, Transaction, activateLibrary, freshLibraryName } from "./db";
 import { bindDaily, syncDaily, invalidateDaily } from "./bridge";
 import { memory } from "@/memory/store";
 import { createEmptyMemory } from "@/memory/types";
@@ -87,11 +87,16 @@ beforeEach(async () => {
   await activateLibrary(lib);
   dispose = bindDaily();
   settings.eventsEnabled = false;
+  settings.overviewMaxChars = 500;
+  settings.overviewBatchTokens = 80000;
+  settings.overviewMaterialMode = "both";
 });
 afterEach(() => {
   apiSettings.prompts.eventOverview = originalEventPrompt;
   apiSettings.prompts.eventLatestProgress = originalLatestPrompt;
   settings.interval = originalInterval;
+  settings.overviewMaxChars = 1000;
+  settings.overviewMaterialMode = "both";
   dispose?.();
   lib.close();
   vi.restoreAllMocks();
@@ -139,14 +144,14 @@ test("manual chain holds three separate floors and joins never call a model or d
     expect(prompt).toContain("不超过500字");
     expect(prompt).toContain("主动舍弃琐碎小事");
     for (const text of [
-      "摘要1",
       "摘要3",
       "摘要5",
-      "正文细节1",
       "正文细节3",
       "正文细节5",
     ])
       expect(prompt).toContain(text);
+    expect(prompt).not.toContain("摘要1");
+    expect(prompt).not.toContain("正文细节1");
     return answer;
   });
   await updateEventOverview(lib, v, id, 48000, sender);
@@ -356,7 +361,8 @@ test("immediate update stages membership, includes all pending bodies, and publi
   const before = await lib.all("event_revisions");
   const sender = vi.fn(async (messages) => {
     const prompt = JSON.stringify(messages);
-    for (const floor of [1, 3, 5]) expect(prompt).toContain(`正文细节${floor}`);
+    for (const floor of [3, 5]) expect(prompt).toContain(`正文细节${floor}`);
+    expect(prompt).not.toContain("正文细节1");
     return '{"overview":"bad';
   });
   const review = (await prepareFloorEventUpdate(5, id, 48000, sender))!;
@@ -417,6 +423,8 @@ test("explicit rewrite works for an archived fully summarized chain, sends instr
     progress: "",
   });
   const sender = vi.fn(async (messages) => {
+    const body = JSON.parse(messages.at(-1).content);
+    expect(body.overviewRole).toBe("reference_only"); expect(body.summarizedCount).toBe(0);
     const prompt = JSON.stringify(messages);
     for (const part of [
       "合成自定义写法",
@@ -665,7 +673,7 @@ test("manual backfill runs while automatic filling is disabled, sends original d
     false,
   );
   const pack = await exportLibrary(lib);
-  expect(pack.version).toBe(13);
+  expect(pack.version).toBe(14);
   const restored = await restoreLibrary(pack, false);
   expect(
     (await restored.all<TableRow>("custom_table_rows"))[0].bodySources,
@@ -921,4 +929,92 @@ test('all event model paths and independent backfill clean source payloads witho
   } finally {
     apiSettings.bodyStartTag = previous.start; apiSettings.bodyEndTag = previous.end; apiSettings.customStripTags = previous.strip;
   }
+});
+
+
+test("discarding a rewrite during its first batch stops subsequent calls and saves nothing", async () => {
+  for (const message of ctx.chat) message.mes += "长".repeat(4000);
+  const id = await chain();
+  await joinFloorEvent(3, id); await joinFloorEvent(5, id);
+  const before = await lib.all("event_revisions");
+  let live = true;
+  const sender = vi.fn(async () => { live = false; return answer; });
+  await expect(prepareEventRewrite(id, "突出关键转折", 14000, sender, () => live)).rejects.toThrow("迟到");
+  expect(sender).toHaveBeenCalledTimes(1);
+  expect(await lib.all("event_revisions")).toEqual(before);
+});
+
+test("overview settings are snapshotted through a model request and its review", async () => {
+  settings.overviewMaxChars = 1200;
+  const text = "核".repeat(1199) + "🌸";
+  const output = JSON.stringify({ ...JSON.parse(answer), overview: text });
+  const review = await prepareFloorEvent(1, "合成测试", 200000, async messages => {
+    expect(JSON.stringify(messages)).toContain("不超过1200字");
+    settings.overviewMaxChars = 100;
+    return output;
+  });
+  expect(review.overviewMaxChars).toBe(1200);
+  await review.confirm(review.raw);
+  expect((await eventView(lib, await syncDaily())).cards[0].meta.overview).toBe(text);
+});
+
+
+test("AI update review reuses covered input while explicit rewrite rereads it", async () => {
+  const id = await chain(); await joinFloorEvent(3, id);
+  const incremental = vi.fn(async messages => {
+    const body = JSON.parse(messages.at(-1).content);
+    expect(body.materials).toHaveLength(1); expect(body.materials[0].summary).toBe("摘要3");
+    expect(JSON.stringify(body)).not.toContain("正文细节1");
+    return answer;
+  });
+  const review = await prepareEventRewrite(id, "保留关键转变", 80000, incremental, () => true, false);
+  await review.confirm(review.raw);
+  const rewritten = await prepareEventRewrite(id, "主动重新提炼", 80000, async messages => {
+    expect(JSON.parse(messages.at(-1)!.content).materials).toHaveLength(2);
+    expect(JSON.stringify(messages)).toContain("正文细节1");
+    return answer;
+  });
+  expect(rewritten.raw).toContain("overview");
+});
+
+test("automatic run does not migrate unchanged old chains, manual batch explicitly can", async () => {
+  const id = await chain();
+  const old = (await lib.all<any>("event_revisions"))[0]; delete old.overviewCoverage;
+  await lib.transaction(["event_revisions"], "readwrite", tx => tx.put("event_revisions", old));
+  settings.interval = 1;
+  ctx.chat.push({ name: "用户", is_user: true, is_system: false, mes: "新的无关提问", extra: {} });
+  const sender = vi.fn(async () => answer);
+  await runEvents(false, sender); expect(sender).not.toHaveBeenCalled();
+  await runEvents(true, sender); expect(sender).toHaveBeenCalledTimes(1);
+  const card = (await eventView(lib, await syncDaily())).cards[0];
+  expect(card.chain.id).toBe(id); expect(card.meta.overviewCoverage).toBe(1);
+});
+
+test.each(['summary', 'body', 'both'] as const)("creation %s mode has no excluded text hidden in native context", async mode => {
+  settings.overviewMaterialMode = mode;
+  ctx.chat[1].mes = 'CREATE_BODY_SENTINEL'; ctx.chat[1].extra!.bbs_leaf!.text = 'CREATE_SUMMARY_SENTINEL';
+  ctx.chat[1].extra!.bbs_leaf!.timeStart = '2088/01/02 10:00'; ctx.chat[1].extra!.bbs_leaf!.timeEnd = '2088/01/02 11:00';
+  const review = await prepareFloorEvent(1, '建立合成事件', 200000, async messages => {
+    const full = JSON.stringify(messages), material = JSON.parse(messages.at(-1)!.content);
+    expect(full.includes('CREATE_BODY_SENTINEL')).toBe(mode !== 'summary');
+    expect(full.includes('CREATE_SUMMARY_SENTINEL')).toBe(mode !== 'body');
+    expect(material.id).toBeTruthy(); expect(material.storyTime).toBe('2088/01/02 10:00 - 2088/01/02 11:00');
+    settings.overviewMaterialMode = mode === 'summary' ? 'body' : 'summary';
+    return answer;
+  });
+  expect(review.materialMode).toBe(mode); await review.confirm(review.raw);
+  expect((await eventView(lib, await syncDaily())).cards[0].meta.overviewMaterialMode).toBe(mode);
+});
+
+
+test("multi-chain updates do not reload all source bodies after each event-only commit", async () => {
+  for (let i = 0; i < 3; i++) { const id = await chain(); await joinFloorEvent(3, id); }
+  const initial = await syncDaily(), reads = vi.spyOn(Transaction.prototype, 'get');
+  try {
+    const sender = vi.fn(async () => answer);
+    await runEvents(true, sender);
+    expect(sender).toHaveBeenCalledTimes(3);
+    expect(reads.mock.calls.filter(([store]) => store === 'source_bodies').length).toBeLessThanOrEqual(initial.refs.length);
+    expect((await eventView(lib, await syncDaily())).cards.every(card => !eventPending(card))).toBe(true);
+  } finally { reads.mockRestore(); }
 });

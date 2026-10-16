@@ -169,6 +169,9 @@ export interface EventChain extends Row {
 export interface EventRevision extends Row {
     latestProgress?: { version: 1; text: string; time: string; memory: string } | null;
     eventSchema?: 2;
+    /** Full-overview generation or explicit human coverage confirmation, never legacy progress projection. */
+    overviewCoverage?: 1;
+    overviewMaterialMode?: 'summary' | 'body' | 'both';
     overview?: string;
     summarized?: string[];
     story: string;

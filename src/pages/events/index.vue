@@ -31,7 +31,6 @@ import {
   editEvent,
   deleteEvent,
   setEventArchived,
-  EVENT_OVERVIEW_MAX_CHARS,
   eventOverviewLength,
   type EventCard,
 } from "@/mnemosyne/events";
@@ -39,6 +38,7 @@ import {
   manualEventState,
   eventOverview,
   eventPending,
+  eventCoverageUpgradeNeeded,
   keepEventOverview,
   prepareEventRewrite,
   type EventReview,
@@ -59,6 +59,12 @@ const error = ref(""),
   loading = ref(false),
   storedCount = ref(0),
   pages = ref<Record<string, number>>({});
+const expandedCards = ref<Record<string, boolean>>({}),
+  expandedHistory = ref<Record<string, boolean>>({}),
+  expandedMembers = ref<Record<string, boolean>>({});
+function setExpanded(event: Event, state: Record<string, boolean>, id: string) {
+  if (event.target === event.currentTarget) state[id] = (event.currentTarget as HTMLDetailsElement).open;
+}
 const editing = ref(false),
   editId = ref<string | null>(null),
   title = ref(""),
@@ -165,7 +171,8 @@ async function archiveSelected() {
   await refresh();
 }
 const rewriteCard = shallowRef<EventCard | null>(null),
-  rewriteInstructions = ref("");
+  rewriteInstructions = ref(""),
+  rewriteAll = ref(true);
 const confirmRewrite = ref(false),
   review = shallowRef<EventReview | null>(null),
   reviewError = ref("");
@@ -186,6 +193,7 @@ function resetRewrite() {
 function openRewrite(card?: EventCard) {
   if (busy.value || manualEventState.busy || jobState.busy) return;
   rewriteCard.value = card ?? archiveMenu.value;
+  rewriteAll.value = !card;
   archiveMenu.value = null;
   rewriteInstructions.value = card ? "根据当前成员摘要更新事件概要，保留仍成立的事实，修正已变化的内容。" : "";
   rewriteHost = hostVersion();
@@ -212,7 +220,10 @@ async function generateRewrite() {
     const result = await prepareEventRewrite(
       rewriteCard.value.chain.id,
       rewriteInstructions.value,
-      settings.maxChars,
+      settings.overviewBatchTokens,
+      undefined,
+      () => !disposed && token === rewriteTicket && scope === hostScope(),
+      rewriteAll.value,
     );
     if (token === rewriteTicket && scope === hostScope()) {
       review.value = result;
@@ -291,7 +302,7 @@ async function refresh() {
   error.value = "";
   try {
     const captured = await syncDaily(), lib = await activeLibrary();
-    const host = hostVersion(), generation = dailyState.generation;
+    const host = hostVersion(), generation = dailyState.generation, capturedRevision = dailyState.revision;
     const data = await eventView(lib, captured);
     if (!live()) return;
     const valid = await dailyCurrent(captured, host, generation) && lib === await activeLibrary();
@@ -302,6 +313,8 @@ async function refresh() {
     cards.value = data.cards;
     storedCount.value = data.storedCount;
     scope = observed;
+    // syncDaily may notify this page itself; the validated result already includes it.
+    if (capturedRevision === dailyState.revision) reloadQueued = false;
   } catch (e) {
     if (live()) error.value = `事件读取未完成：${(e as Error).message}`;
   } finally {
@@ -391,8 +404,10 @@ const members = (card: EventCard) =>
     (pages.value[card.chain.id] ?? 0) * 10,
     ((pages.value[card.chain.id] ?? 0) + 1) * 10,
   );
-const text = (id: string) =>
-  view.value?.memories.find((m) => m.id === id)?.content ?? cards.value.flatMap(c => c.memberDetails ?? []).find(m => m.id === id)?.content ?? "";
+const memberText = computed(() => new Map([
+  ...cards.value.flatMap(c => c.memberDetails ?? []), ...(view.value?.memories ?? []),
+].map(m => [m.id, m.content])));
+const text = (id: string) => memberText.value.get(id) ?? "";
 watch(() => dailyState.revision, queueRefresh);
 watch(
   () => dailyState.scope,
@@ -402,6 +417,7 @@ watch(
     cards.value = [];
     storedCount.value = 0;
     pages.value = {};
+    expandedCards.value = {}; expandedHistory.value = {}; expandedMembers.value = {};
     error.value = "";
     notice.value = "";
     editing.value = false;
@@ -462,8 +478,8 @@ onBeforeUnmount(() => {
     <details v-if="!archiveMode" class="mn-card">
       <summary>事件概要自动更新与召回设置</summary>
       <p>
-        自动和批量更新仅更新已有链的待处理成员，每条待更新链一次摘要 API
-        请求；会产生模型费用。关闭自动更新时可使用“批量更新”。
+        自动和批量更新已有链的待处理成员；长链按预算依次请求多批，会产生模型费用。已整理部分用概要替代旧摘要和正文。
+        每条链全部成功后才保存；停止或失败保留该链原概要，其他已完成链不回退。关闭自动更新时可使用“批量更新”。
       </p>
       <label
         ><input
@@ -481,12 +497,20 @@ onBeforeUnmount(() => {
         >距最近已保存进展新增多少楼后，检查并更新概要待处理的事件链。User 和
         Assistant 各算一楼。</small
       >
+      <label>生成概要发送的材料<BbsSelect v-model="settings.overviewMaterialMode" :options="[
+        { value: 'summary', label: '仅摘要' }, { value: 'body', label: '仅正文' }, { value: 'both', label: '摘要+正文' }
+      ]" aria-label="生成概要发送的材料" /></label>
+      <small>默认摘要+正文。只影响发送的材料文本；成员ID、来源标识和原有剧情时间保留。切换后可手动更新重建覆盖，不会仅因切换自动调用模型；缺失所选材料时明确提示，不偷偷换模式。新建事件选单一材料时不附带原摘要生成的历史上下文，避免混入未选文本；摘要+正文保留原创建上下文。</small>
       <label
-        >完整请求预算（字符）<input
-          v-model.number="settings.maxChars"
-          type="number"
-          min="1000"
+        >事件概要上限（字，含标点）<input
+          v-model.number="settings.overviewMaxChars" type="number" min="1" max="20000" step="1"
       /></label>
+      <small>默认1000字；新建、更新、重写和手动编辑均按此上限校验，已有概要不会自动裁剪。</small>
+      <label
+        >每批估算输入预算（token）<input
+          v-model.number="settings.overviewBatchTokens" type="number" min="1000" max="1000000" step="1000"
+      /></label>
+      <small>默认80000，包含累计概要、待处理摘要/正文、提示词和安全余量。token 为保守估算，不保证等于服务商计数；模型上下文还需容纳渠道配置的输出额度。单条完整材料超预算会停止并提示，不截断正文。旧版已有事件链会自动沿用，成员和历史不变；首次更新缺少可靠覆盖记录的旧链时，会从当前全部成员分批重建。来源变化或主动重写也会重建。仅缺旧版覆盖记录不会触发自动付费更新，可手动点“批量更新”完成接入。</small>
       <h3>召回后的事件补充</h3>
       <p>
         先按原有向量 / BM25 / RRF / rerank
@@ -559,6 +583,8 @@ onBeforeUnmount(() => {
       v-for="card in visibleCards"
       :key="`${archiveMode}:${card.chain.id}`"
       class="mn-card mn-event-card"
+      :open="!!expandedCards[card.chain.id]"
+      @toggle="setExpanded($event, expandedCards, card.chain.id)"
       :class="{ 'mn-archive-card': archiveMode }"
     >
       <summary
@@ -581,8 +607,7 @@ onBeforeUnmount(() => {
           <span
             >{{ statusName(card.meta.status) }} ·
             {{ card.members.length }} 条关联<span v-if="eventPending(card)">
-              · 概要待更新</span
-            ></span
+              · 概要待更新</span><span v-else-if="eventCoverageUpgradeNeeded(card)"> · 可重建分批覆盖</span></span
           ><span class="mn-actions"
             ><button :disabled="busy || jobState.busy || manualEventState.busy || membershipUi.loading" @click.stop.prevent="openMemberships({ eventId: card.chain.id })">批量加入</button>
             <button
@@ -599,10 +624,12 @@ onBeforeUnmount(() => {
           >
         </div>
       </summary>
+      <template v-if="expandedCards[card.chain.id]">
       <hr />
-      <div v-if="eventPending(card)" class="mn-card">
+      <div v-if="eventPending(card) || eventCoverageUpgradeNeeded(card)" class="mn-card">
         <p v-if="card.blocked">关联摘要待审核或来源已删除。先处理上方摘要审核；已删除来源可展开成员解除关联。</p>
-        <p v-else>概要待更新。可以保留原概要、手动补充，或让模型更新；事件关联仍保留。</p>
+        <p v-else-if="eventPending(card)">概要待更新。可以保留原概要、手动补充，或让模型更新；事件关联仍保留。</p>
+        <p v-else>当前概要已保留，材料模式改变或缺少新版覆盖记录时可点“AI更新”或“批量更新”分批建立可靠覆盖记录；不会仅因升级自动调用模型。</p>
         <div class="mn-actions mn-overview-actions">
           <button :disabled="busy || jobState.busy || card.blocked" @click="run(async () => { await keepEventOverview(await activeLibrary(), validView(), card.chain.id, () => viewHost === hostVersion() && viewGeneration === dailyState.generation); await refresh(); })">保留当前</button>
           <button :disabled="busy || jobState.busy" @click="edit(card)">手动更新</button>
@@ -615,10 +642,11 @@ onBeforeUnmount(() => {
       </p>
       <p class="mn-pre"><strong>最新进展：</strong>{{ card.meta.latestProgress ? [card.meta.latestProgress.time, card.meta.latestProgress.text].filter(Boolean).join(' · ') : card.meta.latestProgress === null ? '暂无明确进展' : '尚未填写，可在编辑中补充' }}</p>
       <hr />
-      <details>
+      <details :open="!!expandedHistory[card.chain.id]" @toggle="setExpanded($event, expandedHistory, card.chain.id)">
         <summary>
           <strong><u>完整追加史</u></strong>
         </summary>
+        <template v-if="expandedHistory[card.chain.id]">
         <article
           v-for="member in members(card)"
           :key="member.id"
@@ -627,7 +655,7 @@ onBeforeUnmount(() => {
           <p class="mn-member-preview">
             {{ text(member.memory).slice(0, 100) }}
           </p>
-          <details class="mn-member-detail">
+          <details class="mn-member-detail" :open="!!expandedMembers[member.id]" @toggle="setExpanded($event, expandedMembers, member.id)">
             <summary>
               <span>完整摘要</span>
               <button
@@ -638,7 +666,7 @@ onBeforeUnmount(() => {
                 移除关联
               </button>
             </summary>
-            <p class="mn-pre">{{ text(member.memory) }}</p>
+            <p v-if="expandedMembers[member.id]" class="mn-pre">{{ text(member.memory) }}</p>
           </details>
         </article>
         <div class="mn-actions">
@@ -657,7 +685,9 @@ onBeforeUnmount(() => {
             下一页
           </button>
         </div>
+        </template>
       </details>
+      </template>
     </details>
     <ModalMask :open="!!archiveMenu" @close="!busy && (archiveMenu = null)">
       <section
@@ -702,17 +732,17 @@ onBeforeUnmount(() => {
         class="mn-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="重写概要"
+        :aria-label="rewriteAll ? '重写概要' : '更新概要'"
         @submit.prevent="confirmRewrite = true"
       >
         <header>
-          <h3>重写概要</h3>
+          <h3>{{ rewriteAll ? "重写概要" : "更新概要" }}</h3>
           <small>{{ rewriteCard?.meta.title }}</small>
         </header>
         <div class="mn-dialog-body">
           <p>
             写一段说明，告诉 AI
-            当前概要哪里不合意、希望保留或突出什么，以及怎样改写。将结合这条链的全部有效成员正文、摘要和当前概要重写。
+            当前概要希望保留或突出什么，以及怎样概括。{{ rewriteAll ? "本次重写会从全部有效成员分批重新提炼。" : "本次更新用概要替代已整理材料，只补入新增成员；旧版覆盖不明、材料模式改变或来源改变时分批重建。" }}
           </p>
           <TableTextField
             v-model="rewriteInstructions"
@@ -734,21 +764,20 @@ onBeforeUnmount(() => {
               jobState.busy
             "
           >
-            重写
+            {{ rewriteAll ? "重写" : "更新" }}
           </button>
         </footer>
       </form>
     </ModalMask>
     <ConfirmDialog
       v-model:open="confirmRewrite"
-      title="确认重写概要"
+      :title="rewriteAll ? '确认重写概要' : '确认更新概要'"
       top-layer
       confirm-text="确认发送"
       :busy="busy"
       @confirm="generateRewrite"
     >
-      将发送本链全部有效成员正文、摘要、当前概要和你的改写要求，调用一次摘要
-      API，可能产生费用。返回后先审阅，确认才保存；不会新建事件链。
+      {{ rewriteAll ? "将从本链全部有效成员的所选材料分批重写" : "将用当前概要和未覆盖成员材料分批更新；旧版覆盖不明或来源改变时重建" }}，附上你的要求，按预算分批调用摘要 API，可能产生多次费用。返回后先审阅，确认才保存；不会新建事件链。
     </ConfirmDialog>
     <EventResponseReview
       v-if="review"
@@ -797,11 +826,11 @@ onBeforeUnmount(() => {
             >概要<TableTextField v-model="overview" label="事件概要" />
             <small
               :class="{
-                'mn-warning': overviewChars > EVENT_OVERVIEW_MAX_CHARS,
+                'mn-warning': overviewChars > settings.overviewMaxChars,
               }"
             >
               {{ overviewChars }} /
-              {{ EVENT_OVERVIEW_MAX_CHARS }}
+              {{ settings.overviewMaxChars }}
               字（含标点）。仅记录核心变化及影响关系或转变的重要细节。
             </small></label
           ><label>最新进展（{{ EVENT_PROGRESS_MAX_CHARS }}字内）<textarea v-model="latestText" rows="2" :maxlength="EVENT_PROGRESS_MAX_CHARS" :disabled="!progressSources.length" placeholder="简述最近一次实质进展" /></label>
@@ -818,7 +847,7 @@ onBeforeUnmount(() => {
           ><button v-if="editId" type="button" :disabled="busy" @click="run(() => save(false))">只保存编辑，稍后确认</button><button
             class="mn-primary"
             :disabled="
-              busy || !title.trim() || overviewChars > EVENT_OVERVIEW_MAX_CHARS
+              busy || !title.trim() || overviewChars > settings.overviewMaxChars
             "
           >
             保存并确认概要

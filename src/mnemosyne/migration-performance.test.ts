@@ -53,7 +53,7 @@ test.each(['oldest-first', 'head-first'])('5k/10k legacy chains validate with li
     expect(counts[1]).toBeLessThanOrEqual(counts[0] * 2 + 8);
 });
 
-test.each(Array.from({ length: 13 }, (_, i) => (i + 1) as Package['version']))('v%s retains old rows and rejects malformed predecessor graphs', async version => {
+test.each(Array.from({ length: 14 }, (_, i) => (i + 1) as Package['version']))('v%s retains old rows and rejects malformed predecessor graphs', async version => {
     const pack = await legacyPackage(12, version), original = JSON.stringify(pack);
     await expect(validateCurrentData(pack)).resolves.toBeUndefined();
     expect(JSON.stringify(pack)).toBe(original);
@@ -169,7 +169,7 @@ test('20k dependency chain is iterative and rejects a cycle after the long tail'
     expect(() => validateData(pack)).toThrow('摘要依赖循环');
 });
 
-test.each(Array.from({ length: 13 }, (_, i) => (i + 1) as Package['version']))('v%s shared summaries retain graph rejection guards after settled paths', async version => {
+test.each(Array.from({ length: 14 }, (_, i) => (i + 1) as Package['version']))('v%s shared summaries retain graph rejection guards after settled paths', async version => {
     const pack = await legacyPackage(1, version); addSummaries(pack, 30);
     expect(() => validateData(pack)).not.toThrow();
     const cycle = structuredClone(pack);

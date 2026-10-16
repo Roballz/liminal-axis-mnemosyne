@@ -6,7 +6,7 @@ import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
     schema: 1;
     created: number;
     excluded: string[];
@@ -23,7 +23,7 @@ export async function exportLibrary(lib: Library): Promise<Package> {
         return result;
     });
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
-    const base = { format: 'mnemosyne-daily' as const, version: 13 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 14 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     await validateCurrentData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -51,7 +51,7 @@ export async function validateCurrentData(pack: Omit<Package, 'checksum'>): Prom
     validateStructure(pack, await validateBodyHashes(pack));
 }
 function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: ReadonlyMap<string, string> = new Map()) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     const stores: readonly Store[] = STORES.filter(s => !(s === 'table_history' && pack.version < 11) && !(s === 'source_bodies' && pack.version < 12));
     check(pack.data && Object.keys(pack.data).length === stores.length && Object.keys(pack.data).every(s => stores.includes(s as Store)), '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
@@ -75,6 +75,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             if (pack.version >= 11 && store === 'history_snapshots') optional.push('variants');
             if (pack.version >= 12) optional.push(...(store === 'source_revisions' ? ['bodySchema', 'bodyHash', 'bodyLength'] : store === 'history_snapshots' ? ['snapshotSchema'] : store === 'manifest_blocks' ? ['variants'] : store === 'branches' ? ['legacyHead'] : []));
             if (pack.version >= 13 && store === 'memory_revisions') optional.push('sourceRecovery');
+            if (pack.version >= 14 && store === 'event_revisions') optional.push('overviewCoverage', 'overviewMaterialMode');
             const required = store === 'source_revisions' && (r as any).bodySchema === 1 && pack.version >= 12 ? FIELDS[store].filter(k => k !== 'content') : FIELDS[store];
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && required.every(k => k in r), `字段不合法 ${store}`);
@@ -337,6 +338,12 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
                 check(r.eventSchema === 2 && typeof r.overview === 'string' && Array.isArray(r.summarized), '事件概要版本非法');
                 memoryRefs(r, r.summarized);
             }
+            if (store === 'event_revisions' && r.overviewMaterialMode !== undefined) check(['summary', 'body', 'both'].includes(r.overviewMaterialMode), '事件概要材料模式非法');
+            if (store === 'event_revisions' && r.overviewCoverage !== undefined) {
+                const coverageRefs = new Set(r.refs);
+                check(r.overviewCoverage === 1 && ['summary', 'body', 'both'].includes(r.overviewMaterialMode) && r.eventSchema === 2 && Array.isArray(r.summarized) &&
+                    coverageRefs.size === new Set(r.summarized).size && r.summarized.every((id: string) => coverageRefs.has(id)), '事件概要覆盖回执非法');
+            }
             memoryRefs(r, store === 'event_memberships' ? [r.memory] : store === 'event_progress' ? r.memories : r.refs);
         }
     for (const r of maps.reviews.values()) {
@@ -467,8 +474,13 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         check(r.id === 'daily-settings' && r.value && typeof r.value === 'object', '不允许导出任意设置或密钥');
         const keys = ['eventsEnabled', 'interval', 'delay', 'batchSize', 'maxChars', 'chains', 'excerptChars', 'totalChars', 'extra'];
         if (pack.version >= 6) keys.push('backfillBatchSize');
+        if (pack.version >= 14) keys.push('overviewMaxChars', 'overviewBatchTokens', 'overviewMaterialMode');
+        for (const [key, min, max] of [['overviewMaxChars', 1, 20000], ['overviewBatchTokens', 1000, 1000000]] as const) {
+            if (r.value[key] !== undefined) check(Number.isSafeInteger(r.value[key]) && r.value[key] >= min && r.value[key] <= max, '事件概要设置超出有效范围');
+        }
         if (r.value.backfillBatchSize !== undefined) check(Number.isSafeInteger(r.value.backfillBatchSize) && r.value.backfillBatchSize > 0, '补表批量必须为正整数');
-        check(Object.keys(r.value).every(k => keys.includes(k)) && Object.values(r.value).every(v => typeof v === 'number' || typeof v === 'boolean'), '设置白名单拒绝');
+        check(Object.keys(r.value).every(k => keys.includes(k)) && Object.entries(r.value).every(([key, value]) =>
+            key === 'overviewMaterialMode' ? ['summary', 'body', 'both'].includes(value as string) : typeof value === 'number' || typeof value === 'boolean'), '设置白名单拒绝');
     }
 }
 export async function restoreLibrary(value: unknown, activate = true): Promise<Library> {

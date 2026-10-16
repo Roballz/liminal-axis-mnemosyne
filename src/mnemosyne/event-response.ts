@@ -7,7 +7,7 @@ import { checkEventOverview } from "./events";
 export function eventJsonText(raw: string) {
   return raw.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\s*```$/i, "$1");
 }
-export function parseManualEvent(raw: string) {
+export function parseManualEvent(raw: string, maxChars?: number) {
   const text = eventJsonText(raw);
   check(
     text,
@@ -55,7 +55,7 @@ export function parseManualEvent(raw: string) {
     typeof v.overview === "string" && v.overview.trim(),
     "overview（事件概要）必须是非空文本。",
   );
-  checkEventOverview(v.overview);
+  checkEventOverview(v.overview, maxChars);
   check(
     typeof v.progress === "string" && Array.from(v.progress).length <= EVENT_APPEND_MAX_CHARS,
     `progress（追加进展）必须是文本，最多${EVENT_APPEND_MAX_CHARS}字（含标点、数字、字母）；没有进展可填空字符串 ""。`,
@@ -74,9 +74,9 @@ export function parseManualEvent(raw: string) {
     progress: v.progress,
   };
 }
-export function eventResponseError(text: string): string {
+export function eventResponseError(text: string, maxChars?: number): string {
   try {
-    parseManualEvent(text);
+    parseManualEvent(text, maxChars);
     return "";
   } catch (error) {
     return (error as Error).message;

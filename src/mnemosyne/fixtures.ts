@@ -29,6 +29,7 @@ export async function batchFixture(count = 5) {
 /** Remove only fields unavailable in pre-table-history package fixtures. */
 export function withoutTableHistory(pack: import('./migration').Package) {
     // Construct an actual old-format synthetic package, never just relabel v12 rows.
+    for (const revision of pack.data.event_revisions as import('./model').EventRevision[]) { delete revision.overviewCoverage; delete revision.overviewMaterialMode; }
     const bodies = new Map((pack.data.source_bodies ?? []).map(r => [r.id, r as import('./model').SourceBody]));
     for (const revision of pack.data.source_revisions as import('./model').Revision[]) {
         if (revision.bodySchema === 1) {

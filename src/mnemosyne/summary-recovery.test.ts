@@ -48,7 +48,7 @@ test.each([11,12])('v%s ancestor backup preserves newer host summary as unresolv
  expect((await statuses(lib,view)).get(missing[0].id)).toBe('needs_review');
  expect(dailyState).toMatchObject({pending:false,error:'',archived:4,summaries:2,review:1});
  expect((await eventView(lib,view)).valid.map(m=>m.id)).not.toContain(missing[0].id);
- const saved=await exportLibrary(lib);expect(saved.version).toBe(13);
+ const saved=await exportLibrary(lib);expect(saved.version).toBe(14);
  const restored=await restoreLibrary(saved,false);
  try {expect(await exportLibrary(restored)).toMatchObject({data:saved.data});expect((await statuses(restored,await capture(restored,view.branch.id))).get(missing[0].id)).toBe('needs_review');}finally{restored.close();}
  const files=new Map<string,Blob>();

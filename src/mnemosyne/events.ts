@@ -1,3 +1,4 @@
+import { eventOverviewMaxChars, DEFAULT_EVENT_OVERVIEW_MAX_CHARS, eventMaterialMode } from './event-settings';
 import { EVENT_PROGRESS_MAX_CHARS, EVENT_APPEND_MAX_CHARS, EVENT_APPEND_PROMPT_MAX_CHARS } from '@/memory/limits';
 import { cleanBody, splitTimeLabel } from '@/memory/timeTag';
 import type { EventHint } from '@/memory/contextTags';
@@ -23,7 +24,7 @@ export interface EventView {
     validity: Map<string, import('./canonical').MemoryStatus>;
     storedCount: number;
 }
-export async function eventView(lib: Library, view: CapturedView, includeHistory = false): Promise<EventView> {
+export async function eventView(lib: Library, view: CapturedView, includeHistory = false, eventId?: string): Promise<EventView> {
     const validStates = await statuses(lib, view);
     const valid = view.memories.filter(m => validStates.get(m.id) === 'valid');
     const permitted = new Set(valid.map(m => m.id));
@@ -31,7 +32,10 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
     const selected = new Map(view.memories.map(m => [m.owner, m]));
     const positions = new Map(view.refs.map((ref, index) => [ref.message, index]));
     const result = await lib.transaction(STORES, 'readonly', async (tx) => {
-        const chains = await tx.all<EventChain>('event_chains', 'branch', view.branch.id);
+        // Single-chain work must not reproject every unrelated chain on each batch job.
+        const requested = eventId === undefined ? undefined : await tx.get<EventChain>('event_chains', eventId);
+        const chains = eventId === undefined ? await tx.all<EventChain>('event_chains', 'branch', view.branch.id)
+            : requested?.branch === view.branch.id && requested.story === view.branch.story ? [requested] : [];
         // Share reads only inside this projection. Never reuse across a branch/epoch change.
         const memories = new Map(view.memories.map(m => [m.id, Promise.resolve<MemoryRevision | undefined>(m)]));
         const readMemory = (id: string) => {
@@ -310,7 +314,7 @@ export async function commitEventBatch(lib: Library, batch: EventBatch, output: 
         return receipt;
     });
 }
-export const EVENT_OVERVIEW_MAX_CHARS = 500;
+export const EVENT_OVERVIEW_MAX_CHARS = DEFAULT_EVENT_OVERVIEW_MAX_CHARS;
 /** Archive changes presentation only, so in-flight narrative updates remain valid. */
 export async function setEventArchived(lib: Library, view: CapturedView, eventId: string, archived: boolean, guard: () => boolean = () => true) {
     check(typeof archived === 'boolean', '归档标记无效');
@@ -323,8 +327,8 @@ export async function setEventArchived(lib: Library, view: CapturedView, eventId
     });
 }
 export const eventOverviewLength = (text: string) => Array.from(text.trim()).length;
-export function checkEventOverview(text: string) {
-    check(eventOverviewLength(text) <= EVENT_OVERVIEW_MAX_CHARS, `事件概要不能超过${EVENT_OVERVIEW_MAX_CHARS}字（含标点），未保存；请精简后重试`);
+export function checkEventOverview(text: string, maxChars = eventOverviewMaxChars()) {
+    check(eventOverviewLength(text) <= maxChars, `事件概要不能超过${maxChars}字（含标点），未保存；请精简后重试`);
 }
 /** Rebind retained progress only when the user/model confirms the current event material. */
 export async function confirmLatestProgressSource(lib: Library, progress: EventRevision['latestProgress'], members: MemoryRevision[]) {
@@ -385,6 +389,8 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
         const base = { story: branch.story, branch: branch.id, owner: key, snapshot: view.snapshot.id, cutoff: view.cutoff, epoch: branch.epoch };
         const progressSource = progressChanged && patch.latestProgress && valid.find(m => m.id === patch.latestProgress!.memory);
         await tx.add('event_revisions', { ...row('er'), ...base, eventSchema: 2,
+            ...(patch.confirmOverview || (existing?.meta.overviewCoverage === 1 &&
+                (patch.summarized === undefined || equal(patch.summarized, existing.meta.summarized))) ? { overviewCoverage: 1, overviewMaterialMode: patch.confirmOverview ? eventMaterialMode() : existing?.meta.overviewMaterialMode } : {}),
             ...(latestProgress !== undefined ? { latestProgress: latestProgress && progressSource ? {
                 ...latestProgress, text: latestProgress.text.trim(),
                 time: splitTimeLabel(progressSource.storyTime).end || progressSource.storyTime,

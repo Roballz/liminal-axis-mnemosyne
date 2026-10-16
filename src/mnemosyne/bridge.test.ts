@@ -423,7 +423,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect((await syncDaily()).branch.sourceRoleRepairs).toHaveLength(1);
     expect(dailyState.review).toBe(0);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(13);
+    expect(pack.version).toBe(14);
     const restored = await restoreLibrary(pack);
     lib = restored;
     dispose?.(); dispose = bindDaily();
