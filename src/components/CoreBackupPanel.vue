@@ -4,11 +4,11 @@ import BbsSelect from './BbsSelect.vue';
 import { BACKUP_LOCATION } from '@/st/native-backups';
 import { activeLibrary, ACTIVE_KEY, DB_PREFIX } from '@/mnemosyne/db';
 import { dailyState, invalidateDaily, syncDaily, serializeDailyActivation } from '@/mnemosyne/bridge';
-import { backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
-import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups, retryCoreBackups, retryDeletionProtection, reportArchiveProtection } from '@/mnemosyne/core-backup-runtime';
+import { AUTO_BACKUP_KEEP, backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
+import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups, retryCoreBackups } from '@/mnemosyne/core-backup-runtime';
 
 const inventory = shallowRef<BackupInventory>({ entries: [], invalid: [] });
-const choice = ref(''), keep = ref<5 | 10>(10), error = ref(''), notice = ref('');
+const choice = ref(''), error = ref(''), notice = ref('');
 const loading = ref(false), loadedAt = ref(0);
 const currentLibrary = ref('');
 const blocked = computed(() => coreBackupState.enabled ? backupArchiveBlockReason(dailyState) : '');
@@ -42,37 +42,21 @@ async function load() {
         inventory.value = result;
         loadedAt.value = Date.now();
         currentLibrary.value = localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`;
-        keep.value = coreBackupState.keep;
         if (!result.entries.some(entry => entry.key === choice.value)) choice.value = '';
     } finally { loading.value = false; }
 }
 async function configure() {
     const enabled = !coreBackupState.enabled;
-    if (enabled && !confirm(`启用后，仅在酒馆前台运行时每 30 分钟检查变化，每个库保留最近 ${keep.value} 份自动核心包。新文件写入并读回验证后，会永久删除本功能多余的较旧自动备份；手动、固定保留、恢复前保护、删除前保护、档案删除保护/起点和其他库文件不受影响。明文存于本机 TT 数据目录，不发送网络。启用？`)) return;
-    await configureCoreBackups(enabled, keep.value);
+    if (enabled && !confirm(`启用后，仅在酒馆前台运行时每 30 分钟检查变化，每个库保留最近 ${AUTO_BACKUP_KEEP} 份自动核心包。新文件写入并读回验证后，会永久删除本功能多余的较旧自动备份；删除消息、缩短正文或删除档案不另存保护包；两次备份之间丢失的数据可能无法恢复。手动、固定、恢复前及已有历史保护文件不受影响。明文存于本机 TT 数据目录，不发送网络。启用？`)) return;
+    await configureCoreBackups(enabled, AUTO_BACKUP_KEEP);
 }
 async function saveManual() {
-    if (!confirm('把当前完整核心库另存为不会自动删除的备份，并设为本库今后自动备份的新起点？如果先前检测到资料减少，请先核对是否需要恢复。旧备份保留。')) return;
+    if (!confirm('把当前完整核心库另存为不会自动删除的备份，并设为本库今后自动备份的新起点？旧备份保留。')) return;
     const backups = await getCoreBackups(), lib = await activeLibrary();
     const selector = localStorage.getItem(ACTIVE_KEY), stamp = revision();
     const result = await backups.save(lib, 'manual', coreBackupState.keep,
         () => !disposed && !dailyState.pending && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision());
     if (result.state === 'saved') notice.value = '手动保护备份已写入并验证；已明确设为本库新的自动备份起点。该文件不会自动删除。';
-    await load();
-}
-async function acceptArchiveLoss() {
-    const backups = await getCoreBackups(), lib = await activeLibrary();
-    const selector = localStorage.getItem(ACTIVE_KEY), stamp = revision();
-    const approval = await backups.previewArchiveLoss(lib);
-    if (!confirm(`确认这些档案是你主动删除的，并接受当前库作为新的自动备份起点？\n故事 ${approval.previous.counts.stories} → ${approval.currentCounts.stories}，分支 ${approval.previous.counts.branches} → ${approval.currentCounts.branches}，摘要 ${approval.previous.counts.memories} → ${approval.currentCounts.memories}。\n会先保护 ${date(approval.previous.snapshotAt)} 最近已保存的完整旧包；它可能没有删除前尚未备份的数据。恢复旧档案需要恢复整个核心包，不会恢复宿主聊天。旧包验证成功后才保存当前起点。`)) return;
-    const guard = () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision();
-    const result = await backups.acceptArchiveLoss(lib, approval, guard, entry => reportArchiveProtection(entry, false));
-    if (result.state === 'saved') {
-        coreBackupState.error = '';
-        coreBackupState.status = coreBackupState.enabled ? '旧包已保护，当前档案已设为新起点；自动备份继续检查' : '旧包已保护，当前档案已设为新起点；自动备份尚未启用';
-        notice.value = coreBackupState.status;
-        retryCoreBackups();
-    }
     await load();
 }
 async function pin() {
@@ -120,25 +104,19 @@ async function restore() {
         <p role="status">{{ status }}</p>
         <p v-if="blocked" class="mn-warning" role="status">自动备份暂缓：{{ blocked }}。处理后会继续检查；启用状态不代表已写入备份。</p>
         <p v-if="coreBackupState.error || error" class="mn-warning" role="alert">{{ error || coreBackupState.error }}</p>
-        <p v-if="coreBackupState.protectionNotice" role="status" style="overflow-wrap: anywhere">{{ coreBackupState.protectionNotice }}</p>
         <p v-if="notice" role="status">{{ notice }}</p>
         <p v-if="loading" role="status">正在连接原生接口并读取备份列表…</p>
         <button :disabled="coreBackupState.busy" @click="run(load)">{{ loading ? '正在读取备份列表…' : '读取备份列表' }}</button>
         <template v-if="coreBackupState.available">
-            <label>每个库保留的自动备份数
-                <select v-model.number="keep" :disabled="coreBackupState.busy || coreBackupState.enabled">
-                    <option :value="10">10 份（默认）</option><option :value="5">5 份</option>
-                </select>
-            </label>
+            <p>每个库固定保留最近 {{ AUTO_BACKUP_KEEP }} 份自动备份。</p>
             <button :disabled="coreBackupState.busy" @click="run(configure)">{{ coreBackupState.enabled ? '关闭自动备份' : '启用自动备份' }}</button>
             <p class="mn-muted">前台稳定后开始检查，同一库的自动备份至少间隔 30 分钟；没有变化不重复写入。退到后台或关闭酒馆时停止发起新备份，已经交给宿主的写入可能完成。写入失败会延后重试，旧副本保留；原生接口提供单文件原子发布，但不承诺断电持久化。</p>
-            <button v-if="coreBackupState.enabled && dailyState.error" :disabled="coreBackupState.busy" @click="run(async () => { retryDeletionProtection(); await syncDaily(); notice = '归档重试完成，自动备份继续检查'; })">重试删除前保护 / 归档</button>
-            <button v-if="coreBackupState.enabled" :disabled="coreBackupState.busy || !!blocked" @click="retryCoreBackups">重试自动备份检查（仍保留保护校验）</button>
-            <button :disabled="coreBackupState.busy" @click="run(acceptArchiveLoss)">保护旧包并接受当前档案（恢复自动备份）…</button>
+            <button v-if="dailyState.error" :disabled="coreBackupState.busy" @click="run(async () => { await syncDaily(); notice = '归档重试完成'; })">重试归档</button>
+            <button v-if="coreBackupState.enabled" :disabled="coreBackupState.busy || !!blocked" @click="retryCoreBackups">重试自动备份检查</button>
             <button :disabled="coreBackupState.busy || dailyState.pending" @click="run(saveManual)">手动保存并设为新起点（不轮换）</button>
             <p v-if="loadedAt" role="status">接口读取成功（{{ date(loadedAt) }}）；已验证 {{ inventory.entries.length }} 份，共 {{ size(totalBytes) }}。<template v-if="!inventory.entries.length">当前没有已验证的可恢复备份。</template></p>
             <p v-else class="mn-muted">尚未读取磁盘备份列表，备份数量未知。</p>
-            <p>每个库各保留 {{ coreBackupState.keep }} 份自动备份；手动 / 固定 / 恢复前 / 删除前 / 档案删除保护及起点副本额外保留，可能使总数更多。旧库不会自动清理。</p>
+            <p>删除消息、缩短正文或删除档案不再额外备份。20 个半小时恢复点约对应 10 小时的活跃使用，不保证连续覆盖最近 10 小时；未运行、后台、无变化或保存失败时不会补齐。两次备份之间丢失的数据可能无法恢复。手动 / 固定 / 恢复前副本和已有历史保护包仍保留，总文件数可能超过 20；旧库不会自动清理。</p>
             <p v-if="inventory.invalid.length" class="mn-warning">{{ inventory.invalid.length }} 份文件无法验证，未删除；不计入上面的已验证数量和大小，也不可用于恢复。</p>
             <BbsSelect v-model="choice" :options="options" aria-label="可恢复的磁盘核心包" />
             <div v-if="selected" class="mn-card">
@@ -146,7 +124,7 @@ async function restore() {
                 <p>{{ selected.counts.stories }} 故事 · {{ selected.counts.branches }} 分支 · {{ selected.counts.source_messages }} 消息身份 · {{ selected.counts.memories }} 摘要 · {{ selected.counts.event_chains }} 事件链 · {{ selected.counts.custom_table_rows }} 表格行</p>
                 <p style="overflow-wrap: anywhere">来源库：{{ selected.sourceLibrary }}</p>
                 <p style="overflow-wrap: anywhere">文件路径：{{ BACKUP_LOCATION }}{{ selected.key }}</p>
-                <p v-if="selected.kind === 'before-deletion' || selected.kind === 'before-archive-deletion'" class="mn-muted">此文件保护最近已保存的完整核心包，以显示的核心包时间为准；可能不含删除前尚未备份的楼层，不参与自动轮换。</p>
+                <p v-if="selected.kind === 'before-deletion' || selected.kind === 'before-archive-deletion'" class="mn-muted">这是旧版留下的保护文件，本次更新不删除它，也不再生成新的删除保护文件。以显示的核心包时间为准，不参与自动轮换。</p>
                 <small>列表数量只用于预览；恢复前会重新读文件并校验完整核心包。</small>
                 <div class="mn-actions">
                     <button :disabled="coreBackupState.busy || selected.kind !== 'auto'" @click="run(pin)">固定保留一份副本</button>

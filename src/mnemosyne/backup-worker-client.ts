@@ -1,6 +1,5 @@
 import BackupWorker from './core-backup.worker?worker&inline';
 import type { BackupDisk } from '@/st/native-backups';
-import type { BackupPreview } from './core-backups';
 import type { BackupJob, BackupResult, HostMessage, WorkerMessage, DiskRequest } from './backup-worker-protocol';
 
 const unavailable = '后台备份线程不可用；已暂停本次备份，旧备份保留。请重新加载插件后重试（需要宿主允许 Web Worker）';
@@ -9,7 +8,7 @@ const unavailable = '后台备份线程不可用；已暂停本次备份，旧�
  * There is deliberately no synchronous/main-thread fallback on unsupported WebViews.
  */
 export function runBackupWorker(disk: BackupDisk, job: BackupJob, isCurrent: () => boolean,
-    onProtected?: (entry: BackupPreview) => void, createWorker: () => Worker = () => new BackupWorker(),
+    createWorker: () => Worker = () => new BackupWorker(),
     onPendingNative?: (message: string) => void): Promise<BackupResult> {
     return new Promise((resolve, reject) => {
         let worker: Worker;
@@ -67,8 +66,6 @@ export function runBackupWorker(disk: BackupDisk, job: BackupJob, isCurrent: () 
                     error => send({ type: 'reply', id: message.id, error: error instanceof Error ? error.message : String(error) }));
                 inFlight.add(task);
                 void task.finally(() => inFlight.delete(task));
-            } else if (message.type === 'protected') {
-                try { onProtected?.(message.entry); } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
             } else if (message.type === 'done') finish(undefined, message.result);
             else if (message.type === 'failed') finish(new Error(message.error));
         };

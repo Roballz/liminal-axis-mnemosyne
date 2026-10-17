@@ -54,7 +54,7 @@ test('uncertain disable is locally stopped and explicitly warns that restart can
     vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
     const runtime = await import('./core-backup-runtime');
     await runtime.getCoreBackups(); expect(runtime.coreBackupState.enabled).toBe(true);
-    await expect(runtime.configureCoreBackups(false, 10)).rejects.toThrow('重启后可能');
+    await expect(runtime.configureCoreBackups(false, 20)).rejects.toThrow('重启后可能');
     expect(runtime.coreBackupState.enabled).toBe(false);
     expect(runtime.coreBackupState.status).toContain('未确认');
     expect(backupFailure(new Error(runtime.coreBackupState.error))).toContain('重启后可能');
@@ -96,20 +96,6 @@ test('archive blocker display covers every startup gate without changing saved r
     expect(state).toEqual({ pending: true, error: '摘要基线缺失', conflict: true, tableError: '填表待处理' });
 });
 
-test('verified protection uses native escaped nonblocking toast once and keeps a retrievable path', async () => {
-    vi.resetModules();
-    const warning = vi.fn(); vi.stubGlobal('window', { toastr: { warning } });
-    const runtime = await import('./core-backup-runtime');
-    const entry = { key: 'before-deletion-test.json', snapshotAt: 1800000000000 } as any;
-    runtime.reportDeletionProtection(entry, true);
-    runtime.reportDeletionProtection(entry, true);
-    expect(warning).toHaveBeenCalledTimes(1);
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining('snapshots-v1/before-deletion-test.json'), '柏宝书', { escapeHtml: true });
-    expect(runtime.coreBackupState.protectionNotice).toContain('应用本次删除前');
-    vi.stubGlobal('window', {});
-    expect(() => runtime.reportDeletionProtection({ ...entry, key: 'other.json' }, true)).not.toThrow();
-});
-
 test('explicit retry resets failure backoff without clearing validation or creating extra timers', async () => {
     vi.useFakeTimers();
     const run = vi.fn().mockRejectedValueOnce(new Error('ENOSPC')).mockResolvedValue(undefined);
@@ -118,4 +104,28 @@ test('explicit retry resets failure backoff without clearing validation or creat
     for (let i = 0; i < 100; i++) scheduler.retry();
     expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(30_000); expect(run).toHaveBeenCalledTimes(2); scheduler.stop();
+});
+
+test.each([5, 10])('loading legacy keep=%s uses 20 without writes or toggling enabled', async keep => {
+    vi.resetModules();
+    const store = Object.fromEntries(['listBlobKeys', 'getBlob', 'setBlob', 'deleteBlob', 'tryGetJson', 'setJson'].map(name => [name, vi.fn()]));
+    store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep } });
+    vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
+    const runtime = await import('./core-backup-runtime'); await runtime.getCoreBackups();
+    expect(runtime.coreBackupState).toMatchObject({ enabled: true, keep: 20, settingsVerified: true });
+    expect(store.setJson).not.toHaveBeenCalled(); expect(store.setBlob).not.toHaveBeenCalled(); expect(store.deleteBlob).not.toHaveBeenCalled();
+});
+
+test('saving 20 requires exact readback; migrated legacy readback cannot mask a stale settings write', async () => {
+    vi.resetModules();
+    const store = Object.fromEntries(['listBlobKeys', 'getBlob', 'setBlob', 'deleteBlob', 'tryGetJson', 'setJson'].map(name => [name, vi.fn()]));
+    store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep: 10 } });
+    vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
+    const runtime = await import('./core-backup-runtime'); await runtime.getCoreBackups();
+    await expect(runtime.configureCoreBackups(true, 20)).rejects.toThrow('读回不一致');
+    expect(runtime.coreBackupState).toMatchObject({ enabled: false, settingsVerified: false });
+    store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep: 20 } });
+    await runtime.configureCoreBackups(true, 20);
+    expect(runtime.coreBackupState).toMatchObject({ enabled: true, keep: 20, settingsVerified: true });
+    expect(store.setJson.mock.calls.at(-1)?.[0]).toMatchObject({ value: { schema: 1, enabled: true, keep: 20 } });
 });

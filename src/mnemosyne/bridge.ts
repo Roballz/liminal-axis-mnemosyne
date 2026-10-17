@@ -1,5 +1,5 @@
 import { beginBodyEdit, settleBodyEdit, cancelBodyEdit } from './summary-edit-signal';
-import { protectDeletionBeforeSync, protectArchiveBeforeDeletion, completeArchiveBackup } from './core-backup-runtime';
+import { sourceSyncBaseline } from './source-sync-guard';
 import { membershipProjection, type MembershipProjection } from './event-memberships';
 import { ReplyFinality, ReplyFinalityError, type ReplyBlocker, type ReplyBlockerCursor } from './reply-finality';
 import { toast } from '@/st/toast';
@@ -618,9 +618,9 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             const deletionTables = dailyState.tableRevision;
             const deletionGuard = () => scope === hostScope() && isActive() && generation === dailyState.generation && host === hostVersion() &&
                 getContext()?.chat === deletionChat && localStorage.getItem(ACTIVE_KEY) === deletionSelector && dailyState.tableRevision === deletionTables;
-            const protectedBranch = await protectDeletionBeforeSync(lib, observation, deletionGuard, lastCache?.library === lib.db.name ? lastCache.view : undefined);
-            check(deletionGuard(), '聊天在删除保护期间改变，待重试');
-            const branch = await synchronize(lib, observation, protectedBranch ? { ...protectedBranch, isCurrent: deletionGuard } : undefined);
+            const baseline = await sourceSyncBaseline(lib, observation);
+            check(deletionGuard(), '聊天在归档校验期间改变，待重试');
+            const branch = await synchronize(lib, observation, { ...baseline, isCurrent: deletionGuard });
             savedHost = host;
             check(
                 scope === hostScope() && isActive() && generation === dailyState.generation && host === hostVersion(),
@@ -1076,9 +1076,7 @@ export async function deleteDailyArchive(lib: Awaited<ReturnType<typeof activeLi
     const job = serial.catch(() => {}).then(async () => {
         const guard = () => isCurrent() && scope === hostScope() && generation === dailyState.generation;
         check(lib === await activeLibrary() && guard(), '聊天或数据库已改变，请重新预览删除');
-        const protectedArchive = await protectArchiveBeforeDeletion(lib, plan, guard);
         await commitArchiveDeletion(lib, plan, guard);
-        if (protectedArchive) await completeArchiveBackup(lib, plan, guard);
         cache = lastCache = injectionCache = null;
         invalidateDaily('档案已删除');
         if (plan.scopes.includes(scope)) {

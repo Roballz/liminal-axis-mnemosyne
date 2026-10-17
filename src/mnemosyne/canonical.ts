@@ -141,7 +141,7 @@ async function publishSnapshot(tx: Transaction, branch: Branch, refs: SourceRef[
     await tx.add('history_snapshots', snapshot);
     return snapshot.id;
 }
-export async function synchronize(lib: Library, observation: HostObservation, protection?: { branch?: Branch; binding?: Binding; isCurrent(): boolean }): Promise<Branch> {
+export async function synchronize(lib: Library, observation: HostObservation, baseline?: { branch?: Branch; binding?: Binding; isCurrent(): boolean }): Promise<Branch> {
     check(
         observation.scope && new Set(observation.messages.map((m) => m.key)).size === observation.messages.length,
         '消息映射身份重复，需要人工核对',
@@ -151,15 +151,15 @@ export async function synchronize(lib: Library, observation: HostObservation, pr
     const memoryHashes = await Promise.all(observation.memories.map((m) => fingerprint(m)));
     const tagUpdates = await tagOnlyRevisions(lib, observation);
     return lib.transaction(STORES, 'readwrite', async (tx) => {
-        if (protection?.branch) {
-            const live = await tx.get<Branch>('branches', protection.branch.id);
-            check(live && live.head === protection.branch.head && live.view === protection.branch.view &&
-                live.epoch === protection.branch.epoch && protection.isCurrent(), '删除保护后档案或聊天已变化，请重新保存保护包');
+        if (baseline?.branch) {
+            const live = await tx.get<Branch>('branches', baseline.branch.id);
+            check(live && live.head === baseline.branch.head && live.view === baseline.branch.view &&
+                live.epoch === baseline.branch.epoch && baseline.isCurrent(), '归档校验后档案或聊天已变化，请重试');
         }
         const bindings = await tx.all<Binding>('host_bindings');
         let binding = bindings.find((b) => !b.detached && b.scope === observation.scope);
-        if (protection) check(JSON.stringify(binding) === JSON.stringify(protection.binding),
-            '删除保护后绑定已变化，未应用删除');
+        if (baseline) check(JSON.stringify(binding) === JSON.stringify(baseline.binding),
+            '归档校验后绑定已变化，未应用删除');
         let branch: Branch;
         if (!binding) {
             const story = { ...row('st'), created: Date.now() };
@@ -421,7 +421,7 @@ export async function synchronize(lib: Library, observation: HostObservation, pr
         if (oldHead !== branch.head || previous?.id !== branch.view || recovered) branch.epoch++;
         await tx.put('branches', branch);
         if (oldHead !== branch.head) await retireCurrentBodies(tx, branch, priorRefs);
-        if (protection) check(protection.isCurrent(), '删除归档期间聊天已变化，本次事务回滚');
+        if (baseline) check(baseline.isCurrent(), '删除归档期间聊天已变化，本次事务回滚');
         return branch;
     });
 }

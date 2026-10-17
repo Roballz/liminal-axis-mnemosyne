@@ -1,13 +1,8 @@
 import { runBackupWorker } from './backup-worker-client';
 import { reactive, watch } from 'vue';
-import { toast } from '@/st/toast';
-import { BACKUP_LOCATION, nativeBackupDisk } from '@/st/native-backups';
-import { deletionBeforeSync } from './deletion-protection';
-import type { ArchiveDeletionPlan } from './archive-deletion';
-import type { CapturedView } from './model';
-import type { HostObservation } from './canonical';
-import { activeLibrary, ACTIVE_KEY, type Library } from './db';
-import { AUTO_BACKUP_INTERVAL, CoreBackups, backupFailure, backupSettings, type BackupSettings, type BackupPreview } from './core-backups';
+import { nativeBackupDisk } from '@/st/native-backups';
+import { activeLibrary, ACTIVE_KEY } from './db';
+import { AUTO_BACKUP_INTERVAL, AUTO_BACKUP_KEEP, CoreBackups, backupFailure, backupSettings, type BackupSettings } from './core-backups';
 
 export const BACKUP_WAITING_STATUS = '自动备份已启用，等待前台稳定状态';
 /** Display the same archive gates used by startup without changing scheduler policy. */
@@ -19,76 +14,12 @@ export function backupArchiveBlockReason(state: { pending: boolean; error: strin
 }
 
 export const coreBackupState = reactive({
-    available: false, enabled: false, keep: 10 as 5 | 10, busy: false,
-    status: '尚未检查原生磁盘备份接口', error: '', lastSavedAt: 0, protectionNotice: '', settingsVerified: false,
+    available: false, enabled: false, keep: AUTO_BACKUP_KEEP as typeof AUTO_BACKUP_KEEP, busy: false,
+    status: '尚未检查原生磁盘备份接口', error: '', lastSavedAt: 0, settingsVerified: false,
 });
-const notifiedProtections = new Set<string>();
 function reportPendingNative(message: string) {
     coreBackupState.error = message;
     coreBackupState.status = '后台处理已停止，等待原生磁盘操作确认';
-}
-export function reportDeletionProtection(entry: BackupPreview, current = false) {
-    const message = `检测到正文消失被删除，已自动备份最近核心包，路径：${BACKUP_LOCATION}${entry.key}。核心包时间：${new Date(entry.snapshotAt).toLocaleString()}；${current ? '已在应用本次删除前导出当前已归档核心库。' : '这是最近已保存的完整核心包，不保证包含删除前尚未备份的楼层。'}`;
-    if (notifiedProtections.has(entry.key)) return;
-    coreBackupState.protectionNotice = message;
-    notifiedProtections.add(entry.key);
-    toast(message, 'warning', true);
-}
-let deletionFailure: { library: string; retryAt: number; failures: number; message: string } | undefined;
-export function retryDeletionProtection() { deletionFailure = undefined; }
-/** Runs inside the bridge source-sync queue, before canonical head/body mutation. */
-export async function protectDeletionBeforeSync(lib: Library, input: HostObservation, isCurrent: () => boolean, cached?: CapturedView) {
-    // Startup settings loading may still be in flight. Do not let it race the first sync.
-    if (connecting) await connecting.catch(() => {});
-    if (!coreBackupState.enabled && (!coreBackupState.available || coreBackupState.settingsVerified)) return;
-    const expected = await deletionBeforeSync(lib, input, cached);
-    if (!expected) return {};
-    if (!expected.needsProtection) return { branch: expected.branch, binding: expected.binding };
-    if (deletionFailure?.library === lib.db.name && Date.now() < deletionFailure.retryAt) throw new Error(deletionFailure.message);
-    try {
-        if (!coreBackupState.settingsVerified) throw new Error('自动备份设置未确认，不能安全应用正文删除；请先重新确认备份设置');
-        const backups = await getCoreBackups();
-        const entry = await backups.runExclusive(() => runBackupWorker(backups.disk,
-            { kind: 'protect-deletion', library: lib.db.name, expected: expected.branch }, isCurrent, undefined, undefined, reportPendingNative)) as BackupPreview;
-        reportDeletionProtection(entry, true);
-        deletionFailure = undefined;
-        coreBackupState.error = '';
-        coreBackupState.status = '删除前保护已验证，正在归档当前聊天；完成后自动备份继续';
-        return { branch: expected.branch, binding: expected.binding };
-    } catch (error) {
-        coreBackupState.error = `删除前保护未完成，当前核心档案保留，尚未应用删除：${backupFailure(error)}`;
-        const failures = deletionFailure?.library === lib.db.name ? deletionFailure.failures + 1 : 1;
-        deletionFailure = { library: lib.db.name, failures, retryAt: Date.now() + Math.min(AUTO_BACKUP_INTERVAL, 5 * 60_000 * 2 ** Math.min(failures - 1, 3)), message: coreBackupState.error };
-        coreBackupState.status = '删除归档暂缓，已限制失败重试频率；可点重试删除前保护 / 归档';
-        throw new Error(coreBackupState.error);
-    }
-}
-export function reportArchiveProtection(entry: BackupPreview, current: boolean) {
-    const message = `检测到档案删除，已保存核心包保护副本，路径：${BACKUP_LOCATION}${entry.key}。核心包时间：${new Date(entry.snapshotAt).toLocaleString()}。${current ? '已在删除档案前导出当前核心库。' : '这是最近已保存的旧包，不保证包含此前尚未备份的数据。'}`;
-    if (notifiedProtections.has(entry.key)) return;
-    notifiedProtections.add(entry.key); coreBackupState.protectionNotice = message;
-    toast(message, 'warning', true);
-}
-export async function protectArchiveBeforeDeletion(lib: Library, plan: ArchiveDeletionPlan, guard: () => boolean) {
-    if (connecting) await connecting.catch(() => {});
-    if (!coreBackupState.enabled && (!coreBackupState.available || coreBackupState.settingsVerified)) return false;
-    if (!coreBackupState.settingsVerified) throw new Error('备份设置结果未确认，请先重新确认设置；尚未删除档案');
-    const entry = await (await getCoreBackups()).protectArchiveDeletion(lib, plan, guard);
-    reportArchiveProtection(entry, true);
-    return true;
-}
-export async function completeArchiveBackup(lib: Library, plan: ArchiveDeletionPlan, guard: () => boolean) {
-    try {
-        const result = await (await getCoreBackups()).completeArchiveDeletion(lib, plan, guard);
-        coreBackupState.error = '';
-        coreBackupState.status = result.state === 'empty'
-            ? '最后一个档案已删除；删除前保护保留。当前库为空，不写空备份或轮换，请有新档案后核对新起点'
-            : '档案已删除，删除后的备份起点已写入并验证，自动备份可继续';
-        requestCheck?.();
-    } catch (error) {
-        coreBackupState.status = '档案已删除，删除前保护保留；自动备份新起点待恢复';
-        coreBackupState.error = `档案删除已完成，但新起点保存失败：${backupFailure(error)}。请使用“保护旧包并接受当前档案”重试，不必再次删除。`;
-    }
 }
 /** Explicit retry only resets scheduler backoff, never the validation baseline. */
 export function retryCoreBackups() { retryCheck?.(); }
@@ -116,7 +47,7 @@ export async function getCoreBackups(): Promise<CoreBackups> {
     })();
 }
 
-export async function configureCoreBackups(enabled: boolean, keep: 5 | 10) {
+export async function configureCoreBackups(enabled: boolean, keep: typeof AUTO_BACKUP_KEEP) {
     const backups = await getCoreBackups();
     // Stop scheduling locally before an uncertain settings write/read. Enabling only
     // takes effect after readback, so a settings IO error cannot silently start work.
@@ -124,8 +55,10 @@ export async function configureCoreBackups(enabled: boolean, keep: 5 | 10) {
     const settings: BackupSettings = { schema: 1, enabled, keep };
     try {
         await backups.disk.writeSettings(settings);
-        const saved = backupSettings(await backups.disk.readSettings());
-        if (JSON.stringify(settings) !== JSON.stringify(saved)) throw new Error('备份设置读回不一致');
+        const persisted = await backups.disk.readSettings();
+        const saved = backupSettings(persisted);
+        // Migration is for loading old settings, not proof that a new write persisted.
+        if ((persisted as BackupSettings)?.keep !== keep || JSON.stringify(settings) !== JSON.stringify(saved)) throw new Error('备份设置读回不一致');
     } catch (error) {
         const message = `本次会话已暂停；${enabled ? '启用' : '关闭'}设置未确认保存，重启后可能按旧设置或已写入设置启用。${backupFailure(error)}`;
         coreBackupState.status = '备份设置保存结果未确认'; coreBackupState.error = message;
@@ -200,7 +133,7 @@ export function bindCoreBackups(ready: () => boolean, revision: () => unknown = 
                 const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
                     { kind: 'auto', library: lib.db.name, keep: coreBackupState.keep },
                     () => alive && ready() && document.visibilityState === 'visible' && coreBackupState.enabled &&
-                        selected === localStorage.getItem(ACTIVE_KEY) && stamp === revision(), entry => reportDeletionProtection(entry), undefined, reportPendingNative)) as import('./core-backups').BackupOutcome;
+                        selected === localStorage.getItem(ACTIVE_KEY) && stamp === revision(), undefined, reportPendingNative)) as import('./core-backups').BackupOutcome;
                 coreBackupState.error = '';
                 if (result.state === 'saved') {
                     coreBackupState.lastSavedAt = result.entry.savedAt;

@@ -37,9 +37,7 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
     try {
         lib = await Library.open(message.job.library, true);
         const backups = new CoreBackups(disk), guard = () => rpc({ method: 'guard' });
-        const result = message.job.kind === 'auto'
-            ? await backups.save(lib, 'auto', message.job.keep, guard, entry => send({ type: 'protected', entry }))
-            : await backups.protectCurrentDeletion(lib, message.job.expected, guard);
+        const result = await backups.save(lib, 'auto', message.job.keep, guard);
         send({ type: 'done', result });
     } catch (error) {
         send({ type: 'failed', error: error instanceof Error ? error.message : String(error) });

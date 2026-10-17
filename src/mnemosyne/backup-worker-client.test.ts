@@ -16,11 +16,11 @@ const disk = (): BackupDisk => ({
     write: vi.fn(async () => {}), remove: vi.fn(async () => {}),
     readSettings: vi.fn(), writeSettings: vi.fn(),
 });
-const job = { kind: 'auto' as const, library: 'mnemosyne_daily_test', keep: 5 as const };
+const job = { kind: 'auto' as const, library: 'mnemosyne_daily_test', keep: 20 as const };
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 function start(d = disk(), guard = () => true) {
     const worker = new FakeWorker();
-    const result = runBackupWorker(d, job, guard, undefined, () => worker as unknown as Worker);
+    const result = runBackupWorker(d, job, guard, () => worker as unknown as Worker);
     worker.emit({ type: 'ready' });
     return { worker, result, disk: d };
 }
@@ -54,11 +54,11 @@ test('current-state guard is rechecked immediately before each native write and 
 
 test('worker blocked/failed startup never falls back to main-thread backup', async () => {
     const d = disk();
-    await expect(runBackupWorker(d, job, () => true, undefined, () => { throw new Error('CSP'); })).rejects.toThrow('Web Worker');
+    await expect(runBackupWorker(d, job, () => true, () => { throw new Error('CSP'); })).rejects.toThrow('Web Worker');
     expect(d.list).not.toHaveBeenCalled(); expect(d.write).not.toHaveBeenCalled();
     vi.useFakeTimers();
     const worker = new FakeWorker();
-    const result = runBackupWorker(d, job, () => true, undefined, () => worker as unknown as Worker);
+    const result = runBackupWorker(d, job, () => true, () => worker as unknown as Worker);
     const rejected = expect(result).rejects.toThrow('Web Worker');
     await vi.advanceTimersByTimeAsync(15_000); await rejected;
     expect(worker.terminate).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
@@ -69,7 +69,7 @@ test('worker error drains already-issued native write before releasing shared wr
     let release!: () => void;
     d.write = vi.fn(() => new Promise<void>(resolve => { release = resolve; }));
     const pending = vi.fn();
-    const result = manager.runExclusive(() => runBackupWorker(d, job, () => true, undefined, () => worker as unknown as Worker, pending));
+    const result = manager.runExclusive(() => runBackupWorker(d, job, () => true, () => worker as unknown as Worker, pending));
     await flush(); worker.emit({ type: 'ready' });
     worker.emit({ type: 'rpc', id: 1, method: 'write', key: 'new', blob: new Blob() }); await flush();
     const next = vi.fn(async () => {}), queued = manager.runExclusive(next);
@@ -86,7 +86,7 @@ test('processing timeout retains writer reservation until outstanding native IO 
     const d = disk(), worker = new FakeWorker(), manager = new CoreBackups(d), pending = vi.fn();
     let release!: () => void;
     d.write = vi.fn(() => new Promise<void>(resolve => { release = resolve; }));
-    const result = manager.runExclusive(() => runBackupWorker(d, job, () => true, undefined, () => worker as unknown as Worker, pending));
+    const result = manager.runExclusive(() => runBackupWorker(d, job, () => true, () => worker as unknown as Worker, pending));
     await flush(); worker.emit({ type: 'ready' });
     worker.emit({ type: 'rpc', id: 1, method: 'write', key: 'new', blob: new Blob() }); await flush();
     const next = vi.fn(async () => {}), queued = manager.runExclusive(next);

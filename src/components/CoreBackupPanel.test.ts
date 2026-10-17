@@ -41,7 +41,7 @@ function mount() { const root = make('root'), app = renderer.createApp(Panel); a
 beforeEach(() => {
     mocks.inventory.mockReset().mockResolvedValue({ entries: [], invalid: [] });
     mocks.connect.mockReset().mockResolvedValue({ inventory: mocks.inventory }); mocks.configure.mockReset();
-    Object.assign(coreBackupState, { available: true, enabled: true, keep: 10, busy: false, status: BACKUP_WAITING_STATUS, error: '', lastSavedAt: 0 });
+    Object.assign(coreBackupState, { available: true, enabled: true, keep: 20, busy: false, status: BACKUP_WAITING_STATUS, error: '', lastSavedAt: 0 });
     Object.assign(dailyState, { pending: false, error: '', conflict: false, tableError: '' });
     vi.stubGlobal('localStorage', { getItem: () => null });
 });
@@ -109,4 +109,13 @@ test('late inventory completion after unmount cannot publish a result into a reo
     finish({ entries: [], invalid: [] }); await operation; await nextTick();
     expect(text(second.root)).toContain('备份数量未知'); expect(text(second.root)).not.toContain('接口读取成功');
     expect(button(second.root, '读取备份列表').props.disabled).toBe(false);
+});
+
+test('panel advertises fixed 20 retention, no deletion packages and qualified coverage', async () => {
+    const { root } = mount();
+    expect(text(root)).toContain('固定保留最近 20 份');
+    expect(text(root)).toContain('不再额外备份'); expect(text(root)).toContain('不保证连续覆盖最近 10 小时');
+    expect(text(root)).toContain('已有历史保护包仍保留');
+    expect(text(root)).not.toContain('保护旧包并接受当前档案'); expect(text(root)).not.toContain('重试删除前保护');
+    expect(nodes(root).some(n => n.type === 'option' && ['5', '10'].includes(String(n.props.value)))).toBe(false);
 });
