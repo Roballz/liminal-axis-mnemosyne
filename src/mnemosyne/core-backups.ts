@@ -31,7 +31,34 @@ export interface BackupPreview {
     counts: Package['counts'];
     checksum: string;
 }
-export interface BackupInventory { entries: BackupPreview[]; invalid: { key: string; error: string }[] }
+export interface BackupListEntry {
+    key: string;
+    kind: Kind;
+    savedAt: number;
+    bank: string;
+    /** Untrusted display hint, never evidence for restore, pin, or retention. */
+    preview?: BackupPreview;
+}
+export interface BackupInventory { entries: BackupListEntry[] }
+// Only a disposable, bounded display cache. Every backup remains discoverable by filename.
+const PREVIEW_LIMIT = 256;
+function previewHints(value: unknown): BackupPreview[] {
+    if (value === undefined) return [];
+    const catalog = value as { schema: number; entries: BackupPreview[] };
+    check(catalog?.schema === 1 && Array.isArray(catalog.entries) && catalog.entries.length <= PREVIEW_LIMIT, '预览元数据无效');
+    return catalog.entries.filter(entry => {
+        const match = typeof entry?.key === 'string' && KEY.exec(entry.key);
+        return match && entry.kind === match[1] && entry.savedAt === Number(match[2]) &&
+            Number.isSafeInteger(entry.snapshotAt) && entry.snapshotAt > 0 &&
+            typeof entry.sourceLibrary === 'string' && entry.sourceLibrary.startsWith(DB_PREFIX) && entry.sourceLibrary.length < 256 &&
+            Number.isSafeInteger(entry.bytes) && entry.bytes > 0 && entry.bytes <= BACKUP_MAX_BYTES &&
+            typeof entry.checksum === 'string' && /^[a-f0-9]{64}$/.test(entry.checksum) &&
+            entry.counts && typeof entry.counts === 'object' && Object.keys(entry.counts).length <= 64 &&
+            Object.values(entry.counts).every(n => Number.isSafeInteger(n) && n >= 0) &&
+            ['stories', 'branches', 'source_messages', 'memories', 'event_chains', 'custom_table_rows'].every(k => Number.isSafeInteger((entry.counts as any)[k]));
+    }).map(({ key, kind, savedAt, snapshotAt, sourceLibrary, bytes, counts, checksum }) =>
+        ({ key, kind, savedAt, snapshotAt, sourceLibrary, bytes, counts, checksum }));
+}
 export type BackupOutcome = { state: 'saved'; entry: BackupPreview; warning?: string } | { state: 'unchanged' | 'too-soon' | 'empty' };
 function latestBaseline(keys: string[]): string | undefined {
     // Legacy deletion packages remain readable, but no longer gate ordinary backups.
@@ -115,14 +142,26 @@ export class CoreBackups {
     }
 
     async inventory(): Promise<BackupInventory> {
-        const result: BackupInventory = { entries: [], invalid: [] };
-        for (const key of await this.keys()) {
-            // Cached entries are only display hints. Selection, pin and restore always
-            // re-read and validate the selected file; no persisted index is authoritative.
-            try { result.entries.push(this.previews.get(key) ?? (await this.read(key)).entry); }
-            catch (e) { result.invalid.push({ key, error: errorText(e) }); }
-        }
-        return result;
+        // Directory-only: never open full packages, including old files with no hints.
+        return { entries: (await this.keys()).map(key => {
+            const match = KEY.exec(key)!;
+            return { key, kind: match[1] as Kind, savedAt: Number(match[2]), bank: match[3], preview: this.previews.get(key) };
+        }) };
+    }
+
+    async previewHints(): Promise<BackupPreview[]> {
+        return previewHints(await this.disk.readPreviews?.());
+    }
+
+    async rememberPreview(entry: BackupPreview): Promise<void> {
+        this.previews.set(entry.key, entry);
+        if (!this.disk.writePreviews) return;
+        // Best effort only. A missing/corrupt hint cache must not invalidate a backup.
+        let previous: BackupPreview[] = [];
+        try { previous = await this.previewHints(); } catch { /* Rebuild hints, not backups. */ }
+        const entries = [entry, ...previous.filter(e => e.key !== entry.key)]
+            .sort((a, b) => b.savedAt - a.savedAt).slice(0, PREVIEW_LIMIT);
+        try { await this.disk.writePreviews({ schema: 1, entries }); } catch { /* Filename-only fallback remains available. */ }
     }
 
     save(lib: Library, kind: 'auto' | 'manual' | 'before-restore', keep: typeof AUTO_BACKUP_KEEP = AUTO_BACKUP_KEEP, isCurrent: BackupGuard = () => true): Promise<BackupOutcome> {
@@ -190,7 +229,7 @@ export class CoreBackups {
             const lib = await restoreLibrary(selected.file.pack, false);
             try {
                 check(isCurrent(), '恢复页面已改变，已验证的新库未启用，原库保留');
-                await activateLibrary(lib);
+                await activateLibrary(lib, isCurrent);
                 return lib;
             } catch (error) { lib.close(); throw error; }
         });
@@ -210,6 +249,7 @@ export class CoreBackups {
         await this.disk.write(key, blob); // TT stages and atomically publishes this unique file.
         const persisted = await this.read(key);
         check(persisted.entry.checksum === file.checksum && persisted.entry.bytes === blob.size, '新备份读回不一致，旧备份保留');
+        await this.rememberPreview(persisted.entry);
         return persisted.entry;
     }
 }

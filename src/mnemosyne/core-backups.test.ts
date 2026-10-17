@@ -60,8 +60,8 @@ test('rotation keeps 20 per library and never touches manual, pinned, foreign-na
         if (i === 0 && saved.state === 'saved') pinned = (await backups.pin(saved.entry.key, saved.entry.checksum)).key;
     }
     const inventory = await backups.inventory();
-    expect(inventory.entries.filter(e => e.kind === 'auto' && e.sourceLibrary === lib.db.name)).toHaveLength(20);
-    expect(inventory.entries.filter(e => e.sourceLibrary === other.lib.db.name)).toHaveLength(1);
+    expect(inventory.entries.filter(e => e.kind === 'auto' && e.preview?.sourceLibrary === lib.db.name)).toHaveLength(20);
+    expect(inventory.entries.filter(e => e.preview?.sourceLibrary === other.lib.db.name)).toHaveLength(1);
     expect(disk.files.has(pinned)).toBe(true); expect(disk.files.has('user-backup.json')).toBe(true);
     if (manual.state === 'saved') expect(disk.files.has(manual.entry.key)).toBe(true);
     expect(disk.remove).toHaveBeenCalledTimes(2); lib.close(); other.lib.close();
@@ -306,6 +306,68 @@ test('unreadable legacy protection does not gate ordinary automatic snapshots an
     const old = await legacyCopy(disk, first.entry.key, 'before-deletion'); disk.files.set(old, new Blob(['corrupt legacy']));
     time.advance(); input.messages[1].content = '短'; await synchronize(lib, input);
     expect((await backups.save(lib, 'auto')).state).toBe('saved');
-    expect((await backups.inventory()).invalid.map(e => e.key)).toContain(old);
+    expect((await backups.inventory()).entries.map(e => e.key)).toContain(old);
+    await expect(backups.read(old)).rejects.toThrow();
     expect(disk.files.has(old)).toBe(true); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
+});
+
+
+test('cold inventory lists thousands of legacy names without opening any package or reading metadata', async () => {
+    const disk = new Disk();
+    const files = Array.from({ length: 1500 }, (_, i) => `before-deletion-v1-${1_800_000_000_000 + i}-0123456789abcdef-00000000-0000-0000-0000-000000000000.json`);
+    for (const key of files) disk.files.set(key, new Blob(['unverified legacy data']));
+    disk.files.set('foreign-file.json', new Blob(['untouched']));
+    const inventory = await new CoreBackups(disk).inventory();
+    expect(inventory.entries).toHaveLength(1500);
+    expect(inventory.entries[0]).toMatchObject({ key: files.at(-1), kind: 'before-deletion', savedAt: 1_800_000_001_499, bank: '0123456789abcdef' });
+    expect(inventory.entries.every(entry => !entry.preview)).toBe(true);
+    expect(disk.list).toHaveBeenCalledOnce(); expect(disk.read).not.toHaveBeenCalled();
+    expect(disk.write).not.toHaveBeenCalled(); expect(disk.remove).not.toHaveBeenCalled();
+});
+
+test('preview hints persist separately, are bounded, and never become restore or pin authority', async () => {
+    const { lib } = await fixture(1), disk = new Disk();
+    let hints: unknown;
+    const readPreviews = vi.fn(async () => hints), writePreviews = vi.fn(async (value: unknown) => { hints = value; });
+    Object.assign(disk, { readPreviews, writePreviews });
+    const saved = await new CoreBackups(disk, clock().now).save(lib, 'auto');
+    if (saved.state !== 'saved') throw new Error('missing backup');
+    const cold = new CoreBackups(disk); disk.read.mockClear();
+    expect((await cold.inventory()).entries).toHaveLength(1);
+    expect(disk.read).not.toHaveBeenCalled();
+    expect((await cold.previewHints())[0]).toEqual(saved.entry);
+    expect(disk.read).not.toHaveBeenCalled();
+    // A plausible but false cached count does not alter the full-file validation result.
+    (hints as any).entries[0] = { ...saved.entry, counts: { ...saved.entry.counts, stories: 999 } };
+    expect((await cold.previewHints())[0].counts.stories).toBe(999);
+    expect((await cold.read(saved.entry.key)).entry.counts.stories).toBe(saved.entry.counts.stories);
+    disk.files.set(saved.entry.key, new Blob(['corrupted after preview']));
+    await expect(cold.restore(saved.entry.key, saved.entry.checksum)).rejects.toThrow();
+    await expect(cold.pin(saved.entry.key, saved.entry.checksum)).rejects.toThrow();
+    expect(disk.write).toHaveBeenCalledOnce(); expect(disk.remove).not.toHaveBeenCalled();
+    const entries = Array.from({ length: 256 }, (_, i) => ({ ...saved.entry, savedAt: saved.entry.savedAt - i - 1,
+        key: saved.entry.key.replace(String(saved.entry.savedAt), String(saved.entry.savedAt - i - 1)) }));
+    hints = { schema: 1, entries };
+    await cold.rememberPreview(saved.entry);
+    expect((hints as any).entries).toHaveLength(256);
+    expect((hints as any).entries[0]).toEqual(saved.entry);
+    lib.close();
+});
+
+test('missing, malformed, and failed preview hints never hide filename inventory or fail a verified save', async () => {
+    const { lib } = await fixture(1), disk = new Disk();
+    const readPreviews = vi.fn(async (): Promise<unknown> => undefined), writePreviews = vi.fn(async () => { throw new Error('hint IO'); });
+    Object.assign(disk, { readPreviews, writePreviews });
+    const saved = await new CoreBackups(disk, clock().now).save(lib, 'manual');
+    expect(saved.state).toBe('saved');
+    const cold = new CoreBackups(disk); disk.read.mockClear();
+    expect(await cold.previewHints()).toEqual([]);
+    readPreviews.mockResolvedValueOnce({ schema: 1, entries: [{ key: 'invalid' }, null] });
+    expect(await cold.previewHints()).toEqual([]);
+    readPreviews.mockRejectedValueOnce(new Error('metadata IO'));
+    await expect(cold.previewHints()).rejects.toThrow('metadata IO');
+    expect((await cold.inventory()).entries).toHaveLength(1);
+    expect(disk.read).not.toHaveBeenCalled(); expect(disk.remove).not.toHaveBeenCalled();
+    disk.list.mockRejectedValueOnce(new Error('directory IO'));
+    await expect(cold.inventory()).rejects.toThrow('directory IO'); lib.close();
 });

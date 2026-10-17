@@ -1,4 +1,5 @@
 import { STORES, type Store, type Row, check, id } from './model';
+import { readDailySettings, settings } from './event-settings';
 export const DB_PREFIX = 'mnemosyne_daily_';
 export const ACTIVE_KEY = 'mnemosyne_daily_active_v1';
 export const DB_VERSION = 3;
@@ -71,14 +72,22 @@ export class Library {
     close() { this.db.close(); }
 }
 let active: Promise<Library> | undefined;
+let activationGeneration = 0;
+/** Synchronous token: checking it must not yield to another activation. */
+export const libraryActivationGeneration = () => activationGeneration;
 export function activeLibrary(): Promise<Library> {
     return active ??= Library.open(localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`);
 }
-export async function activateLibrary(lib: Library) {
+export async function activateLibrary(lib: Library, isCurrent = () => true) {
+    const restoredSettings = await readDailySettings(lib);
+    check(isCurrent(), '恢复页面已改变，已验证的新库未启用，原库保留');
     // Durable selector changes only after validation and import transaction completion.
     localStorage.setItem(ACTIVE_KEY, lib.db.name);
     const previous = active;
     active = Promise.resolve(lib);
+    activationGeneration++;
+    // Publish this library's settings before any post-restore sync or jobs can resume.
+    Object.assign(settings, restoredSettings);
     // The validated selector switch is already committed. A failed old open (or
     // obsolete-connection cleanup) must not make restore close the new active library.
     if (previous) await previous.then(old => { if (old !== lib) old.close(); }).catch(() => {});

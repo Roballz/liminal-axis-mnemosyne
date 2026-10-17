@@ -21,6 +21,8 @@ const disk: BackupDisk = {
     remove: key => rpc({ method: 'remove', key }),
     readSettings: async () => { throw new Error('Worker cannot read settings'); },
     writeSettings: async () => { throw new Error('Worker cannot write settings'); },
+    readPreviews: () => rpc({ method: 'readPreviews' }),
+    writePreviews: value => rpc({ method: 'writePreviews', value }),
 };
 self.onmessage = async (event: MessageEvent<HostMessage>) => {
     const message = event.data;
@@ -35,8 +37,13 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
     started = true;
     let lib: Library | undefined;
     try {
-        lib = await Library.open(message.job.library, true);
         const backups = new CoreBackups(disk), guard = () => rpc({ method: 'guard' });
+        if (message.job.kind === 'preview') {
+            const { entry } = await backups.read(message.job.key);
+            send({ type: 'done', result: { state: 'preview', entry } });
+            return;
+        }
+        lib = await Library.open(message.job.library, true);
         const result = await backups.save(lib, 'auto', message.job.keep, guard);
         send({ type: 'done', result });
     } catch (error) {

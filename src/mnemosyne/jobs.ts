@@ -3,25 +3,20 @@ import { requestCompletion, requestViaMainApi } from '@/api/client';
 import { getChannelForTask, engineActiveHere } from '@/api/settings';
 import { engineState } from '@/memory/engine';
 import { getContext } from '@/st/context';
-import { activeLibrary } from './db';
+import { activeLibrary, libraryActivationGeneration } from './db';
 import { syncDaily, dailyState, hostScope, hostVersion } from './bridge';
 import { eventView } from './events';
 import { manualEventState, eventPending, eventCoverageUpgradeNeeded, updateEventOverview } from './manual-events';
 import { check, type Branch } from './model';
-import { settings, dailySettingsDefaults, eventOverviewMaxChars, eventBatchTokens, eventMaterialMode, EVENT_MATERIAL_MODES } from './event-settings';
+import { settings, readDailySettings, eventOverviewMaxChars, eventBatchTokens, eventMaterialMode } from './event-settings';
 export { settings } from './event-settings';
 export const jobState = reactive({ busy: false, status: '未运行', chars: 0, completed: 0, stopped: false });
 let stop = false;
 export async function loadDailySettings() {
-    const stored = await (await activeLibrary()).get<any>('library_meta', 'daily-settings');
-    Object.assign(settings, dailySettingsDefaults, stored?.value ?? {});
-    if (!EVENT_MATERIAL_MODES.includes(settings.overviewMaterialMode)) settings.overviewMaterialMode = 'both';
-    // Old libraries gain only the new options; no overview text or coverage is rewritten.
-    for (const key of ['overviewMaxChars', 'overviewBatchTokens'] as const) {
-        const max = key === 'overviewMaxChars' ? 20000 : 1000000;
-        const min = key === 'overviewMaxChars' ? 1 : 1000;
-        if (!Number.isSafeInteger(settings[key]) || settings[key] < min || settings[key] > max) settings[key] = dailySettingsDefaults[key];
-    }
+    const generation = libraryActivationGeneration();
+    const lib = await activeLibrary(), next = await readDailySettings(lib);
+    // A startup/backfill read from the previous library may finish after a restore.
+    if (generation === libraryActivationGeneration()) Object.assign(settings, next);
 }
 export async function saveDailySettings() {
     eventOverviewMaxChars(); eventBatchTokens(); eventMaterialMode();

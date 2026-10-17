@@ -13,6 +13,12 @@ export interface KnowledgeFile {
   enabled: boolean;
   embedding: string;
   revision: string;
+  /** v1 preserves decoded import text exactly. Missing on legacy chunk-only files. */
+  sourceVersion?: 1;
+  sourceText?: string;
+  /** Each edit has an isolated vector scope; pending/failed edits have embedding="". */
+  vectorRevision?: string;
+  indexError?: string;
 }
 export interface KnowledgeConfig { enabled: boolean; count: number; threshold: number; maxChars: number }
 export const knowledgeDebug = reactive({ status: '', hits: [] as { name: string; block: number; score: number }[] });
@@ -48,6 +54,30 @@ async function save(file: KnowledgeFile): Promise<void> {
   await transaction('readwrite', store => store.put({ ...file, chunks: [...file.chunks] }));
   invalidateRecallCache();
 }
+/** Read and compare inside the write transaction, including across browser tabs. */
+async function mutate(file: KnowledgeFile, change: (current: KnowledgeFile) => KnowledgeFile | undefined): Promise<KnowledgeFile | undefined> {
+  const database = await db();
+  const result = await new Promise<KnowledgeFile | undefined>((resolve, reject) => {
+    const tx = database.transaction('files', 'readwrite'), store = tx.objectStore('files');
+    const request = store.get(file.id);
+    let next: KnowledgeFile | undefined, error: unknown;
+    request.onsuccess = () => {
+      try {
+        const current = request.result as KnowledgeFile | undefined;
+        if (!current || current.database !== file.database) throw new Error('知识库文件已删除或角色不匹配，请刷新');
+        next = change(current);
+        if (next) store.put({ ...next, chunks: [...next.chunks] }); else store.delete(file.id);
+      } catch (e) { error = e; tx.abort(); }
+    };
+    tx.oncomplete = () => resolve(next);
+    tx.onerror = tx.onabort = () => reject(error || tx.error || new Error('知识库写入被取消'));
+  });
+  invalidateRecallCache();
+  return result;
+}
+export function knowledgeText(file: KnowledgeFile): string {
+  return file.sourceText ?? file.chunks.join(`\n${file.delimiter}\n`);
+}
 export function embeddingIdentity(): string {
   const endpoint = resolveVectorModel('embedding');
   return JSON.stringify([endpoint.url, endpoint.model]);
@@ -60,7 +90,7 @@ export function normalizeKnowledgeConfig(config: KnowledgeConfig): KnowledgeConf
 }
 export function splitKnowledge(text: string, delimiter: string): string[] {
   const marker = delimiter.trim();
-  if (!marker || /[\r\n]/.test(marker)) throw new Error('分隔符必须是非空单行文本');
+  if (!marker || /[\r\n]/.test(delimiter)) throw new Error('分隔符必须是非空单行文本');
   const chunks: string[] = [];
   let lines: string[] = [];
   const flush = () => { const block = lines.join('\n').trim(); if (block) chunks.push(block); lines = []; };
@@ -73,41 +103,60 @@ export function splitKnowledge(text: string, delimiter: string): string[] {
   if (chunks.some(block => block.length > 24000)) throw new Error('有区块超过 24000 字符，请增加分隔符，不会自动截断');
   return chunks;
 }
-export async function readKnowledgeFile(file: File, delimiter: string, encoding = 'utf-8'): Promise<string[]> {
+export async function readKnowledgeSource(file: File, delimiter: string, encoding = 'utf-8'): Promise<{ text: string; chunks: string[] }> {
   if (!/\.(txt|md)$/i.test(file.name)) throw new Error('仅支持 TXT 和 MD 文件');
   if (file.size > MAX_FILE_BYTES) throw new Error('单文件最多 5 MB');
-  const text = new TextDecoder(encoding, { fatal: true }).decode(await file.arrayBuffer());
+  const text = new TextDecoder(encoding, { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer());
+  return { text, chunks: validateText(text, delimiter) };
+}
+export async function readKnowledgeFile(file: File, delimiter: string, encoding = 'utf-8'): Promise<string[]> {
+  return (await readKnowledgeSource(file, delimiter, encoding)).chunks;
+}
+function validateText(text: string, delimiter: string): string[] {
+  if (new TextEncoder().encode(text).length > MAX_FILE_BYTES) throw new Error('单文件最多 5 MB');
   if (text.includes('\0')) throw new Error('文件含二进制内容，请选择正确编码或纯文本文件');
   return splitKnowledge(text, delimiter);
 }
 function newId(): string { return Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16)).join('-'); }
-export function knowledgeScope(file: KnowledgeFile): string { return `knowledge:${file.id}`; }
+export function knowledgeScope(file: KnowledgeFile): string {
+  return `knowledge:${file.id}${file.vectorRevision ? `:${file.vectorRevision}` : ''}`;
+}
 export function knowledgeFingerprint(files: KnowledgeFile[]): string {
   return JSON.stringify(files.map(file => [file.id, file.revision, file.enabled, file.embedding]).sort());
 }
 
-/** Publish metadata only after every vector is written. Unpublished scopes cannot be recalled. */
-export async function importKnowledge(database: string, name: string, delimiter: string, chunks: string[],
+async function writeVectors(file: KnowledgeFile, identity: string, signal?: AbortSignal, progress?: (done: number) => void,
+  checkCurrent?: () => Promise<void>): Promise<void> {
+  for (let offset = 0; offset < file.chunks.length; offset += 16) {
+    signal?.throwIfAborted();
+    if (embeddingIdentity() !== identity) throw new Error('Embedding 配置已改变，请重新保存');
+    await checkCurrent?.();
+    const batch = file.chunks.slice(offset, offset + 16);
+    const vectors = await embedTexts(batch, signal);
+    signal?.throwIfAborted();
+    if (embeddingIdentity() !== identity) throw new Error('Embedding 配置已改变，请重新保存');
+    await checkCurrent?.();
+    if (vectors.length !== batch.length || vectors.some(v => !v.length || !Array.from(v).every(Number.isFinite))) throw new Error('Embedding 返回无效向量');
+    await localStore.upsert(file.database, knowledgeScope(file), batch.map((text, i) => ({
+      leafId: `${file.id}:${offset + i}`, docHash: file.id, payloadHash: file.vectorRevision ?? file.id,
+      document: text, vector: encodeFloat32Base64(vectors[i]), dim: vectors[i].length, msgIndex: offset + i,
+    })));
+    progress?.(offset + batch.length);
+  }
+  signal?.throwIfAborted();
+  if (embeddingIdentity() !== identity) throw new Error('Embedding 配置已改变，请重新保存');
+}
+
+/** Publish new imports only after every vector is written; string input preserves original text. */
+export async function importKnowledge(database: string, name: string, delimiter: string, source: string[] | string,
   signal?: AbortSignal, progress?: (done: number) => void): Promise<KnowledgeFile> {
+  const chunks = typeof source === 'string' ? validateText(source, delimiter) : source;
   const file: KnowledgeFile = { id: newId(), database, name, delimiter, chunks: [...chunks], enabled: true,
-    embedding: embeddingIdentity(), revision: newId() };
+    embedding: embeddingIdentity(), revision: newId(),
+    ...(typeof source === 'string' ? { sourceVersion: 1 as const, sourceText: source } : {}) };
   if (!chunks.length || chunks.length > 1000 || chunks.some(c => !c.trim() || c.length > 24000)) throw new Error('无效的知识库区块');
   try {
-    for (let offset = 0; offset < chunks.length; offset += 16) {
-      signal?.throwIfAborted();
-      if (embeddingIdentity() !== file.embedding) throw new Error('Embedding 配置已改变，请重新导入');
-      const batch = chunks.slice(offset, offset + 16);
-      const vectors = await embedTexts(batch, signal);
-      signal?.throwIfAborted();
-      if (vectors.length !== batch.length || vectors.some(v => !v.length || !Array.from(v).every(Number.isFinite))) throw new Error('Embedding 返回无效向量');
-      await localStore.upsert(database, knowledgeScope(file), batch.map((text, i) => ({
-        leafId: `${file.id}:${offset + i}`, docHash: file.id, payloadHash: file.id,
-        document: text, vector: encodeFloat32Base64(vectors[i]), dim: vectors[i].length, msgIndex: offset + i,
-      })));
-      progress?.(offset + batch.length);
-    }
-    signal?.throwIfAborted();
-    if (embeddingIdentity() !== file.embedding) throw new Error('Embedding 配置已改变，请重新导入');
+    await writeVectors(file, file.embedding, signal, progress);
     await save(file);
     return file;
   } catch (error) {
@@ -115,15 +164,59 @@ export async function importKnowledge(database: string, name: string, delimiter:
     throw error;
   }
 }
+
+/** Save text first, invalidate old recall immediately, then publish only this edit's complete vector scope. */
+export async function editKnowledge(file: KnowledgeFile, text: string, signal?: AbortSignal,
+  progress?: (done: number) => void): Promise<KnowledgeFile> {
+  const chunks = validateText(text, file.delimiter), identity = embeddingIdentity();
+  signal?.throwIfAborted();
+  let changed = false;
+  const pending = (await mutate(file, current => {
+    if (current.revision !== file.revision) throw new Error('知识库已在其他操作中改变，请刷新后重新编辑');
+    if (text === knowledgeText(current) && current.embedding === identity) return current;
+    changed = true;
+    return { ...current, sourceVersion: 1, sourceText: text, chunks, embedding: '',
+      vectorRevision: newId(), revision: newId(), indexError: '' };
+  }))!;
+  if (!changed) return pending;
+  const assertCurrent = (current?: KnowledgeFile) => {
+    if (!current || current.vectorRevision !== pending.vectorRevision) throw new Error('此次编辑已被更新操作取代，请刷新');
+  };
+  try {
+    await localStore.clearScope(file.database, knowledgeScope(file));
+    await writeVectors(pending, identity, signal, progress, async () => {
+      assertCurrent(await transaction('readonly', store => store.get(file.id)));
+    });
+    return (await mutate(pending, current => {
+      assertCurrent(current);
+      signal?.throwIfAborted();
+      if (embeddingIdentity() !== identity) throw new Error('Embedding 配置已改变，请重新保存');
+      return { ...current, embedding: identity, revision: newId(), indexError: '' };
+    }))!;
+  } catch (error) {
+    await localStore.clearScope(file.database, knowledgeScope(pending)).catch(() => {});
+    await mutate(pending, current => {
+      assertCurrent(current);
+      return { ...current, embedding: '', revision: newId(), indexError: String(error) };
+    }).catch(() => {}); // Never recreate a deleted file or replace a newer edit with an old error.
+    throw error;
+  }
+}
 export async function setKnowledgeEnabled(file: KnowledgeFile, enabled: boolean): Promise<void> {
-  await save({ ...file, enabled, revision: newId() });
+  await mutate(file, current => ({ ...current, enabled, revision: newId() }));
 }
 export async function deleteKnowledge(file: KnowledgeFile): Promise<void> {
-  // Disable first; a failed vector deletion cannot leave this file eligible for injection.
-  await setKnowledgeEnabled(file, false);
-  await localStore.clearScope(file.database, knowledgeScope(file));
-  await transaction('readwrite', store => store.delete(file.id));
-  invalidateRecallCache();
+  // Disable and supersede active edits first. Failed deletion keeps recoverable text metadata.
+  let removed: KnowledgeFile | undefined;
+  const blocked = (await mutate(file, current => {
+    removed = current;
+    return { ...current, enabled: false, embedding: '', vectorRevision: newId(), revision: newId() };
+  }))!;
+  await localStore.clearScope(file.database, knowledgeScope(removed!));
+  await mutate(blocked, current => {
+    if (current.vectorRevision !== blocked.vectorRevision) throw new Error('文件已被更新，未执行删除，请刷新');
+    return undefined;
+  });
 }
 export function eligibleKnowledge(files: KnowledgeFile[], config: KnowledgeConfig): KnowledgeFile[] {
   const cfg = normalizeKnowledgeConfig(config);
@@ -139,6 +232,11 @@ export async function recallKnowledge(database: string, files: KnowledgeFile[], 
   if (!selected.length) { knowledgeDebug.status = '未启用知识库或没有与当前 Embedding 配置匹配的文件'; return ''; }
   const byScope = new Map(selected.map(file => [knowledgeScope(file), file]));
   const { results } = await localStore.search(database, [...byScope.keys()], queryVectors, { topK: 1000 });
+  signal?.throwIfAborted();
+  const latest = await listKnowledge(database);
+  if (knowledgeFingerprint(selected) !== knowledgeFingerprint(latest.filter(file => selected.some(old => old.id === file.id)))) {
+    knowledgeDebug.status = '知识库内容或状态已改变，已丢弃旧召回结果'; return '';
+  }
   signal?.throwIfAborted();
   const blocks: string[] = [];
   let length = 0;

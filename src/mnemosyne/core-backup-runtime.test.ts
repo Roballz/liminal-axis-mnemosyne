@@ -42,7 +42,7 @@ test('damaged settings keep automatic work disabled but do not hide independentl
     expect(runtime.coreBackupState.available).toBe(true);
     expect(runtime.coreBackupState.enabled).toBe(false);
     expect(runtime.coreBackupState.error).toContain('settings IO failed');
-    expect(await backups.inventory()).toEqual({ entries: [], invalid: [] });
+    expect(await backups.inventory()).toEqual({ entries: [] });
     expect(store.setBlob).not.toHaveBeenCalled(); expect(store.deleteBlob).not.toHaveBeenCalled();
 });
 
@@ -128,4 +128,37 @@ test('saving 20 requires exact readback; migrated legacy readback cannot mask a 
     await runtime.configureCoreBackups(true, 20);
     expect(runtime.coreBackupState).toMatchObject({ enabled: true, keep: 20, settingsVerified: true });
     expect(store.setJson.mock.calls.at(-1)?.[0]).toMatchObject({ value: { schema: 1, enabled: true, keep: 20 } });
+});
+
+test('selected preview dispatches only a worker job and rejects stale results after metadata persistence', async () => {
+    vi.resetModules();
+    const store = Object.fromEntries(['listBlobKeys', 'getBlob', 'setBlob', 'deleteBlob', 'tryGetJson', 'setJson'].map(name => [name, vi.fn()]));
+    store.tryGetJson.mockResolvedValue({ found: false });
+    let finishWrite!: () => void;
+    store.setJson.mockImplementation(() => new Promise<void>(resolve => { finishWrite = resolve; }));
+    vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
+    const worker = await import('./backup-worker-client');
+    const entry = { key: 'selected' } as import('./core-backups').BackupPreview;
+    const read = vi.spyOn(worker, 'runBackupWorker').mockResolvedValue({ state: 'preview', entry });
+    const runtime = await import('./core-backup-runtime');
+    let current = true;
+    const result = runtime.readCoreBackupPreview('selected', () => current);
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    expect(read).toHaveBeenCalledOnce(); expect(read.mock.calls[0][1]).toEqual({ kind: 'preview', key: 'selected' });
+    expect(store.getBlob).not.toHaveBeenCalled();
+    current = false; finishWrite();
+    await expect(result).rejects.toThrow('备份选择已改变');
+    expect(store.setBlob).not.toHaveBeenCalled(); expect(store.deleteBlob).not.toHaveBeenCalled();
+});
+
+test('obsolete selected preview never starts a worker or reads a full backup', async () => {
+    vi.resetModules();
+    const store = Object.fromEntries(['listBlobKeys', 'getBlob', 'setBlob', 'deleteBlob', 'tryGetJson', 'setJson'].map(name => [name, vi.fn()]));
+    store.tryGetJson.mockResolvedValue({ found: false });
+    vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
+    const worker = await import('./backup-worker-client');
+    const read = vi.spyOn(worker, 'runBackupWorker');
+    const runtime = await import('./core-backup-runtime');
+    await expect(runtime.readCoreBackupPreview('selected', () => false)).rejects.toThrow('备份选择已改变');
+    expect(read).not.toHaveBeenCalled(); expect(store.getBlob).not.toHaveBeenCalled();
 });

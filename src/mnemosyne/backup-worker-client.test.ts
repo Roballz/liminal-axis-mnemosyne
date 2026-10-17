@@ -122,3 +122,31 @@ test('worker existing-only open aborts upgrade without modifying an older databa
     });
     expect(existing.version).toBe(1); expect([...existing.objectStoreNames]).toEqual(['old-data']); existing.close();
 });
+
+
+test('preview worker bridge only permits reading its exact selected key and denies every mutation', async () => {
+    const d = disk(), worker = new FakeWorker();
+    let current = true;
+    const result = runBackupWorker(d, { kind: 'preview', key: 'selected' }, () => current, () => worker as unknown as Worker);
+    worker.emit({ type: 'ready' });
+    worker.emit({ type: 'rpc', id: 1, method: 'read', key: 'selected' }); await flush();
+    expect(d.read).toHaveBeenCalledExactlyOnceWith('selected');
+    worker.emit({ type: 'rpc', id: 2, method: 'read', key: 'another' });
+    worker.emit({ type: 'rpc', id: 3, method: 'list' });
+    worker.emit({ type: 'rpc', id: 4, method: 'write', key: 'selected', blob: new Blob() });
+    worker.emit({ type: 'rpc', id: 5, method: 'remove', key: 'selected' });
+    worker.emit({ type: 'rpc', id: 6, method: 'writePreviews', value: {} }); await flush();
+    expect(d.read).toHaveBeenCalledOnce(); expect(d.list).not.toHaveBeenCalled();
+    expect(d.write).not.toHaveBeenCalled(); expect(d.remove).not.toHaveBeenCalled();
+    expect(worker.postMessage.mock.calls.slice(-5).every(([message]) => 'error' in message)).toBe(true);
+    current = false;
+    worker.emit({ type: 'rpc', id: 7, method: 'read', key: 'selected' }); await flush();
+    expect(d.read).toHaveBeenCalledOnce();
+    worker.emit({ type: 'failed', error: 'changed selection' }); await expect(result).rejects.toThrow('changed selection');
+});
+
+test('unavailable detail worker does not parse the selected file on the UI thread', async () => {
+    const d = disk();
+    await expect(runBackupWorker(d, { kind: 'preview', key: 'selected' }, () => true, () => { throw new Error('CSP'); })).rejects.toThrow('所选文件仍未验证');
+    expect(d.read).not.toHaveBeenCalled(); expect(d.write).not.toHaveBeenCalled();
+});

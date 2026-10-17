@@ -10,6 +10,8 @@ export interface BackupDisk {
     remove(key: string): Promise<void>;
     readSettings(): Promise<unknown>;
     writeSettings(value: unknown): Promise<void>;
+    readPreviews?(): Promise<unknown>;
+    writePreviews?(value: unknown): Promise<void>;
 }
 
 export async function nativeBackupDisk(host: any = globalThis): Promise<BackupDisk> {
@@ -22,6 +24,7 @@ export async function nativeBackupDisk(host: any = globalThis): Promise<BackupDi
         throw new Error('当前 TauriTavern 文件接口不完整，自动磁盘备份不可用');
     const table = { namespace: BACKUP_NAMESPACE, table: BACKUP_TABLE };
     const settings = { namespace: BACKUP_NAMESPACE, table: 'settings-v1', key: 'config' };
+    const previews = { namespace: BACKUP_NAMESPACE, table: 'preview-hints-v1', key: 'recent' };
     return {
         list: () => store.listBlobKeys(table),
         read: key => store.getBlob({ ...table, key }),
@@ -33,5 +36,11 @@ export async function nativeBackupDisk(host: any = globalThis): Promise<BackupDi
             return result.found ? result.value : undefined;
         },
         writeSettings: value => store.setJson({ ...settings, value }),
+        readPreviews: async () => {
+            const result = await store.tryGetJson(previews);
+            if (!result || typeof result.found !== 'boolean') throw new Error('预览元数据读取结果不完整');
+            return result.found ? result.value : undefined;
+        },
+        writePreviews: value => store.setJson({ ...previews, value }),
     };
 }

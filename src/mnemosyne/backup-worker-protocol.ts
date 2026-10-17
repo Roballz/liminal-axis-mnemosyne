@@ -1,10 +1,10 @@
-import type { BackupOutcome } from './core-backups';
+import type { BackupOutcome, BackupPreview } from './core-backups';
 
-export type BackupJob = { library: string; kind: 'auto'; keep: 20 };
-export type BackupResult = BackupOutcome;
+export type BackupJob = { library: string; kind: 'auto'; keep: 20 } | { kind: 'preview'; key: string };
+export type BackupResult = BackupOutcome | { state: 'preview'; entry: BackupPreview };
 export type DiskCall = (
-    { method: 'guard' | 'list' } | { method: 'read' | 'remove'; key: string } |
-    { method: 'write'; key: string; blob: Blob }
+    { method: 'guard' | 'list' | 'readPreviews' } | { method: 'read' | 'remove'; key: string } |
+    { method: 'write'; key: string; blob: Blob } | { method: 'writePreviews'; value: unknown }
 );
 export type DiskRequest = { type: 'rpc'; id: number } & DiskCall;
 export type WorkerMessage = DiskRequest | { type: 'ready' } |

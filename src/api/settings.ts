@@ -132,7 +132,7 @@ export interface VectorRecallSettings {
 
 /** 向量记忆设置。embedding 为基准,rerank/queryRewrite 的 url 留空则整体复用 embedding。 */
 export interface VectorSettings {
-  knowledge: { enabled: boolean; count: number; threshold: number; maxChars: number };
+  knowledge: { enabled: boolean; count: number; threshold: number; maxChars: number; delimiter?: string };
   /** 向量记忆开关 */
   enabled: boolean;
   /** 文本向量化端点(基准,必填) */
@@ -357,7 +357,7 @@ function defaults(): ApiSettings {
     prompts: { summary: '', resummary: '', resummary2: '', eventOverview: '', eventLatestProgress: '', jailbreak: '', timeTag: '' },
     verbosity: 'detailed',
     vector: {
-      knowledge: { enabled: false, count: 3, threshold: 0.8, maxChars: 6000 },
+      knowledge: { enabled: false, count: 3, threshold: 0.8, maxChars: 6000, delimiter: '=========' },
       enabled: false,
       // 默认填硅基流动地址 + 各角色模型,用户只需在 embedding 填一次 key 即可跑通:
       // rerank/queryRewrite 的 url/key 留空会回落复用 embedding 的(见 resolveVectorModel)。
@@ -490,7 +490,8 @@ function normalize(raw: unknown): ApiSettings {
     rerank: normalizeVectorEndpoint(rv.rerank, d.vector.rerank),
     queryRewrite: normalizeVectorEndpoint(rv.queryRewrite, d.vector.queryRewrite),
     recall: { ...d.vector.recall, ...(rv.recall ?? {}) },
-    knowledge: { ...d.vector.knowledge, ...(rv.knowledge ?? {}) },
+    knowledge: { ...d.vector.knowledge, ...(rv.knowledge ?? {}),
+      delimiter: typeof rv.knowledge?.delimiter === 'string' ? rv.knowledge.delimiter : d.vector.knowledge.delimiter },
   };
   // 召回注入深度:非负整数;老配置缺失、非法或输入框暂时为空时回退 D0。
   merged.vector.recall.injectionDepth = normalizeRecallInjectionDepth(merged.vector.recall.injectionDepth);

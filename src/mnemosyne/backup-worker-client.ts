@@ -2,7 +2,6 @@ import BackupWorker from './core-backup.worker?worker&inline';
 import type { BackupDisk } from '@/st/native-backups';
 import type { BackupJob, BackupResult, HostMessage, WorkerMessage, DiskRequest } from './backup-worker-protocol';
 
-const unavailable = '后台备份线程不可用；已暂停本次备份，旧备份保留。请重新加载插件后重试（需要宿主允许 Web Worker）';
 /** Only Blobs, file keys and small previews cross the UI boundary. Full packages,
  * IndexedDB snapshot reads, parsing, hashing and validation stay in the worker.
  * There is deliberately no synchronous/main-thread fallback on unsupported WebViews.
@@ -10,6 +9,9 @@ const unavailable = '后台备份线程不可用；已暂停本次备份，旧�
 export function runBackupWorker(disk: BackupDisk, job: BackupJob, isCurrent: () => boolean,
     createWorker: () => Worker = () => new BackupWorker(),
     onPendingNative?: (message: string) => void): Promise<BackupResult> {
+    const unavailable = job.kind === 'preview'
+        ? '后台校验线程不可用；所选文件仍未验证，未恢复或删除。请重新加载插件后重试（需要宿主允许 Web Worker）；此前手动导出的核心包仍可在“档案 / 迁移”导入'
+        : '后台备份线程不可用；已暂停本次备份，旧备份保留。请重新加载插件后重试（需要宿主允许 Web Worker）';
     return new Promise((resolve, reject) => {
         let worker: Worker;
         try { worker = createWorker(); } catch { reject(new Error(unavailable)); return; }
@@ -38,9 +40,16 @@ export function runBackupWorker(disk: BackupDisk, job: BackupJob, isCurrent: () 
         };
         const onError = () => finish(new Error(unavailable));
         const execute = async (request: DiskRequest): Promise<unknown> => {
+            // Detail jobs can only read their exact selected backup, never mutate disk.
+            if (job.kind === 'preview' && (request.method !== 'read' || request.key !== job.key || !isCurrent()))
+                throw new Error('备份选择已改变或校验请求越界');
             switch (request.method) {
                 case 'guard': return isCurrent();
                 case 'list': return disk.list();
+                case 'readPreviews': return disk.readPreviews?.();
+                case 'writePreviews':
+                    if (!isCurrent()) throw new Error('档案状态改变，暂不保存预览元数据');
+                    return disk.writePreviews?.(request.value);
                 case 'read': return disk.read(request.key);
                 case 'write':
                     // Recheck on the main thread immediately before native side effects,

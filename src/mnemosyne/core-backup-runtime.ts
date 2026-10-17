@@ -47,6 +47,19 @@ export async function getCoreBackups(): Promise<CoreBackups> {
     })();
 }
 
+/** No main-thread parsing fallback: unavailable Workers leave the file unverified. */
+export async function readCoreBackupPreview(key: string, isCurrent: () => boolean) {
+    const backups = await getCoreBackups();
+    return backups.runExclusive(async () => {
+        if (!isCurrent()) throw new Error('备份选择已改变');
+        const result = await runBackupWorker(backups.disk, { kind: 'preview', key }, isCurrent);
+        if (result.state !== 'preview' || result.entry.key !== key || !isCurrent()) throw new Error('备份选择已改变');
+        await backups.rememberPreview(result.entry);
+        if (!isCurrent()) throw new Error('备份选择已改变');
+        return result.entry;
+    });
+}
+
 export async function configureCoreBackups(enabled: boolean, keep: typeof AUTO_BACKUP_KEEP) {
     const backups = await getCoreBackups();
     // Stop scheduling locally before an uncertain settings write/read. Enabling only
