@@ -1622,9 +1622,9 @@ export function finalizeDelta(delta: SummaryDelta, openPlansOrdered: { id: strin
   const location = optText(delta.location);
   if (time) out.time = time;
   if (location) out.location = location;
-  // 权威定位路径:规范化后非空才固化(只有给了 location 才有意义,但不强制——手动场景可单独给)
+  // 权威定位路径:显式空数组保留清空指令,未提供则不写路径补丁;可单独更新而不改 location。
   const lp = cleanPath(delta.locationPath);
-  if (lp.length) out.locationPath = lp;
+  if (delta.locationPath !== undefined) out.locationPath = lp;
   const sceneFocus = cleanSceneFocus(delta.sceneFocus);
   if (sceneFocus !== undefined) out.sceneFocus = sceneFocus;
   const protagonist = cleanProtagonistDelta(delta.protagonist);
@@ -2065,12 +2065,12 @@ export function editNpc(
   const personality = patch.personality?.trim() || undefined;
 
   // 位置 / 即时层:patch 明确给了用 patch 的;否则从旧 NPC 继承(改名不丢所在地/随行/状态/重要性)。
-  // location 保留空字符串(用户清空输入=所在不明),不能像旧逻辑那样被洗成 undefined 而清不掉。
+  // location/outfit/condition 保留空字符串(用户明确清空),不能洗成 undefined 而丢失清空指令。
   const prev = memory.npcs.find(n => n.id === npcId(oldName));
   const follow = patch.follow !== undefined ? patch.follow : prev?.follow;
   const location = patch.location !== undefined ? patch.location.trim() : (prev?.location ?? '');
-  const outfit = patch.outfit !== undefined ? (patch.outfit.trim() || undefined) : prev?.outfit;
-  const condition = patch.condition !== undefined ? (patch.condition.trim() || undefined) : prev?.condition;
+  const outfit = patch.outfit !== undefined ? patch.outfit.trim() : prev?.outfit;
+  const condition = patch.condition !== undefined ? patch.condition.trim() : prev?.condition;
   const important = patch.important !== undefined ? patch.important : prev?.important;
 
   // 年龄:值没变(或未提供)时必须连旧锚点一起带上,否则重放会把锚点错误刷新到本叶子时间(等于冻龄);
