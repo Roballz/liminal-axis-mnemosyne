@@ -11,6 +11,7 @@ import {
   RESUMMARY_THINKING_CHECKLIST,
   RESUMMARY_THINKING_PREFILL,
   RULE_ABSOLUTE_TIME_LANGUAGE,
+  RULE_SUMMARY_TIME_ANCHOR,
   RULE_ITEMS,
   RULE_NPCS,
   RULE_PLANS,
@@ -20,6 +21,7 @@ import {
   RULE_SUMMARY_COMPOSITION,
   RULE_SUMMARY_WRITE,
   MEMORY_BRIEFING_END,
+  MEMORY_BRIEFING_NOTE,
   SUMMARY_PROMPT,
   SUMMARY_FACT_PREPARATION,
   SUMMARY_FACT_VERIFICATION,
@@ -89,7 +91,7 @@ describe('summary composition contract', () => {
   it('cuts nonessential action detail while preserving actors, means, outcomes and budgets', () => {
     for (const rule of [
       '在本任务篇幅内先压缩重复过程和修饰',
-      '保留主体、关键手段、结果、了结与必要因果',
+      '保留主体、来源、条件、关键手段与数值、结果、了结与必要因果',
       '不让动作细节挤掉关键事实及其限定',
     ]) {
       expect(RULE_SUMMARY_COMPOSITION).toContain(rule);
@@ -167,7 +169,7 @@ describe('summary fact workflow', () => {
       '关键事件与结果、状态变化、明确情报、比较基准',
       '主体、说话人、关键数值与范围、确定程度',
       '条件连同受影响对象及具体影响保留',
-      '区分建议、已决定、已启动与已完成',
+      '区分建议、计划做、已决定、已启动与已完成',
       '不将人物说法自动当作客观事实',
       '不让旧状态冒充现状或把新状态倒写进过去',
       '局部观察不扩大为普遍规则',
@@ -204,7 +206,7 @@ describe('summary fact workflow', () => {
     expect(SUMMARY_OUTPUT_PROTOCOL).toContain('需要引用时沿用输入段号或原文短证据');
     expect(SUMMARY_OUTPUT_PROTOCOL).toContain('不要开启第二个块');
     expect(SUMMARY_OUTPUT_PROTOCOL).toContain('没有预填充则自行打开');
-    expect(SUMMARY_OUTPUT_PROTOCOL).toContain('不把来源标记或核查记录写进最终 JSON');
+    expect(SUMMARY_OUTPUT_PROTOCOL).toContain('最终 JSON 不含审计段号、来源列表或核查记录');
     expect(THINKING_CHECKLIST).toContain('确无变化的模块可合并注明无变化,但不能跳过核查');
   });
 
@@ -220,7 +222,7 @@ describe('summary fact workflow', () => {
     expect(RESUMMARY_THINKING_PREFILL).toBe('<thinking>');
   });
 
-  it('checks final state operations without repeating field audits or dropping inference exceptions', () => {
+  it('checks final state operations without repeating field audits or inferring offscreen changes', () => {
     for (const rule of [
       '实际输出的状态操作与盘点结论一致',
       '该更新的字段没有遗漏',
@@ -228,8 +230,8 @@ describe('summary fact workflow', () => {
       '删除、清空或 resolve 须有依据',
       '整体覆盖保留未失效的旧要点',
       '不重复列字段证据表',
-      '时间锚点仅按本任务时间规则处理',
-      '主要 NPC 离场演变仅限 outfit/location/condition',
+      '时间锚点不得强造日期',
+      'NPC 不因离场或时间流逝自动演变',
       '自定义变量按其原有规则核对触发依据及操作',
     ]) {
       expect(THINKING_CHECKLIST).toContain(rule);
@@ -507,5 +509,93 @@ describe('instruction and material boundaries', () => {
       expect(template).toContain(SUMMARY_OUTPUT_PROTOCOL);
       expect(template).toContain('【输出');
     }
+  });
+});
+
+
+describe('v1.4.15 scoped default prompt fusion', () => {
+  it('keeps the user item description and local item/plan contracts in the default', () => {
+    const prompt = buildSummaryPrompt(args).system;
+    expect(prompt).toContain('"desc": "物品描述,外观/用途/剧情意义(可选)"');
+    for (const field of ['keywords', 'holder', 'history', 'historyAppend', 'currentProgress', 'remaining']) {
+      expect(prompt).toContain(`"${field}"`);
+    }
+    expect(prompt).toContain('跨场景');
+    expect(prompt).toContain('已启动外部事件');
+    expect(RULE_PLANS).toContain('未知写空字符串,不得套用现实日期或另一层时间');
+  });
+
+  it('retains propositions, sources, modality and parameters before decorative detail in all levels', () => {
+    for (const parts of [buildSummaryPrompt(args), buildBatchSummaryPrompt({ ...args, floorCount: 2 }),
+      buildResummaryPrompt({ ...args, level: 1 }), buildResummaryPrompt({ ...args, level: 2 })]) {
+      expect(parts.system).toContain('保留主体、来源、条件、关键手段与数值、结果');
+      expect(parts.system).toContain('概率程度不能被压没或改强改弱');
+      expect(parts.system).toContain('建议、计划做、已决定、已启动与已完成保持原阶段');
+    }
+    for (const checklist of [buildSummaryThinking(args.user).checklist, buildBatchThinking(2).checklist, RESUMMARY_THINKING_CHECKLIST]) {
+      expect(checklist).toContain('标明亲见/转述/声称/推测来源');
+      expect(checklist).toContain('条件与结果逐项对应,不得错误串接命题');
+      expect(checklist).toContain('“极可能”不降成“可能”');
+      expect(checklist).toContain('保留“至少/至多/仅/仍/尚未”等限定');
+      expect(checklist).toContain('事实的说话人、来源及推测口径仍自然保留');
+    }
+  });
+
+  it('requires new evidence for offscreen NPC state and only prohibits briefing-format recitation', () => {
+    const prompt = buildSummaryPrompt(args).system + buildSummaryThinking(args.user).checklist;
+    expect(prompt).toContain('主要角色与配角使用同一事实标准');
+    expect(prompt).toContain('没有新证据时不得推演位置、换装、痊愈或恶化');
+    expect(prompt).toContain('本轮未提及不等于清空');
+    expect(prompt).not.toMatch(/唯一允许的合理推演|离场演变|多日多半已换装|主要 NPC 离场演变/);
+    expect(MEMORY_BRIEFING_NOTE).toContain('标签、字段、编号、列表或整段整理文本');
+    expect(MEMORY_BRIEFING_NOTE).toContain('人物可在自身知情范围内回忆、引用或谈论相关经历');
+    expect(MEMORY_BRIEFING_NOTE).not.toContain('以任何形式输出本节内容');
+    expect(MEMORY_BRIEFING_END).toContain('旧状态只是最后确认记录');
+  });
+
+  it.each([
+    '外层现实为2026/10/20。星海故事纪年2041/3/8,主角约定3天后归来。',
+    '当前整段为沉浸式星海游戏主线,游戏纪年2041/3/8,没有外层现实情节。',
+    '星海故事没有绝对日期,主角在抵达王都3天后返回。',
+    '星海故事未交代日期或间隔,只说会面之后返回。',
+  ])('preserves supplied story-time evidence without synthesizing or replacing the source: %s', content => {
+    for (const parts of [buildSummaryPrompt({ ...args, content }),
+      buildBatchSummaryPrompt({ ...args, content, floorCount: 1 }),
+      buildResummaryPrompt({ ...args, content, level: 1 }), buildResummaryPrompt({ ...args, content, level: 2 })]) {
+      expect(parts.user).toContain(content);
+      expect(parts.system).toContain(RULE_ABSOLUTE_TIME_LANGUAGE);
+      expect(parts.system).toContain('不得套用现实当前日期、消息时间或另一层时间');
+      expect(parts.system).toContain('同时绑定所属故事与原文对应事件');
+      expect(parts.system).toContain('天数/月数必须来自原文');
+      expect(parts.system).toContain('只保留有据的先后关系并注明“具体日期未确定”');
+      expect(parts.system).toContain('后续压缩必须原样保留');
+    }
+  });
+
+  it('does not force invented timestamps in untagged single-floor, batch or saved old-template paths', () => {
+    const oldCustom = 'CUSTOM {{content}} 【完整时间锚点格式(系统强制)】无时间基准时自行设定完整年份。';
+    const single = buildSummaryPrompt({ ...args, hasTimeTags: false });
+    const batch = buildBatchSummaryPrompt({ ...args, floorCount: 2 });
+    apiSettings.prompts.summary = oldCustom;
+    const custom = buildSummaryPrompt({ ...args, hasTimeTags: false });
+    expect(custom.user).toContain(oldCustom.replace('{{content}}', args.content));
+    expect(apiSettings.prompts.summary).toBe(oldCustom);
+    expect(combined(custom).split(RULE_SUMMARY_TIME_ANCHOR)).toHaveLength(2);
+    apiSettings.prompts.summary = `CUSTOM {{content}} ${RULE_SUMMARY_TIME_ANCHOR}`;
+    const currentCustom = buildSummaryPrompt({ ...args, hasTimeTags: false });
+    expect(combined(currentCustom).split(RULE_SUMMARY_TIME_ANCHOR)).toHaveLength(2);
+    for (const parts of [single, batch, custom]) {
+      expect(parts.system).toContain(RULE_SUMMARY_TIME_ANCHOR);
+      expect(parts.system).toContain('某端无可靠时间就写空字符串 ""');
+      expect(parts.system).toContain('不得拿来推进另一层主线时钟');
+      expect(parts.system).toContain('沉浸式游戏/小说本身就是当前主线时,使用该游戏/小说的时钟');
+      expect(parts.system).toContain('只有嵌套于当前主线的回忆、梦境、书中故事等另一层片段');
+      expect(parts.system).toContain('沿用原有精度,不补未知年月日或时分');
+      expect(parts.system).not.toMatch(/自行设定一个符合世界观|宁可给一个不完美但具体的时间|绝不能留空|必须一次性建立/);
+    }
+    expect(buildSummaryThinking(args.user).checklist).toContain('未知端点为空字符串');
+    expect(buildBatchThinking(2).checklist).toContain('无依据的端点写空字符串');
+    apiSettings.prompts.summary = '';
+    expect(buildSummaryPrompt(args).system).toContain('无需输出 time / timeStart / timeEnd 字段');
   });
 });
