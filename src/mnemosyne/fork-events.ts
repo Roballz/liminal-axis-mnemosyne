@@ -27,9 +27,9 @@ export async function inheritForkEvents(tx: Transaction, parent: CapturedView, b
         // Every reference is remapped; no child event points back to a mutable parent event.
         for (const revision of card.history?.revisions ?? []) await copyRevision(revision);
         for (const member of card.history?.memberships ?? [])
-            await tx.add('event_memberships', { ...member, ...row('link'), ...base, memory: (await mapIds([member.memory]))[0] } as Membership);
+            await tx.add('event_memberships', { ...member, ...row('link'), ...base, cutoff: Math.min(member.cutoff, parent.cutoff), memory: (await mapIds([member.memory]))[0] } as Membership);
         for (const progress of card.history?.progress ?? [])
-            await tx.add('event_progress', { ...progress, ...row('ep'), ...base, memories: await mapIds(progress.memories) } as Progress);
+            await tx.add('event_progress', { ...progress, ...row('ep'), ...base, cutoff: Math.min(progress.cutoff, parent.cutoff), memories: await mapIds(progress.memories) } as Progress);
         await copyRevision(card.meta, branch.epoch);
         for (const member of card.members)
             await tx.add('event_memberships', { ...member, ...row('link'), ...base, epoch: branch.epoch,

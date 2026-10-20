@@ -790,7 +790,7 @@ onBeforeUnmount(() => {
     <ModalMask :open="!!resyncPlan" @close="!busy && (resyncPlan = null)">
       <section v-if="resyncPlan" class="mn-dialog" role="dialog" aria-label="重新继承父事件链">
         <h3>重新继承父事件链</h3>
-        <p>按已保存的分叉点（前 {{ resyncPlan.parent.cutoff }} 条消息）检查，包含归档事件。补齐缺失事件，替换未修改的继承事件；子分支自己修改过的事件会跳过。</p>
+        <p>按已保存的分叉点（前 {{ resyncPlan.parent.cutoff }} 条消息）检查，包含归档事件。优先按关联材料的楼层与来源核对，可补回因较晚创建或整理而被旧规则漏掉的事件；楼层证据不符时回退历史版本。补齐缺失事件，替换未修改的继承事件；子分支自己修改过的事件会跳过。</p>
         <p>父档案、聊天正文与摘要保持原样，不调用模型。</p>
         <ul style="max-height: 45vh; overflow-y: auto">
           <li v-for="(item, index) in resyncPlan.entries" :key="index">

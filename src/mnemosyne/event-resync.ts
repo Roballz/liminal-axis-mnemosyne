@@ -2,7 +2,7 @@ import type { Library } from './db';
 import { capture, current, statuses, summarySources } from './canonical';
 import { eventView, type EventCard } from './events';
 import { inheritForkEvents } from './fork-events';
-import { sourceRefsMatch } from './source-equivalence';
+import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { STORES, check, equal, type Branch, type CapturedView, type EventChain, type EventRevision, type Membership, type Progress, type MemoryRevision } from './model';
 
 export interface EventResyncPlan {
@@ -25,12 +25,25 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
     const valid = child.memories.filter(m => states.get(m.id) === 'valid');
     const ids = new Map<string, string>();
     const signature = (m: MemoryRevision) => [m.hostId, m.content, m.level, m.anchor, m.storyTime, m.seed, m.recall, m.visibility];
+    const parentPositions = new Map(parent.refs.map((ref, index) => [ref.message, index]));
+    const childPositions = new Map(child.refs.map((ref, index) => [ref.message, index]));
     await lib.transaction(STORES, 'readonly', async tx => {
         for (const source of projection.valid) {
             const candidates = valid.filter(m => equal(signature(m), signature(source)));
             if (candidates.length !== 1) continue;
             const target = candidates[0];
-            if (sourceRefsMatch(child.branch, await summarySources(tx, source), await summarySources(tx, target)) &&
+            const sources = await summarySources(tx, source);
+            const floors = [...sources, ...source.coverage].map(ref => ref.message);
+            if (source.anchor) floors.push(source.anchor);
+            // Identical text may reuse a SourceRef after a swipe. Re-inheritance must
+            // still match the child's actual material, not only equal summary text.
+            const sameFloors = floors.every(message => {
+                const index = parentPositions.get(message);
+                return index !== undefined && childPositions.get(message) === index &&
+                    sourceRefMatches(child.branch, parent.refs[index], child.refs[index]) &&
+                    parent.snapshot.variants?.[index] === child.snapshot.variants?.[index];
+            });
+            if (sameFloors && sourceRefsMatch(child.branch, sources, await summarySources(tx, target)) &&
                 sourceRefsMatch(child.branch, source.coverage, target.coverage)) ids.set(source.id, target.id);
         }
         // Higher summaries also need the same selected dependencies, not just equal prose.
