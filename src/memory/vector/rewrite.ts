@@ -28,6 +28,8 @@ import { fetchWithTimeoutRetry } from './embed';
 
 /** rewrite 模型最多取几条 query(对齐 Horae) */
 const MAX_QUERIES = 6;
+/** 场景意图用于精排,允许比检索短句更完整的上下文。 */
+const MAX_INTENT_LEN = 360;
 /** 单条 query 限长 */
 const MAX_QUERY_LEN = 220;
 
@@ -155,14 +157,13 @@ function buildMessages(chat: STMessage[]): ChatMsg[] {
   return messages;
 }
 
-/** base url 规整到 /chat/completions 端点 */
-function chatCompletionsEndpoint(rawUrl: string): string {
-  const base = String(rawUrl || '')
+/** 保持原 Query 路径语义:只移除端点后缀,由宿主追加 /chat/completions,不自动补 /v1。 */
+function chatCompletionsBase(rawUrl: string): string {
+  return String(rawUrl || '')
     .trim()
     .replace(/\/+$/, '')
     .replace(/\/embeddings$/i, '')
     .replace(/\/chat\/completions$/i, '');
-  return base ? `${base}/chat/completions` : '';
 }
 
 /** 解析 INTENT + 多行 Q(对齐 Horae:去前缀符号、去重、限长) */
@@ -195,7 +196,7 @@ export function parseResponse(text: string): RewriteResult {
     }
     const im = line.match(/^INTENT\s*[:：]\s*(.+)$/i);
     if (im) {
-      intent = sanitize(im[1]);
+      intent = sanitize(im[1], MAX_INTENT_LEN);
       continue;
     }
     const qm = line.match(/^Q\s*\d*\s*[:：]\s*(.+)$/i);
@@ -211,13 +212,13 @@ export function parseResponse(text: string): RewriteResult {
   return { intent, queries, ...(context ? { context } : {}) };
 }
 
-function sanitize(text: string): string {
+function sanitize(text: string, maxLength = MAX_QUERY_LEN): string {
   return String(text || '')
     .trim()
     .replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, MAX_QUERY_LEN);
+    .slice(0, maxLength);
 }
 
 /** 同轮重生成只分析最新用户输入及其之前的剧情，不把待替换的回答当成新输入。 */
@@ -229,36 +230,51 @@ export function recallInputChat(chat: STMessage[]): STMessage[] {
 }
 
 /**
- * 执行查询重写。queryRewrite 端点未配 model 时抛错(调用方降级)。
- * 走前端直连 chat/completions(与 embed 同源策略,渠道地址/密钥可留空复用 embedding)。
+ * 执行查询重写。未配置或请求失败时抛错,召回侧结束本轮而不降级改写。
+ * 仅传输改走宿主低层 /generate 转发;不调用 generateRaw、不使用主 API 预设。
+ * 渠道地址/密钥仍按原设置解析,可留空复用 embedding。
  */
 export async function rewriteQuery(signal?: AbortSignal, inputChat?: STMessage[]): Promise<RewriteResult> {
   const ep = resolveVectorModel('queryRewrite');
   if (!ep.model) throw new Error('Query 重写模型未配置');
-  const endpoint = chatCompletionsEndpoint(ep.url);
-  if (!endpoint) throw new Error('Query 重写地址未配置');
+  const baseUrl = chatCompletionsBase(ep.url);
+  if (!baseUrl) throw new Error('Query 重写地址未配置');
 
   const ctx = getContext();
+  if (typeof ctx?.getRequestHeaders !== 'function') throw new Error('Query 重写宿主请求接口不可用');
   const chat = inputChat ?? recallInputChat(ctx?.chat ?? []);
   if (!chat.length) throw new Error('无对话上下文可重写');
 
   const messages = buildMessages(chat);
+  const queryParams = {
+    temperature: 0.1,
+    top_p: 0.8,
+    max_tokens: apiSettings.vector.queryRewriteMaxTokens,
+    stream: false,
+    enable_thinking: false,
+  };
 
   const resp = await fetchWithTimeoutRetry(
-    endpoint,
+    '/api/backends/chat-completions/generate',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.key || ''}` },
+      headers: ctx.getRequestHeaders(),
       body: JSON.stringify({
+        chat_completion_source: 'custom',
+        custom_api_format: 'openai_compat',
+        custom_url: baseUrl,
+        // quiet 保留宿主的 HTTP 失败状态,而非主生成兼容路径的合成成功消息。
+        type: 'quiet',
+        tool_choice: 'none',
         model: ep.model,
         messages,
-        // 对齐 Horae:低温更服从格式;enable_thinking:false 关思维链——
-        // 国产模型(Qwen3/GLM 等)默认开思维链会先吐 <think> 推理,冲乱 INTENT/Q 行格式导致解析失败。
-        temperature: 0.1,
-        top_p: 0.8,
-        max_tokens: apiSettings.vector.queryRewriteMaxTokens,
-        stream: false,
-        enable_thinking: false,
+        ...queryParams,
+        // custom 源不读 proxy_password;明确覆盖宿主 Custom secret,包括空 key。
+        custom_include_headers: JSON.stringify({ Authorization: `Bearer ${ep.key || ''}` }),
+        // 宿主 allowlist 会丢 enable_thinking。最终 include 保留原采样/思考参数。
+        custom_include_body: JSON.stringify(queryParams),
+        // TT 007abf7 的 DeepSeek v4 适配会额外注入 thinking:enabled;原请求没有该字段。
+        custom_exclude_body: JSON.stringify(['thinking']),
       }),
     },
     { timeoutSec: ep.timeoutSec, retries: ep.retries, label: 'Query 重写', externalSignal: signal },
@@ -267,7 +283,11 @@ export async function rewriteQuery(signal?: AbortSignal, inputChat?: STMessage[]
     const t = await resp.text().catch(() => '');
     throw new Error(`Query 重写 API ${resp.status}: ${t.slice(0, 200)}`);
   }
-  const json = await resp.json();
+  const json = await resp.json().catch(() => { throw new Error('Query 重写返回无效 JSON'); });
+  if (json?.error) {
+    const message = typeof json.error === 'string' ? json.error : json.error.message || '未知错误';
+    throw new Error(`Query 重写 API 返回错误:${String(message).slice(0, 200)}`);
+  }
   const content = json?.choices?.[0]?.message?.content;
   const raw = typeof content === 'string' ? content : '';
   if (!raw.trim()) throw new Error('Query 重写返回空内容');

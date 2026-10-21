@@ -15,6 +15,30 @@ it('新安装默认关闭成功预览', async () => {
   hydrateSettings();
   expect(apiSettings.summarySuccessPreviewEnabled).toBe(false);
 });
+it('缺失的破限配置跟随内置默认,不自动开启 Query 破限', async () => {
+  mock.ctx.extensionSettings.mnemosyne_daily = { prompts: { summary: '保留摘要模板' } };
+  const { apiSettings, hydrateSettings } = await import('./settings'); hydrateSettings();
+  expect(apiSettings.prompts.jailbreak).toBe('');
+  expect(apiSettings.prompts.summary).toBe('保留摘要模板');
+  expect(apiSettings.vector.queryRewriteJailbreak).toBe(false);
+});
+it.each(['', '  自定义破限正文  ', '<sanctuary_override_directive>已保存旧文本</sanctuary_override_directive>'])
+('升级/保存/重载保留原始破限值 %s 和用户开关', async jailbreak => {
+  mock.ctx.extensionSettings.mnemosyne_daily = {
+    prompts: { jailbreak, summary: '保留摘要模板' }, vector: { queryRewriteJailbreak: true },
+  };
+  let settings = await import('./settings'); settings.hydrateSettings();
+  expect(settings.apiSettings.prompts.jailbreak).toBe(jailbreak);
+  expect(settings.apiSettings.vector.queryRewriteJailbreak).toBe(true);
+  settings.apiSettings.vector.queryRewriteJailbreak = false;
+  await (await import('vue')).nextTick();
+  const saved = JSON.parse(JSON.stringify(mock.ctx.extensionSettings.mnemosyne_daily));
+  vi.resetModules(); mock.ctx.extensionSettings = { mnemosyne_daily: saved };
+  settings = await import('./settings'); settings.hydrateSettings();
+  expect(settings.apiSettings.prompts.jailbreak).toBe(jailbreak);
+  expect(settings.apiSettings.prompts.summary).toBe('保留摘要模板');
+  expect(settings.apiSettings.vector.queryRewriteJailbreak).toBe(false);
+});
 it.each([undefined, null, 'true', 1])('旧配置缺失或非法值 %s 都关闭', async value => {
   mock.ctx.extensionSettings.mnemosyne_daily = { summarySuccessPreviewEnabled: value };
   const { apiSettings, hydrateSettings } = await import('./settings'); hydrateSettings();

@@ -293,7 +293,7 @@ const PROMPT_METAS: PromptMeta[] = [
   {
     key: 'jailbreak',
     label: '破限提示词',
-    hint: '作为置顶 system 附加在摘要/总结请求里,降低副 API 拒答率。留空则用内置默认。',
+    hint: '内置默认已更新为 NVWA 核心。用于摘要/总结；Query 重写仅在启用破限时附加。留空或恢复默认后点击完成，使用新版默认；已有自定义内容不会被升级覆盖。',
     builtin: JAILBREAK_PROMPT,
     macros: [],
   },

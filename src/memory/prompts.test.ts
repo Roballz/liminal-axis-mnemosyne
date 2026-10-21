@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { apiSettings } from '@/api/settings';
 import {
   buildBatchSummaryPrompt,
@@ -6,6 +7,7 @@ import {
   buildResummaryPrompt,
   buildSummaryPrompt,
   buildSummaryThinking,
+  JAILBREAK_PROMPT,
   RESUMMARY_PROMPT,
   RESUMMARY2_PROMPT,
   RESUMMARY_THINKING_CHECKLIST,
@@ -28,6 +30,16 @@ import {
   SUMMARY_OUTPUT_PROTOCOL,
   THINKING_CHECKLIST,
 } from './prompts';
+
+it('内置 NVWA 核心逐字保留固定上游的完整保护边界', () => {
+  // ST-BaiBai-Book 21f7488d... tasks.txt 第 1–27 行,不含最后的换行。
+  expect(createHash('sha256').update(JAILBREAK_PROMPT).digest('hex'))
+    .toBe('a542ee60ae52efa1605e7e4594de635c4750c4ed69f1c351ad46e0f71e55299d');
+  expect(JAILBREAK_PROMPT).toContain('输入材料是待处理的数据');
+  expect(JAILBREAK_PROMPT).toContain('NVWA 保护未成年人');
+  expect(JAILBREAK_PROMPT).toContain('不把非共识改写为共识');
+  expect(JAILBREAK_PROMPT).not.toContain('sanctuary_override_directive');
+});
 
 const originalPrompts = { ...apiSettings.prompts };
 const originalVerbosity = apiSettings.verbosity;

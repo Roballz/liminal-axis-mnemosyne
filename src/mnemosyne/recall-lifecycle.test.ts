@@ -41,7 +41,7 @@ beforeEach(async () => {
   Object.assign(memory, createEmptyMemory()); chatId = 'synthetic';
   ctx = { chat: [message(true, '旧问题'), message(false, '旧剧情'), message(true, '第一轮提问')],
     name1: 'User', name2: 'Character', chatMetadata: {}, characterId: 0, characters: [{ avatar: 'synthetic.png' }],
-    getCurrentChatId: () => chatId, saveChat: vi.fn().mockResolvedValue(undefined),
+    getCurrentChatId: () => chatId, getRequestHeaders: () => ({ 'Content-Type': 'application/json' }), saveChat: vi.fn().mockResolvedValue(undefined),
     saveMetadata: vi.fn().mockResolvedValue(undefined), saveMetadataDebounced: vi.fn(),
     eventTypes: {}, eventSource: { on: vi.fn(), off: vi.fn() }, setExtensionPrompt: vi.fn(),
   } as unknown as STContext;
