@@ -71,6 +71,8 @@ let parallelHost: { host: string; version: string } | null = null;
 let serial: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let bindingEpoch = 0;
+let summaryPolicyEpoch = 0;
+let summaryCachePolicy = 0;
 let automaticSync: Promise<unknown> | undefined;
 let automaticAgain = false;
 let savedHost = '';
@@ -130,24 +132,12 @@ export function hostScope(): string {
     const avatar = ctx.characters?.[Number(ctx.characterId)]?.avatar ?? ctx.groupId ?? '';
     return JSON.stringify([avatar, chat]);
 }
+function hostMessageVersion(m: STMessage) {
+    return [m.extra?.[MESSAGE_KEY], sourceRole(m), m.mes, m.swipe_id, m.extra?.bbs_omit,
+        m.extra?.bbs_leaf, m.extra?.[EVIDENCE_KEY], m.extra?.[MANUAL_KEY], m.extra?.[TABLE_OUTPUT_KEY]];
+}
 export function hostVersion(): string {
-    const ctx = getContext();
-    return JSON.stringify([
-        hostScope(),
-        (ctx?.chat ?? []).map((m) => [
-            m.extra?.[MESSAGE_KEY],
-            sourceRole(m),
-            m.mes,
-            m.swipe_id,
-            m.extra?.bbs_omit,
-            m.extra?.bbs_leaf,
-            m.extra?.[EVIDENCE_KEY],
-            m.extra?.[MANUAL_KEY],
-            m.extra?.[TABLE_OUTPUT_KEY],
-        ]),
-        memory.summaries,
-        replyFinality.revision,
-    ]);
+    return JSON.stringify([hostScope(), (getContext()?.chat ?? []).map(hostMessageVersion), memory.summaries, replyFinality.revision]);
 }
 /** 只有引擎同步提交的可见近期补摘可以沿用版本；正文编辑始终得到新版本。 */
 export function recallHostVersion(): string {
@@ -206,6 +196,7 @@ export function hiddenRoleRepairRefs(view: CapturedView): SourceRef[] {
     });
 }
 export function invalidateDaily(reason = '档案视图已更新', hostNotification = false) {
+    if (!hostNotification) summaryPolicyEpoch++;
     promptHistory = null;
     const scope = hostScope();
     if (dailyState.scope !== scope) { reason = '已切换聊天'; invalidateReplyDiagnostics(); }
@@ -451,6 +442,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                     );
                     check(observedHost === hostVersion() && isActive() && observedGeneration === dailyState.generation, '聊天已改变');
                     lastCache = injectionCache = cache;
+                    summaryCachePolicy = summaryPolicyEpoch;
                     Object.assign(dailyState, {
                         pending: false,
                         status: '已归档',
@@ -685,6 +677,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             };
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '聊天已改变');
             lastCache = injectionCache = cache;
+            summaryCachePolicy = summaryPolicyEpoch;
             Object.assign(dailyState, {
                 branch: branch.id,
                 archived: view.refs.length,
@@ -735,6 +728,7 @@ export async function refreshDailyTables() {
     const permitted = new Set(previous.view.memories.filter((m) => events.validity.get(m.id) === 'valid').map((m) => m.id));
     cache = { ...previous, ...events, ...projectView(previous.view, events.validity), view: { ...previous.view, branch }, tableText: renderTableState(inputs, permitted) };
     lastCache = injectionCache = cache;
+    summaryCachePolicy = summaryPolicyEpoch;
     dailyState.tableRevision++;
     dailyState.revision++;
     if (installed) refreshInjection();
@@ -904,7 +898,13 @@ export function bindDaily() {
             // whole-chat comparisons are batched; permissions and request-time
             // sync still validate exact live content, without a timed cache.
             const notify = key === 'CHARACTER_MESSAGE_RENDERED' ? () => rendered.schedule() : scheduleDaily;
+            const revision = replyFinality.revision;
             const result = action(...args);
+            // First fragment still revokes permissions. Further renders of the same
+            // live candidate do not schedule full-chat comparisons or failed archives.
+            // Completion, stop, edits, other floors and chat changes retain their events.
+            if (key === 'CHARACTER_MESSAGE_RENDERED' && revision === replyFinality.revision &&
+                replyFinality.isStreamingFloor(args[0])) return result;
             if (key === 'STREAM_TOKEN_RECEIVED' && !result) return;
             if (key === 'STREAM_TOKEN_RECEIVED') invalidateReplyDiagnostics();
             notify();
@@ -987,12 +987,50 @@ export function bindDaily() {
     if (typeof window !== 'undefined') window.addEventListener?.('pagehide', dispose, { once: true });
     return dispose;
 }
+/** A checked archived prefix can supply summary evidence while a later reply is streaming.
+ * This never archives the suffix or grants it injection/table permissions. */
+async function archivedSummaryEvidence(indices: number[], dependencies: string[]) {
+    const prior = lastCache, ctx = getContext();
+    if (!prior || !ctx || summaryCachePolicy !== summaryPolicyEpoch) return null;
+    const cutoff = indices.length ? Math.max(...indices) + 1 : prior.view.refs.length;
+    if (cutoff > prior.view.refs.length || indices.some(i => !Number.isInteger(i) || i < 0)) return null;
+    // Parse the archived version once. Compare body strings directly; never serialize
+    // the live streaming suffix or repeatedly copy all source bodies for each guard.
+    const archived = JSON.parse(prior.host), expected = archived[1].slice(0, cutoff) as unknown[][];
+    const summaries = JSON.stringify(archived[2]), messages = ctx.chat.slice(0, cutoff);
+    const sameValue = (a: unknown, b: unknown) => a == null && b == null || a === b ||
+        typeof a === 'object' && typeof b === 'object' && JSON.stringify(a) === JSON.stringify(b);
+    const prefixCurrent = () => messages.every((m, i) => ctx.chat[i] === m &&
+        hostMessageVersion(m).every((value, j) => sameValue(value, expected[i]?.[j]))) && JSON.stringify(memory.summaries) === summaries;
+    const scope = hostScope(), epoch = bindingEpoch, policy = summaryPolicyEpoch, library = activeLibrary();
+    const hostCurrent = () => installed && bindingEpoch === epoch && summaryPolicyEpoch === policy &&
+        activeLibrary() === library && getContext()?.chat === ctx.chat && hostScope() === scope &&
+        messages.length === cutoff && archived[0] === scope && prefixCurrent() &&
+        (getContext()?.chatMetadata[BINDING_KEY] as { branch?: string; scope?: string } | undefined)?.branch === prior.view.branch.id &&
+        (getContext()?.chatMetadata[BINDING_KEY] as { scope?: string } | undefined)?.scope === scope;
+    if (!hostCurrent()) return null;
+    const lib = await library;
+    if (lib.db.name !== prior.library || !await current(lib, prior.view) || !hostCurrent()) return null;
+    const finalityCurrent = await replyFinality.assertSummaryPrefix(cutoff);
+    // Dependencies outside the checked prefix must use the ordinary full sync route.
+    const prefixRefs = new Map(prior.view.refs.slice(0, cutoff).map(r => [r.message, r.revision]));
+    const selected = dependencies.map(id => prior.view.memories.find(m => m.hostId === id));
+    if (selected.some(m => !m || !prior.allowed.has(m.hostId) ||
+        [...m.inputRefs, ...m.coverage].some(ref => prefixRefs.get(ref.message) !== ref.revision))) return null;
+    if (!await current(lib, prior.view) || !hostCurrent() || !finalityCurrent()) return null;
+    return { view: prior.view, host: prior.host, generation: dailyState.generation, dependencies,
+        inputRefs: indices.map(i => prior.view.refs[i]), current: () => hostCurrent() && finalityCurrent(),
+        allowedDependencies: dependencies };
+}
 export async function captureSummaryEvidence(indices: number[], dependencies: string[] = []) {
     if (!installed) return null;
+    const archived = await serializeDailyActivation(() => archivedSummaryEvidence(indices, dependencies));
+    if (archived) return archived;
     const view = await syncDaily();
     const host = hostVersion();
     const generation = dailyState.generation;
-    return { view, host, generation, dependencies, inputRefs: indices.map((i) => view.refs[i]).filter(Boolean) };
+    return { view, host, generation, dependencies, inputRefs: indices.map((i) => view.refs[i]).filter(Boolean),
+        current: undefined as (() => boolean) | undefined, allowedDependencies: dependencies.filter(summaryAllowed) };
 }
 export function attachSummaryEvidence(
     chat: STMessage[],
@@ -1027,7 +1065,7 @@ export function attachSummaryEvidence(
 export function assertSummaryEvidence(evidence: Awaited<ReturnType<typeof captureSummaryEvidence>>) {
     if (evidence)
         check(
-            evidence.generation === dailyState.generation && evidence.host === hostVersion(),
+            evidence.current ? evidence.current() : evidence.generation === dailyState.generation && evidence.host === hostVersion(),
             '摘要请求期间正文已改变，旧结果不能应用',
         );
 }

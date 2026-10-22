@@ -1361,7 +1361,7 @@ test.each(['keep', 'update'] as const)('native error-suffix deletion waits for U
         await emit('MESSAGE_UPDATED', 1);
         await new Promise(resolve => setTimeout(resolve, 250));
         expect((ctx.chat[1].extra![key] as any).state).toBe('edited');
-        expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' });
+        await vi.waitFor(() => expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' }), { timeout: 2000 });
         expect(await lib.all('reviews')).toEqual([]);
         expect((await readDailyReview())!.view.memories[0].content).toBe('合成旧摘要');
         const engine = await import('@/memory/engine');
@@ -1483,7 +1483,7 @@ test('historical API-error floor keeps native latest save gray; native save on e
         await emit('MESSAGE_EDITED', 1); await emit('MESSAGE_UPDATED', 1);
         await new Promise(resolve => setTimeout(resolve, 250));
         expect((ctx.chat[1].extra![key] as any).state).toBe('edited');
-        expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' });
+        await vi.waitFor(() => expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' }), { timeout: 2000 });
         expect(dailyState.pending).toBe(false);
         expect(await lib.all('reviews')).toEqual([]); // Explicit body acceptance is not summary acceptance.
     } finally { close(); }
@@ -1507,4 +1507,142 @@ test('a host edit event invalidates diagnostic continuation without automaticall
     const page = await bridge.readReplyBlockers(); expect(page.next).toBeDefined();
     await emit('MESSAGE_EDITED', 0);
     await expect(bridge.readReplyBlockers(page.next)).rejects.toThrow('重新检查');
+});
+
+test.each([false, true])('old-floor summary saves during new streaming reply; archive and tables catch up once (tables=%s)', async tables => {
+    const { runSummary, engineState } = await import('@/memory/engine');
+    const { flushLeavesNow } = await import('@/memory/store');
+    const { newTable, saveTable } = await import('./tables');
+    const { refreshDailyTables } = await import('./bridge');
+    delete ctx.chat[1].extra!.bbs_leaf;
+    const emit = bindFinalityEvents(), original = await syncDaily();
+    let tableId = '';
+    if (tables) {
+        const def = newTable(original, '并行摘要表');
+        def.columns = [{ id: 'v', name: '事项', type: 'text', mode: 'append', description: '' }];
+        await saveTable(lib, original, def); await refreshDailyTables(); tableId = def.id;
+    }
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true); vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    const request = vi.spyOn(client, 'requestViaMainApi').mockImplementation(async () => {
+        await emit('GENERATION_STARTED', 'normal');
+        ctx.chat.push(message(true, '后续输入'), message(false, '正在生成'));
+        ctx.streamingProcessor = { messageId: 3, isFinished: false, isStopped: false, abortController: { signal: { aborted: false } } };
+        await emit('CHARACTER_MESSAGE_RENDERED', 3);
+        await expect(syncDaily()).rejects.toThrow('暂不归档');
+        return JSON.stringify({ summary: '独立的旧楼摘要', ...(tables ? { customTables: [{ table_id: tableId, add: [{ v: '已发生的事项' }], update: [] }] } : {}) });
+    });
+    try {
+        await runSummary(1, { checkResummary: false });
+        expect(engineState.lastError).toBe('');
+        expect(ctx.chat[1].extra!.bbs_leaf!.text).toBe('独立的旧楼摘要');
+        expect(request).toHaveBeenCalledTimes(1);
+        flushLeavesNow();
+        expect(ctx.saveChat).toHaveBeenCalled();
+        expect((await capture(lib, original.branch.id)).refs).toEqual(original.refs);
+        expect(await lib.all('table_receipts')).toHaveLength(0);
+        ctx.chat[3].mes = '完成的新正文';
+        ctx.streamingProcessor!.isFinished = true;
+        await emit('MESSAGE_RECEIVED', 3); await emit('GENERATION_ENDED');
+        ctx.streamingProcessor = null;
+        const saved = await syncDaily();
+        expect(saved.refs).toHaveLength(4);
+        const summary = saved.memories.find(m => m.content === '独立的旧楼摘要')!;
+        expect(summary).toBeDefined();
+        expect((await statuses(lib, saved)).get(summary.id)).toBe('valid');
+        expect(summary.inputRefs).toEqual(original.refs);
+        await syncDaily();
+        expect(await lib.all('table_receipts')).toHaveLength(tables ? 1 : 0);
+        expect(await lib.all('custom_table_rows')).toHaveLength(tables ? 1 : 0);
+    } finally { flushLeavesNow(); }
+});
+
+test('summary prefix evidence tolerates suffix streaming across async validation but rejects source and lifecycle changes', async () => {
+    const emit = bindFinalityEvents(); await syncDaily();
+    await emit('GENERATION_STARTED', 'normal');
+    ctx.chat.push(message(true, '新输入'), message(false, '流式正文'));
+    ctx.streamingProcessor = { messageId: 3, isFinished: false, isStopped: false };
+    await emit('CHARACTER_MESSAGE_RENDERED', 3);
+    const evidence = await captureSummaryEvidence([0, 1]);
+    ctx.chat[3].mes += '继续增长'; await emit('CHARACTER_MESSAGE_RENDERED', 3);
+    expect(() => assertSummaryEvidence(evidence)).not.toThrow();
+    ctx.chat[1].mes += '编辑旧楼';
+    expect(() => assertSummaryEvidence(evidence)).toThrow('已改变');
+});
+
+test.each(['edit', 'swipe', 'delete', 'chat', 'table', 'later-summary', 'policy'] as const)('parallel summary still rejects conflicting %s changes', async change => {
+    const { runSummary, engineState } = await import('@/memory/engine');
+    const { flushLeavesNow } = await import('@/memory/store');
+    const { newTable, saveTable } = await import('./tables');
+    const { refreshDailyTables } = await import('./bridge');
+    delete ctx.chat[1].extra!.bbs_leaf;
+    const emit = bindFinalityEvents(), view = await syncDaily();
+    const def = newTable(view, '版本校验表');
+    def.columns = [{ id: 'v', name: '事项', type: 'text', mode: 'append', description: '' }];
+    await saveTable(lib, view, def); await refreshDailyTables();
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true); vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    vi.spyOn(client, 'requestViaMainApi').mockImplementation(async () => {
+        await emit('GENERATION_STARTED', 'normal');
+        ctx.chat.push(message(true, '新输入'), message(false, '新正文片段'));
+        ctx.streamingProcessor = { messageId: 3, isFinished: false, isStopped: false };
+        await emit('CHARACTER_MESSAGE_RENDERED', 3);
+        if (change === 'edit') ctx.chat[1].mes += '修改';
+        if (change === 'swipe') ctx.chat[1].swipe_id = 1;
+        if (change === 'delete') ctx.chat.splice(1, 1);
+        if (change === 'chat') { ctx.getCurrentChatId = () => 'other'; await emit('CHAT_CHANGED'); }
+        if (change === 'table') { def.name += '修改'; await saveTable(lib, await capture(lib, view.branch.id), def); }
+        if (change === 'later-summary') ctx.chat[3].extra!.bbs_leaf = { id: 'later', text: '后楼已摘', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+        if (change === 'policy') invalidateDaily('权限已改变');
+        return JSON.stringify({ summary: '不能写入', customTables: [{ table_id: def.id, add: [{ v: '旧返回' }], update: [] }] });
+    });
+    try {
+        await runSummary(1, { checkResummary: false });
+        expect(engineState.lastError).not.toBe('');
+        expect(ctx.chat.some(m => m.extra?.bbs_leaf?.text === '不能写入')).toBe(false);
+        expect(await lib.all('table_receipts')).toHaveLength(0);
+    } finally { flushLeavesNow(); }
+});
+
+test('stream render bursts do not repeatedly scan old bodies, refresh prompts or retry full archiving', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+        const emit = bindFinalityEvents(); await syncDaily();
+        await emit('GENERATION_STARTED', 'normal');
+        ctx.chat.push(message(true, '新输入'), message(false, '流式正文'));
+        ctx.streamingProcessor = { messageId: 3, isFinished: false, isStopped: false };
+        await emit('CHARACTER_MESSAGE_RENDERED', 3);
+        await vi.advanceTimersByTimeAsync(500);
+        const body = ctx.chat[0].mes; let reads = 0;
+        Object.defineProperty(ctx.chat[0], 'mes', { configurable: true, get: () => { reads++; return body; } });
+        const get = vi.spyOn(lib, 'get'), prompt = vi.mocked(ctx.setExtensionPrompt!); prompt.mockClear();
+        for (let i = 0; i < 100; i++) {
+            ctx.chat[3].mes += '字';
+            await emit('CHARACTER_MESSAGE_RENDERED', 3);
+            await emit('STREAM_TOKEN_RECEIVED');
+            await vi.advanceTimersByTimeAsync(40);
+        }
+        expect(reads).toBe(0);
+        expect(get).not.toHaveBeenCalled();
+        expect(prompt).not.toHaveBeenCalled();
+        Object.defineProperty(ctx.chat[0], 'mes', { configurable: true, writable: true, value: body });
+        ctx.streamingProcessor!.isFinished = true;
+        await emit('MESSAGE_RECEIVED', 3); await emit('GENERATION_ENDED'); ctx.streamingProcessor = null;
+        expect((await syncDaily()).refs).toHaveLength(4);
+    } finally { vi.useRealTimers(); }
+});
+
+test('summary prefix checks never read the unrelated streaming body or rescan all floors for each receipt', async () => {
+    const emit = bindFinalityEvents(); await syncDaily();
+    await emit('GENERATION_STARTED', 'normal');
+    ctx.chat.push(message(true, '新输入'), message(false, '流式正文'));
+    ctx.streamingProcessor = { messageId: 3, isFinished: false, isStopped: false };
+    await emit('CHARACTER_MESSAGE_RENDERED', 3);
+    const text = ctx.chat[3].mes; let reads = 0;
+    Object.defineProperty(ctx.chat[3], 'mes', { configurable: true, get: () => { reads++; return text; } });
+    const evidence = await captureSummaryEvidence([0, 1]);
+    expect(evidence?.current).toBeTypeOf('function');
+    expect(() => assertSummaryEvidence(evidence)).not.toThrow();
+    expect(reads).toBe(0);
+    Object.defineProperty(ctx.chat[3], 'mes', { configurable: true, writable: true, value: text });
 });

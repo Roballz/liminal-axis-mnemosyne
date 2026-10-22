@@ -1025,7 +1025,7 @@ async function responseEvidence(original: Awaited<ReturnType<typeof captureSumma
   guard();
   if (!fresh || fresh.view.branch.id !== original.view.branch.id ||
       JSON.stringify(fresh.inputRefs) !== JSON.stringify(original.inputRefs) ||
-      !original.dependencies.every(summaryAllowed))
+      !original.dependencies.every(id => fresh.allowedDependencies.includes(id)))
     throw new Error('摘要来源或分支已改变，不能复用旧返回');
   return fresh;
 }
@@ -1289,7 +1289,7 @@ async function summarizeFloorWork(
     return { delta: { ...d, summary } as SummaryDelta & { summary: string }, tablePlan };
   }, async ({ delta, tablePlan }) => {
     const evidence = await responseEvidence(mnEvidence, targets, responseGuard);
-    if (tableRequest && (chat.findLastIndex(isAiFloor) !== aiFloor || evidence?.view.branch.tableHead !== tableRequest.tableHead))
+    if (tableRequest && (chat.slice(aiFloor + 1).some(m => !!getLeaf(m)) || evidence?.view.branch.tableHead !== tableRequest.tableHead))
       throw new Error('当前最新楼层或表格历史已改变，旧填表返回不能应用');
     if (evidence && JSON.stringify(await eventHintsBefore(await activeLibrary(), evidence.view, targets[0])) !== JSON.stringify(events))
       throw new Error('请求使用的事件材料已改变，不能复用旧返回');
@@ -1485,7 +1485,7 @@ async function summarizeBatchWork(
     return { list: cleaned as Array<SummaryDelta & { summary: string }>, tablePlan };
   }, async ({ list, tablePlan }) => {
     const evidence = await responseEvidence(mnEvidence, allTargets, responseGuard);
-    if (tableRequest && (!block.includes(chat.findLastIndex(isAiFloor)) || evidence?.view.branch.tableHead !== tableRequest.tableHead))
+    if (tableRequest && (chat.slice(block.at(-1)! + 1).some(m => !!getLeaf(m)) || evidence?.view.branch.tableHead !== tableRequest.tableHead))
       throw new Error('当前最新楼层或表格历史已改变，旧填表返回不能应用');
     if (evidence && JSON.stringify(await eventHintsBefore(await activeLibrary(), evidence.view, beforeIndex)) !== JSON.stringify(events))
       throw new Error('请求使用的事件材料已改变，不能复用旧返回');

@@ -133,6 +133,12 @@ export class ReplyFinality {
         if (!receipt || receipt.epoch !== run.epoch || (run.stopped && receipt.state !== 'aborted'))
             await this.stamp(m, run.floor, run.stopped ? 'aborted' : 'pending', run);
     }
+    /** Render-only notifications for this active candidate do not change archive permissions. */
+    isStreamingFloor(floor: unknown) {
+        const run = this.current(), p = this.host().processor;
+        return !!run && typeof floor === 'number' && run.floor === floor && this.matchesProcessor(run, p) &&
+            p?.isFinished !== true && !p?.isStopped && !p?.abortController?.signal?.aborted;
+    }
     streaming() {
         const run = this.current(), h = this.host(), p = h.processor;
         if (!run) return this.observe();
@@ -232,12 +238,12 @@ export class ReplyFinality {
         this.writes.add(write);
         void write.then(() => this.writes.delete(write), () => this.writes.delete(write));
     }
-    private targetCurrent(h: ReplyHost, floor: number) {
+    private targetCurrent(h: ReplyHost, floor: number, scoped = false) {
         const m = h.chat[floor], text = m.mes, page = swipe(m), role = assistant(m), uncreated = this.uncreatedSwipe(m);
         const receipt = JSON.stringify(m.extra?.[REPLY_FINALITY_KEY]), revision = this.revision;
         return () => {
             const now = this.host();
-            return now.scope === h.scope && now.chat === h.chat && now.chat[floor] === m && this.revision === revision &&
+            return now.scope === h.scope && now.chat === h.chat && now.chat[floor] === m && (scoped || this.revision === revision) &&
                 m.mes === text && swipe(m) === page && assistant(m) === role && this.uncreatedSwipe(m) === uncreated &&
                 JSON.stringify(m.extra?.[REPLY_FINALITY_KEY]) === receipt;
         };
@@ -320,26 +326,41 @@ export class ReplyFinality {
     async assertArchivable(observe = true) {
         return this.assertRange(observe);
     }
-    private async assertRange(observe: boolean, cutoff?: number) {
+    /** Validate completed source floors without coupling them to a later streaming reply. */
+    async assertSummaryPrefix(cutoff: number) {
+        return this.assertRange(false, cutoff, true);
+    }
+    private async assertRange(observe: boolean, cutoff?: number, scoped = false) {
         await Promise.all([...this.writes]);
         if (observe) await this.observe();
         const h = this.host(), run = this.current(), revision = this.revision;
         const processor = h.processor;
         const processorState = (p: ReplyHost['processor']) => JSON.stringify([p?.messageId, p?.isFinished, p?.isStopped, p?.abortController?.signal?.aborted]);
         const observedProcessor = processorState(processor);
-        const snapshot = h.chat.map(m => ({ message: m, text: m.mes, swipe: swipe(m),
+        const relevantRun = () => {
+            const r = this.current();
+            return r && r.floor < (cutoff ?? h.chat.length) ? [r.epoch, r.floor, r.page, r.ended, r.stopped] : null;
+        };
+        const runState = JSON.stringify(relevantRun());
+        const relevantProcessor = () => {
+            const p = this.host().processor;
+            return p && typeof p.messageId === 'number' && p.messageId < (cutoff ?? h.chat.length) ? processorState(p) : null;
+        };
+        const prefixProcessor = relevantProcessor();
+        const snapshot = (scoped ? h.chat.slice(0, cutoff) : h.chat).map(m => ({ message: m, text: m.mes, swipe: swipe(m),
             receipt: JSON.stringify(m.extra?.[REPLY_FINALITY_KEY]), role: assistant(m), uncreated: this.uncreatedSwipe(m) }));
         const current = () => {
             const now = this.host();
-            return now.scope === h.scope && now.chat === h.chat && now.errorLabel === h.errorLabel && now.processor === processor &&
-                processorState(now.processor) === observedProcessor && this.revision === revision && now.chat.length === snapshot.length &&
+            return now.scope === h.scope && now.chat === h.chat && now.errorLabel === h.errorLabel &&
+                (scoped ? now.chat.length >= snapshot.length && JSON.stringify(relevantRun()) === runState && relevantProcessor() === prefixProcessor :
+                    now.processor === processor && processorState(now.processor) === observedProcessor && this.revision === revision && now.chat.length === snapshot.length) &&
                 snapshot.every((s, i) => now.chat[i] === s.message && s.text === s.message.mes && s.swipe === swipe(s.message) &&
                     s.role === assistant(s.message) && s.uncreated === this.uncreatedSwipe(s.message) && s.receipt === JSON.stringify(s.message.extra?.[REPLY_FINALITY_KEY]));
         };
         for (let floor = 0; floor < (cutoff ?? h.chat.length); floor++) {
             const m = h.chat[floor];
             if (!assistant(m)) continue;
-            const target = this.targetCurrent(h, floor), candidate = !!run && run.floor === floor && this.candidate(run) === m;
+            const target = this.targetCurrent(h, floor, scoped), candidate = !!run && run.floor === floor && this.candidate(run) === m;
             const result = this.blockerReason(h, m, floor, run, candidate);
             const problem = result instanceof Promise ? await result : result;
             if (!target()) throw new ReplyFinalityError();

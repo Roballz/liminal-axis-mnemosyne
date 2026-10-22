@@ -901,13 +901,13 @@ it('手动检测总结先准备一条预览，不在确认前连锁创建高层'
     expect(client.requestViaMainApi).toHaveBeenCalledOnce();
   } finally { Object.assign(settings.apiSettings, saved); }
 });
-it('带表格的待确认请求在追加新AI楼后拒绝历史楼改当前表', async () => {
+it('带表格的待确认请求在后楼已有摘要时拒绝历史楼改当前表', async () => {
   const chat = [message(true), message()]; useChat(chat);
   vi.spyOn(summaryTables, 'prepareSummaryTables').mockResolvedValue({ inputs: [], branch: 'test', system: '', user: '' });
   vi.spyOn(summaryTables, 'parseSummaryTableResult').mockReturnValue(null);
   await prepareSummaryFloor(1);
   const record = summaryResponses[0];
-  chat.push(message(true), message());
+  chat.push(message(true), message(false, { extra: { bbs_leaf: leaf() } }));
   await expect(recoverSummaryResponse(record, JSON.stringify(summary))).rejects.toThrow('最新楼层');
   expect(chat[1].extra?.bbs_leaf).toBeUndefined();
 });
