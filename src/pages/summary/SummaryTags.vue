@@ -23,6 +23,13 @@ const links = computed(() => [
   ...(tags.value?.eventIds.length ? events.value.filter(e => tags.value!.eventIds.includes(e.id)).map(e => `相关事件 · ${e.title}`) : []),
 ]);
 const opened = ref(false), busy = ref(false), publicOnly = ref(false);
+const eventSearch = ref(''), eventPageSize = ref(80);
+const filteredEvents = computed(() => {
+  if (!opened.value) return [];
+  const q = eventSearch.value.trim().toLocaleLowerCase();
+  return q ? events.value.filter(e => e.title.toLocaleLowerCase().includes(q) || e.id.toLocaleLowerCase().includes(q)) : events.value;
+});
+const displayedEvents = computed(() => filteredEvents.value.slice(0, eventPageSize.value));
 const participants = ref(''), reason = ref(''), eventIds = ref<string[]>([]);
 let expectedHost = '';
 async function open(publication = false) {
@@ -36,6 +43,8 @@ async function open(publication = false) {
     participants.value = tags.value?.participants?.join('、') ?? '';
     reason.value = tags.value?.public?.reason ?? '';
     eventIds.value = [...(tags.value?.eventIds ?? [])];
+    eventSearch.value = '';
+    eventPageSize.value = 80;
     opened.value = true;
   } catch (error) { toast((error as Error).message, 'warning'); }
   finally { busy.value = false; }
@@ -85,9 +94,11 @@ async function save() {
       </template>
       <template v-else>
         <label>在场人物<input v-model="participants" class="bbs-input" placeholder="名字之间用顿号分隔" /></label>
-        <fieldset v-if="events.length"><legend>相关事件</legend>
-          <label v-for="e in events" :key="e.id"><input v-model="eventIds" type="checkbox" :value="e.id" />{{ e.title }}</label>
-          <small>这里只调整召回关联，正式事件链成员在事件页管理。</small>
+        <fieldset v-if="events.length"><legend>相关事件（完整目录 · {{ events.length }} 条）</legend>
+          <input v-model="eventSearch" class="bbs-input" placeholder="搜索事件名称或 ID" @input="eventPageSize = 80" />
+          <label v-for="e in displayedEvents" :key="e.id"><input v-model="eventIds" type="checkbox" :value="e.id" />{{ e.title }}<small v-if="e.archived">已归档</small><small v-if="e.needsReview">待审核</small></label>
+          <button v-if="displayedEvents.length < filteredEvents.length" type="button" class="bbs-btn" @click="eventPageSize += 80">显示更多（{{ displayedEvents.length }}/{{ filteredEvents.length }}）</button>
+          <small>这里调整摘要关联标签；生成摘要关联会在归档核验后同步登记为事件成员。</small>
         </fieldset>
       </template>
       <footer class="bbs-modal-foot"><button class="bbs-btn" @click="opened = false">取消</button><button class="bbs-btn bbs-btn-primary" :disabled="busy || (publicOnly && !reason.trim())" @click="save">保存</button></footer>
