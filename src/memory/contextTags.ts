@@ -13,6 +13,8 @@ export interface EventHint {
   title: string;
   status: string;
   latest?: string;
+  archived?: boolean;
+  needsReview?: boolean;
 }
 export interface RecallContext {
   participants: string[];
