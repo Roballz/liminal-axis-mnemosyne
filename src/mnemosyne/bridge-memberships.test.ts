@@ -3,6 +3,7 @@ import { beforeEach, afterEach, expect, test, vi } from 'vitest';
 import { Library, Transaction, activateLibrary, freshLibraryName } from './db';
 import { bindDaily, syncDaily, invalidateDaily, readDailyMembershipContext, refreshDailyTables, currentMembershipHints } from './bridge';
 import { saveMemberships } from './event-memberships';
+import { eventView } from './events';
 import { ReplyFinality } from './reply-finality';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
@@ -46,4 +47,31 @@ test('archivability changing during its awaited check cannot open a cached membe
   await syncDaily();
   vi.spyOn(ReplyFinality.prototype, 'assertArchivable').mockResolvedValueOnce(() => false);
   await expect(readDailyMembershipContext()).rejects.toThrow();
+});
+
+test('validated generated eventIds become one AI membership and retries do not duplicate it', async () => {
+  ctx.chat.push(
+    { name: '用户', is_user: true, is_system: false, mes: '合成第二问', extra: {} },
+    { name: '角色', is_user: false, is_system: false, mes: '合成第二答', extra: {
+      bbs_leaf: { id: 'tagged-leaf', text: '合成第二摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 },
+    } },
+  );
+  let view = await syncDaily();
+  const original = view.memories.find(m => m.hostId === 'real-bridge-leaf')!;
+  const created = await saveMemberships(lib, view, {
+    mode: 'add', memories: [original.id], eventIds: [], newTitle: '合成事件链',
+  });
+  await syncDaily();
+  const target = ctx.chat[3].extra!.bbs_leaf as any;
+  target.tags = { version: 1, participants: [], planIds: [], eventIds: [created.created!] };
+  invalidateDaily();
+  view = await syncDaily();
+  const card = (await eventView(lib, view)).cards.find(c => c.chain.id === created.created)!;
+  expect(card.members).toHaveLength(2);
+  const ai = (await lib.all<any>('event_memberships')).filter(m => m.origin === 'ai');
+  expect(ai).toHaveLength(1);
+  expect(ai[0]).toMatchObject({ memory: view.memories.find(m => m.hostId === 'tagged-leaf')!.id,
+    active: true, locked: false, owner: created.created });
+  await syncDaily();
+  expect((await lib.all<any>('event_memberships')).filter(m => m.origin === 'ai')).toHaveLength(1);
 });
