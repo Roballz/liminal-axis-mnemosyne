@@ -58,10 +58,10 @@ test('all formal chain names remain visible, including long names and review met
   const names = ['非常长的事件链名称'.repeat(30), 'AnotherLongUnbrokenChainName'.repeat(30), '事件链三'];
   badges.value = new Map([['leaf-0', names.map((title, i) => ({ title, archived: i === 0, needsReview: i === 1 }))]]);
   const root = mount();
-  expect(content(status(root))).toBe(`关联事件:${names.join('，')}`);
+  expect(content(status(root))).toBe(`相关事件:${names.join('，')}`);
   expect(status(root).props.class).not.toContain('is-muted');
   expect(status(root).props.class).toContain('is-linked');
-  expect(content(nodes(root).find(n => n.props.class === 'mn-floor-event-label')!)).toBe('关联事件:');
+  expect(content(nodes(root).find(n => n.props.class === 'mn-floor-event-label')!)).toBe('相关事件:');
   expect(content(nodes(root).find(n => n.props.class === 'mn-floor-event-names')!)).toBe(names.join('，'));
   expect(status(root).props.title).toContain('（已归档）');
   expect(status(root).props.title).toContain('（待审核）');

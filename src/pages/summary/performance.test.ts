@@ -11,7 +11,7 @@ import { engineState } from '@/memory/engine';
 // This test exercises actual Vue card rendering, not browser layout/scrolling.
 vi.mock('@/components/SummaryReviewPanel.vue', () => ({ default: { render: () => null } }));
 afterEach(() => { vi.restoreAllMocks(); Object.assign(memory, createEmptyMemory()); engineState.lastPlanWrite = null; });
-it('240张摘要共享一次目录校验，首屏有界，折叠总结不挂载隐藏标签卡', async () => {
+it('240张摘要目录按需读取，首屏有界，折叠总结不挂载隐藏标签卡', async () => {
   const count = 240;
   const chat = Array.from({ length: count }, (_, i) => ({ name: '合成角色', is_user: false, is_system: false,
     mes: `合成剧情${i}。` + '正文只用于测量本地序列化。'.repeat(200), extra: { bbs_leaf: {
@@ -29,7 +29,7 @@ it('240张摘要共享一次目录校验，首屏有界，折叠总结不挂载�
   const start = performance.now();
   const html = await renderToString(createSSRApp(SummaryPage));
   console.info(`synthetic-summary-render: ${Math.round(performance.now() - start)}ms, directory reads=${hints.mock.calls.length}`);
-  expect(hints).toHaveBeenCalledTimes(1);
+  expect(hints).not.toHaveBeenCalled();
   expect(html.match(/class="bbs-tags-top"/g)).toHaveLength(40);
   expect(html).toContain('显示更多');
   hints.mockClear();

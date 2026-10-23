@@ -19,7 +19,7 @@ const expanded = ref(props.open);
 <template>
   <section class="bbs-collapsible" :class="{ 'is-open': expanded }">
     <button class="bbs-collapsible-head" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
-      <span class="bbs-collapsible-title">{{ title }}</span>
+      <span class="bbs-collapsible-title"><slot name="title">{{ title }}</slot></span>
       <Icon name="chevron" class="bbs-collapsible-chevron" />
     </button>
     <div class="bbs-collapsible-outer">
@@ -64,7 +64,10 @@ const expanded = ref(props.open);
   outline-offset: -2px;
 }
 
+.bbs-collapsible-title { min-width: 0; flex: 1; margin-right: 8px; }
+
 .bbs-collapsible-chevron {
+  flex-shrink: 0;
   font-size: 18px;
   color: var(--bbs-ink-muted);
   transition: transform var(--bbs-dur) var(--bbs-ease);

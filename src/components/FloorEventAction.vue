@@ -7,7 +7,7 @@ import { derivedMeta } from '@/memory/store';
 import { membershipBadges, membershipUi, openMemberships, membershipPicking, membershipRowsByHost, membershipSelected, toggleMembershipRow } from '@/mnemosyne/event-membership-ui';
 import { manualEventState } from '@/mnemosyne/manual-events';
 import { jobState } from '@/mnemosyne/jobs';
-const props = defineProps<{ floor: number; disabled?: boolean; leafId?: string }>();
+const props = defineProps<{ floor: number; disabled?: boolean; leafId?: string; compact?: boolean }>();
 let live = true;
 onBeforeUnmount(() => { live = false; });
 function open() {
@@ -25,7 +25,7 @@ const names = computed(() => entries.value.map(item => item.title).join('，'));
 // A missing projection is unknown/stale, never evidence of no formal memberships.
 const label = computed(() => membershipUi.loading ? '事件链 · 加载中'
   : !membershipBadges.value ? '事件链 · 待刷新'
-  : entries.value.length ? `关联事件:${names.value}`
+  : entries.value.length ? `相关事件:${names.value}`
   : '本楼层尚未加入事件链');
 const muted = computed(() => membershipUi.loading || !membershipBadges.value || !entries.value.length);
 const detail = computed(() => entries.value.map(item => `${item.title}${item.archived ? '（已归档）' : ''}${item.needsReview ? '（待审核）' : ''}`).join('，'));
@@ -37,9 +37,9 @@ const blocked = computed(() => membershipUi.loading || membershipUi.saving || ma
     <input type="checkbox" :checked="!!pickingRow && membershipSelected.has(pickingRow.id)" :disabled="!pickingRow?.valid || membershipUi.saving"
       @change="pickingRow && toggleMembershipRow(pickingRow.id)" />加入选择
   </label>
-  <div v-else class="mn-floor-event-row">
+  <div v-else class="mn-floor-event-row" :class="{ 'is-compact': compact }">
     <span class="mn-floor-event-text" :class="{ 'is-muted': muted, 'is-linked': !muted }" :title="detail || label">
-      <template v-if="!muted"><span class="mn-floor-event-label">关联事件:</span><span class="mn-floor-event-names">{{ names }}</span></template>
+      <template v-if="!muted"><span class="mn-floor-event-label">相关事件:</span><span class="mn-floor-event-names">{{ names }}</span></template>
       <template v-else>{{ label }}</template>
     </span>
     <span class="mn-floor-event-actions">
@@ -60,6 +60,8 @@ const blocked = computed(() => membershipUi.loading || membershipUi.saving || ma
 .mn-floor-event-names { min-width: 0; font-size: 11px; line-height: 16px; }
 :global(.bbs-root[data-theme='night'] .mn-floor-event-text:not(.is-muted)) { color: #fff; }
 .mn-floor-event-text.is-muted { color: var(--bbs-ink-soft); font-style: italic; }
+.mn-floor-event-row.is-compact .mn-floor-event-text { font-size: 10px; line-height: 16px; color: inherit; opacity: .7; }
+.mn-floor-event-row.is-compact .mn-floor-event-names { font-size: inherit; line-height: inherit; }
 .mn-floor-event-actions { display: flex; justify-content: center; }
 .mn-floor-event { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--bbs-radius-sm); background: transparent; color: var(--bbs-ink-muted); cursor: pointer; }
 .mn-floor-event:hover:not(:disabled) { color: var(--bbs-accent); background: var(--bbs-surface-2); }

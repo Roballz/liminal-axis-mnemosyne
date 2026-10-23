@@ -10,7 +10,6 @@ import { derivedMeta } from '@/memory/store';
 import { normalizeTags, type EventHint, type SummaryTags } from '@/memory/contextTags';
 import { dailyInstalled, dailyState, hostVersion, syncDaily, readDailyEventEditor, dailyCurrent, refreshDailyTables } from '@/mnemosyne/bridge';
 import { refreshInjection } from '@/memory/inject';
-import { membershipBadges } from '@/mnemosyne/event-membership-ui';
 import { saveMemberships } from '@/mnemosyne/event-memberships';
 import { activeLibrary } from '@/mnemosyne/db';
 
@@ -23,13 +22,6 @@ const tags = computed(() => {
 // One validated directory per page revision, never one full chat serialization per card.
 const pageEvents = inject(SUMMARY_CTX)!.events;
 const events = shallowRef<EventHint[]>([]);
-// Formal memberships are the reverse tag projection: no host rewrite or sync loop.
-const links = computed(() => {
-  void derivedMeta.rev; void dailyState.revision;
-  const related = dailyInstalled() ? membershipBadges.value?.get(props.leafId) ?? []
-    : pageEvents.value.filter(e => tags.value?.eventIds.includes(e.id));
-  return related.map(e => `相关事件 · ${e.title}`);
-});
 let editor: Awaited<ReturnType<typeof readDailyEventEditor>> | null = null;
 let memoryId = '';
 const opened = ref(false), busy = ref(false), publicOnly = ref(false);
@@ -110,8 +102,7 @@ async function save() {
     </button>
     <button class="bbs-tag-public" type="button" :class="{ 'is-on': tags?.public }" :aria-pressed="!!tags?.public" :title="tags?.public?.reason || '标为公开并填写原因'" :disabled="busy" @click.stop="togglePublic">公开</button>
   </div>
-  <FloorEventAction :floor="floor" :leaf-id="leafId" />
-  <div v-if="links.length" class="bbs-tag-links"><span v-for="link in links" :key="link">{{ link }}</span></div>
+  <FloorEventAction :floor="floor" :leaf-id="leafId" compact />
   <ModalMask :open="opened" @close="opened = false">
     <div class="bbs-modal bbs-tags-modal" role="dialog" aria-modal="true" :aria-label="publicOnly ? '公开理由' : '编辑摘要标签'" @click.stop>
       <header class="bbs-modal-head"><strong>{{ publicOnly ? '公开理由' : '摘要标签' }}</strong><button class="bbs-btn" @click="opened = false">关闭</button></header>
@@ -140,7 +131,6 @@ async function save() {
 .bbs-tag-empty { opacity:.65; }
 .bbs-tag-public { border:1px solid var(--bbs-line); background:none; color:inherit; opacity:.65; border-radius:12px; padding:3px 9px; font-size:11px; cursor:pointer; }
 .bbs-tag-public.is-on { opacity:1; color:var(--bbs-accent, #b89b60); border-color:currentColor; }
-.bbs-tag-links { display:flex; flex-wrap:wrap; gap:5px 12px; font-size:10px; opacity:.7; margin-bottom:7px; }
 .bbs-tags-modal { display:flex; flex-direction:column; gap:14px; }
 .bbs-tags-modal fieldset { max-height:180px; overflow:auto; border:1px solid var(--bbs-line); border-radius:6px; }
 .bbs-tags-modal label { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:5px; }

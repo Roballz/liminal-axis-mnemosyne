@@ -114,5 +114,8 @@ test('both editors read the full branch catalog including archived chains and re
   await refreshDailyTables();
   const app = createSSRApp(SummaryTags, { floor: 1, leafId: 'real-bridge-leaf' });
   app.provide(SUMMARY_CTX, { events: computed(() => []) } as any);
-  expect(await renderToString(app)).toContain('相关事件 · 归档也可选');
+  const html = await renderToString(app);
+  expect(html).toContain('相关事件:');
+  expect(html.match(/class="mn-floor-event-names"[^>]*>归档也可选<\/span>/g)).toHaveLength(1);
+  expect(html).not.toContain('bbs-tag-links');
 });

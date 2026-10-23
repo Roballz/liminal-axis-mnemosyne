@@ -1582,6 +1582,15 @@ function exportPublicApiDocument() {
 
         <!-- 上次召回详情:把上一次召回各阶段的中间结果可视化,便于调参/排障(reactive 自动刷新) -->
         <Collapsible title="上次召回详情" :open="false">
+          <template #title>
+            <span class="bbs-recall-heading">
+              <span class="bbs-recall-heading-label">上次召回详情</span>
+              <span v-if="recallDebug.summaryStatus || recallDebug.knowledgeStatus" class="bbs-recall-route-status">
+                <span v-if="recallDebug.summaryStatus">摘要：{{ recallDebug.summaryStatus }}</span>
+                <span v-if="recallDebug.knowledgeStatus">知识库：{{ recallDebug.knowledgeStatus }}</span>
+              </span>
+            </span>
+          </template>
           <p v-if="!recallDebug.at" class="bbs-field-hint">
             尚无召回记录。配好向量渠道后发一条消息触发召回,这里会显示重写 / 检索 / 重排 / 注入各阶段结果。
           </p>
@@ -1593,8 +1602,6 @@ function exportPublicApiDocument() {
               <span class="bbs-dbg-time">{{ fmtRecallTime(recallDebug.at) }}</span>
             </div>
 
-            <p v-if="recallDebug.summaryStatus" class="bbs-field-hint">摘要：{{ recallDebug.summaryStatus }}</p>
-            <p v-if="recallDebug.knowledgeStatus" class="bbs-field-hint">知识库：{{ recallDebug.knowledgeStatus }}</p>
             <details v-if="recallDebug.detail"><summary>错误详情</summary><pre>{{ recallDebug.detail }}</pre></details>
 
             <!-- 四阶段各自可折叠,默认收起;标题带计数 -->
@@ -2783,6 +2790,9 @@ function exportPublicApiDocument() {
 }
 
 /* —— 上次召回详情(调试面板):状态横幅 + 步骤分区 + 分数条卡片 —— */
+.bbs-recall-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bbs-recall-heading-label { flex-shrink: 0; }
+.bbs-recall-route-status { display: flex; flex-direction: column; min-width: 0; font-size: 10px; font-weight: 400; line-height: 1.4; color: var(--bbs-ink-muted); overflow-wrap: anywhere; }
 .bbs-dbg {
   display: flex;
   flex-direction: column;
