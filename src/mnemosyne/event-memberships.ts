@@ -116,12 +116,21 @@ export async function syncGeneratedEventMemberships(lib: Library, view: Captured
     const validity = await statuses(lib, view);
     const leaves = view.memories.filter(m => m.level === 0 && !m.seed && validity.get(m.id) === 'valid' && m.tags?.eventIds?.length);
     if (!leaves.length) return false;
+    // Invert summary tags once. Large stories must not scan every leaf for every chain.
+    const tagged = new Map<string, string[]>();
+    for (const leaf of leaves) for (const id of leaf.tags!.eventIds) {
+        const ids = tagged.get(id) ?? [];
+        ids.push(leaf.id);
+        tagged.set(id, ids);
+    }
     const { cards } = await eventView(lib, view);
     const pending = new Map<string, { card: EventCard; memories: string[] }>();
     for (const card of cards) {
         if (card.blocked || card.needsReview) continue;
+        const candidates = tagged.get(card.chain.id);
+        if (!candidates?.length) continue;
         const owned = new Set(card.members.map(m => m.memory));
-        const ids = leaves.filter(m => m.tags!.eventIds.includes(card.chain.id) && !owned.has(m.id)).map(m => m.id);
+        const ids = candidates.filter(id => !owned.has(id));
         if (ids.length) pending.set(card.chain.id, { card, memories: ids });
     }
     if (!pending.size) return false;
