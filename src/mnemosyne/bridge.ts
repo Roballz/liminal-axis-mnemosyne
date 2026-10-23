@@ -58,6 +58,7 @@ interface DailyCache {
     tableText: string;
     eventText: string;
     eventHints: EventHint[];
+    eventDirectory: EventHint[];
     memberships: MembershipProjection;
     library: string;
     reviewCount: number;
@@ -314,10 +315,14 @@ async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, vie
     const { cards, validity } = await eventView(lib, view);
     check(await current(lib, view), '事件状态已改变，请重试');
     const safe = cards.filter(c => !c.needsReview && !c.blocked);
-    return { validity, memberships: membershipProjection(view, cards), eventText: renderPersistentEvents(safe), eventHints: safe.map(c => ({
+    const asHint = (c: typeof cards[number]): EventHint => ({
         id: c.chain.id, title: c.meta.title, status: c.meta.status,
         latest: c.meta.latestProgress ? `${c.meta.latestProgress.time} ${c.meta.latestProgress.text}`.trim() : undefined,
-    })) };
+    });
+    return { validity, memberships: membershipProjection(view, cards), eventText: renderPersistentEvents(safe),
+        eventHints: safe.map(asHint),
+        eventDirectory: cards.map(c => ({ ...asHint(c), archived: !!c.chain.archived, needsReview: !!c.needsReview || !!c.blocked })),
+    };
 }
 export function persistentEventText(): string {
     return readableProjection()?.eventText ?? '';
@@ -344,6 +349,10 @@ export function currentMembershipHints(): MembershipProjection | null {
 }
 export function currentEventHints(): EventHint[] {
     return readableProjection()?.eventHints ?? [];
+}
+/** Full branch catalog for the editor only; never supplied to summary prompts. */
+export function currentEventDirectory(): EventHint[] {
+    return readableProjection()?.eventDirectory ?? [];
 }
 export function canonicalLeaves(): CanonicalLeaf[] {
     return readableProjection()?.leaves ?? [];
