@@ -966,3 +966,22 @@ describe('成功预览开关关闭', () => {
     expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
   });
 });
+
+it('request and response guards retain long old source strings without repeated whole-prefix JSON copies', async () => {
+  const marker = 'old-long-source-marker-';
+  const chat = [message(true), message(false, { mes: marker + '合成旧正文'.repeat(100_000), extra: { bbs_leaf: leaf() } }),
+    message(true), message()];
+  useChat(chat);
+  let copies = 0;
+  const stringify = JSON.stringify;
+  const spy = vi.spyOn(JSON, 'stringify').mockImplementation(((...args: any[]) => {
+    const output = (stringify as any)(...args);
+    if (output?.length > 100_000 && output.includes(marker)) copies++;
+    return output;
+  }) as typeof JSON.stringify);
+  try {
+    await summarizeFloor(3);
+    expect(chat[3].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(copies).toBe(0);
+  } finally { spy.mockRestore(); }
+});

@@ -1,3 +1,4 @@
+import { sourceSnapshot, sameSourceSnapshot } from './source-snapshot';
 import { requestSummaryResponse, applySummaryResponse, summaryResponses, type SummaryResponse } from './summary-response';
 import { generatedTags, type EventHint } from './contextTags';
 import { describePlanWrite } from './plan-write';
@@ -1003,17 +1004,17 @@ function resolveSender(
 /** Snapshot actual prompt inputs before any asynchronous evidence/context reads. */
 function summaryResponseGuard(chat: STMessage[], end = chat.length - 1, dependencies = memory.summaries.map(s => s.id)) {
   const scope = hostScope(), messages = chat.slice(0, end + 1);
-  const fingerprint = () => JSON.stringify([
+  const fingerprint = () => [
     chat.slice(0, end + 1).map(m => [m.mes, m.is_user, !!m.is_system && !m.extra?.bbs_hidden,
       m.swipe_id, m.extra?.bbs_omit, m.extra?.bbs_leaf]),
     dependencies.map(id => memory.summaries.find(s => s.id === id) ?? null),
     dependencies.map(id => memory.summaries.filter(s => s.childIds?.includes(id)).map(s => s.id).sort()),
     apiSettings.summaryOnlyMode,
-  ]);
-  const source = fingerprint();
+  ];
+  const source = sourceSnapshot(fingerprint());
   return () => {
     if (!engineActiveHere() || getContext()?.chat !== chat || hostScope() !== scope ||
-        messages.some((m, i) => chat[i] !== m) || fingerprint() !== source)
+        messages.some((m, i) => chat[i] !== m) || !sameSourceSnapshot(fingerprint(), source))
       throw new Error('聊天、楼层或摘要来源已改变；保留返回供查看，但不能应用旧结果');
   };
 }

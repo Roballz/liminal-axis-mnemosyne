@@ -1,3 +1,4 @@
+import { sourceSnapshot, sameSourceSnapshot } from '@/memory/source-snapshot';
 import { beginBodyEdit, settleBodyEdit, cancelBodyEdit } from './summary-edit-signal';
 import { sourceSyncBaseline } from './source-sync-guard';
 import { membershipProjection, type MembershipProjection } from './event-memberships';
@@ -60,6 +61,14 @@ interface DailyCache {
     memberships: MembershipProjection;
     library: string;
     reviewCount: number;
+}
+interface SummaryBaseline { scope: string; messages: unknown[]; summaries: unknown }
+const summaryBaselines = new WeakMap<DailyCache, SummaryBaseline>();
+function recordSummaryBaseline(value: DailyCache) {
+    if (summaryBaselines.has(value)) return;
+    summaryBaselines.set(value, { scope: hostScope(),
+        messages: (getContext()?.chat ?? []).map(m => sourceSnapshot(hostMessageVersion(m))),
+        summaries: sourceSnapshot(memory.summaries) });
 }
 let cache: DailyCache | null = null;
 let lastCache: DailyCache | null = null;
@@ -146,7 +155,7 @@ export function recallHostVersion(): string {
         getContext()?.chat.map(m => !m.is_user && !!m.is_system)]);
 }
 function readableProjection(): DailyCache | null {
-    return injectionCache?.host === hostVersion() ? injectionCache : null;
+    return injectionCache && injectionCache.host === hostVersion() ? injectionCache : null;
 }
 /** 在已校验来源之后、同步落叶之前调用；返回的提交器不得跨 await 使用。 */
 export function beginVisibleSummaryCommit(floor: number): () => void {
@@ -441,6 +450,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                         '聊天已改变，请重试',
                     );
                     check(observedHost === hostVersion() && isActive() && observedGeneration === dailyState.generation, '聊天已改变');
+                    recordSummaryBaseline(cache);
                     lastCache = injectionCache = cache;
                     summaryCachePolicy = summaryPolicyEpoch;
                     Object.assign(dailyState, {
@@ -676,6 +686,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 ),
             };
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '聊天已改变');
+            recordSummaryBaseline(cache);
             lastCache = injectionCache = cache;
             summaryCachePolicy = summaryPolicyEpoch;
             Object.assign(dailyState, {
@@ -727,6 +738,7 @@ export async function refreshDailyTables() {
     if (cache !== previous || host !== hostVersion()) return;
     const permitted = new Set(previous.view.memories.filter((m) => events.validity.get(m.id) === 'valid').map((m) => m.id));
     cache = { ...previous, ...events, ...projectView(previous.view, events.validity), view: { ...previous.view, branch }, tableText: renderTableState(inputs, permitted) };
+    recordSummaryBaseline(cache);
     lastCache = injectionCache = cache;
     summaryCachePolicy = summaryPolicyEpoch;
     dailyState.tableRevision++;
@@ -994,29 +1006,34 @@ async function archivedSummaryEvidence(indices: number[], dependencies: string[]
     if (!prior || !ctx || summaryCachePolicy !== summaryPolicyEpoch) return null;
     const cutoff = indices.length ? Math.max(...indices) + 1 : prior.view.refs.length;
     if (cutoff > prior.view.refs.length || indices.some(i => !Number.isInteger(i) || i < 0)) return null;
-    // Parse the archived version once. Compare body strings directly; never serialize
-    // the live streaming suffix or repeatedly copy all source bodies for each guard.
-    const archived = JSON.parse(prior.host), expected = archived[1].slice(0, cutoff) as unknown[][];
-    const summaries = JSON.stringify(archived[2]), messages = ctx.chat.slice(0, cutoff);
-    const sameValue = (a: unknown, b: unknown) => a == null && b == null || a === b ||
-        typeof a === 'object' && typeof b === 'object' && JSON.stringify(a) === JSON.stringify(b);
+    // Published archive metadata is snapshotted once. Body strings remain shared;
+    // request/response checks never parse a full-chat JSON copy.
+    const baseline = summaryBaselines.get(prior);
+    if (!baseline) return null;
+    const expected = baseline.messages.slice(0, cutoff), messages = ctx.chat.slice(0, cutoff);
     const prefixCurrent = () => messages.every((m, i) => ctx.chat[i] === m &&
-        hostMessageVersion(m).every((value, j) => sameValue(value, expected[i]?.[j]))) && JSON.stringify(memory.summaries) === summaries;
+        sameSourceSnapshot(hostMessageVersion(m), expected[i])) && sameSourceSnapshot(memory.summaries, baseline.summaries);
     const scope = hostScope(), epoch = bindingEpoch, policy = summaryPolicyEpoch, library = activeLibrary();
     const hostCurrent = () => installed && bindingEpoch === epoch && summaryPolicyEpoch === policy &&
         activeLibrary() === library && getContext()?.chat === ctx.chat && hostScope() === scope &&
-        messages.length === cutoff && archived[0] === scope && prefixCurrent() &&
+        messages.length === cutoff && baseline.scope === scope && prefixCurrent() &&
         (getContext()?.chatMetadata[BINDING_KEY] as { branch?: string; scope?: string } | undefined)?.branch === prior.view.branch.id &&
         (getContext()?.chatMetadata[BINDING_KEY] as { scope?: string } | undefined)?.scope === scope;
     if (!hostCurrent()) return null;
     const lib = await library;
     if (lib.db.name !== prior.library || !await current(lib, prior.view) || !hostCurrent()) return null;
     const finalityCurrent = await replyFinality.assertSummaryPrefix(cutoff);
-    // Dependencies outside the checked prefix must use the ordinary full sync route.
-    const prefixRefs = new Map(prior.view.refs.slice(0, cutoff).map(r => [r.message, r.revision]));
-    const selected = dependencies.map(id => prior.view.memories.find(m => m.hostId === id));
-    if (selected.some(m => !m || !prior.allowed.has(m.hostId) ||
-        [...m.inputRefs, ...m.coverage].some(ref => prefixRefs.get(ref.message) !== ref.revision))) return null;
+    // Canonical validity already proves exact sources, verified plugin sidecars,
+    // and explicit role-repair pairs at this same checked Head/view/epoch. Do not
+    // impose a second, stricter revision equality that rejects those valid proofs.
+    // This check only bounds the dependency to the unchanged host prefix.
+    const refs = prior.view.refs.slice(0, cutoff);
+    const validity = dependencies.length ? await statuses(lib, { ...prior.view, refs, cutoff }) : prior.validity;
+    const byHost = new Map(prior.view.memories.map(m => [m.hostId, m]));
+    if (dependencies.some(id => {
+        const m = byHost.get(id);
+        return !m || !prior.allowed.has(id) || validity.get(m.id) !== 'valid';
+    })) return null;
     if (!await current(lib, prior.view) || !hostCurrent() || !finalityCurrent()) return null;
     return { view: prior.view, host: prior.host, generation: dailyState.generation, dependencies,
         inputRefs: indices.map(i => prior.view.refs[i]), current: () => hostCurrent() && finalityCurrent(),

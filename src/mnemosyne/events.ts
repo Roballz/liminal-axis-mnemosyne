@@ -584,7 +584,13 @@ export function renderPersistentEvents(cards: EventCard[]): string {
 }
 export async function eventHintsBefore(lib: Library, view: CapturedView | undefined, cutoff: number): Promise<EventHint[]> {
     if (!view) return [];
-    const prior = await capture(lib, view.branch.id, Math.min(cutoff, view.cutoff), view.snapshot.id);
+    check(await current(lib, view), '事件目录已改变，请重试');
+    // Reuse the exact captured source strings. Re-capturing here copied every
+    // historical body out of IndexedDB at both request preparation and response.
+    const end = Math.min(cutoff, view.cutoff), refs = view.refs.slice(0, end);
+    check(Number.isInteger(end) && end >= 0, '截止点无效');
+    const prior: CapturedView = { ...view, refs, cutoff: end,
+        sources: new Map(refs.map(ref => [ref.revision, view.sources.get(ref.revision)!])) };
     const { cards } = await eventView(lib, prior);
     check(await current(lib, view), '事件目录已改变，请重试');
     return cards.filter(c => !c.blocked && !c.needsReview).map(c => ({

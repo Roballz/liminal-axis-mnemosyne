@@ -1646,3 +1646,108 @@ test('summary prefix checks never read the unrelated streaming body or rescan al
     expect(reads).toBe(0);
     Object.defineProperty(ctx.chat[3], 'mes', { configurable: true, writable: true, value: text });
 });
+
+test('historical dependency with verified generated sidecar does not send old-floor summary through live suffix archive gate', async () => {
+    const emit = bindFinalityEvents();
+    await syncDaily();
+    const evidence = await captureSummaryEvidence([0, 1]);
+    ctx.chat[1].mes += '\n<bbs_items>程序写入的合成旁注</bbs_items>';
+    attachSummaryEvidence(ctx.chat, 1, evidence, [0, 1]);
+    ctx.chat.push(message(true, '下一轮问题'), message(false, '下一轮完整回复'));
+    const prior = await syncDaily();
+    expect((await statuses(lib, prior)).get(prior.memories[0].id)).toBe('valid');
+    const start = await captureSummaryEvidence([2, 3], ['legacy-leaf']);
+    await emit('GENERATION_STARTED', 'normal');
+    ctx.chat.push(message(true, '最新问题'), message(false, '尚在生成'));
+    ctx.streamingProcessor = { messageId: 5, isFinished: false, isStopped: false };
+    await emit('CHARACTER_MESSAGE_RENDERED', 5);
+    const returned = await captureSummaryEvidence([2, 3], ['legacy-leaf']);
+    expect(returned!.inputRefs).toEqual(start!.inputRefs);
+    expect(returned!.allowedDependencies).toContain('legacy-leaf');
+    expect(() => assertSummaryEvidence(returned)).not.toThrow();
+});
+
+test('summary with historical sidecar dependency actually writes its leaf before streaming suffix ends', async () => {
+    const { runSummary, engineState } = await import('@/memory/engine');
+    const { flushLeavesNow } = await import('@/memory/store');
+    const emit = bindFinalityEvents(); await syncDaily();
+    const first = await captureSummaryEvidence([0, 1]);
+    ctx.chat[1].mes += '\n<bbs_items>已验证历史旁注</bbs_items>';
+    attachSummaryEvidence(ctx.chat, 1, first, [0, 1]);
+    ctx.chat.push(message(true, '第二轮输入'), message(false, '需要第一次补摘的第二轮回复'));
+    const prior = await syncDaily();
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true); vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    vi.spyOn(client, 'requestViaMainApi').mockImplementation(async messages => {
+        expect(messages.map(m => m.content).join('\n')).toContain('合成旧摘要');
+        await emit('GENERATION_STARTED', 'normal');
+        ctx.chat.push(message(true, '第三轮输入'), message(false, '第三轮正在生成'));
+        ctx.streamingProcessor = { messageId: 5, isFinished: false, isStopped: false };
+        await emit('CHARACTER_MESSAGE_RENDERED', 5);
+        return '{"summary":"第二轮已保存摘要"}';
+    });
+    try {
+        await runSummary(3, { checkResummary: false });
+        expect(engineState.lastError).toBe('');
+        expect(ctx.chat[3].extra!.bbs_leaf!.text).toBe('第二轮已保存摘要');
+        expect((await capture(lib, prior.branch.id)).refs).toHaveLength(4);
+        await expect(syncDaily()).rejects.toThrow('暂不归档');
+    } finally { flushLeavesNow(); }
+});
+
+test('large archived summary evidence does not parse or stringify whole historical bodies on request and response', async () => {
+    const emit = bindFinalityEvents();
+    ctx.chat[0].mes = 'large-source-marker-' + '合成正文'.repeat(100_000);
+    await syncDaily();
+    let copies = 0;
+    const stringify = JSON.stringify, parse = JSON.parse;
+    const stringifySpy = vi.spyOn(JSON, 'stringify').mockImplementation(((...args: any[]) => {
+        const value = (stringify as any)(...args);
+        if (value?.length > 100_000 && value.includes('large-source-marker-')) copies++;
+        return value;
+    }) as typeof JSON.stringify);
+    const parseSpy = vi.spyOn(JSON, 'parse').mockImplementation(((text: string, reviver?: any) => {
+        if (text.length > 100_000 && text.includes('large-source-marker-')) copies++;
+        return parse(text, reviver);
+    }) as typeof JSON.parse);
+    try {
+        const before = await captureSummaryEvidence([0, 1]);
+        expect(() => assertSummaryEvidence(before)).not.toThrow();
+        expect(copies).toBe(0);
+        await emit('GENERATION_STARTED', 'normal');
+        ctx.chat.push(message(true, '新输入'), message(false, '流式候选'));
+        ctx.streamingProcessor = { messageId: 3, isFinished: false, isStopped: false };
+        await emit('CHARACTER_MESSAGE_RENDERED', 3);
+        copies = 0; // Lifecycle invalidation is separate from summary/source checks.
+        const after = await captureSummaryEvidence([0, 1]);
+        for (let i = 0; i < 10; i++) {
+            canonicalLeaves(); bridge.dailyTableText(); bridge.currentEventHints(); bridge.summaryAllowed('legacy-leaf');
+        }
+        expect(() => assertSummaryEvidence(after)).not.toThrow();
+        expect(copies).toBe(0);
+        ctx.chat[0].mes += '编辑';
+        expect(() => assertSummaryEvidence(after)).toThrow('已改变');
+    } finally { stringifySpy.mockRestore(); parseSpy.mockRestore(); }
+});
+
+test('summary event hints reuse the exact captured prefix without rereading archived bodies', async () => {
+    const { eventHintsBefore } = await import('./events');
+    const view = await syncDaily();
+    await editEvent(lib, view, null, { title: '已发生的历史事件', status: 'open', keywords: [] },
+        { memory: view.memories[0].id, active: true, kind: 'reference' });
+    const selected = await syncDaily();
+    let bodyReads = 0;
+    const transaction = lib.transaction.bind(lib);
+    vi.spyOn(lib, 'transaction').mockImplementation(((stores: any, mode: any, action: any) => transaction(stores, mode, async tx => {
+        const get = tx.get.bind(tx);
+        tx.get = (async (store: any, key: any) => {
+            if (store === 'source_bodies') bodyReads++;
+            return get(store, key);
+        }) as typeof tx.get;
+        return action(tx);
+    })) as typeof lib.transaction);
+    const hints = await eventHintsBefore(lib, selected, 2);
+    expect(hints.map(h => h.title)).toContain('已发生的历史事件');
+    expect(bodyReads).toBe(0);
+    expect(await eventHintsBefore(lib, selected, 0)).toEqual([]);
+});
