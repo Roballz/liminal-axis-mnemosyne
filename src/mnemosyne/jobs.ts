@@ -1,5 +1,5 @@
 import { reactive, watch } from 'vue';
-import { requestCompletion, requestViaMainApi } from '@/api/client';
+import { requestCompletion, requestViaMainApi, type ChatMsg } from '@/api/client';
 import { getChannelForTask, engineActiveHere } from '@/api/settings';
 import { engineState } from '@/memory/engine';
 import { getContext } from '@/st/context';
@@ -27,9 +27,8 @@ export async function saveDailySettings() {
     check(settings.batchSize <= 200 && [0,1].includes(settings.extra), '批量最多200；每链额外进展最多1');
     await (await activeLibrary()).transaction(['library_meta'], 'readwrite', tx => tx.put('library_meta', { id: 'daily-settings', schema: 1, value: JSON.parse(JSON.stringify(settings)) } as any));
 }
-export type Sender = (prompt: string) => Promise<string>;
-export const sendDaily: Sender = async (prompt) => {
-    const messages = [{ role: 'user' as const, content: prompt }];
+export type Sender = (messages: ChatMsg[]) => Promise<string>;
+export const sendDaily: Sender = async (messages) => {
     const channel = getChannelForTask('summary');
     return channel ? requestCompletion(channel, messages) : requestViaMainApi(messages);
 };
@@ -65,10 +64,9 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
             let batch = 0;
             const updated = await updateEventOverview(lib, view, id, settings.overviewBatchTokens,
                 messages => {
-                    const prompt = messages.map(m => m.content).join('\n');
-                    jobState.chars = prompt.length;
+                    jobState.chars = messages.reduce((n, m) => n + m.content.length, 0);
                     jobState.status = `更新概要 ${jobState.completed + 1} / ${pending.length} · 第 ${++batch} 批`;
-                    return sender(prompt);
+                    return sender(messages);
                 }, guard, manual, () => !stop && scope === hostScope() && generation === dailyState.generation);
             if (updated) jobState.completed++;
         }
