@@ -141,7 +141,7 @@ test("manual chain holds three separate floors and joins never call a model or d
   expect(eventPending(card)).toBe(true);
   const sender = vi.fn(async (messages) => {
     const prompt = JSON.stringify(messages);
-    expect(prompt).toContain("不超过500字");
+    expect(prompt).toContain("不超过600字");
     expect(prompt).toContain("主动舍弃琐碎小事");
     for (const text of [
       "摘要3",
@@ -190,12 +190,14 @@ test.each([true, false])(
         },
       );
     }
-    const sender = vi.fn(async (prompt: string) => {
+    const sender = vi.fn(async (messages: { role: 'system' | 'user'; content: string }[]) => {
+      expect(messages.map(m => m.role)).toEqual(['system', 'user']);
+      const prompt = JSON.stringify(messages);
       expect(prompt).toContain(apiSettings.prompts.eventOverview);
       expect(prompt).toContain(apiSettings.prompts.eventLatestProgress);
       expect(prompt).not.toContain(EVENT_LATEST_PROGRESS_PROMPT);
       expect(prompt).toContain('"overview"');
-      expect(prompt).toContain("不超过500字");
+      expect(prompt).toContain("不超过600字");
       return answer;
     });
     await runEvents(manual, sender);
@@ -221,7 +223,7 @@ test("custom event writing replaces the default for create/update, blank restore
     expect(instruction).toContain(apiSettings.prompts.eventLatestProgress);
     expect(instruction).not.toContain(EVENT_LATEST_PROGRESS_PROMPT);
     expect(instruction).not.toContain("主动舍弃琐碎小事");
-    expect(instruction).toContain("不超过500字");
+    expect(instruction).toContain("不超过600字");
     expect(instruction).toContain('"progress"');
     expect(instruction).toContain(EVENT_OUTPUT_PROTOCOL);
     expect(instruction).toContain('progress 不超过80字');
@@ -238,7 +240,7 @@ test("custom event writing replaces the default for create/update, blank restore
     expect(messages[0].content).toContain(apiSettings.prompts.eventLatestProgress);
     expect(messages[0].content).not.toContain('用一句话写新证据');
     expect(messages[0].content).not.toContain("用三句话");
-    expect(messages[0].content).toContain("不超过500字");
+    expect(messages[0].content).toContain("不超过600字");
     return answer;
   });
   await updateEventOverview(lib, await syncDaily(), id, 48000, updateSender);
@@ -280,7 +282,7 @@ test("manual create uses native summary materials without changing summaries", a
     const p = JSON.stringify(messages);
     expect(p).toContain("正文细节1");
     expect(p).toContain("把这一天当成一个整体");
-    expect(p).toContain("不超过500字");
+    expect(p).toContain("不超过600字");
     expect(p).toContain("对人物关系或重要转变有实质影响");
     return answer;
   });
