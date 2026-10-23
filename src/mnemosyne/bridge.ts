@@ -1,7 +1,7 @@
 import { sourceSnapshot, sameSourceSnapshot } from '@/memory/source-snapshot';
 import { beginBodyEdit, settleBodyEdit, cancelBodyEdit } from './summary-edit-signal';
 import { sourceSyncBaseline } from './source-sync-guard';
-import { membershipProjection, type MembershipProjection } from './event-memberships';
+import { membershipProjection, syncGeneratedEventMemberships, type MembershipProjection } from './event-memberships';
 import { ReplyFinality, ReplyFinalityError, type ReplyBlocker, type ReplyBlockerCursor } from './reply-finality';
 import { toast } from '@/st/toast';
 import { archiveWasDeleted, allowArchiveCreation, commitArchiveDeletion, type ArchiveDeletionPlan } from './archive-deletion';
@@ -683,6 +683,15 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             }
             const inputs = await readTables(lib, view.branch);
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
+            // Generated tags become memberships only after canonical source verification.
+            // Reproject the new epoch before publishing; never cache a stale event view.
+            if (await syncGeneratedEventMemberships(lib, view,
+                () => host === hostVersion() && isActive() && generation === dailyState.generation)) {
+                const updated = await lib.get<Branch>('branches', view.branch.id);
+                check(updated && updated.head === view.branch.head && updated.view === view.branch.view,
+                    '事件标签同步后视图已改变');
+                view = { ...view, branch: updated };
+            }
             cache = {
                 view,
                 ...projectView(view, validity),
