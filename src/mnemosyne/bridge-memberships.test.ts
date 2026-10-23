@@ -1,9 +1,13 @@
 import 'fake-indexeddb/auto';
+import { createSSRApp, computed } from 'vue';
+import { renderToString } from 'vue/server-renderer';
+import SummaryTags from '@/pages/summary/SummaryTags.vue';
+import { SUMMARY_CTX } from '@/pages/summary/ctx';
 import { beforeEach, afterEach, expect, test, vi } from 'vitest';
 import { Library, Transaction, activateLibrary, freshLibraryName } from './db';
-import { bindDaily, syncDaily, invalidateDaily, readDailyMembershipContext, refreshDailyTables, currentMembershipHints } from './bridge';
+import { bindDaily, syncDaily, invalidateDaily, readDailyMembershipContext, refreshDailyTables, currentMembershipHints, readDailyEventEditor } from './bridge';
 import { saveMemberships } from './event-memberships';
-import { eventView } from './events';
+import { eventView, setEventArchived } from './events';
 import { ReplyFinality } from './reply-finality';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
@@ -74,4 +78,41 @@ test('validated generated eventIds become one AI membership and retries do not d
     active: true, locked: false, owner: created.created });
   await syncDaily();
   expect((await lib.all<any>('event_memberships')).filter(m => m.origin === 'ai')).toHaveLength(1);
+});
+
+test('manual unlink survives stale generated tags, summary revision changes and archive retries', async () => {
+  let view = await syncDaily();
+  const created = await saveMemberships(lib, view, { mode: 'add', memories: [view.memories[0].id], eventIds: [], newTitle: '人工控制' });
+  ctx.chat[1].extra!.bbs_leaf!.tags = { version: 1, planIds: [], eventIds: [created.created!] };
+  invalidateDaily(); view = await syncDaily();
+  await saveMemberships(lib, view, { mode: 'replace', memories: [view.memories[0].id], eventIds: [] });
+  await refreshDailyTables();
+  expect(currentMembershipHints()?.get('real-bridge-leaf') ?? []).toEqual([]);
+  ctx.chat[1].extra!.bbs_leaf!.text += ' 修订摘要';
+  invalidateDaily(); view = await syncDaily();
+  expect((await eventView(lib, view)).cards[0].members).toHaveLength(0);
+  expect((await eventView(lib, view)).cards[0].removedMembers?.[0]).toMatchObject({ locked: true, memory: view.memories[0].id });
+  await syncDaily();
+  expect((await lib.all<any>('event_memberships')).filter(m => m.origin === 'ai')).toHaveLength(0);
+  await saveMemberships(lib, view, { mode: 'replace', memories: [view.memories[0].id], eventIds: [created.created!] });
+  await refreshDailyTables();
+  expect(currentMembershipHints()?.get('real-bridge-leaf')).toEqual([expect.objectContaining({ id: created.created })]);
+});
+
+
+test('both editors read the full branch catalog including archived chains and reverse memberships', async () => {
+  let view = await syncDaily();
+  const chain = await saveMemberships(lib, view, { mode: 'replace', memories: [view.memories[0].id], eventIds: [], newTitle: '归档也可选' });
+  await refreshDailyTables();
+  view = (await readDailyMembershipContext()).view;
+  await setEventArchived(lib, view, chain.created!, true);
+  const editor = await readDailyEventEditor();
+  expect(editor.projection.cards).toHaveLength(1);
+  expect(editor.projection.cards[0].chain.archived).toBe(true);
+  expect(editor.projection.cards[0].members[0].memory).toBe(view.memories[0].id);
+  expect(ctx.chat[1].extra!.bbs_leaf!.tags).toBeUndefined(); // Reverse projection needs no host writes.
+  await refreshDailyTables();
+  const app = createSSRApp(SummaryTags, { floor: 1, leafId: 'real-bridge-leaf' });
+  app.provide(SUMMARY_CTX, { events: computed(() => []) } as any);
+  expect(await renderToString(app)).toContain('相关事件 · 归档也可选');
 });

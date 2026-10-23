@@ -130,7 +130,8 @@ export async function syncGeneratedEventMemberships(lib: Library, view: Captured
         const candidates = tagged.get(card.chain.id);
         if (!candidates?.length) continue;
         const owned = new Set(card.members.map(m => m.memory));
-        const ids = candidates.filter(id => !owned.has(id));
+        const removed = new Set(card.removedMembers?.filter(m => m.locked).map(m => m.memory));
+        const ids = candidates.filter(id => !owned.has(id) && !removed.has(id));
         if (ids.length) pending.set(card.chain.id, { card, memories: ids });
     }
     if (!pending.size) return false;

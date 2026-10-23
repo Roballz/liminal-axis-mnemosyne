@@ -190,9 +190,9 @@ test.each([true, false])(
         },
       );
     }
-    const sender = vi.fn(async (messages: { role: 'system' | 'user'; content: string }[]) => {
+    const sender = vi.fn(async (messages: { role: 'system' | 'user' | 'assistant'; content: string }[]) => {
       expect(messages.map(m => m.role)).toEqual(['system', 'user']);
-      const prompt = JSON.stringify(messages);
+      const prompt = messages.map(m => m.content).join('\n');
       expect(prompt).toContain(apiSettings.prompts.eventOverview);
       expect(prompt).toContain(apiSettings.prompts.eventLatestProgress);
       expect(prompt).not.toContain(EVENT_LATEST_PROGRESS_PROMPT);
@@ -209,7 +209,7 @@ test.each([true, false])(
   },
 );
 test("custom event writing replaces the default for create/update, blank restores default, output protocol remains", async () => {
-  expect(buildEventInstruction()).toContain(EVENT_OVERVIEW_PROMPT);
+  expect(buildEventInstruction()).toContain(EVENT_OVERVIEW_PROMPT.replace('{{overviewTarget}}', '600').replace('{{summaryCount}}', '1'));
   expect(buildEventInstruction()).toContain(EVENT_LATEST_PROGRESS_PROMPT);
   expect(EVENT_LATEST_PROGRESS_PROMPT).toContain('latestProgress.text 不超过100字');
   apiSettings.prompts.eventOverview = "合成自定义：用三句话概括关系转折。";
@@ -248,7 +248,7 @@ test("custom event writing replaces the default for create/update, blank restore
   expect(updateSender).toHaveBeenCalledTimes(1);
   apiSettings.prompts.eventOverview = " \n ";
   apiSettings.prompts.eventLatestProgress = " \n ";
-  expect(buildEventInstruction()).toContain(EVENT_OVERVIEW_PROMPT);
+  expect(buildEventInstruction()).toContain(EVENT_OVERVIEW_PROMPT.replace('{{overviewTarget}}', '600').replace('{{summaryCount}}', '1'));
   expect(buildEventInstruction()).toContain(EVENT_LATEST_PROGRESS_PROMPT);
 });
 test("stopping an overview request does not publish late output or lose queued members", async () => {
@@ -951,7 +951,8 @@ test("overview settings are snapshotted through a model request and its review",
   const text = "核".repeat(1199) + "🌸";
   const output = JSON.stringify({ ...JSON.parse(answer), overview: text });
   const review = await prepareFloorEvent(1, "合成测试", 200000, async messages => {
-    expect(JSON.stringify(messages)).toContain("不超过1200字");
+    expect(JSON.stringify(messages)).toContain("不超过600字");
+    expect(JSON.stringify(messages)).not.toContain("不超过1200字");
     settings.overviewMaxChars = 100;
     return output;
   });

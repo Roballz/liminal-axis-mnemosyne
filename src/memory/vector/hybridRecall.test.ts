@@ -148,7 +148,7 @@ it('重复进入同一轮召回时等待已有请求，不提前放行生成', a
   vi.mocked(embed.embedTexts).mockReturnValueOnce(pending.promise);
   const first = runVectorRecall();
   await vi.waitFor(() => expect(embed.embedTexts).toHaveBeenCalledTimes(1));
-  expect(recallDebug.status).toContain('查询向量化');
+  expect(recallDebug.status).toContain('embedding');
   let released = false;
   const second = runVectorRecall().then(() => { released = true; });
   await Promise.resolve(); await Promise.resolve();
@@ -162,7 +162,8 @@ it('重复进入同一轮召回时等待已有请求，不提前放行生成', a
 it('embedding 超时结束为失败，下一轮可以再次召回', async () => {
   vi.mocked(embed.embedTexts).mockRejectedValueOnce(new Error('embedding超时(>10s)'));
   await runVectorRecall();
-  expect(recallDebug.status).toContain('召回失败:embedding超时');
+  expect(recallDebug.status).toBe('召回失败：embedding');
+  expect(recallDebug.detail).toContain('embedding超时');
   expect(finalText()).toBe('');
   await runVectorRecall();
   expect(recallDebug.status).toBe('召回完成');
@@ -172,8 +173,8 @@ it('embedding 超时结束为失败，下一轮可以再次召回', async () => 
 it('rerank 超时有明确降级结果，不缓存失败，下一轮重新请求', async () => {
   vi.mocked(embed.rerankDocuments).mockRejectedValueOnce(new Error('rerank超时(>20s)'));
   await runVectorRecall();
-  expect(recallDebug.status).toContain('召回完成（降级）');
-  expect(recallDebug.status).toContain('rerank超时');
+  expect(recallDebug.status).toBe('降级召回');
+  expect(recallDebug.detail).toContain('rerank超时');
   await runVectorRecall();
   expect(embed.rerankDocuments).toHaveBeenCalledTimes(2);
   expect(recallDebug.status).toBe('召回完成');
@@ -215,7 +216,8 @@ it('新一轮输入会替换悬挂的旧任务，不被旧锁跳过', async () =
 it('写入宿主注入槽异常也释放锁，下一轮仍能召回', async () => {
   inject.mockImplementationOnce(() => { throw new Error('prompt unavailable'); });
   await runVectorRecall();
-  expect(recallDebug.status).toContain('召回失败:prompt unavailable');
+  expect(recallDebug.status).toContain('召回失败');
+  expect(recallDebug.detail).toContain('prompt unavailable');
   await runVectorRecall();
   expect(finalText()).toContain('A 原文');
   expect(recallDebug.status).toBe('召回完成');

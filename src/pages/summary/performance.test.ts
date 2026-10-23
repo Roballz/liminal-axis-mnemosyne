@@ -22,7 +22,7 @@ it('240张摘要共享一次目录校验，首屏有界，折叠总结不挂载�
   vi.spyOn(context, 'getContext').mockReturnValue({ chat, chatMetadata: {}, getCurrentChatId: () => 'synthetic-perf' } as any);
   Object.assign(memory, createEmptyMemory());
   recomputeDerived();
-  const hints = vi.spyOn(bridge, 'currentEventHints').mockImplementation(() => {
+  const hints = vi.spyOn(bridge, 'currentEventDirectory').mockImplementation(() => {
     bridge.hostVersion(); // Same full-host serialization as a validated real cache read.
     return [{ id: 'ev_perf', title: '合成事件', status: 'open' }];
   });

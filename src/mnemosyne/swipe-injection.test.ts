@@ -66,7 +66,12 @@ test.each([false, true])('real generation/bridge/recall: vector=%s normal, swipe
         await prepareGeneration(abort, type);
         expect(injected()).toContain('未受影响的历史摘要'); expect(abort).not.toHaveBeenCalled();
         expect(sync).toHaveBeenCalledTimes(enabled ? 2 : 1); // Real active recall performs its second full sync.
-        if (enabled) expect(recallDebug.status).toContain('未召回:没有可召回的旧摘要或启用的知识库');
+        if (enabled) {
+            // A blocked archive used to be silently reported as no recall needed.
+            if (recallDebug.summaryStatus === '归档失败') {
+                expect(recallDebug.status).toBe('召回失败'); expect(recallDebug.detail).toBeTruthy();
+            } else expect(recallDebug.status).toBe('无需召回');
+        }
     }
     expect(fetch).not.toHaveBeenCalled();
 });

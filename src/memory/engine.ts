@@ -1224,7 +1224,7 @@ async function floorSummaryContext(chat: STMessage[], aiFloor: number, targets: 
 
   const events = view ? await eventHintsBefore(await activeLibrary(), view, beforeIndex) : [];
   prompt.system += `\n\n${SUMMARY_TAG_PROTOCOL}\n${PLAN_PROGRESS_PROTOCOL}`;
-  prompt.user += `\n【已有事件目录（仅供关联，不改成员）】\n${JSON.stringify(events)}`;
+  prompt.user += `\n【已有事件目录（用 tags.eventIds 关联，程序同步成员）】\n${JSON.stringify(events)}`;
   return { prompt, charCard, persona, worldInfo, stateBefore, events };
 }
 /** Same native summary materials, repurposed by explicit event creation; no summary writes. */

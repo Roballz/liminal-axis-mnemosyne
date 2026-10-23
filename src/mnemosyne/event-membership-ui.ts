@@ -3,8 +3,8 @@ import { getLeaf } from '@/memory/apply';
 import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
 import { activeLibrary, type Library } from './db';
-import { dailyState, hostScope, hostVersion, readDailyMembershipContext, refreshDailyTables, dailyCurrent, currentMembershipHints } from './bridge';
-import { eventView, type EventCard } from './events';
+import { dailyState, hostScope, hostVersion, readDailyEventEditor, refreshDailyTables, dailyCurrent, currentMembershipHints } from './bridge';
+import { type EventCard } from './events';
 import { manualEventState } from './manual-events';
 import { jobState } from './jobs';
 import { check, type CapturedView } from './model';
@@ -68,8 +68,7 @@ export async function openMemberships(options: { floor?: number; eventId?: strin
     membershipUi.error = '';
     manualEventState.busy = true;
     try {
-        const { view, lib, host, generation } = await readDailyMembershipContext();
-        const projection = await eventView(lib, view);
+        const { view, lib, host, generation, projection } = await readDailyEventEditor();
         check(run === ticket && scope === hostScope() && await dailyCurrent(view, host, generation) && lib === await activeLibrary(), '聊天已改变，请重新打开');
         check(run === ticket && scope === hostScope() && host === hostVersion() && generation === dailyState.generation && (options.isCurrent?.() ?? true), '摘要或聊天已改变，请重新打开');
         const positions = new Map(view.refs.map((ref, index) => [ref.message, index]));

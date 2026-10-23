@@ -110,6 +110,9 @@ test('canonical unavailable still permits independently budgeted knowledge recal
     vi.spyOn(knowledge, 'recallKnowledge').mockResolvedValue('独立知识，额度未受摘要阻塞影响');
     await runVectorRecall();
     expect(text()).toContain('独立知识');
+    expect(recallDebug.summaryStatus).toBe('归档失败');
+    expect(recallDebug.knowledgeStatus).toBe('已注入');
+    expect(recallDebug.status).toBe('降级召回');
     expect(vector.vecSearch).not.toHaveBeenCalled();
     expect(indexing.ensureRecallIndex).not.toHaveBeenCalled();
 });
@@ -119,4 +122,20 @@ test('rerank fallback uses cosine for legacy tier behavior while reporting no fa
     await runVectorRecall();
     expect(text()).toContain(leaves[0].mesFull);
     expect(recallDebug.rerank.every((h: any) => h.rerankScore === null)).toBe(true);
+});
+
+
+test('摘要事件校验失效只丢弃摘要，知识库仍完成注入', async () => {
+    settings.apiSettings.vector.knowledge.enabled = true;
+    vi.spyOn(knowledge, 'listKnowledge').mockResolvedValue([{ id: 'knowledge', database: 'synthetic-db', name: '合成知识', delimiter: '---', chunks: ['独立知识'], enabled: true, embedding: knowledge.embeddingIdentity(), revision: '1' }]);
+    vi.spyOn(knowledge, 'recallKnowledge').mockResolvedValue('独立知识');
+    vi.mocked(embed.rerankDocuments).mockImplementation(async () => {
+        await editEvent(lib, view, null, { title: '变化', status: 'open', keywords: [] }, { memory: view.memories[0].id, active: true, kind: 'progress' });
+        return [{ index: 0, score: .99 }];
+    });
+    await runVectorRecall();
+    expect(text()).toBe('独立知识');
+    expect(recallDebug.summaryStatus).toBe('处理失败');
+    expect(recallDebug.knowledgeStatus).toBe('已注入');
+    expect(recallDebug.status).toBe('降级召回');
 });

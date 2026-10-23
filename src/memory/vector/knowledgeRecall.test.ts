@@ -10,6 +10,9 @@ import * as store from './store';
 import * as embed from './embed';
 import * as rewrite from './rewrite';
 import * as knowledge from './knowledge';
+import { recallDebug } from './debug';
+import * as contextRecall from './contextRecall';
+import * as bm25 from './bm25';
 import { clearRecallInjection, runVectorRecall } from './recall';
 
 const original = JSON.parse(JSON.stringify(settings.apiSettings.vector));
@@ -107,11 +110,50 @@ it('召回中知识库被删除，丢弃旧命中，缓存不复用', async () =
   vi.mocked(rewrite.rewriteQuery).mockImplementationOnce(async () => {
     await knowledge.deleteKnowledge(file); return { intent: 'BB', queries: ['BB'] };
   });
-  await runVectorRecall(); expect(finalText()).toBe('');
+  await runVectorRecall(); expect(finalText()).toContain('旧剧情摘要'); expect(finalText()).not.toContain('BB设定');
+  expect(recallDebug.knowledgeStatus).toBe('结果已失效');
   await runVectorRecall(); expect(finalText()).toContain('旧剧情摘要'); expect(finalText()).not.toContain('BB设定');
 });
 
 it('知识库读取失败不阻断摘要召回', async () => {
   vi.spyOn(knowledge, 'listKnowledge').mockRejectedValue(new Error('storage unavailable'));
   await runVectorRecall(); expect(finalText()).toContain('旧剧情摘要');
+});
+
+
+it.each(['index', 'search', 'render'] as const)('摘要 %s 失败仍注入知识库，显示独立状态且不缓存失败', async stage => {
+  if (stage === 'index') vi.mocked(index.ensureRecallIndex).mockRejectedValueOnce(new Error('index unavailable'));
+  if (stage === 'search') vi.mocked(store.vecSearch).mockRejectedValueOnce(new Error('search unavailable'));
+  if (stage === 'render') vi.spyOn(contextRecall, 'prioritizeRrf').mockImplementationOnce(() => { throw new Error('summary processing failed'); });
+  await runVectorRecall();
+  expect(finalText()).toContain('BB设定'); expect(finalText()).not.toContain('旧剧情摘要');
+  expect(recallDebug.status).toBe('降级召回');
+  expect(recallDebug.summaryStatus).toContain('失败');
+  expect(recallDebug.knowledgeStatus).toBe('已注入');
+  await runVectorRecall();
+  expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(2);
+  expect(finalText()).toContain('旧剧情摘要');
+});
+
+it('无命中与检索失败分开显示，短状态按汉字和英文单词计数', async () => {
+  vi.mocked(store.vecSearch).mockResolvedValueOnce({ results: [] });
+  await runVectorRecall();
+  expect(recallDebug.summaryStatus).toBe('未命中'); expect(recallDebug.knowledgeStatus).toBe('已注入');
+  for (const label of [recallDebug.status, `摘要：${recallDebug.summaryStatus}`, `知识库：${recallDebug.knowledgeStatus}`])
+    expect(label.match(/[\p{Script=Han}]|[A-Za-z]+|[0-9]+/gu)?.length ?? 0).toBeLessThanOrEqual(10);
+});
+
+
+it.each(['BM25', 'rerank'] as const)('%s 失败且摘要无可用结果时不误报未命中', async stage => {
+  settings.apiSettings.vector.recall.embeddingThreshold = 1;
+  if (stage === 'BM25') {
+    settings.apiSettings.vector.recall.bm25Candidates = 1;
+    vi.spyOn(bm25, 'searchBm25').mockRejectedValueOnce(new Error('BM25 unavailable'));
+    vi.mocked(store.vecSearch).mockResolvedValueOnce({ results: [] });
+  } else vi.mocked(embed.rerankDocuments).mockRejectedValueOnce(new Error('rerank unavailable'));
+  await runVectorRecall();
+  expect(recallDebug.summaryStatus).toContain(stage);
+  expect(recallDebug.summaryStatus).toContain('失败');
+  expect(recallDebug.knowledgeStatus).toBe('已注入');
+  expect(finalText()).toContain('BB设定'); expect(finalText()).not.toContain('旧剧情摘要');
 });

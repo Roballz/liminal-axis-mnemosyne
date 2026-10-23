@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ scope: 'one', host: 'v1', context: {} as any, 
 vi.mock('@/st/context', () => ({ getContext: () => mocks.context }));
 vi.mock('@/st/toast', () => ({ toast: mocks.toast }));
 vi.mock('./bridge', async () => ({ dailyState: (await import('vue')).reactive({ revision: 0, generation: 0, scope: 'one' }),
-  hostScope: () => mocks.scope, hostVersion: () => mocks.host, readDailyMembershipContext: mocks.read,
+  hostScope: () => mocks.scope, hostVersion: () => mocks.host, readDailyEventEditor: async () => { const context = await mocks.read(); return { ...context, projection: await (await import('./events')).eventView(context.lib, context.view) }; },
   refreshDailyTables: mocks.refresh, dailyCurrent: mocks.current, currentMembershipHints: () => null }));
 vi.mock('./manual-events', () => ({ manualEventState: { busy: false } }));
 vi.mock('./jobs', () => ({ jobState: { busy: false } }));

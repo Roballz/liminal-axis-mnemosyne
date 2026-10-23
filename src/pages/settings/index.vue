@@ -687,7 +687,7 @@ const recallStatusKind = computed<'ok' | 'warn' | 'fail' | 'pending'>(() => {
   const s = recallDebug.status;
   if (s.includes('失败')) return 'fail';
   if (s.includes('进行中')) return 'pending';
-  if (s.includes('未召回') || s.includes('未注入')) return 'warn';
+  if (s.includes('未召回') || s.includes('未注入') || s.includes('降级') || s.includes('未命中')) return 'warn';
   return 'ok';
 });
 // 分数(0~1)→ 进度条宽度百分比;负分(如未知)按 0 处理
@@ -1592,6 +1592,10 @@ function exportPublicApiDocument() {
               <span class="bbs-dbg-status-text">{{ recallDebug.status }}</span>
               <span class="bbs-dbg-time">{{ fmtRecallTime(recallDebug.at) }}</span>
             </div>
+
+            <p v-if="recallDebug.summaryStatus" class="bbs-field-hint">摘要：{{ recallDebug.summaryStatus }}</p>
+            <p v-if="recallDebug.knowledgeStatus" class="bbs-field-hint">知识库：{{ recallDebug.knowledgeStatus }}</p>
+            <details v-if="recallDebug.detail"><summary>错误详情</summary><pre>{{ recallDebug.detail }}</pre></details>
 
             <!-- 四阶段各自可折叠,默认收起;标题带计数 -->
             <Collapsible :title="`1 · 查询重写 · ${recallDebug.queries.length} Q`" :open="false">

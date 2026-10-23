@@ -16,6 +16,8 @@ export interface EventCard {
     needsReview?: boolean;
     blocked?: boolean;
     memberDetails?: MemoryRevision[];
+    /** Current family-resolved removals; AI must respect manual unlink decisions. */
+    removedMembers?: Membership[];
     history?: { revisions: EventRevision[]; memberships: Membership[]; progress: Progress[] };
     inheritanceKey?: string;
 }
@@ -204,7 +206,7 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             const blocked = live && members.some(m => !permitted.has(m.memory));
             const needsReview = live && ((!!meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))) || meta.refs.some(id => !permitted.has(id)) || !!meta.summarized?.some(id => !memberSet.has(id) || !permitted.has(id)));
             if (!live && (meta.summarized?.some(id => !memberSet.has(id)) || (meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))))) meta = { ...meta, overview: '', summarized: [], latestProgress: null };
-            cards.push({ chain, meta, members, progress, needsReview, blocked, memberDetails: [...memberDetails.values()],
+            cards.push({ chain, meta, members, removedMembers: [...latest.values()].filter(m => !m.active), progress, needsReview, blocked, memberDetails: [...memberDetails.values()],
                 ...(includeHistory ? { history } : {}) });
         }
         return { cards, valid, validity: validStates, storedCount: chains.length };

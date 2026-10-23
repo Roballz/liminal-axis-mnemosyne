@@ -343,6 +343,13 @@ export async function readDailyMembershipContext() {
     check(host === hostVersion() && generation === dailyState.generation && lib === await activeLibrary(), '聊天已改变，请重新打开');
     return { view: { ...prior.view, branch }, lib, host, generation };
 }
+/** Shared editor catalog: includes archived/review chains, independently of injection cache. */
+export async function readDailyEventEditor() {
+    const context = await readDailyMembershipContext();
+    const projection = await eventView(context.lib, context.view);
+    check(await dailyCurrent(context.view, context.host, context.generation) && context.lib === await activeLibrary(), '聊天已改变，请重新打开');
+    return { ...context, projection };
+}
 /** UI membership is independent of recall eligibility; null means not currently verified. */
 export function currentMembershipHints(): MembershipProjection | null {
     return readableProjection()?.memberships ?? null;

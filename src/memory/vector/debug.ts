@@ -44,6 +44,10 @@ export interface RecallDebug {
   at: number;
   /** 状态文案:'召回完成' | '进行中…' | '未召回:…' | '失败:…' */
   status: string;
+  summaryStatus?: string;
+  knowledgeStatus?: string;
+  /** Raw diagnostic, kept separate from short status labels. */
+  detail?: string;
   /** 查询重写的场景意图(兼作 rerank query) */
   intent: string;
   /** 查询重写产出的多条检索 query */
@@ -58,7 +62,7 @@ export interface RecallDebug {
 }
 
 function empty(): RecallDebug {
-  return { context: undefined, contextRanked: [], at: 0, status: '', intent: '', queries: [], embedding: [], bm25: [], bm25Status: 'BM25 未启用', fusion: [], rerank: [], injectedText: '' };
+  return { context: undefined, contextRanked: [], at: 0, status: '', summaryStatus: '', knowledgeStatus: '', detail: '', intent: '', queries: [], embedding: [], bm25: [], bm25Status: 'BM25 未启用', fusion: [], rerank: [], injectedText: '' };
 }
 
 /** 全局召回调试快照。UI 直接订阅;recall.ts 在各阶段写入。 */

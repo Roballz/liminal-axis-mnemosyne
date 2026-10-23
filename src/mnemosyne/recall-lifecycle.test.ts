@@ -189,8 +189,8 @@ test.each([1, 3])('重排期间真实编辑 #%s 正文依然取消，并保留�
   const recall = runVectorRecall();
   await vi.waitFor(() => expect(embed.rerankDocuments).toHaveBeenCalledOnce());
   ctx.chat[floor].mes = '人工编辑后的剧情'; scheduleDaily(); await recall;
-  expect(recallDebug.status).toContain('正文或摘要已更新');
-  expect(recallDebug.status).toContain('阶段：重排候选原文');
+  expect(recallDebug.detail).toContain('正文或摘要已更新');
+  expect(recallDebug.detail).toContain('阶段：重排');
   expect(injected()).toBe('');
   pending.resolve([{ index: 0, score: 1 }]); await nextTick();
   expect(injected()).toBe('');
@@ -252,7 +252,7 @@ test('同轮回答追加、swipe 与删除后重新生成复用召回，真实�
   await runVectorRecall();
   const recalled = injected(); expect(recalled).toContain('旧剧情');
   const firstQueries = [...recallDebug.queries];
-  expect(localStorage.getItem(RECALL_CACHE_STORAGE_KEY)).toContain('hybrid-v3');
+  expect(localStorage.getItem(RECALL_CACHE_STORAGE_KEY)).toContain('hybrid-v4');
   const reply = message(false, '待替换回答 A <bbs_end>2099-01-01 12:00</bbs_end>');
   reply.extra!.bbs_leaf = { id: 'tail-leaf', text: '本轮回答摘要', delta: {}, v: 1, createdAt: 2, swipe: 0 };
   ctx.chat.push(reply); scheduleDaily();

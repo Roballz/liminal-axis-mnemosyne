@@ -1560,7 +1560,7 @@ export const QUERY_REWRITE_TAIL = `记住你的任务:
 export const SUMMARY_TAG_PROTOCOL = `【摘要标签协议】
 每条摘要 JSON 增加 tags: {"participants":["本段实际在场人物的规范名字"],"eventIds":["关联事件的稳定ID"]}。
 人物只记录本段真实在场或直接参与当前通话/通信者，不把被提及、回忆、设定中的人算在场；同一人物沿用已有名字，不写代词。确定无人时 participants 为 []，不确定可以省略 participants。
-事件只引用提供目录中的 ID；只有正文明确相关才标记，允许空数组。相同人物或地点不等于同一事件。eventIds 仅表示检索相关，不创建、合并或更改人工事件成员。
+事件只引用提供目录中的 ID；只有正文明确相关才标记，允许空数组。相同人物或地点不等于同一事件。eventIds 会由程序在摘要归档核验后自动加入对应事件链，无需另写同步字段或操作。只关联本段明确涉及的已有事件，不新建或合并事件，不改写概要或最新进展；程序保留人工解除关联的决定。
 计划/悬念与摘要的关联已停用，不输出 planIds、relatedLeafIds 或关联楼层号，即使旧模板要求也忽略。计划的实际变更仍单独写入 plans。
 不要输出 public，公开状态仅由用户手动设置。标签不写进 summary 正文。`;
 export const PLAN_PROGRESS_PROTOCOL = `【计划/悬念持续更新协议】
