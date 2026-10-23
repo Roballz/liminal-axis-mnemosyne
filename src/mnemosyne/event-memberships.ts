@@ -2,6 +2,7 @@
 import { Library } from './db';
 import { eventView, type EventCard } from './events';
 import { check, row, type Branch, type CapturedView, type EventChain, type EventRevision, type Membership } from './model';
+import { statuses } from './canonical';
 
 export interface MembershipHint {
     id: string;
@@ -102,4 +103,47 @@ export function parseFloorRanges(text: string, maxFloor: number): Set<number> | 
         for (let floor = lo; floor <= hi; floor++) floors.add(floor);
     }
     return floors;
+}
+
+/**
+ * Materialize validated, generated summary eventIds as ordinary AI memberships.
+ * Only current confirmed leaf revisions qualify; missing/reviewed/blocked events
+ * and stale sources cannot be promoted. No network/model calls or host writes.
+ * Transactionally advancing the branch epoch makes retries idempotent.
+ */
+export async function syncGeneratedEventMemberships(lib: Library, view: CapturedView,
+    guard: () => boolean = () => true): Promise<boolean> {
+    const validity = await statuses(lib, view);
+    const leaves = view.memories.filter(m => m.level === 0 && !m.seed && validity.get(m.id) === 'valid' && m.tags?.eventIds?.length);
+    if (!leaves.length) return false;
+    const { cards } = await eventView(lib, view);
+    const pending = new Map<string, { card: EventCard; memories: string[] }>();
+    for (const card of cards) {
+        if (card.blocked || card.needsReview) continue;
+        const owned = new Set(card.members.map(m => m.memory));
+        const ids = leaves.filter(m => m.tags!.eventIds.includes(card.chain.id) && !owned.has(m.id)).map(m => m.id);
+        if (ids.length) pending.set(card.chain.id, { card, memories: ids });
+    }
+    if (!pending.size) return false;
+    return lib.transaction(['branches', 'event_chains', 'event_revisions', 'event_memberships'], 'readwrite', async tx => {
+        const branch = await tx.get<Branch>('branches', view.branch.id);
+        check(guard() && branch && branch.story === view.branch.story && branch.head === view.branch.head &&
+            branch.view === view.branch.view && branch.epoch === view.branch.epoch &&
+            view.snapshot.id === branch.head && view.cutoff === view.snapshot.length,
+            '事件标签同步期间视图已改变');
+        branch.epoch++;
+        for (const [id, { card, memories }] of pending) {
+            const chain = await tx.get<EventChain>('event_chains', id);
+            check(chain?.branch === branch.id && chain.story === branch.story, '事件链已改变');
+            const base = { story: branch.story, branch: branch.id, owner: id,
+                snapshot: view.snapshot.id, cutoff: view.cutoff, epoch: branch.epoch };
+            await tx.add('event_revisions', { ...card.meta, ...row('er'), ...base, created: Date.now() } as EventRevision);
+            for (const memory of memories) await tx.add('event_memberships', {
+                ...row('link'), ...base, memory, kind: 'progress', origin: 'ai', locked: false, active: true,
+            } as Membership);
+        }
+        check(guard(), '事件标签同步期间聊天已改变');
+        await tx.put('branches', branch);
+        return true;
+    });
 }
