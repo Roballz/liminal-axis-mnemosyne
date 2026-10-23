@@ -84,11 +84,13 @@ function sourceLabel(hit: HybridHit, selfScope: string | null): string {
 function windowLeafIds(chat: STMessage[]): string[] {
   const keepStart = resolveKeepStart(chat);
   const ids: string[] = [];
+  // Snapshot once, never reserialize the full archive and scan all leaves per floor.
+  const canonicalByFloor = dailyInstalled() ? new Map(canonicalLeaves().map(l => [l.msgIndex, l.leafId])) : null;
   for (let i = 0; i < chat.length; i++) {
     if (chat[i]?.extra?.bbs_omit) continue;
     if (chat[i]?.is_system === true && (!apiSettings.autoHideEnabled || i < keepStart)) continue;
     if (leafValid(chat[i])) {
-      const key = dailyInstalled() ? canonicalLeaves().find(l => l.msgIndex === i)?.leafId : getLeaf(chat[i])!.id;
+      const key = canonicalByFloor ? canonicalByFloor.get(i) : getLeaf(chat[i])!.id;
       if (key) ids.push(key);
     }
   }
@@ -480,13 +482,21 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const hybridEnabled = cfg.bm25Candidates > 0;
   const safeEvents = eventCards.filter(c => !c.blocked && !c.needsReview);
   const localLeaves = leaves;
+  const canonicalById = new Map(canonicalAtStart.map(l => [l.leafId, l]));
+  const localById = new Map(localLeaves.map(l => [l.leafId, l]));
+  const memberEvents = new Map<string, string[]>();
+  for (const card of safeEvents) for (const member of card.members) {
+    const ids = memberEvents.get(member.memory) ?? [];
+    ids.push(card.chain.id);
+    memberEvents.set(member.memory, ids);
+  }
   const tagHit = <T extends HybridHit>(hit: T): T => {
     if (hit.scope !== selfScope) return hit;
-    const canonical = dailyInstalled() ? canonicalAtStart.find(l => l.leafId === hit.leafId) : undefined;
-    const local = localLeaves.find(l => l.leafId === hit.leafId);
+    const canonical = dailyInstalled() ? canonicalById.get(hit.leafId) : undefined;
+    const local = localById.get(hit.leafId);
     const leaf = !dailyInstalled() && local ? getLeaf(chat[local.msgIndex]) : undefined;
     const tags = canonical?.tags ?? (leaf?.id === hit.leafId ? leaf.tags : undefined);
-    const eventIds = safeEvents.filter(c => c.members.some(m => m.memory === hit.leafId)).map(c => c.chain.id);
+    const eventIds = memberEvents.get(hit.leafId) ?? [];
     return { ...hit, tags: { ...(tags ?? { version: 1 }),
       planIds: [],
       eventIds: [...new Set([...(tags?.eventIds ?? []), ...eventIds])],
