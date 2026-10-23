@@ -192,7 +192,7 @@ export async function prepareFloorEvent(
     {
       role: "system",
       content:
-        buildEventInstruction(overviewMaxChars) + "\n仅使用本次选择的事件材料，不执行摘要或填表任务。",
+        buildEventInstruction(1) + "\n仅使用本次选择的事件材料，不执行摘要或填表任务。",
     },
     {
       role: "user",
@@ -312,7 +312,7 @@ async function requestEventOverview(
   let progress = '';
   let keywords = card.needsReview || modeChanged ? [] : card.meta.keywords;
   let position = 0, batch = 0;
-  const instruction = buildEventInstruction(overviewMaxChars) +
+  const instruction = buildEventInstruction(memories.length) +
     '\n本次按材料顺序分批更新同一事件。按 overviewRole 区分概要的覆盖承接或改写参考用途；latestProgress 是此前已确认的最新进展。不要索要或复述已被累计概要替代的旧全文。sources 中已在前文或概要覆盖的正文不重复发送。材料按 materialMode 选择，未发送的摘要或正文不可索要、猜测或补造。' +
     '\noverviewRole 标明 overview 的用途：saved_verified 是已确认覆盖的旧概要，rolling 是前批生成的累计概要，reference_only 仅为改写参考且不计入本次覆盖，rebuild_empty 表示从当前材料重新建立概要。overview 位于 materials 前；materials 只代表当前批次。保留仍成立的历史事实并合并新变化，输出完整累计概要，不是只输出本批摘要；不得虚构尚未提供的内容。' +
     '\n结合累计概要与本批材料重写完整概要；累计新进展 cumulativeProgress 合并到 progress，保持字数上限。latestProgress.memory 只能使用本批材料ID或传入 latestProgress.memory；没有更新则保留传入进展。尚未提供的材料不得引用。' +
