@@ -584,17 +584,27 @@ export function renderPersistentEvents(cards: EventCard[]): string {
 }
 export async function eventHintsBefore(lib: Library, view: CapturedView | undefined, cutoff: number): Promise<EventHint[]> {
     if (!view) return [];
+    check(Number.isInteger(cutoff) && cutoff >= 0, '截止点无效');
     check(await current(lib, view), '事件目录已改变，请重试');
-    // Reuse the exact captured source strings. Re-capturing here copied every
-    // historical body out of IndexedDB at both request preparation and response.
-    const end = Math.min(cutoff, view.cutoff), refs = view.refs.slice(0, end);
-    check(Number.isInteger(end) && end >= 0, '截止点无效');
-    const prior: CapturedView = { ...view, refs, cutoff: end,
-        sources: new Map(refs.map(ref => [ref.revision, view.sources.get(ref.revision)!])) };
-    const { cards } = await eventView(lib, prior);
+    // Eligibility follows the earliest valid member summary's actual plot floor,
+    // not the much later floor where the event chain was created/edited.
+    // Read the verified current catalog once; do not load historical bodies or
+    // reproject all event revisions separately for every summary request.
+    const { cards, valid } = await eventView(lib, view);
+    const positions = new Map(view.refs.map((ref, index) => [ref.message, index]));
+    const floor = new Map(valid.filter(m => m.level === 0 && !m.seed)
+        .map(m => [m.id, positions.get(m.anchor ?? '') ?? -1]));
+    const end = Math.min(cutoff, view.cutoff);
     check(await current(lib, view), '事件目录已改变，请重试');
-    return cards.filter(c => !c.blocked && !c.needsReview).map(c => ({
-        id: c.chain.id, title: c.meta.title, status: c.meta.status,
-        latest: c.meta.latestProgress ? `${c.meta.latestProgress.time} ${c.meta.latestProgress.text}`.trim() : undefined,
-    }));
+    return cards.filter(c => !c.blocked && !c.needsReview &&
+        c.members.some(m => (floor.get(m.memory) ?? -1) >= 0 && (floor.get(m.memory) ?? -1) < end))
+        .map(c => {
+            const latest = c.meta.latestProgress;
+            // Never show a later source's progress when summarizing an earlier floor.
+            const latestFloor = latest ? floor.get(latest.memory) : undefined;
+            return { id: c.chain.id, title: c.meta.title, status: c.meta.status,
+                ...(latest && latestFloor !== undefined && latestFloor >= 0 && latestFloor < end
+                    ? { latest: `${latest.time} ${latest.text}`.trim() } : {}),
+            };
+        });
 }
