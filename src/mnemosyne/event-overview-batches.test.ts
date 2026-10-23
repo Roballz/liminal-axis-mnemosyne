@@ -179,7 +179,10 @@ test('settings default/migration, Unicode limit and backup roundtrip preserve ol
     expect(parseManualEvent(response(atLimit)).overview).toBe(atLimit);
     expect(() => parseManualEvent(response(atLimit + '超'))).toThrow('1000字');
     settings.overviewMaxChars = 1200; settings.overviewBatchTokens = 90000; settings.overviewMaterialMode = 'summary';
-    expect(buildEventInstruction()).toContain('不超过1200字');
+    expect(buildEventInstruction()).toContain('不超过600字');
+    expect(buildEventInstruction(21)).toContain('不超过900字');
+    expect(buildEventInstruction(41)).toContain('不超过1200字');
+    expect(buildEventInstruction(61)).toContain('不超过1500字');
     await saveDailySettings();
     const pack = await exportLibrary(lib); expect(pack.version).toBe(14);
     restored = await restoreLibrary(pack, false); await activateLibrary(restored);
