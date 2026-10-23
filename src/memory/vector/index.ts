@@ -128,9 +128,9 @@ export function vectorIndexableHere(): boolean {
  * 把当前聊天的叶子同步进向量库(增量)。可被防抖 schedule 或手动「重建索引」直接调用。
  * @returns 本轮重新生成向量与仅更新附属数据的条数。
  */
-export async function syncVectorIndex(signal?: AbortSignal): Promise<VectorSyncResult> {
+export async function syncVectorIndex(signal?: AbortSignal, archiveAlreadySynced = false): Promise<VectorSyncResult> {
   if (!vectorIndexableHere()) return { embedded: 0, payloadUpdated: 0 };
-  if (dailyInstalled()) await syncDaily();
+  if (dailyInstalled() && !archiveAlreadySynced) await syncDaily();
   const database = currentVectorDb();
   const chatId = currentChatId();
   if (!database || !chatId) return { embedded: 0, payloadUpdated: 0 };
@@ -231,9 +231,9 @@ async function updatePayload(database: string, scope: string, todo: LeafForIndex
  * 召回前补齐索引并刷新过期 payload。与后台索引共用 single-flight；
  * 运行期间发生的新编辑会在当前任务结束前自动补跑。
  */
-export async function ensureRecallIndex(signal?: AbortSignal): Promise<void> {
+export async function ensureRecallIndex(signal?: AbortSignal, archiveAlreadySynced = false): Promise<void> {
   if (!vectorIndexableHere()) return;
-  await syncVectorIndex(signal);
+  await syncVectorIndex(signal, archiveAlreadySynced);
 }
 
 /**
