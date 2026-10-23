@@ -206,9 +206,13 @@ export const localStore: VectorStore = {
     const queries = queryVectors.map(decodeFloat32Base64).map(normalize);
     const fused = new Map<string, { row: LocalRecord; bestSim: number; bestQuery: number }>();
 
+    let scored = 0;
     for (const scope of scopes) {
       const rows = await getScopeRows(database, scope);
       for (const r of rows) {
+        // Cooperative scoring: allow rendering/touch input between batches.
+        // IndexedDB format, score math, fusion and ordering remain unchanged.
+        if (++scored % 96 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
         if (exclude.has(String(r.leafId))) continue;
         const v = r.vector instanceof Float32Array ? r.vector : Float32Array.from(r.vector as ArrayLike<number>);
         let best = -1;
