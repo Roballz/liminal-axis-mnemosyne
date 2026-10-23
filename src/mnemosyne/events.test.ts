@@ -1,6 +1,6 @@
 import { test, expect, vi } from 'vitest';
 import { batchFixture, fixture, output, observation } from './fixtures';
-import { prepareEventBatch, parseEventOutput, commitEventBatch, eventView, editEvent, wrapEvents } from './events';
+import { prepareEventBatch, parseEventOutput, commitEventBatch, eventView, editEvent, eventHintsBefore, wrapEvents } from './events';
 import { capture, synchronize } from './canonical';
 import { type Branch, type EventReceipt, type Progress } from './model';
 import { exportLibrary, restoreLibrary } from './migration';
@@ -232,4 +232,19 @@ test('history backfill chooses a batch cutoff before loading the event catalog',
     expect(batch?.view.cutoff).toBe(4);
     expect(batch?.prompt).not.toContain('末尾才出现的未来事项');
     lib.close();
+});
+
+test('summary catalog visibility follows first linked summary floor, not later chain creation floor', async () => {
+    const { lib, branch, view } = await fixture(4);
+    try {
+        // Create the chain after all four summaries already exist, anchored to the first summary.
+        const chain = await editEvent(lib, view, null,
+            { title: 'Earlier story event', status: 'open', keywords: [], overview: '' },
+            { memory: view.memories[0].id, active: true, kind: 'progress' });
+        const currentView = await capture(lib, branch.id);
+        const firstFloor = currentView.refs.findIndex(ref => ref.message === currentView.memories[0].anchor);
+        expect(firstFloor).toBeGreaterThanOrEqual(0);
+        expect((await eventHintsBefore(lib, currentView, firstFloor)).some(e => e.id === chain)).toBe(false);
+        expect((await eventHintsBefore(lib, currentView, firstFloor + 1)).some(e => e.id === chain)).toBe(true);
+    } finally { lib.close(); }
 });
