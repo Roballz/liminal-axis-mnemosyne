@@ -395,7 +395,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const degraded: string[] = [];
   if (summaryWanted) {
     setRecallStatus('进行中…检查／补齐摘要向量索引');
-    try { await ensureRecallIndex(signal); }
+    try { await ensureRecallIndex(signal, !!canonicalView); }
     catch (error) {
       signal.throwIfAborted();
       summaryReady = false;
