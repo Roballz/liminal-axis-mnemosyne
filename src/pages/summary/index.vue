@@ -19,7 +19,7 @@ import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 
 import SummaryNode from './SummaryNode.vue';
 import SummaryTags from './SummaryTags.vue';
 import { normalizeTags, shortText } from '@/memory/contextTags';
-import { currentEventHints, dailyInstalled, dailyState, hostScope, hostVersion, syncDaily } from '@/mnemosyne/bridge';
+import { currentEventDirectory, dailyInstalled, dailyState, hostScope, hostVersion, syncDaily } from '@/mnemosyne/bridge';
 import type { MemPlan } from '@/memory/types';
 import { SUMMARY_CTX, type SummaryRow } from './ctx';
 
@@ -29,7 +29,7 @@ onMounted(() => recomputeDerived());
 
 const events = computed(() => {
   void derivedMeta.rev; void dailyState.revision; void dailyState.generation;
-  return currentEventHints();
+  return currentEventDirectory();
 });
 
 // 切聊天:重置临时视图态(展开/搜索/选择),避免上个聊天的残留跨聊天带过来。
