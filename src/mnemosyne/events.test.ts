@@ -4,6 +4,7 @@ import { prepareEventBatch, parseEventOutput, commitEventBatch, eventView, editE
 import { capture, synchronize } from './canonical';
 import { type Branch, type EventReceipt, type Progress } from './model';
 import { exportLibrary, restoreLibrary } from './migration';
+import { Transaction } from './db';
 test('five summaries publish five memberships and exactly one append-only progress', async () => {
     const { lib, batch, branch } = await batchFixture();
     const out = output(batch);
@@ -265,5 +266,76 @@ test('summary catalog excludes resolved chains, preserves archived active chains
         expect((await eventView(lib, currentView)).cards).toHaveLength(3);
         await editEvent(lib, currentView, ids[2], { title: 'reopened', status: 'open', keywords: [] });
         expect((await eventHintsBefore(lib, await capture(lib, branch.id), cutoff)).map(e => e.id).sort()).toEqual([...ids].sort());
+    } finally { lib.close(); }
+});
+
+test('deleted floor unlinks its event member once, retains overview history, and identifies old references', async () => {
+    const { lib, branch, input, view } = await fixture(3);
+    try {
+        const removed = view.memories[2];
+        const id = await editEvent(lib, view, null,
+            { title: '删楼测试', status: 'open', keywords: [], overview: '旧概要仍保留', summarized: [removed.id] },
+            { memory: removed.id, active: true, kind: 'progress' });
+        await editEvent(lib, await capture(lib, branch.id), id,
+            { title: '删楼测试', status: 'open', keywords: [] },
+            { memory: view.memories[0].id, active: true, kind: 'progress' });
+        input.messages.splice(4); input.memories.pop();
+        await synchronize(lib, input);
+        const card = (await eventView(lib, await capture(lib, branch.id), false, undefined, true)).cards[0];
+        expect(card.members.map(m => m.memory)).toEqual([view.memories[0].id]);
+        expect(card.blocked).toBe(false);
+        expect(card.needsReview).toBe(true);
+        expect(card.meta.overview).toBe('旧概要仍保留');
+        expect(card.issues).toContainEqual(expect.objectContaining({ memory: removed.id, deleted: true, floor: 5, reason: '来源楼层已删除' }));
+        expect(await lib.get('memory_revisions', removed.id)).toBeDefined();
+        const count = (await lib.all('event_memberships')).length;
+        const reads = vi.spyOn(Transaction.prototype, 'all');
+        try {
+            await synchronize(lib, input);
+            input.messages.push({ key: 'after-deletion', role: 'user', content: '删除后的新消息', swipe: 0 });
+            await synchronize(lib, input);
+            expect(reads.mock.calls.filter(([store, index]) => store === 'event_memberships' && index === 'branch')).toHaveLength(0);
+        } finally { reads.mockRestore(); }
+        expect(await lib.all('event_memberships')).toHaveLength(count);
+        const restored = await restoreLibrary(await exportLibrary(lib), false);
+        try {
+            await synchronize(restored, input);
+            expect(await restored.all('event_memberships')).toHaveLength(count);
+        } finally { restored.close(); }
+    } finally { lib.close(); }
+});
+
+test('editing a source does not auto-unlink its member and diagnostics locate the blocked summary', async () => {
+    const { lib, branch, input, view } = await fixture(2);
+    try {
+        await editEvent(lib, view, null, { title: '来源编辑', status: 'open', keywords: [] },
+            { memory: view.memories[0].id, active: true, kind: 'progress' });
+        input.messages[1].content += '改写';
+        await synchronize(lib, input);
+        const card = (await eventView(lib, await capture(lib, branch.id), false, undefined, true)).cards[0];
+        expect(card.members).toHaveLength(1);
+        expect(card.blocked).toBe(true);
+        expect(card.issues).toContainEqual(expect.objectContaining({ memory: view.memories[0].id, floor: 1,
+            deleted: false, text: view.memories[0].content, reason: '来源变化，摘要待审核' }));
+    } finally { lib.close(); }
+});
+
+test('failed deletion reconciliation rolls back unlinks and retries on the next synchronization', async () => {
+    const { lib, branch, input, view } = await fixture(2);
+    try {
+        await editEvent(lib, view, null, { title: '事务回滚', status: 'open', keywords: [] },
+            { memory: view.memories[1].id, active: true, kind: 'progress' });
+        const before = await lib.all('event_memberships');
+        input.messages.splice(2); input.memories.pop();
+        const original = Transaction.prototype.add;
+        const writes = vi.spyOn(Transaction.prototype, 'add').mockImplementation(function (this: Transaction, store, value) {
+            if (store === 'event_memberships') throw new Error('synthetic write failure');
+            return original.call(this, store, value);
+        });
+        try { await expect(synchronize(lib, input)).rejects.toThrow('synthetic write failure'); }
+        finally { writes.mockRestore(); }
+        expect(await lib.all('event_memberships')).toEqual(before);
+        await synchronize(lib, input);
+        expect((await eventView(lib, await capture(lib, branch.id))).cards[0].members).toHaveLength(0);
     } finally { lib.close(); }
 });

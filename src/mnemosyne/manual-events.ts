@@ -167,7 +167,7 @@ export async function floorEventContext(floor: number) {
     lib = await activeLibrary();
   const host = hostVersion(),
     generation = dailyState.generation;
-  const data = await eventView(lib, view);
+  const data = await eventView(lib, view, false, undefined, true);
   check(await dailyCurrent(view, host, generation), "楼层已改变");
   const memory = data.valid.find(
     (m) => m.level === 0 && m.anchor === view.refs[floor]?.message,
@@ -241,7 +241,7 @@ export async function updateEventOverview(
   // Cheap stop/scope/generation check at CPU yields; guard still checks full freshness at every send/save.
   preparationGuard = guard,
 ) {
-  const data = await eventView(lib, view, false, eventId);
+  const data = await eventView(lib, view, false, eventId, true);
   const card = data.cards.find((c) => c.chain.id === eventId);
   check(card, "事件不存在或已失效");
   if (!eventPending(card) && !(allowCoverageUpgrade && eventCoverageUpgradeNeeded(card))) return false;
@@ -281,7 +281,9 @@ async function requestEventOverview(
   preparationGuard = guard,
 ) {
   check(Number.isSafeInteger(maxTokens) && maxTokens > 0, "事件 token 预算必须为正整数");
-  check(!card.blocked && memories.every(id => validity.get(id) === 'valid'), '请先审核来源摘要，或解除已删除来源的关联');
+  const problems = (card.issues ?? []).filter(issue => memories.includes(issue.memory));
+  check(!card.blocked && memories.every(id => validity.get(id) === 'valid'),
+    `请先处理问题摘要：${problems.slice(0, 3).map(issue => `${issue.floor === undefined ? '楼层未知' : `${issue.deleted ? '原' : ''}#${issue.floor}楼`} ${issue.reason}「${issue.text.slice(0, 24)}」`).join('；') || '来源已失效，请展开事件查看关联成员'}`);
   check(memories.length, '该事件没有有效关联摘要，请先加入内容');
   const byId = new Map(view.memories.map(m => [m.id, m]));
   const refsByMessage = new Map(view.refs.map(r => [r.message, r]));
@@ -472,7 +474,7 @@ export async function prepareEventRewrite(
     lib = await activeLibrary();
   const host = hostVersion(), scope = hostScope(),
     generation = dailyState.generation;
-  const data = await eventView(lib, view, false, eventId);
+  const data = await eventView(lib, view, false, eventId, true);
   const card = data.cards.find((c) => c.chain.id === eventId);
   check(card, "事件不存在或不属于当前分支");
   const memories = card.members.map((m) => m.memory);

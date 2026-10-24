@@ -26,7 +26,7 @@ import {
   runTableBackfill,
   stopTableBackfill,
 } from "./table-backfill";
-import { runEvents, stopDailyJob, settings } from "./jobs";
+import { runEvents, stopDailyJob, settings, jobState } from "./jobs";
 import { exportLibrary, restoreLibrary } from "./migration";
 import type { TableDef, TableRow } from "./model";
 const answer = JSON.stringify({
@@ -113,6 +113,17 @@ async function chain() {
     () => true,
   );
 }
+test('blocked batch explains skips and explicit update identifies the offending floor', async () => {
+  const id = await chain();
+  ctx.chat[1].mes += '来源被编辑';
+  const sender = vi.fn(async () => answer);
+  await runEvents(true, sender);
+  expect(sender).not.toHaveBeenCalled();
+  expect(jobState.status).toContain('1 条来源异常已跳过');
+  expect(jobState.status).toContain('一天约会');
+  await expect(updateEventOverview(lib, await syncDaily(), id, 80000, sender)).rejects.toThrow('#1楼');
+  expect(sender).not.toHaveBeenCalled();
+});
 async function table() {
   const v = await syncDaily(),
     def = newTable(v, "约会记录");

@@ -51,6 +51,7 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
         const last = Math.max(0, ...cards.flatMap(c => c.progress.map(p => p.cutoff)));
         if (!manual && target - last < settings.interval) return;
         const pending = cards.filter(c => !c.blocked && (manual || !c.needsReview) && (eventPending(c) || manual && eventCoverageUpgradeNeeded(c))).map(c => c.chain.id);
+        const blocked = cards.filter(c => c.blocked && eventPending(c));
         for (const id of pending) {
             if (stop) break;
             check(guard(), '聊天改变，事件任务停止');
@@ -70,7 +71,8 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
                 }, guard, manual, () => !stop && scope === hostScope() && generation === dailyState.generation);
             if (updated) jobState.completed++;
         }
-        if (!stop) jobState.status = `批量整理完成：更新 ${jobState.completed} 条事件链`;
+        if (!stop) jobState.status = `批量整理完成：更新 ${jobState.completed} 条事件链` +
+            (blocked.length ? `；${blocked.length} 条来源异常已跳过：${blocked.slice(0, 3).map(c => c.meta.title).join('、')}。展开事件查看问题摘要` : '');
         if (stop)
             jobState.status = '已停止；已保存概要保留，其余仍待更新';
     }

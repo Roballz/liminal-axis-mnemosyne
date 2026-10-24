@@ -303,7 +303,7 @@ async function refresh() {
   try {
     const captured = await syncDaily(), lib = await activeLibrary();
     const host = hostVersion(), generation = dailyState.generation, capturedRevision = dailyState.revision;
-    const data = await eventView(lib, captured);
+    const data = await eventView(lib, captured, false, undefined, true);
     if (!live()) return;
     const valid = await dailyCurrent(captured, host, generation) && lib === await activeLibrary();
     if (!live()) return;
@@ -627,9 +627,18 @@ onBeforeUnmount(() => {
       <template v-if="expandedCards[card.chain.id]">
       <hr />
       <div v-if="eventPending(card) || eventCoverageUpgradeNeeded(card)" class="mn-card">
-        <p v-if="card.blocked">关联摘要待审核或来源已删除。先处理上方摘要审核；已删除来源可展开成员解除关联。</p>
-        <p v-else-if="eventPending(card)">概要待更新。可以保留原概要、手动补充，或让模型更新；事件关联仍保留。</p>
-        <p v-else>当前概要已保留，材料模式改变或缺少新版覆盖记录时可点“AI更新”或“批量更新”分批建立可靠覆盖记录；不会仅因升级自动调用模型。</p>
+        <p v-if="card.blocked">关联摘要待审核，请先处理。</p>
+        <p v-else-if="!card.members.length">暂无关联摘要，请先加入摘要。</p>
+        <p v-else-if="card.needsReview">概要来源已变化，请更新概要。</p>
+        <p v-else-if="eventPending(card)">概要待更新，可手动修改或使用 AI 更新。</p>
+        <p v-else>当前概要已保留，可更新覆盖记录。</p>
+        <details v-if="card.issues?.length">
+          <summary>查看问题摘要（{{ card.issues.length }}）</summary>
+          <p v-for="issue in card.issues" :key="issue.memory">
+            <strong>{{ issue.floor === undefined ? '楼层未知' : `${issue.deleted ? '原' : ''}#${issue.floor}楼` }}</strong>
+            · {{ issue.reason }}<br />{{ issue.text.slice(0, 60) || '摘要内容缺失' }}
+          </p>
+        </details>
         <div class="mn-actions mn-overview-actions">
           <button :disabled="busy || jobState.busy || card.blocked" @click="run(async () => { await keepEventOverview(await activeLibrary(), validView(), card.chain.id, () => viewHost === hostVersion() && viewGeneration === dailyState.generation); await refresh(); })">保留当前</button>
           <button :disabled="busy || jobState.busy" @click="edit(card)">手动更新</button>
@@ -653,6 +662,7 @@ onBeforeUnmount(() => {
           class="mn-card"
         >
           <p class="mn-member-preview">
+            <strong v-if="card.issues?.some(issue => issue.memory === member.memory)">⚠ {{ card.issues.find(issue => issue.memory === member.memory)?.reason }} · </strong>
             {{ text(member.memory).slice(0, 100) }}
           </p>
           <details class="mn-member-detail" :open="!!expandedMembers[member.id]" @toggle="setExpanded($event, expandedMembers, member.id)">

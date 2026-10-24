@@ -161,16 +161,16 @@ test('manual summary versions keep event membership; high summary and overview c
   expect(wrapEvents([card], view, [view.memories[0].id], [], budget)).toContain(card.meta.overview);
   validateData(await exportLibrary(lib)); lib.close();
 });
-test('deleted sources remain visible locally, cannot be confirmed or sent; unlink resolves without erasing history', async () => {
+test('deleted sources auto-unlink, remain available in history, and are never sent for overview updates', async () => {
   const { lib, input, branch, view } = await fixture(1);
   const id = await commitManualEvent(lib, view, null, [view.memories[0].id], response, () => true);
   input.messages.pop(); input.memories = []; await synchronize(lib, input);
   let current = await capture(lib, branch.id), card = (await eventView(lib, current)).cards[0];
-  expect(card.blocked).toBe(true); expect(card.memberDetails?.[0].content).toBe(view.memories[0].content);
+  expect(card.blocked).toBe(false); expect(card.members).toEqual([]);
+  expect(card.removedMembers?.map(m => m.memory)).toContain(view.memories[0].id);
+  expect(card.needsReview).toBe(true);
   const sender = vi.fn(async () => response);
-  await expect(updateEventOverview(lib, current, id, 48000, sender)).rejects.toThrow('来源'); expect(sender).not.toHaveBeenCalled();
-  await expect(keepEventOverview(lib, current, id)).rejects.toThrow('来源');
-  await editEvent(lib, current, id, card.meta, { memory: view.memories[0].id, active: false, kind: 'progress' });
+  await expect(updateEventOverview(lib, current, id, 48000, sender)).rejects.toThrow('没有有效关联摘要'); expect(sender).not.toHaveBeenCalled();
   current = await capture(lib, branch.id); await keepEventOverview(lib, current, id);
   expect((await eventView(lib, await capture(lib, branch.id))).cards[0].members).toEqual([]);
   expect(await lib.get('memory_revisions', view.memories[0].id)).toBeDefined();

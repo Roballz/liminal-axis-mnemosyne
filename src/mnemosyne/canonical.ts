@@ -1,6 +1,7 @@
 import { readSource, snapshotVariants, retireCurrentBodies } from './current-body';
 import { ensureTableHistory, reconcileTableHistory, inheritTableHistory } from './table-history';
 import { eventView } from './events';
+import { unlinkDeletedEventSources, eventSourcesChecked } from './event-source-sync';
 import { inheritForkMemory } from './fork-memory';
 import type { SummaryTags } from '@/memory/contextTags';
 import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
@@ -150,7 +151,8 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
     const bodyHashes = await Promise.all(observation.messages.map((m) => fingerprint(m.content)));
     const memoryHashes = await Promise.all(observation.memories.map((m) => fingerprint(m)));
     const tagUpdates = await tagOnlyRevisions(lib, observation);
-    return lib.transaction(STORES, 'readwrite', async (tx) => {
+    let removedEventSources = new Set<string>();
+    const synchronized = await lib.transaction(STORES, 'readwrite', async (tx) => {
         if (baseline?.branch) {
             const live = await tx.get<Branch>('branches', baseline.branch.id);
             check(live && live.head === baseline.branch.head && live.view === baseline.branch.view &&
@@ -396,6 +398,8 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
             visiting.delete(id); affected.set(id, removed); return removed;
         };
         for (const [family, id] of Object.entries(selections)) if (await hasMissingSource(id)) delete selections[family];
+        removedEventSources = new Set([...observedMessages].filter(removedMessage));
+        const eventsChanged = await unlinkDeletedEventSources(lib, tx, branch, removedEventSources, refs.length);
         if (!previous || !equal(previous.selections, selections)) {
             const view: MemoryView = { ...row('mv'), branch: branch.id, selections };
             await tx.add('memory_views', view);
@@ -418,12 +422,14 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 sourceRecovery: { version: 1, reason: 'missing_basis', snapshot: branch.head } } as MemoryRevision);
             recovered = true;
         }
-        if (oldHead !== branch.head || previous?.id !== branch.view || recovered) branch.epoch++;
+        if (oldHead !== branch.head || previous?.id !== branch.view || recovered || eventsChanged) branch.epoch++;
         await tx.put('branches', branch);
         if (oldHead !== branch.head) await retireCurrentBodies(tx, branch, priorRefs);
         if (baseline) check(baseline.isCurrent(), '删除归档期间聊天已变化，本次事务回滚');
         return branch;
     });
+    eventSourcesChecked(lib, synchronized, removedEventSources);
+    return synchronized;
 }
 export async function capture(
     lib: Library,

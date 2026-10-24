@@ -9,6 +9,7 @@ import { snapshotRefs, summarySources, statuses, capture, current, sameNarrative
 import { snapshotVariants } from './current-body';
 import { STORES, row, check, equal, fingerprint, type CapturedView, type EventChain, type EventRevision, type Membership, type Progress, type EventReceipt, type Branch, type Snapshot, type MemoryRevision } from './model';
 export interface EventCard {
+    issues?: { memory: string; roles: string[]; reason: string; floor?: number; deleted: boolean; text: string }[];
     chain: EventChain;
     meta: EventRevision;
     members: Membership[];
@@ -27,7 +28,7 @@ export interface EventView {
     validity: Map<string, import('./canonical').MemoryStatus>;
     storedCount: number;
 }
-export async function eventView(lib: Library, view: CapturedView, includeHistory = false, eventId?: string): Promise<EventView> {
+export async function eventView(lib: Library, view: CapturedView, includeHistory = false, eventId?: string, includeIssues = false): Promise<EventView> {
     const validStates = await statuses(lib, view);
     const valid = view.memories.filter(m => validStates.get(m.id) === 'valid');
     const permitted = new Set(valid.map(m => m.id));
@@ -66,6 +67,7 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             return ok;
         };
         const cards: EventCard[] = [];
+        const diagnosticFloors = new Map<string, Map<string, number>>();
         const equivalents = new Map<string, string>();
         const resolveMemory = async (id: string): Promise<string> => {
             if (equivalents.has(id)) return equivalents.get(id)!;
@@ -205,8 +207,37 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             }
             const blocked = live && members.some(m => !permitted.has(m.memory));
             const needsReview = live && ((!!meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))) || meta.refs.some(id => !permitted.has(id)) || !!meta.summarized?.some(id => !memberSet.has(id) || !permitted.has(id)));
+            const issues: NonNullable<EventCard['issues']> = [];
+            if (includeIssues && (blocked || needsReview)) {
+                const references = new Map<string, string[]>();
+                const add = (id: string, role: string, membershipRequired = true) => {
+                    if (permitted.has(id) && (!membershipRequired || memberSet.has(id))) return;
+                    references.set(id, [...(references.get(id) ?? []), role]);
+                };
+                for (const m of members) add(m.memory, '关联成员');
+                for (const id of new Set([...meta.refs, ...(meta.summarized ?? [])])) add(id, '旧概要', false);
+                for (const id of meta.summarized ?? []) if (!memberSet.has(id)) add(id, '已解除关联');
+                if (meta.latestProgress) add(meta.latestProgress.memory, '最新进展');
+                for (const [id, roles] of references) {
+                    const memory = await readMemory(id);
+                    const deleted = !!memory?.anchor && !positions.has(memory.anchor);
+                    let floor = memory?.anchor ? positions.get(memory.anchor) : undefined;
+                    if (deleted && memory) {
+                        const basis = await readSnapshot(memory.basis);
+                        if (basis && !diagnosticFloors.has(basis.id)) diagnosticFloors.set(basis.id,
+                            new Map((await snapshotRefs(tx, basis)).map((ref, index) => [ref.message, index])));
+                        floor = basis ? diagnosticFloors.get(basis.id)?.get(memory.anchor!) : undefined;
+                    }
+                    const state = validStates.get(id);
+                    const reason = deleted ? '来源楼层已删除' : state === 'needs_review' ? '来源变化，摘要待审核'
+                        : state === 'needs_rebuild' ? '下级摘要变化，需重建' : state === 'excluded' ? '摘要未参与记忆'
+                        : !memberSet.has(id) && permitted.has(id) ? '已解除关联，旧内容仍引用'
+                        : '旧摘要已被替换或移出当前视图';
+                    issues.push({ memory: id, roles: [...new Set(roles)], reason, floor, deleted, text: memory?.content ?? '' });
+                }
+            }
             if (!live && (meta.summarized?.some(id => !memberSet.has(id)) || (meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))))) meta = { ...meta, overview: '', summarized: [], latestProgress: null };
-            cards.push({ chain, meta, members, removedMembers: [...latest.values()].filter(m => !m.active), progress, needsReview, blocked, memberDetails: [...memberDetails.values()],
+            cards.push({ chain, meta, members, removedMembers: [...latest.values()].filter(m => !m.active), progress, needsReview, blocked, issues, memberDetails: [...memberDetails.values()],
                 ...(includeHistory ? { history } : {}) });
         }
         return { cards, valid, validity: validStates, storedCount: chains.length };
