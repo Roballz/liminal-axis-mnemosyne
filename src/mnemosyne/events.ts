@@ -598,7 +598,7 @@ export async function eventHintsBefore(lib: Library, view: CapturedView | undefi
         .map(m => [m.id, positions.get(m.anchor ?? '') ?? -1]));
     const end = Math.min(cutoff, view.cutoff);
     check(await current(lib, view), '事件目录已改变，请重试');
-    return cards.filter(c => !c.blocked && !c.needsReview &&
+    return cards.filter(c => c.meta.status !== 'resolved' && !c.blocked && !c.needsReview &&
         c.members.some(m => (floor.get(m.memory) ?? -1) >= 0 && (floor.get(m.memory) ?? -1) < end))
         .map(c => {
             const latest = c.meta.latestProgress;

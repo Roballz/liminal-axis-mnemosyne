@@ -1,6 +1,6 @@
 import { test, expect, vi } from 'vitest';
 import { batchFixture, fixture, output, observation } from './fixtures';
-import { prepareEventBatch, parseEventOutput, commitEventBatch, eventView, editEvent, eventHintsBefore, wrapEvents } from './events';
+import { prepareEventBatch, parseEventOutput, commitEventBatch, eventView, editEvent, eventHintsBefore, setEventArchived, wrapEvents } from './events';
 import { capture, synchronize } from './canonical';
 import { type Branch, type EventReceipt, type Progress } from './model';
 import { exportLibrary, restoreLibrary } from './migration';
@@ -246,5 +246,24 @@ test('summary catalog visibility follows first linked summary floor, not later c
         expect(firstFloor).toBeGreaterThanOrEqual(0);
         expect((await eventHintsBefore(lib, currentView, firstFloor)).some(e => e.id === chain)).toBe(false);
         expect((await eventHintsBefore(lib, currentView, firstFloor + 1)).some(e => e.id === chain)).toBe(true);
+    } finally { lib.close(); }
+});
+
+test('summary catalog excludes resolved chains, preserves archived active chains, and restores reopened chains', async () => {
+    const { lib, branch, view } = await fixture(4);
+    try {
+        const ids: string[] = [];
+        for (const status of ['open', 'dormant', 'resolved']) {
+            ids.push(await editEvent(lib, await capture(lib, branch.id), null,
+                { title: status, status, keywords: [], overview: '' },
+                { memory: view.memories[0].id, active: true, kind: 'progress' }));
+        }
+        await setEventArchived(lib, await capture(lib, branch.id), ids[0], true);
+        const currentView = await capture(lib, branch.id);
+        const cutoff = currentView.refs.findIndex(ref => ref.message === view.memories[0].anchor) + 1;
+        expect((await eventHintsBefore(lib, currentView, cutoff)).map(e => e.id).sort()).toEqual(ids.slice(0, 2).sort());
+        expect((await eventView(lib, currentView)).cards).toHaveLength(3);
+        await editEvent(lib, currentView, ids[2], { title: 'reopened', status: 'open', keywords: [] });
+        expect((await eventHintsBefore(lib, await capture(lib, branch.id), cutoff)).map(e => e.id).sort()).toEqual([...ids].sort());
     } finally { lib.close(); }
 });
