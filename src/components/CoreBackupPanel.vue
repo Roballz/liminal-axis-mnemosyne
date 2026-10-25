@@ -6,7 +6,8 @@ import { fingerprint } from '@/mnemosyne/model';
 import { activeLibrary, ACTIVE_KEY, DB_PREFIX } from '@/mnemosyne/db';
 import { dailyState, invalidateDaily, syncDaily, serializeDailyActivation } from '@/mnemosyne/bridge';
 import { AUTO_BACKUP_KEEP, backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
-import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups, readCoreBackupPreview } from '@/mnemosyne/core-backup-runtime';
+import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups, readCoreBackupPreview,
+    saveCoreBackup, pinCoreBackup, restoreCoreBackup } from '@/mnemosyne/core-backup-runtime';
 
 const inventory = shallowRef<BackupInventory>({ entries: [] });
 const choice = ref(''), error = ref(''), notice = ref('');
@@ -77,9 +78,9 @@ async function configure() {
 }
 async function saveManual() {
     if (!confirm('把当前完整核心库另存为不会自动删除的备份，并设为本库今后自动备份的新起点？旧备份保留。')) return;
-    const backups = await getCoreBackups(), lib = await activeLibrary();
+    const lib = await activeLibrary();
     const selector = localStorage.getItem(ACTIVE_KEY), stamp = revision();
-    const result = await backups.save(lib, 'manual', coreBackupState.keep,
+    const result = await saveCoreBackup(lib, 'manual', coreBackupState.keep,
         () => !disposed && !dailyState.pending && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision());
     if (result.state === 'saved') notice.value = '手动保护备份已写入并验证；已明确设为本库新的自动备份起点。该文件不会自动删除。';
     await load();
@@ -87,7 +88,9 @@ async function saveManual() {
 async function pin() {
     const entry = selected.value;
     if (!entry) return;
-    const saved = await (await getCoreBackups()).pin(entry.key, entry.checksum);
+    const generation = detailGeneration;
+    const saved = await pinCoreBackup(entry.key, entry.checksum,
+        () => !disposed && generation === detailGeneration && choice.value === entry.key && selected.value?.checksum === entry.checksum);
     await load(); choice.value = saved.key;
     notice.value = '已另存为固定保留的副本，不参与自动轮换。';
 }
@@ -95,7 +98,6 @@ async function restore() {
     const entry = selected.value;
     if (!entry) return;
     if (!confirm(`恢复 ${date(entry.snapshotAt)} 的核心包（${entry.counts.stories} 个故事、${entry.counts.memories} 条摘要）？会先保护当前非空核心库，再写入新空库，校验成功后切换。随后会按当前宿主聊天执行普通归档同步，可能更新恢复库中的当前正文，并将来源变化的旧摘要等标为待审核；不会改写宿主聊天。原库和这份磁盘备份保留。继续？`)) return;
-    const backups = await getCoreBackups();
     const selector = localStorage.getItem(ACTIVE_KEY), stamp = revision(), archiveError = dailyState.error;
     // pending also latches after a failure. The serial boundary below drains real
     // source writers; this stamp additionally revokes stale choices/derived edits.
@@ -103,11 +105,11 @@ async function restore() {
         choice.value === entry.key && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision();
     const switched = await serializeDailyActivation(async () => {
         if (!valid()) throw new Error('聊天、档案或选择已改变，请重新预览恢复');
-        try { await backups.save(await activeLibrary(), 'before-restore', coreBackupState.keep, valid); }
+        try { await saveCoreBackup(await activeLibrary(), 'before-restore', coreBackupState.keep, valid); }
         catch (e) {
             if (!valid() || !confirm(`当前库的保护备份未成功：${backupFailure(e)}。仍要恢复所选备份吗？原 IndexedDB 库会保留，但本次未另存保护文件。`)) return false;
         }
-        await backups.restore(entry.key, entry.checksum, valid);
+        await restoreCoreBackup(entry.key, entry.checksum, valid);
         return true;
     });
     if (!switched) return;

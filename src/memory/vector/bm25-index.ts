@@ -18,7 +18,11 @@ export function tokenize(text: string): string[] {
   return terms.filter(t => !stop.has(t));
 }
 const options = { fields: ['text'], tokenize, searchOptions: { prefix: false, fuzzy: false, combineWith: 'OR' as const } };
-type Snapshot = { key: string; version: string; documents: LexicalDocument[]; index: string };
+export type LexicalSnapshot = { key: string; version: string; documents: LexicalDocument[]; index: string };
+export interface LexicalPersistence {
+  load(key: string): Promise<LexicalSnapshot | undefined>;
+  save(snapshot: LexicalSnapshot): Promise<unknown>;
+}
 let dbPromise: Promise<IDBDatabase> | undefined;
 function openDb(): Promise<IDBDatabase> {
   if (!dbPromise) dbPromise = new Promise((resolve, reject) => {
@@ -29,7 +33,7 @@ function openDb(): Promise<IDBDatabase> {
   });
   return dbPromise;
 }
-async function persisted(key: string, snapshot?: Snapshot): Promise<Snapshot | undefined> {
+async function persisted(key: string, snapshot?: LexicalSnapshot): Promise<LexicalSnapshot | undefined> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('indexes', snapshot ? 'readwrite' : 'readonly');
@@ -45,38 +49,75 @@ export class LexicalIndex {
   private key = '';
   private index = new MiniSearch<LexicalDocument>(options);
   private documents = new Map<string, LexicalDocument>();
-  private dirty = false;
+  private generation = 0;
+  private revision = 0;
+  private persistedRevision = -1;
+  private ready = false;
+  private saveRequested = false;
+  private saveTimer?: ReturnType<typeof setTimeout>;
+  private saving?: Promise<void>;
+  constructor(private readonly storage: LexicalPersistence = {
+    load: key => persisted(key), save: snapshot => persisted(snapshot.key, snapshot),
+  }) {}
+
+  private scheduleSave(): void {
+    if (!this.ready || this.revision === this.persistedRevision) return;
+    this.saveRequested = true;
+    if (this.saving || this.saveTimer !== undefined) return;
+    // A later Worker task: returning hits/postMessage happens before serialization.
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      void this.flushPending().catch(() => {}); // Dirty revision remains retryable.
+    }, 0);
+  }
+
+  /** Drain the latest pending revision. Failed writes retain dirty state; a new
+   * search retries them. One in-flight write never clears a newer generation. */
+  flushPending(): Promise<void> {
+    if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
+    if (this.saving) return this.saving.then(() => this.flushPending());
+    const task = Promise.resolve().then(async () => {
+      if (!this.ready || this.revision === this.persistedRevision) return;
+      const generation = this.generation, revision = this.revision;
+      this.saveRequested = false;
+      // No await between the two projections: both describe this exact revision.
+      const snapshot = { key: this.key, version: VERSION, documents: [...this.documents.values()], index: JSON.stringify(this.index) };
+      await this.storage.save(snapshot);
+      if (generation === this.generation) this.persistedRevision = revision;
+    }).finally(() => {
+      if (this.saving === task) this.saving = undefined;
+      if (this.saveRequested) this.scheduleSave();
+    });
+    this.saving = task;
+    return task;
+  }
+
   async search(request: LexicalRequest): Promise<LexicalResult> {
     const key = JSON.stringify([request.database, request.scope]);
-    let persistent = true;
     if (key !== this.key) {
-      this.key = key; this.index = new MiniSearch(options); this.documents.clear(); this.dirty = true;
+      if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
+      this.key = key; this.generation++; this.revision = 0; this.persistedRevision = -1;
+      this.ready = false; this.saveRequested = false;
+      this.index = new MiniSearch(options); this.documents.clear();
       try {
-        const saved = await persisted(key);
+        const saved = await this.storage.load(key);
         if (saved?.version === VERSION) {
           this.index = MiniSearch.loadJSON(saved.index, options);
-          this.documents = new Map(saved.documents.map(d => [d.id, d])); this.dirty = false;
+          this.documents = new Map(saved.documents.map(d => [d.id, d])); this.persistedRevision = 0;
         }
       } catch {
-        persistent = false;
         // 损坏的派生索引可从本次有效摘要重建，不能留下半加载状态。
-        this.index = new MiniSearch(options); this.documents.clear(); this.dirty = true;
+        this.index = new MiniSearch(options); this.documents.clear(); this.persistedRevision = -1;
       }
     }
     const current = new Map(request.documents.map(d => [d.id, { ...d }]));
     for (const [id, old] of this.documents) {
       if (current.get(id)?.text !== old.text) {
-        this.index.remove(old); this.documents.delete(id); this.dirty = true;
+        this.revision++; this.index.remove(old); this.documents.delete(id);
       }
     }
     for (const [id, doc] of current) if (!this.documents.has(id)) {
-      this.index.add(doc); this.documents.set(id, doc); this.dirty = true;
-    }
-    if (this.dirty) {
-      try {
-        await persisted(key, { key, version: VERSION, documents: [...this.documents.values()], index: JSON.stringify(this.index) });
-        this.dirty = false;
-      } catch { persistent = false; }
+      this.revision++; this.index.add(doc); this.documents.set(id, doc);
     }
     const excluded = new Set(request.exclude);
     const scores = new Map<string, number>();
@@ -86,7 +127,9 @@ export class LexicalIndex {
         scores.set(String(hit.id), Math.max(scores.get(String(hit.id)) || 0, hit.score));
       }
     }
-    return { persistent, hits: [...scores].map(([id, score]) => ({ id, score }))
+    this.ready = true;
+    this.scheduleSave();
+    return { persistent: this.persistedRevision === this.revision, hits: [...scores].map(([id, score]) => ({ id, score }))
       .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, request.topK) };
   }
 }

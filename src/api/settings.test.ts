@@ -3,12 +3,16 @@ const mock = vi.hoisted(() => ({ ctx: { extensionSettings: {} as Record<string, 
 vi.mock('@/st/context', () => ({ getContext: () => mock.ctx }));
 let storage: Map<string, string>;
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.resetModules(); storage = new Map(); mock.ctx.extensionSettings = {};
   mock.ctx.saveSettingsDebounced.mockClear();
   vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => storage.set(k, v), removeItem: (k: string) => storage.delete(k) });
   vi.stubGlobal('window', { addEventListener: vi.fn(), dispatchEvent: vi.fn() });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(async () => {
+  await (await import('vue')).nextTick();
+  vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals();
+});
 it('新安装默认关闭成功预览', async () => {
   const { apiSettings, hydrateSettings } = await import('./settings');
   expect(apiSettings.summarySuccessPreviewEnabled).toBe(false);
@@ -32,6 +36,7 @@ it.each(['', '  自定义破限正文  ', '<sanctuary_override_directive>已保�
   expect(settings.apiSettings.vector.queryRewriteJailbreak).toBe(true);
   settings.apiSettings.vector.queryRewriteJailbreak = false;
   await (await import('vue')).nextTick();
+  settings.flushSettingsNow();
   const saved = JSON.parse(JSON.stringify(mock.ctx.extensionSettings.mnemosyne_daily));
   vi.resetModules(); mock.ctx.extensionSettings = { mnemosyne_daily: saved };
   settings = await import('./settings'); settings.hydrateSettings();
@@ -49,6 +54,7 @@ it('开关写入宿主设置；JSON导出/重新载入保留 true 和 false', as
   for (const enabled of [true, false]) {
     settings.apiSettings.summarySuccessPreviewEnabled = enabled;
     await (await import('vue')).nextTick();
+    settings.flushSettingsNow();
     const exported = JSON.stringify(mock.ctx.extensionSettings.mnemosyne_daily);
     expect(JSON.parse(exported).summarySuccessPreviewEnabled).toBe(enabled);
     vi.resetModules(); mock.ctx.extensionSettings = { mnemosyne_daily: JSON.parse(exported) };
@@ -69,6 +75,7 @@ it('正文边界旧配置默认、非法值回退与保存重载', async () => {
   expect(settings.apiSettings.bodyEndTag).toBe('bbs_end');
   settings.apiSettings.bodyStartTag = 'globalTime'; settings.apiSettings.bodyEndTag = 'endTime';
   await (await import('vue')).nextTick();
+  settings.flushSettingsNow();
   const saved = JSON.parse(JSON.stringify(mock.ctx.extensionSettings.mnemosyne_daily));
   expect(saved).toMatchObject({ bodyStartTag: 'globalTime', bodyEndTag: 'endTime' });
   vi.resetModules(); mock.ctx.extensionSettings = { mnemosyne_daily: saved };

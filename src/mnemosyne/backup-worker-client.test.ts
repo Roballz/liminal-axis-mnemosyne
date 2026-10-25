@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { runBackupWorker } from './backup-worker-client';
 import { CoreBackups } from './core-backups';
 import { Library, freshLibraryName } from './db';
-import type { HostMessage, WorkerMessage } from './backup-worker-protocol';
+import type { BackupJob, HostMessage, WorkerMessage } from './backup-worker-protocol';
 import type { BackupDisk } from '@/st/native-backups';
 
 class FakeWorker extends EventTarget {
@@ -149,4 +149,46 @@ test('unavailable detail worker does not parse the selected file on the UI threa
     const d = disk();
     await expect(runBackupWorker(d, { kind: 'preview', key: 'selected' }, () => true, () => { throw new Error('CSP'); })).rejects.toThrow('所选文件仍未验证');
     expect(d.read).not.toHaveBeenCalled(); expect(d.write).not.toHaveBeenCalled();
+});
+
+test.each(['manual', 'before-restore', 'pin'] as const)('%s jobs publish only their copy type and cannot rotate or read unrelated files', async kind => {
+    const d = disk(), worker = new FakeWorker();
+    const selected = 'selected', published = `${kind === 'pin' ? 'pinned' : kind}-v1-copy`;
+    const task: BackupJob = kind === 'pin' ? { kind, key: selected, checksum: 'checksum' } : { kind, library: job.library, keep: 20 };
+    let current = true;
+    const result = runBackupWorker(d, task, () => current, () => worker as unknown as Worker);
+    worker.emit({ type: 'ready' });
+    worker.emit({ type: 'rpc', id: 1, method: 'read', key: selected }); await flush();
+    expect(d.read).toHaveBeenCalledTimes(kind === 'pin' ? 1 : 0);
+    worker.emit({ type: 'rpc', id: 2, method: 'write', key: published, blob: new Blob(['copy']) }); await flush();
+    worker.emit({ type: 'rpc', id: 3, method: 'read', key: published }); await flush();
+    expect(d.write).toHaveBeenCalledOnce(); expect(d.read).toHaveBeenCalledTimes(kind === 'pin' ? 2 : 1);
+    worker.emit({ type: 'rpc', id: 4, method: 'read', key: 'unrelated' });
+    worker.emit({ type: 'rpc', id: 5, method: 'write', key: 'auto-v1-forbidden', blob: new Blob() });
+    worker.emit({ type: 'rpc', id: 6, method: 'remove', key: selected }); await flush();
+    expect(worker.postMessage.mock.calls.slice(-3).every(([message]) => 'error' in message)).toBe(true);
+    current = false;
+    worker.emit({ type: 'rpc', id: 7, method: 'write', key: `${published}-late`, blob: new Blob() }); await flush();
+    expect(d.write).toHaveBeenCalledOnce(); expect(d.remove).not.toHaveBeenCalled();
+    worker.emit({ type: 'failed', error: 'synthetic stop' }); await expect(result).rejects.toThrow('synthetic stop');
+});
+
+test.each(['restore', 'export', 'import'] as const)('%s jobs cannot write, rotate, or enumerate native backups', async kind => {
+    const d = disk(), worker = new FakeWorker();
+    const task: BackupJob = kind === 'restore' ? { kind, key: 'selected', checksum: 'checksum' }
+        : kind === 'export' ? { kind, library: job.library } : { kind, blob: new Blob(['package']) };
+    const result = runBackupWorker(kind === 'restore' ? d : undefined, task, () => true, () => worker as unknown as Worker);
+    worker.emit({ type: 'ready' });
+    worker.emit({ type: 'rpc', id: 1, method: 'guard' });
+    worker.emit({ type: 'rpc', id: 2, method: 'read', key: 'selected' }); await flush();
+    expect(d.read).toHaveBeenCalledTimes(kind === 'restore' ? 1 : 0);
+    worker.emit({ type: 'rpc', id: 3, method: 'read', key: 'other' });
+    worker.emit({ type: 'rpc', id: 4, method: 'write', key: 'selected', blob: new Blob() });
+    worker.emit({ type: 'rpc', id: 5, method: 'remove', key: 'selected' });
+    worker.emit({ type: 'rpc', id: 6, method: 'list' });
+    worker.emit({ type: 'rpc', id: 7, method: 'readPreviews' });
+    worker.emit({ type: 'rpc', id: 8, method: 'writePreviews', value: {} }); await flush();
+    expect(worker.postMessage.mock.calls.slice(-6).every(([message]) => 'error' in message)).toBe(true);
+    expect(d.list).not.toHaveBeenCalled(); expect(d.write).not.toHaveBeenCalled(); expect(d.remove).not.toHaveBeenCalled();
+    worker.emit({ type: 'failed', error: 'synthetic stop' }); await expect(result).rejects.toThrow('synthetic stop');
 });

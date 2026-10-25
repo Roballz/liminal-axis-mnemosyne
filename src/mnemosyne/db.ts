@@ -11,7 +11,15 @@ export function request<T>(r: IDBRequest<T>): Promise<T> {
     return new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 }
 export class Transaction {
-    private readonly selectionNodes = new Map<string, Promise<Row | undefined>>();
+    // Immutable projections share reads only inside this IndexedDB snapshot.
+    // Explicit writes invalidate the key, including maintenance/import operations.
+    private readonly immutableRows = new Map<Store, Map<string, Promise<Row | undefined>>>();
+    private readCache(store: Store) {
+        if (store !== 'memory_selection_nodes' && store !== 'manifest_blocks') return undefined;
+        let cache = this.immutableRows.get(store);
+        if (!cache) { cache = new Map(); this.immutableRows.set(store, cache); }
+        return cache;
+    }
     constructor(readonly native: IDBTransaction, private readonly changes?: TransactionChanges) { }
     get<T extends Row>(store: Store, key: string): Promise<T | undefined> {
         if (store === 'memory_views') return this.rawGet<MemoryView | CompactMemoryView>(store, key).then(value =>
@@ -19,13 +27,13 @@ export class Transaction {
         return this.rawGet<T>(store, key);
     }
     rawGet<T extends Row>(store: Store, key: string): Promise<T | undefined> {
-        const cached = store === 'memory_selection_nodes' ? this.selectionNodes.get(key) : undefined;
+        const cache = this.readCache(store), cached = cache?.get(key);
         if (cached) return cached as Promise<T | undefined>;
         const pending = request<T | undefined>(this.native.objectStore(store).get(key)).then(value => {
             this.changes?.read(store, value);
             return value;
         });
-        if (store === 'memory_selection_nodes') this.selectionNodes.set(key, pending);
+        cache?.set(key, pending);
         return pending;
     }
     all<T extends Row>(store: Store, index?: StoreIndex, key?: IDBValidKey): Promise<T[]> {
@@ -42,19 +50,19 @@ export class Transaction {
         });
     }
     put(store: Store, value: Row): Promise<IDBValidKey> {
-        if (store === 'memory_selection_nodes') this.selectionNodes.delete(value.id);
+        this.immutableRows.get(store)?.delete(value.id);
         const pending = this.native.objectStore(store).put(value);
         this.changes?.write(store, value.id, value);
         return request(pending);
     }
     delete(store: Store, key: string): Promise<undefined> {
-        if (store === 'memory_selection_nodes') this.selectionNodes.delete(key);
+        this.immutableRows.get(store)?.delete(key);
         const pending = this.native.objectStore(store).delete(key);
         this.changes?.write(store, key);
         return request(pending);
     }
     add(store: Store, value: Row): Promise<IDBValidKey> {
-        if (store === 'memory_selection_nodes') this.selectionNodes.delete(value.id);
+        this.immutableRows.get(store)?.delete(value.id);
         const pending = this.native.objectStore(store).add(value);
         this.changes?.write(store, value.id, value);
         return request(pending);

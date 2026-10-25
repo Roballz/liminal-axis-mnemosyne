@@ -20,14 +20,14 @@ import {
   previewArchiveReconnect,
   reconnectArchive,
   deleteDailyArchive,
+  serializeDailyActivation,
 } from '@/mnemosyne/bridge';
 import { archiveDeletionChoices, previewArchiveDeletion, type ArchiveDeletionPlan } from '@/mnemosyne/archive-deletion';
-import { activeLibrary } from '@/mnemosyne/db';
+import { activeLibrary, ACTIVE_KEY } from '@/mnemosyne/db';
 import { keepSummary } from '@/mnemosyne/canonical';
 import { reviewDifference, type ReviewDifference } from '@/mnemosyne/review-diagnostics';
 import { previewRoleRepairs, confirmRoleRepairs, type RoleRepairCandidate } from '@/mnemosyne/source-role-repair';
-import { exportLibrary, restoreLibrary } from '@/mnemosyne/migration';
-import { parseStrictJson } from '@/mnemosyne/json';
+import { exportCoreLibrary, restoreCorePackage } from '@/mnemosyne/core-backup-runtime';
 import { regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
 import { copyLegacyKnowledge } from '@/memory/vector/knowledge';
 import { currentVectorDb } from '@/memory/vector/scope';
@@ -223,11 +223,13 @@ async function review(id: string, action: 'keep' | 'rebuild') {
   await loadReviews();
 }
 async function download() {
-  const pack = await exportLibrary(await activeLibrary());
-  const url = URL.createObjectURL(new Blob([JSON.stringify(pack)], { type: 'application/json' }));
+  const selector = localStorage.getItem(ACTIVE_KEY), generation = dailyState.generation;
+  const result = await exportCoreLibrary(await activeLibrary(),
+    () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) && generation === dailyState.generation);
+  const url = URL.createObjectURL(result.blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `mnemosyne-daily-v${pack.version}.json`;
+  a.download = `mnemosyne-daily-v${result.version}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   notice.value = '核心包已生成，请确认浏览器已保存下载文件。';
@@ -237,7 +239,12 @@ async function restore(event: Event) {
     file = input.files?.[0];
   input.value = '';
   if (!file || !confirm('恢复会写入新的空库，校验成功后切换；原库保留。继续？')) return;
-  await restoreLibrary(parseStrictJson(await file.text()));
+  const selector = localStorage.getItem(ACTIVE_KEY);
+  const revision = () => `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
+  const stamp = revision(), archiveError = dailyState.error;
+  const valid = () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision() &&
+    (!dailyState.pending || !!archiveError && dailyState.error === archiveError);
+  await serializeDailyActivation(() => restoreCorePackage(file, valid));
   invalidateDaily();
   try { await refresh(); }
   catch (e) {

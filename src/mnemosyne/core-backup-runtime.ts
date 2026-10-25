@@ -1,8 +1,10 @@
 import { runBackupWorker } from './backup-worker-client';
 import { reactive, watch } from 'vue';
 import { nativeBackupDisk } from '@/st/native-backups';
-import { activeLibrary, ACTIVE_KEY } from './db';
-import { AUTO_BACKUP_INTERVAL, AUTO_BACKUP_KEEP, CoreBackups, backupFailure, backupSettings, type BackupSettings } from './core-backups';
+import { activeLibrary, activateLibrary, Library, ACTIVE_KEY } from './db';
+import { check } from './model';
+import type { BackupResult } from './backup-worker-protocol';
+import { AUTO_BACKUP_INTERVAL, AUTO_BACKUP_KEEP, CoreBackups, backupFailure, backupSettings, type BackupOutcome, type BackupSettings } from './core-backups';
 
 export const BACKUP_WAITING_STATUS = '自动备份已启用，等待前台稳定状态';
 /** Display the same archive gates used by startup without changing scheduler policy. */
@@ -58,6 +60,55 @@ export async function readCoreBackupPreview(key: string, isCurrent: () => boolea
         if (!isCurrent()) throw new Error('备份选择已改变');
         return result.entry;
     });
+}
+
+/** Large packages never cross the UI boundary. Keep each native job in the same
+ * writer queue used by automatic backups, including draining uncertain native IO. */
+export async function saveCoreBackup(lib: Library, kind: 'manual' | 'before-restore', keep: typeof AUTO_BACKUP_KEEP,
+    isCurrent: () => boolean): Promise<BackupOutcome> {
+    const backups = await getCoreBackups();
+    const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
+        { kind, library: lib.db.name, keep }, isCurrent, undefined, reportPendingNative));
+    check(['saved', 'unchanged', 'too-soon', 'empty'].includes(result.state), '后台备份结果不匹配');
+    if (result.state === 'saved') backups.cachePreview(result.entry);
+    return result as BackupOutcome;
+}
+
+export async function pinCoreBackup(key: string, checksum: string, isCurrent: () => boolean) {
+    const backups = await getCoreBackups();
+    const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
+        { kind: 'pin', key, checksum }, isCurrent, undefined, reportPendingNative));
+    check(result.state === 'pinned', '后台固定备份结果不匹配');
+    backups.cachePreview(result.entry);
+    return result.entry;
+}
+
+async function activatePrepared(result: BackupResult, isCurrent: () => boolean): Promise<Library> {
+    check(result.state === 'restored' && isCurrent(), '恢复页面已改变，已验证的新库未启用，原库保留');
+    const lib = await Library.open(result.library, true);
+    try {
+        // readDailySettings and the final synchronous guard still precede selector publication.
+        await activateLibrary(lib, isCurrent);
+        return lib;
+    } catch (error) { lib.close(); throw error; }
+}
+
+/** Caller holds serializeDailyActivation through preparation and final activation. */
+export async function restoreCoreBackup(key: string, checksum: string, isCurrent: () => boolean): Promise<Library> {
+    const backups = await getCoreBackups();
+    return backups.runExclusive(async () => activatePrepared(await runBackupWorker(backups.disk,
+        { kind: 'restore', key, checksum }, isCurrent, undefined, reportPendingNative), isCurrent));
+}
+
+/** Browser file operations do not require TauriTavern's native backup interface. */
+export async function exportCoreLibrary(lib: Library, isCurrent: () => boolean) {
+    const result = await runBackupWorker(undefined, { kind: 'export', library: lib.db.name }, isCurrent);
+    check(result.state === 'exported' && result.blob instanceof Blob && isCurrent(), '导出页面或档案已改变，请重试');
+    return { blob: result.blob, version: result.version };
+}
+
+export async function restoreCorePackage(blob: Blob, isCurrent: () => boolean): Promise<Library> {
+    return activatePrepared(await runBackupWorker(undefined, { kind: 'import', blob }, isCurrent), isCurrent);
 }
 
 export async function configureCoreBackups(enabled: boolean, keep: typeof AUTO_BACKUP_KEEP) {
@@ -149,6 +200,7 @@ export function bindCoreBackups(ready: () => boolean, revision: () => unknown = 
                         selected === localStorage.getItem(ACTIVE_KEY) && stamp === revision(), undefined, reportPendingNative)) as import('./core-backups').BackupOutcome;
                 coreBackupState.error = '';
                 if (result.state === 'saved') {
+                    backups.cachePreview(result.entry);
                     coreBackupState.lastSavedAt = result.entry.savedAt;
                     coreBackupState.status = result.warning ?? '自动磁盘备份已写入并读回验证，继续按当前档案运行';
                 } else coreBackupState.status = result.state === 'unchanged' ? '核心数据未变化，保留已有备份' : '尚未到下一次自动备份时间';

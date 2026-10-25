@@ -49,16 +49,19 @@ function headers(): Record<string, string> {
 }
 
 /** 发一个 vec 动作请求;非 ok 抛错(带后端 code/message)。 */
-async function request<T>(action: string, body: Record<string, unknown>): Promise<T> {
+async function request<T>(action: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
   const resp = await fetch(`${BASE_URL}/${action}`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify(body),
+    signal,
   });
   const payload = (await resp.json().catch(() => null)) as
     | { ok: true; data: T }
     | { ok: false; error?: { code?: string; message?: string } }
     | null;
+  signal?.throwIfAborted();
   if (!resp.ok || !payload?.ok) {
     const msg = (payload && !payload.ok && payload.error?.message) || `柏宝库请求失败:${action}`;
     const err = new Error(msg) as Error & { code?: string };
@@ -97,7 +100,7 @@ export function vecSearch(
   database: string,
   scopes: string[],
   queryVectors: string[],
-  opts: { topK?: number; excludeLeafIds?: string[] } = {},
+  opts: { topK?: number; excludeLeafIds?: string[]; signal?: AbortSignal } = {},
 ): Promise<{ results: VecHit[] }> {
   return request('vec/search', {
     database,
@@ -105,7 +108,7 @@ export function vecSearch(
     queryVectors,
     topK: opts.topK,
     excludeLeafIds: opts.excludeLeafIds,
-  });
+  }, opts.signal);
 }
 
 export function vecDelete(database: string, scope: string, leafIds: string[]): Promise<{ deleted: number }> {

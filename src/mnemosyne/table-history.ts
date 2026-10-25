@@ -1,7 +1,5 @@
-import { snapshotVariants } from './current-body';
 import type { Transaction } from './db';
-import { snapshotRefs } from './canonical';
-import { check, equal, row, type Branch, type Snapshot, type SourceRef, type TableCommit, type TableDef, type TableRow } from './model';
+import { check, equal, row, type Block, type Branch, type Snapshot, type SourceRef, type TableCommit, type TableDef, type TableRow } from './model';
 
 export const TABLE_STORES = ['branches', 'custom_table_defs', 'custom_table_rows', 'table_receipts',
     'table_history', 'history_snapshots', 'manifest_blocks'] as const;
@@ -63,24 +61,73 @@ export async function tableStateAt(tx: Transaction, head: string | null) {
     return { defs: [...defs.values()], rows: [...rows.values()] };
 }
 
-async function compatible(tx: Transaction, commit: TableCommit, refs: SourceRef[], variants?: number[]) {
-    if (commit.cutoff > refs.length) return false;
-    const snapshot = await tx.get<Snapshot>('history_snapshots', commit.snapshot);
-    check(snapshot, '表格历史来源快照缺失');
-    if (!equal((await snapshotRefs(tx, snapshot)).slice(0, commit.cutoff), refs.slice(0, commit.cutoff))) return false;
-    // Legacy snapshots cannot attest a non-default swipe identity.
-    const old = (await snapshotVariants(tx, snapshot)).slice(0, commit.cutoff);
-    const next = variants?.slice(0, commit.cutoff) ?? Array(commit.cutoff).fill(0);
-    return equal(old, next);
-}
-
 export async function compatibleTableHead(tx: Transaction, head: string | undefined, refs: SourceRef[], variants?: number[]) {
     const seen = new Set<string>();
+    type Evidence = { snapshot: Snapshot; blocks: Block[]; refs: number; variants?: number };
+    const evidence = new Map<string, Evidence>();
+    const prefixes = new Map<string, Map<number, { refs: number; variants?: number }>>();
+    const prefix = (block: Block, offset: number) => {
+        let offsets = prefixes.get(block.id);
+        if (!offsets) { offsets = new Map(); prefixes.set(block.id, offsets); }
+        let value = offsets.get(offset);
+        if (!value) {
+            let count = 0;
+            while (count < block.entries.length && offset + count < refs.length && equal(block.entries[count], refs[offset + count])) count++;
+            value = { refs: count }; offsets.set(offset, value);
+        }
+        return value;
+    };
+    const compatible = async (commit: TableCommit) => {
+        if (commit.cutoff > refs.length) return false;
+        let item = evidence.get(commit.snapshot);
+        if (!item) {
+            const snapshot = await tx.get<Snapshot>('history_snapshots', commit.snapshot);
+            check(snapshot, '表格历史来源快照缺失');
+            const loaded = await Promise.all(snapshot.blocks.map(id => tx.get<Block>('manifest_blocks', id)));
+            check(loaded.every(Boolean), '缺少历史清单块');
+            let offset = 0, matching = 0;
+            for (const block of loaded as Block[]) {
+                if (matching === offset) matching += prefix(block, offset).refs;
+                offset += block.entries.length;
+            }
+            check(offset === snapshot.length, '历史清单计数错误');
+            item = { snapshot, blocks: loaded as Block[], refs: matching }; evidence.set(snapshot.id, item);
+        }
+        if (item.refs < commit.cutoff) return false;
+        if (item.variants === undefined) {
+            let matching = 0;
+            if (item.snapshot.snapshotSchema === 2) {
+                let offset = 0;
+                for (const block of item.blocks) {
+                    check(block.variants && block.variants.length === block.entries.length, '当前来源块缺少变体身份');
+                    if (matching === offset) {
+                        const value = prefix(block, offset);
+                        if (value.variants === undefined) {
+                            let count = 0;
+                            while (count < block.variants.length && (!variants || offset + count < variants.length) &&
+                                equal(block.variants[count], variants ? variants[offset + count] : 0)) count++;
+                            value.variants = count;
+                        }
+                        matching += value.variants;
+                    }
+                    offset += block.variants.length;
+                }
+                check(offset === item.snapshot.length, '变体清单计数错误');
+            } else {
+                // Legacy snapshots cannot attest a non-default swipe identity.
+                const old = item.snapshot.variants;
+                const length = Math.min(old?.length ?? item.snapshot.length, variants?.length ?? item.snapshot.length);
+                while (matching < length && equal(old ? old[matching] : 0, variants ? variants[matching] : 0)) matching++;
+            }
+            item.variants = matching;
+        }
+        return item.variants >= commit.cutoff;
+    };
     while (head) {
         check(!seen.has(head), '表格历史循环'); seen.add(head);
         const commit = await tx.get<TableCommit>('table_history', head);
         check(commit, '表格历史缺失');
-        if (await compatible(tx, commit, refs, variants)) return commit;
+        if (await compatible(commit)) return commit;
         head = commit.parent ?? undefined;
     }
     return null;

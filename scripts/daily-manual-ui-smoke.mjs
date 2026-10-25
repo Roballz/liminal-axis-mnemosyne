@@ -170,6 +170,9 @@ try {
   await promptEditor.getByRole("button", { name: "完成", exact: true }).click();
   await promptEditor.waitFor({ state: "hidden" });
   await promptEntry.getByText("默认", { exact: true }).waitFor();
+  await page.waitForFunction(
+    () => window.__smoke.ctx.extensionSettings.mnemosyne_daily.prompts.eventOverview === "",
+  );
   assert.equal(
     await page.evaluate(
       () =>

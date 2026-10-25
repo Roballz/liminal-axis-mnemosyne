@@ -738,9 +738,12 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
     return lib.transaction(STORES, 'readwrite', async (tx) => {
         const liveParent = await tx.get<Branch>('branches', parent.branch.id);
         check(equal(liveParent, parent.branch), '父分支已改变，请重新选择分支');
-        for (const ref of parent.refs) check(await readSource(tx, ref.revision), '分叉来源正文已不再保留，请重新选择当前分支');
-        for (const card of events.cards)
-            check(equal(await tx.get('event_chains', card.chain.id), card.chain), '父事件已改变，请重新选择分支');
+        const [sources, chains] = await Promise.all([
+            Promise.all(parent.refs.map(async ref => !!await readSource(tx, ref.revision))),
+            Promise.all(events.cards.map(card => tx.get('event_chains', card.chain.id))),
+        ]);
+        check(sources.every(Boolean), '分叉来源正文已不再保留，请重新选择当前分支');
+        check(chains.every((chain, index) => equal(chain, events.cards[index].chain)), '父事件已改变，请重新选择分支');
         check(guard(), '聊天已改变，请重新选择分支');
         check(!(await tx.all<Binding>('host_bindings')).some((b) => !b.detached && b.scope === scope), '目标聊天已绑定');
         const branch: Branch = {
@@ -771,9 +774,10 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
         };
         await tx.add('host_bindings', binding);
         const parentBindings = await tx.all<Binding>('host_bindings', 'branch', parent.branch.id);
+        const parentMessages = new Set(parent.refs.map(ref => ref.message));
         for (const sourceBinding of parentBindings) {
             for (const mapping of await tx.all<Mapping>('message_mappings', 'owner', sourceBinding.id)) {
-                if (parent.refs.some((r) => r.message === mapping.message))
+                if (parentMessages.has(mapping.message))
                     await tx.add('message_mappings', {
                         ...mapping,
                         ...row('map'),

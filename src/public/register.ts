@@ -452,11 +452,10 @@ export async function registerPublicInterface(): Promise<void> {
   const api = createApi();
   (globalThis as typeof globalThis & { STMnemosyne?: STBaiBaiBookApi }).STMnemosyne = api;
 
-  watch(
-    [() => derivedMeta.rev, () => memory.summaries],
-    queueChangedNotice,
-    { deep: true },
-  );
+  // A leaf/state refresh must not traverse an unchanged compression forest.
+  // Keep its own deep watch so in-place text, time and child-list edits still notify.
+  watch(() => derivedMeta.rev, queueChangedNotice);
+  watch(() => memory.summaries, queueChangedNotice, { deep: true });
   bindPublicChangeEvents();
 
   const [slashAvailable, macroSupport] = await Promise.all([

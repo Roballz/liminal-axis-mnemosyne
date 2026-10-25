@@ -8,6 +8,7 @@ import { Library, freshLibraryName, ACTIVE_KEY } from './db';
 import { exportLibrary } from './migration';
 import { STORES, fingerprint } from './model';
 import { AUTO_BACKUP_INTERVAL, CoreBackups, backupSettings } from './core-backups';
+import * as json from './json';
 
 class Disk implements BackupDisk {
     files = new Map<string, Blob>();
@@ -154,6 +155,61 @@ test('a corrupt retained file cannot displace a valid older backup', async () =>
     const result = await backups.save(lib, 'auto', 20);
     expect(result.state).toBe('saved'); if (result.state === 'saved') expect(result.warning).toContain('清理未完成');
     expect(disk.files.has(saved[0])).toBe(true); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
+});
+
+test('rotation re-reads every file but validates exact baseline/new bytes only once per save', async () => {
+    const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
+    try {
+        for (let i = 0; i < 20; i++) {
+            time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input); await backups.save(lib, 'auto');
+        }
+        // Native reads may return a different Blob object for the same exact bytes.
+        disk.read.mockImplementation(async key => new Blob([await disk.files.get(key)!.arrayBuffer()]));
+        const parse = vi.spyOn(json, 'parseStrictJson');
+        for (let round = 0; round < 2; round++) {
+            time.advance(); input.messages[1].content += ` round-${round}`; await synchronize(lib, input);
+            disk.read.mockClear(); parse.mockClear();
+            const result = await backups.save(lib, 'auto');
+            expect(result.state).toBe('saved');
+            if (result.state === 'saved') expect(result.warning).toBeUndefined();
+            // Baseline + persisted new file + 20 retained files + one deletion target.
+            expect(disk.read).toHaveBeenCalledTimes(23);
+            // Only this round's two exact-content witnesses are reused. The other
+            // retained files are fully revalidated again on the next round.
+            expect(parse).toHaveBeenCalledTimes(21);
+            expect(disk.files.size).toBe(20);
+        }
+    } finally { lib.close(); }
+});
+
+test.each(['baseline', 'new'])('same-size replacement of the %s file during rotation cannot retire an older good copy', async target => {
+    const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
+    try {
+        let baseline = '';
+        for (let i = 0; i < 20; i++) {
+            time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input);
+            const result = await backups.save(lib, 'auto'); if (result.state === 'saved') baseline = result.entry.key;
+        }
+        const prior = new Set(disk.files.keys()), reads = new Map<string, number>();
+        let changed = false;
+        disk.read.mockImplementation(async key => {
+            const count = (reads.get(key) ?? 0) + 1; reads.set(key, count);
+            let blob = disk.files.get(key)!;
+            if (count === 2 && (target === 'baseline' ? key === baseline : !prior.has(key))) {
+                const text = await blob.text(), replacement = new Blob(['[', text.slice(1)]);
+                expect(replacement.size).toBe(blob.size);
+                disk.files.set(key, replacement); blob = replacement; changed = true;
+            }
+            return blob;
+        });
+        time.advance(); input.messages[1].content += ' changed'; await synchronize(lib, input);
+        const result = await backups.save(lib, 'auto');
+        expect(changed).toBe(true); expect(result.state).toBe('saved');
+        if (result.state === 'saved') expect(result.warning).toContain('清理未完成');
+        expect(disk.remove).not.toHaveBeenCalled();
+        for (const key of prior) expect(disk.files.has(key)).toBe(true);
+        expect(disk.files.size).toBe(21);
+    } finally { lib.close(); }
 });
 
 test('losing the lifecycle guard during awaited deletion-target verification cannot delete it', async () => {

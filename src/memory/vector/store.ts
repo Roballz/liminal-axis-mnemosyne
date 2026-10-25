@@ -28,7 +28,7 @@ import {
 } from '@/api/baibaoku';
 import { decodeFloat32Base64 } from './embed';
 
-type SearchOpts = { topK?: number; excludeLeafIds?: string[] };
+type SearchOpts = { topK?: number; excludeLeafIds?: string[]; signal?: AbortSignal };
 
 /** 与 baibaoku.ts 的 vec* 一一对应的最小存储接口(bundle 后端独占,不入接口)。 */
 export interface VectorStore {
@@ -165,12 +165,20 @@ let reconciliation: { database: string; scope: string; revision: number; present
   missing: string[]; stalePayload: string[] } | undefined;
 
 /** 取某 [database, scope] 下全部记录(规模 = 当前聊天叶子数,单角色可控)。 */
-async function getScopeRows(database: string, scope: string): Promise<LocalRecord[]> {
+async function getScopeRows(database: string, scope: string, signal?: AbortSignal): Promise<LocalRecord[]> {
+  signal?.throwIfAborted();
   const db = await openDb();
+  signal?.throwIfAborted();
   const tx = db.transaction(STORE, 'readonly');
   const idx = tx.objectStore(STORE).index('by_scope');
-  const rows = await reqDone(idx.getAll(IDBKeyRange.only([database, scope])));
-  return rows as LocalRecord[];
+  const onAbort = () => { try { tx.abort(); } catch { /* Already completed. */ } };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    const rows = await reqDone(idx.getAll(IDBKeyRange.only([database, scope])));
+    signal?.throwIfAborted();
+    return rows as LocalRecord[];
+  } catch (error) { signal?.throwIfAborted(); throw error; }
+  finally { signal?.removeEventListener('abort', onAbort); }
 }
 
 /* —— 向量归一化 / 余弦,口径对齐后端 vector-store.js —— */
@@ -185,16 +193,19 @@ function normalize(vec: Float32Array): Float32Array {
   return out;
 }
 
-/** a 已归一化,b 在此归一化后点积 = 余弦相似度;维度不一致返回 -1(不可比)。 */
-function dotNormalized(a: Float32Array, b: Float32Array): number {
+function vectorNorm(vector: Float32Array): number {
+  let squared = 0;
+  for (let i = 0; i < vector.length; i++) squared += vector[i] * vector[i];
+  return Math.sqrt(squared);
+}
+
+/** a 已归一化,b 的模长按候选预先计算;维度不一致返回 -1(不可比)。 */
+function dotNormalized(a: Float32Array, b: Float32Array, norm: number): number {
   if (a.length !== b.length) return -1;
   let dot = 0;
-  let nb = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
-    nb += b[i] * b[i];
   }
-  const norm = Math.sqrt(nb);
   if (norm === 0) return -1;
   return dot / norm;
 }
@@ -254,26 +265,36 @@ export const localStore: VectorStore = {
   // max 融合:每个叶子取它在各 query 上的最高余弦,跨 scope 同叶子合并留最高分。
   // 纯按最终分取前 topK,不套阈值(阈值留召回端分档)。完全对齐后端 search。
   async search(database, scopes, queryVectors, opts = {}) {
+    const signal = opts.signal;
+    signal?.throwIfAborted();
     const topK = Number.isInteger(opts.topK) && (opts.topK as number) > 0 ? (opts.topK as number) : 20;
     const exclude = new Set((opts.excludeLeafIds ?? []).map(String));
     if (!scopes.length || !queryVectors.length) return { results: [] };
 
     const queries = queryVectors.map(decodeFloat32Base64).map(normalize);
+    const queryDimensions = new Set(queries.map(query => query.length));
     const fused = new Map<string, { row: LocalRecord; bestSim: number; bestQuery: number }>();
 
     let scored = 0;
     for (const scope of scopes) {
-      const rows = await getScopeRows(database, scope);
+      const rows = await getScopeRows(database, scope, signal);
       for (const r of rows) {
         // Cooperative scoring: allow rendering/touch input between batches.
         // IndexedDB format, score math, fusion and ordering remain unchanged.
-        if (++scored % 96 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
+        if (++scored % 96 === 0) {
+          signal?.throwIfAborted();
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
+          signal?.throwIfAborted();
+        }
         if (exclude.has(String(r.leafId))) continue;
         const v = r.vector instanceof Float32Array ? r.vector : Float32Array.from(r.vector as ArrayLike<number>);
+        // Keep the original dot/division arithmetic; Float32 renormalization
+        // would introduce extra rounding and could change tied candidates.
+        const norm = queryDimensions.has(v.length) ? vectorNorm(v) : 0;
         let best = -1;
         let bestQ = -1;
         for (let qi = 0; qi < queries.length; qi++) {
-          const sim = dotNormalized(queries[qi], v);
+          const sim = dotNormalized(queries[qi], v, norm);
           if (sim > best) {
             best = sim;
             bestQ = qi;
@@ -287,6 +308,7 @@ export const localStore: VectorStore = {
       }
     }
 
+    signal?.throwIfAborted();
     const merged = [...fused.values()].sort((a, b) => b.bestSim - a.bestSim).slice(0, topK);
     return {
       results: merged.map(({ row, bestSim, bestQuery }) => ({
@@ -424,7 +446,10 @@ export async function vecSearch(
   queryVectors: string[],
   opts: SearchOpts = {},
 ): Promise<{ results: VecHit[] }> {
-  return (await getVectorStore()).search(database, scopes, queryVectors, opts);
+  opts.signal?.throwIfAborted();
+  const store = await getVectorStore();
+  opts.signal?.throwIfAborted();
+  return store.search(database, scopes, queryVectors, opts);
 }
 
 export async function vecReconcile(

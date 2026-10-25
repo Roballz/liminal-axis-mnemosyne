@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { CoreBackups } from './core-backups';
 import { exportLibrary, restoreLibrary, validateCurrentData, validateData, type Package } from './migration';
 import { fingerprint, STORES, type Branch, type Snapshot } from './model';
+import { fixture } from './fixtures';
 import type { BackupDisk } from '@/st/native-backups';
 
 /** Actual legacy rows, not current-only descriptors relabelled as an old format. */
@@ -192,4 +193,32 @@ test.each(Array.from({ length: 15 }, (_, i) => (i + 1) as Package['version']))('
     crossStory.counts.memory_views++;
     Object.assign(crossStory.data.branches.at(-1)!, { head: 'other-head', view: 'other-view' });
     expect(() => validateData(crossStory)).toThrow('摘要依赖跨故事');
+});
+
+test.each([false, true])('shared basis/source lookup remains linear with full summary proofs (reviews=%s)', async reviews => {
+    const { lib, view } = await fixture(60);
+    try {
+        const pack = await exportLibrary(lib), snapshot = pack.data.history_snapshots.find(row => row.id === view.snapshot.id) as Snapshot;
+        const blocks = new Map(pack.data.manifest_blocks.map(row => [row.id, row as import('./model').Block]));
+        const refs = snapshot.blocks.flatMap(id => blocks.get(id)!.entries);
+        for (const memory of pack.data.memory_revisions as import('./model').MemoryRevision[]) {
+            memory.inputRefs = refs.map(ref => ({ ...ref }));
+            if (reviews) pack.data.reviews.push({ id: `proof-${memory.id}`, schema: 1, story: memory.story,
+                branch: memory.branch, owner: memory.id, snapshot: snapshot.id, decision: 'compatible', origin: 'manual',
+                created: 1, reviewSchema: 2, sourceRefs: refs.map(ref => ({ ...ref })), coverage: [], dependencies: [] } as any);
+        }
+        pack.counts.reviews = pack.data.reviews.length;
+        let reads = 0;
+        for (const block of blocks.values()) for (const ref of block.entries) {
+            const message = ref.message;
+            Object.defineProperty(ref, 'message', { enumerable: true, configurable: true, get: () => { reads++; return message; } });
+        }
+        expect(() => validateData(pack)).not.toThrow();
+        // Count source-entry comparisons, not wall-clock time. The old per-proof
+        // some/findIndex path read these entries hundreds of thousands of times.
+        expect(reads).toBeLessThan(refs.length * 20);
+        const wrong = structuredClone(pack);
+        (wrong.data.memory_revisions[0] as any).inputRefs[0].revision = refs[1].revision;
+        expect(() => validateData(wrong)).toThrow('来源跨身份/故事');
+    } finally { lib.close(); }
 });

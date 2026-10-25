@@ -10,7 +10,9 @@ const request = (): LexicalRequest => ({ database: crypto.randomUUID(), scope: '
 it('中文和编号分词；命中后原生 IDB 重载索引，不重新添加全库文档', async () => {
   expect(tokenize('车站 ＸＪ４２')).toEqual(expect.arrayContaining(['车站', 'xj42']));
   const req = request();
-  expect((await new LexicalIndex().search(req)).hits.map(h => h.id)).toEqual(['A']);
+  const index = new LexicalIndex();
+  expect((await index.search(req)).hits.map(h => h.id)).toEqual(['A']);
+  await index.flushPending();
   const add = vi.spyOn(MiniSearch.prototype, 'add');
   try {
     const restored = await new LexicalIndex().search(req);
@@ -29,6 +31,7 @@ it('编辑、删除、重复 Query、近期排除及 scope/角色隔离', async 
   req.queries = ['ZZ99']; expect((await index.search(req)).hits[0].id).toBe('A');
   req.documents = req.documents.slice(1);
   expect((await index.search(req)).hits).toEqual([]);
+  await index.flushPending();
   expect((await new LexicalIndex().search(req)).hits).toEqual([]);
   expect((await index.search({ ...request(), database: req.database, scope: 'chat:B', documents: [] })).hits).toEqual([]);
   expect((await index.search({ ...request(), documents: [] })).hits).toEqual([]);
@@ -37,7 +40,8 @@ it('编辑、删除、重复 Query、近期排除及 scope/角色隔离', async 
 it('索引持久化失败仍可本地检索，明确报告降级而不是误称已落盘', async () => {
   const tx = vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => { throw new Error('quota'); });
   try {
-    const result = await new LexicalIndex().search(request());
+    const index = new LexicalIndex(), result = await index.search(request());
     expect(result.persistent).toBe(false); expect(result.hits.map(h => h.id)).toEqual(['A']);
+    await expect(index.flushPending()).rejects.toThrow('quota');
   } finally { tx.mockRestore(); }
 });

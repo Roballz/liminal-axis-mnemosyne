@@ -95,30 +95,39 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
         };
         // Fork/resync may use material recorded long after its plot floors. Validity still
         // comes from statuses (including explicit reviews); floor numbers alone prove nothing.
-        const floorMessages = new Map<string, Promise<string[] | null>>();
-        const materialFloors = (id: string): Promise<string[] | null> => {
+        type MaterialFloors = { messages: string[]; dependencies: MaterialFloors[] };
+        const floorMessages = new Map<string, Promise<MaterialFloors | null>>();
+        const basisMessages = new Map<string, Promise<Set<string> | undefined>>();
+        const materialFloors = (id: string): Promise<MaterialFloors | null> => {
             if (!floorMessages.has(id)) floorMessages.set(id, (async () => {
                 const memory = await readMemory(id);
                 if (!memory || !permitted.has(id)) return null;
                 const messages = [...(await summarySources(tx, memory)), ...memory.coverage].map(r => r.message);
                 if (memory.anchor) {
-                    const basis = await readSnapshot(memory.basis);
-                    if (!basis || !(await snapshotRefs(tx, basis)).some(ref => ref.message === memory.anchor)) return null;
+                    if (!basisMessages.has(memory.basis)) basisMessages.set(memory.basis, (async () => {
+                        const basis = await readSnapshot(memory.basis);
+                        return basis && new Set((await snapshotRefs(tx, basis)).map(ref => ref.message));
+                    })());
+                    if (!(await basisMessages.get(memory.basis)!)?.has(memory.anchor)) return null;
                     messages.push(memory.anchor);
                 }
+                const dependencies: MaterialFloors[] = [];
                 for (const dependency of memory.dependencies) {
                     const prior = await readMemory(dependency);
                     // statuses already checked exact dependencies or their explicit approval.
                     const child = prior && selected.get(prior.owner);
                     const floors = child && await materialFloors(child.id);
                     if (!floors) return null;
-                    messages.push(...floors);
+                    dependencies.push(floors);
                 }
-                return messages.length ? [...new Set(messages)] : null;
+                // Share child proof nodes; do not copy every descendant floor Set
+                // into every ancestor in a deeply nested summary chain.
+                return messages.length || dependencies.length ? { messages: [...new Set(messages)], dependencies } : null;
             })());
             return floorMessages.get(id)!;
         };
         const floorSnapshots = new Map<string, Promise<{ refs: import('./model').SourceRef[]; variants: number[] }>>();
+        const floorValidity = new Map<string, Map<MaterialFloors, boolean>>();
         const byFloors = async (record: { snapshot: string; cutoff: number }, ids: string[]) => {
             if (!includeHistory || !ids.length || !ids.every(id => permitted.has(id))) return false;
             const snapshot = await readSnapshot(record.snapshot);
@@ -130,12 +139,36 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
                 refs: await snapshotRefs(tx, snapshot), variants: await snapshotVariants(tx, snapshot),
             }))());
             const evidence = await floorSnapshots.get(snapshot.id)!;
-            return floors.every(f => f!.every(message => {
-                const index = positions.get(message);
-                return index !== undefined && index < record.cutoff &&
-                    sourceRefMatches(view.branch, evidence.refs[index], view.refs[index]) &&
-                    evidence.variants[index] === view.snapshot.variants?.[index];
-            }));
+            const key = JSON.stringify([snapshot.id, record.cutoff]);
+            let memo = floorValidity.get(key);
+            if (!memo) {
+                memo = new Map(); floorValidity.set(key, memo);
+                if (floorValidity.size > 32) floorValidity.delete(floorValidity.keys().next().value!);
+            }
+            const matches = (node: MaterialFloors): boolean => {
+                const pending = [{ node, next: 0, checked: false }];
+                while (pending.length) {
+                    const frame = pending.at(-1)!;
+                    if (memo!.has(frame.node)) { pending.pop(); continue; }
+                    if (!frame.checked) {
+                        frame.checked = true;
+                        const ok = frame.node.messages.every(message => {
+                            const index = positions.get(message);
+                            return index !== undefined && index < record.cutoff &&
+                                sourceRefMatches(view.branch, evidence.refs[index], view.refs[index]) &&
+                                evidence.variants[index] === view.snapshot.variants?.[index];
+                        });
+                        if (!ok) { memo!.set(frame.node, false); pending.pop(); continue; }
+                    }
+                    const child = frame.node.dependencies[frame.next];
+                    if (!child) { memo!.set(frame.node, true); pending.pop(); continue; }
+                    if (!memo!.has(child)) { pending.push({ node: child, next: 0, checked: false }); continue; }
+                    if (!memo!.get(child)) { memo!.set(frame.node, false); pending.pop(); continue; }
+                    frame.next++;
+                }
+                return memo!.get(node)!;
+            };
+            return floors.every(f => matches(f!));
         };
         for (const chain of chains) {
             const compact = working?.rows.get(chain.id);
@@ -153,38 +186,43 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
                 ...memberships.map(m => m.memory), ...allProgress.flatMap(p => p.memories),
             ])].map(readMemory));
             memberships.sort((a, b) => a.epoch - b.epoch);
-            const activeAt = async (epoch: number) => {
-                const latest = new Map<string, Membership>();
-                for (const member of memberships) {
-                    if (member.epoch > epoch) break;
-                    const prior = await readMemory(member.memory);
-                    if (!prior) return null;
-                    latest.set(prior.owner, { ...member, memory: selected.get(prior.owner)?.id ?? member.memory });
-                }
-                // Do not backdate metadata from a removal while the removal itself rolls back.
-                for (const member of latest.values())
-                    if (!member.active && !await inRange(member.snapshot, member.cutoff)) return null;
-                return [...latest.values()].filter(m => m.active).map(m => m.memory);
-            };
+            const associated = new Map<string, { member: Membership; invalidRemoval: boolean }>();
+            let associationCursor = 0, invalidRemovals = 0, missingAssociation = false;
+            let firstProse = Infinity;
+            for (const progress of allProgress) if (progress.text && progress.epoch < firstProse) firstProse = progress.epoch;
             const history: NonNullable<EventCard['history']> = { revisions: [], memberships: [], progress: [] };
             let meta: EventRevision | undefined;
-            for (const original of candidates) {
+            // Ascending history queries share a forward membership sweep. Keep
+            // only the current state, not a full membership array per old epoch.
+            for (const original of includeHistory ? [...candidates].reverse() : candidates) {
                 const r = { ...original, refs: await Promise.all(original.refs.map(resolveMemory)),
                     ...(original.summarized ? { summarized: await Promise.all(original.summarized.map(resolveMemory)) } : {}),
                     ...(original.latestProgress ? { latestProgress: { ...original.latestProgress, memory: await resolveMemory(original.latestProgress.memory) } } : {}),
                 };
                 const dependencies = [...r.refs, ...(r.summarized ?? []), ...(r.latestProgress ? [r.latestProgress.memory] : [])];
-                const associated = includeHistory ? await activeAt(r.epoch) : null;
+                if (includeHistory) while (associationCursor < memberships.length && memberships[associationCursor].epoch <= r.epoch) {
+                    const member = memberships[associationCursor++], prior = await readMemory(member.memory);
+                    if (!prior) { missingAssociation = true; continue; }
+                    if (associated.get(prior.owner)?.invalidRemoval) invalidRemovals--;
+                    const invalidRemoval = !member.active && !await inRange(member.snapshot, member.cutoff);
+                    if (invalidRemoval) invalidRemovals++;
+                    associated.set(prior.owner, { member: { ...member, memory: selected.get(prior.owner)?.id ?? member.memory }, invalidRemoval });
+                }
+                // Removal cutoffs remain user-operation boundaries even if a
+                // later addition makes the same family active again.
+                const active = !includeHistory || missingAssociation || invalidRemovals ? null :
+                    [...associated.values()].filter(value => value.member.active).map(value => value.member.memory);
                 // Unsourced prose still uses the old operation cutoff. A title-only chain
                 // may instead be grounded in its recorded links, even before its first overview.
-                const grounded = dependencies.length > 0 || (!r.overview && !r.latestProgress && !allProgress.some(p => p.epoch <= r.epoch && p.text));
+                const grounded = dependencies.length > 0 || (!r.overview && !r.latestProgress && !(firstProse <= r.epoch));
                 const eligible = (!live || includeHistory) && dependencies.every(id => permitted.has(id)) &&
-                    ((grounded && !!associated?.length && await byFloors(r, [...dependencies, ...associated])) ||
+                    ((grounded && !!active?.length && await byFloors(r, [...dependencies, ...active])) ||
                         (await inRange(r.snapshot, r.cutoff) && (dependencies.length > 0 || await within(r.snapshot, r.cutoff))));
                 if (eligible && includeHistory) history.revisions.push(r);
-                if (!meta && (live || eligible)) meta = r;
+                if ((live || eligible) && (includeHistory || !meta)) meta = r;
                 if (meta && !includeHistory) break;
             }
+            if (includeHistory) history.revisions.reverse(); // Preserve original descending epoch/tie order.
             if (!meta)
                 continue;
             const latest = new Map<string, Membership>();

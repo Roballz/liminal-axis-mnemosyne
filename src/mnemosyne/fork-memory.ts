@@ -1,5 +1,5 @@
 import { sameNarrativeRevision, summarySources } from './canonical';
-import { sourceRefMatches } from './source-equivalence';
+import { sourceRefResolver } from './source-equivalence';
 import type { Transaction } from './db';
 import type { EventView } from './events';
 import { inheritForkEvents } from './fork-events';
@@ -9,20 +9,32 @@ import { row, type Binding, type Branch, type CapturedView, type Memory, type Me
 export async function inheritForkMemory(tx: Transaction, parent: CapturedView, branch: Branch,
     binding: Binding, selection: MemoryView, events: EventView) {
     const ids = new Map(events.valid.map(m => [m.id, row('mr').id]));
+    const selectedByOwner = new Map<string, MemoryRevision>();
+    for (const memory of events.valid) if (!selectedByOwner.has(memory.owner)) selectedByOwner.set(memory.owner, memory);
+    const resolveRef = sourceRefResolver(parent.branch, parent.refs);
+    const revisions = new Map<string, Promise<MemoryRevision | undefined>>();
+    const readRevision = (id: string) => {
+        if (!revisions.has(id)) revisions.set(id, tx.get<MemoryRevision>('memory_revisions', id));
+        return revisions.get(id)!;
+    };
     const families = new Map<string, Memory>();
-    for (const memory of events.valid) {
-        const original = await tx.get<Memory>('memories', memory.owner);
+    const originals = await Promise.all(events.valid.map(memory => tx.get<Memory>('memories', memory.owner)));
+    for (const [index, memory] of events.valid.entries()) {
+        const original = originals[index];
         if (!original) throw new Error('继承摘要身份缺失');
         const family: Memory = { ...original, ...row('mem'), owner: binding.id };
         families.set(memory.owner, family);
         await tx.add('memories', family);
     }
     // Metadata-only revisions can retain dependencies on an equivalent older revision.
-    const equivalent = async (id: string) => {
-        if (ids.has(id)) return ids.get(id)!;
-        const prior = await tx.get<import('./model').MemoryRevision>('memory_revisions', id);
-        const next = prior && events.valid.find(m => m.owner === prior.owner);
-        return prior && next && sameNarrativeRevision(prior, next) ? ids.get(next.id) : undefined;
+    const equivalents = new Map<string, Promise<string | undefined>>();
+    const equivalent = (id: string) => {
+        if (!equivalents.has(id)) equivalents.set(id, (async () => {
+            if (ids.has(id)) return ids.get(id)!;
+            const prior = await readRevision(id), next = prior && selectedByOwner.get(prior.owner);
+            return prior && next && sameNarrativeRevision(prior, next) ? ids.get(next.id) : undefined;
+        })());
+        return equivalents.get(id)!;
     };
     const mapIds = async (values: string[]) => {
         const result = await Promise.all(values.map(equivalent));
@@ -34,7 +46,7 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         const selected = await equivalent(id);
         if (selected) return selected;
         if (historical.has(id)) return historical.get(id)!;
-        const prior = await tx.get<MemoryRevision>('memory_revisions', id);
+        const prior = await readRevision(id);
         const family = prior && families.get(prior.owner);
         if (!prior || !family) return id;
         const key = row('mr').id;
@@ -53,9 +65,9 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         selection.selections[family.id] = copied.id;
         // Parent-confirmed role-only repairs remain exact approvals on the copied summary.
         const sources = await summarySources(tx, memory);
-        const resolved = sources.map(r => parent.refs.find(p => sourceRefMatches(parent.branch, r, p)));
+        const resolved = sources.map(resolveRef);
         if (resolved.every(Boolean) && sources.some((r, i) => r.revision !== resolved[i]!.revision)) {
-            const coverage = memory.coverage.map(r => parent.refs.find(p => sourceRefMatches(parent.branch, r, p)));
+            const coverage = memory.coverage.map(resolveRef);
             if (coverage.every(Boolean)) await tx.add('reviews', { ...row('review'), story: branch.story,
                 branch: branch.id, owner: copied.id, snapshot: branch.head, decision: 'compatible', origin: 'manual',
                 // An explicit copied dependency review below has precedence over role-only compatibility.
@@ -67,13 +79,14 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         const owner = await equivalent(review.owner);
         if (!owner) continue;
         if (review.reviewSchema !== 2 && review.snapshot !== parent.snapshot.id) continue;
-        const sourceRefs = review.sourceRefs?.map(r => parent.refs.find(p => sourceRefMatches(parent.branch, r, p)));
-        const coverage = review.coverage?.map(r => parent.refs.find(p => sourceRefMatches(parent.branch, r, p)));
+        const sourceRefs = review.sourceRefs?.map(resolveRef);
+        const coverage = review.coverage?.map(resolveRef);
         if (sourceRefs?.some(r => !r) || coverage?.some(r => !r)) continue;
-        if (review.dependencies && (await Promise.all(review.dependencies.map(equivalent))).some(id => !id)) continue;
+        const dependencies = review.dependencies && await Promise.all(review.dependencies.map(equivalent));
+        if (dependencies?.some(id => !id)) continue;
         await tx.add('reviews', { ...review, ...row('review'), branch: branch.id, owner, snapshot: branch.head,
             ...(sourceRefs ? { sourceRefs } : {}), ...(coverage ? { coverage } : {}),
-            ...(review.dependencies ? { dependencies: await mapIds(review.dependencies) } : {}) } as Review);
+            ...(dependencies ? { dependencies } : {}) } as Review);
     }
     await inheritForkEvents(tx, parent, branch, events.cards, mapIds);
     // Table history can refer to an older, now unselected summary. Preserve that evidence
@@ -83,7 +96,7 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         const selected = await equivalent(id);
         if (selected) return selected;
         if (tableEvidence.has(id)) return tableEvidence.get(id)!;
-        const prior = await tx.get<MemoryRevision>('memory_revisions', id);
+        const prior = await readRevision(id);
         if (!prior) return undefined;
         let family = families.get(prior.owner);
         if (!family) {

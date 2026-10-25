@@ -10,6 +10,7 @@ export const BACKUP_MAX_BYTES = 64 * 1024 * 1024;
 const OWNER = 'mnemosyne-core-backup-v1';
 const KEY = /^(auto|manual|pinned|before-restore|before-deletion|before-archive-deletion|after-archive-deletion)-v1-(\d{13})-([a-f0-9]{16})-([a-f0-9-]{36})\.json$/;
 export type BackupGuard = () => boolean | Promise<boolean>;
+export type BackupSaveKind = 'auto' | 'manual' | 'before-restore';
 type Kind = 'auto' | 'manual' | 'pinned' | 'before-restore' | 'before-deletion' | 'before-archive-deletion' | 'after-archive-deletion';
 export interface BackupSettings { schema: 1; enabled: boolean; keep: typeof AUTO_BACKUP_KEEP }
 export interface BackupFile {
@@ -97,6 +98,14 @@ function assertNonempty(pack: Package) {
     '当前核心库为空，停止备份和轮换；请先从已有备份恢复');
 }
 
+// Evidence lives for one save only. Re-read the named file before using it: neither
+// a filename nor preview metadata proves that another writer left its bytes intact.
+type FileWitness = { bytes: number; digest: string };
+async function blobDigest(blob: Blob): Promise<string> {
+    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())),
+        byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export class CoreBackups {
     private running: Promise<unknown> = Promise.resolve();
     private previews = new Map<string, BackupPreview>();
@@ -120,10 +129,17 @@ export class CoreBackups {
         });
     }
 
-    async read(key: string): Promise<{ file: BackupFile; entry: BackupPreview }> {
+    async read(key: string, witnesses?: Map<string, FileWitness>): Promise<{ file: BackupFile; entry: BackupPreview }> {
+        check(KEY.test(key), '不是本功能管理的备份文件');
+        const blob = await this.disk.read(key);
+        const result = await this.decode(key, blob);
+        if (witnesses) witnesses.set(key, { bytes: blob.size, digest: await blobDigest(blob) });
+        return result;
+    }
+
+    private async decode(key: string, blob: Blob): Promise<{ file: BackupFile; entry: BackupPreview }> {
         const match = KEY.exec(key);
         check(match, '不是本功能管理的备份文件');
-        const blob = await this.disk.read(key);
         check(blob instanceof Blob && blob.size > 0 && blob.size <= BACKUP_MAX_BYTES, '备份文件为空或超过 64 MiB 安全读取上限');
         const value = parseStrictJson(await blob.text(), BACKUP_MAX_BYTES) as BackupFile;
         check(value && Object.keys(value).sort().join() === ['format', 'kind', 'savedAt', 'sourceLibrary', 'dataDigest', 'pack', 'checksum'].sort().join(), '备份封装字段不完整');
@@ -141,6 +157,14 @@ export class CoreBackups {
         return { file: value, entry };
     }
 
+    private async verifyRetained(key: string, witnesses: Map<string, FileWitness>): Promise<void> {
+        const known = witnesses.get(key);
+        if (!known) { await this.read(key); return; }
+        const blob = await this.disk.read(key);
+        if (blob instanceof Blob && blob.size === known.bytes && await blobDigest(blob) === known.digest) return;
+        await this.decode(key, blob);
+    }
+
     async inventory(): Promise<BackupInventory> {
         // Directory-only: never open full packages, including old files with no hints.
         return { entries: (await this.keys()).map(key => {
@@ -153,8 +177,11 @@ export class CoreBackups {
         return previewHints(await this.disk.readPreviews?.());
     }
 
+    /** Display hint only; never reused as proof for pin, restore, or rotation. */
+    cachePreview(entry: BackupPreview): void { this.previews.set(entry.key, entry); }
+
     async rememberPreview(entry: BackupPreview): Promise<void> {
-        this.previews.set(entry.key, entry);
+        this.cachePreview(entry);
         if (!this.disk.writePreviews) return;
         // Best effort only. A missing/corrupt hint cache must not invalidate a backup.
         let previous: BackupPreview[] = [];
@@ -164,7 +191,7 @@ export class CoreBackups {
         try { await this.disk.writePreviews({ schema: 1, entries }); } catch { /* Filename-only fallback remains available. */ }
     }
 
-    save(lib: Library, kind: 'auto' | 'manual' | 'before-restore', keep: typeof AUTO_BACKUP_KEEP = AUTO_BACKUP_KEEP, isCurrent: BackupGuard = () => true): Promise<BackupOutcome> {
+    save(lib: Library, kind: BackupSaveKind, keep: typeof AUTO_BACKUP_KEEP = AUTO_BACKUP_KEEP, isCurrent: BackupGuard = () => true): Promise<BackupOutcome> {
         return this.serial(async () => {
             check(keep === AUTO_BACKUP_KEEP, '自动备份固定保留最近 20 份');
             const keys = await this.keys();
@@ -175,16 +202,16 @@ export class CoreBackups {
                 return { state: 'too-soon' };
             // A failed/unreadable latest baseline blocks writes, not just deletion.
             const baseline = kind === 'auto' ? latestBaseline(bankKeys) : undefined;
-            const baselineRead = baseline ? await this.read(baseline) : undefined;
-            const previous = baselineRead?.file;
+            const witnesses = new Map<string, FileWitness>();
+            const previousDigest = baseline ? (await this.read(baseline, witnesses)).file.dataDigest : undefined;
             const pack = await exportLibrary(lib); // one consistent readonly transaction
             if (kind === 'before-restore' && pack.counts.stories === 0 && pack.counts.branches === 0)
                 return { state: 'empty' };
             assertNonempty(pack);
             check((await isCurrent()), '档案仍在变化，本次备份已取消');
             const digest = await fingerprint(pack.data);
-            if (previous?.dataDigest === digest) return { state: 'unchanged' };
-            const entry = await this.publish(pack, lib.db.name, kind, digest, keys, isCurrent);
+            if (previousDigest === digest) return { state: 'unchanged' };
+            const entry = await this.publish(pack, lib.db.name, kind, digest, keys, isCurrent, kind === 'auto' ? witnesses : undefined);
             if (kind !== 'auto') return { state: 'saved', entry };
             // Re-list after publication. No delete happens before full persisted readback.
             try {
@@ -193,7 +220,7 @@ export class CoreBackups {
                 if (automatic.length > keep) {
                     // Do not discard a good old copy in favor of an unreadable retained
                     // entry. Validate sequentially so only one full package is live here.
-                    for (const retained of automatic.slice(0, keep)) await this.read(retained);
+                    for (const retained of automatic.slice(0, keep)) await this.verifyRetained(retained, witnesses);
                 }
                 for (const key of automatic.slice(keep)) {
                     if (key === entry.key) continue;
@@ -213,20 +240,33 @@ export class CoreBackups {
         });
     }
 
-    pin(key: string, checksum: string): Promise<BackupPreview> {
+    pin(key: string, checksum: string, isCurrent: BackupGuard = () => true): Promise<BackupPreview> {
         return this.serial(async () => {
             const source = await this.read(key);
-            check(source.entry.checksum === checksum, '所选备份已改变，请重新预览');
-            return this.publish(source.file.pack, source.file.sourceLibrary, 'pinned', source.file.dataDigest, await this.keys());
+            check(source.entry.checksum === checksum && await isCurrent(), '所选备份已改变，请重新预览');
+            return this.publish(source.file.pack, source.file.sourceLibrary, 'pinned', source.file.dataDigest, await this.keys(), isCurrent);
         });
+    }
+
+    /** Worker restore prepares and verifies a fresh database; only the UI may activate it. */
+    prepareRestore(key: string, checksum: string, isCurrent: BackupGuard = () => true): Promise<Library> {
+        return this.serial(() => this.restoreCopy(key, checksum, isCurrent));
+    }
+
+    private async restoreCopy(key: string, checksum: string, isCurrent: BackupGuard): Promise<Library> {
+        const selected = await this.read(key);
+        check(selected.entry.checksum === checksum && await isCurrent(), '所选备份或页面已改变，请重新预览');
+        const lib = await restoreLibrary(selected.file.pack, false);
+        try {
+            check(await isCurrent(), '恢复页面已改变，已验证的新库未启用，原库保留');
+            return lib;
+        } catch (error) { lib.close(); throw error; }
     }
 
     async restore(key: string, checksum: string, isCurrent = () => true): Promise<Library> {
         return this.serial(async () => {
-            const selected = await this.read(key);
-            check(selected.entry.checksum === checksum && isCurrent(), '所选备份或页面已改变，请重新预览');
             // The caller must obtain explicit confirmation. No automatic import path.
-            const lib = await restoreLibrary(selected.file.pack, false);
+            const lib = await this.restoreCopy(key, checksum, isCurrent);
             try {
                 check(isCurrent(), '恢复页面已改变，已验证的新库未启用，原库保留');
                 await activateLibrary(lib, isCurrent);
@@ -235,7 +275,7 @@ export class CoreBackups {
         });
     }
 
-    private async publish(pack: Package, sourceLibrary: string, kind: 'auto' | 'manual' | 'pinned' | 'before-restore', dataDigest: string, keys: string[], isCurrent: BackupGuard = () => true): Promise<BackupPreview> {
+    private async publish(pack: Package, sourceLibrary: string, kind: BackupSaveKind | 'pinned', dataDigest: string, keys: string[], isCurrent: BackupGuard = () => true, witnesses?: Map<string, FileWitness>): Promise<BackupPreview> {
         const savedAt = this.now();
         const bank = (await fingerprint(sourceLibrary)).slice(0, 16);
         const suffix = `${this.uuid()}.json`;
@@ -247,7 +287,7 @@ export class CoreBackups {
         check(blob.size <= BACKUP_MAX_BYTES, '核心包超过 64 MiB 安全读取上限；未写入或轮换备份，请手动导出');
         check((await isCurrent()), '档案仍在变化，本次备份已取消');
         await this.disk.write(key, blob); // TT stages and atomically publishes this unique file.
-        const persisted = await this.read(key);
+        const persisted = await this.read(key, witnesses);
         check(persisted.entry.checksum === file.checksum && persisted.entry.bytes === blob.size, '新备份读回不一致，旧备份保留');
         await this.rememberPreview(persisted.entry);
         return persisted.entry;

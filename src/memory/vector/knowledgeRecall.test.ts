@@ -164,3 +164,83 @@ it.each(['BM25', 'rerank'] as const)('%s 失败且摘要无可用结果时不误
   expect(recallDebug.knowledgeStatus).toBe('已注入');
   expect(finalText()).toContain('BB设定'); expect(finalText()).not.toContain('旧剧情摘要');
 });
+
+function pending<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+const vectorResult = (): Awaited<ReturnType<typeof store.vecSearch>> => ({ results: [{ leafId: 'old-leaf', scope: 'chat:chat-A',
+  similarity: .95, queryIndex: 0, document: '旧剧情摘要', mesFull: '旧全文', storyTime: null, msgIndex: 0 }] });
+const lexicalResult = { hits: [], persistent: true };
+const knowledgeResult: knowledge.KnowledgeRecallResult = { text: '并行 BB 设定', status: '已命中', hits: [{ name: '设定.md', block: 1, score: 1 }] };
+
+it.each(['knowledge-first', 'vector-first'])('三路在任何一路完成前均启动，%s 完成顺序不改变注入和成功缓存', async order => {
+  settings.apiSettings.vector.recall.bm25Candidates = 2;
+  const kb = pending<knowledge.KnowledgeRecallResult>(), lexical = pending<typeof lexicalResult>(), vector = pending<ReturnType<typeof vectorResult>>();
+  const knowledgeSearch = vi.spyOn(knowledge, 'searchKnowledge').mockReturnValue(kb.promise);
+  const lexicalSearch = vi.spyOn(bm25, 'searchBm25').mockReturnValue(lexical.promise);
+  vi.mocked(store.vecSearch).mockReturnValue(vector.promise);
+  const run = runVectorRecall();
+  await vi.waitFor(() => {
+    expect(knowledgeSearch).toHaveBeenCalledTimes(1); expect(lexicalSearch).toHaveBeenCalledTimes(1); expect(store.vecSearch).toHaveBeenCalledTimes(1);
+  });
+  expect(finalText()).toBe('');
+  const signal = knowledgeSearch.mock.calls[0][4];
+  expect(lexicalSearch.mock.calls[0][1]).toBe(signal); expect(vi.mocked(store.vecSearch).mock.calls[0][3]?.signal).toBe(signal);
+  if (order === 'knowledge-first') { kb.resolve(knowledgeResult); lexical.resolve(lexicalResult); vector.resolve(vectorResult()); }
+  else { vector.resolve(vectorResult()); lexical.resolve(lexicalResult); kb.resolve(knowledgeResult); }
+  await run;
+  expect(finalText()).toContain('旧剧情摘要'); expect(finalText()).toContain('并行 BB 设定');
+  expect(finalText().indexOf('旧剧情摘要')).toBeLessThan(finalText().indexOf('并行 BB 设定'));
+  expect(recallDebug.status).toBe('召回完成');
+  const text = finalText(); await runVectorRecall();
+  expect(finalText()).toBe(text); expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(1);
+});
+
+it.each(['knowledge', 'lexical', 'vector'])('并行 %s 失败保留其他路线并允许下一轮重试', async failed => {
+  settings.apiSettings.vector.recall.bm25Candidates = 2;
+  const kb = vi.spyOn(knowledge, 'searchKnowledge'), lexical = vi.spyOn(bm25, 'searchBm25').mockResolvedValue(lexicalResult);
+  if (failed === 'knowledge') kb.mockRejectedValueOnce(new Error('knowledge unavailable'));
+  if (failed === 'lexical') lexical.mockRejectedValueOnce(new Error('lexical unavailable'));
+  if (failed === 'vector') vi.mocked(store.vecSearch).mockRejectedValueOnce(new Error('vector unavailable'));
+  await runVectorRecall();
+  expect(recallDebug.status).toBe('降级召回');
+  if (failed !== 'knowledge') expect(finalText()).toContain('BB设定');
+  if (failed !== 'vector') expect(finalText()).toContain('旧剧情摘要');
+  await runVectorRecall();
+  expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(2);
+  expect(finalText()).toContain('BB设定'); expect(finalText()).toContain('旧剧情摘要');
+});
+
+it('三路挂起时取消及时结束，新轮完成后旧结果不覆盖调试状态或注入', async () => {
+  settings.apiSettings.vector.recall.bm25Candidates = 2;
+  const kb = pending<knowledge.KnowledgeRecallResult>(), lexical = pending<typeof lexicalResult>(), vector = pending<ReturnType<typeof vectorResult>>();
+  const knowledgeSearch = vi.spyOn(knowledge, 'searchKnowledge').mockReturnValueOnce(kb.promise);
+  const lexicalSearch = vi.spyOn(bm25, 'searchBm25').mockResolvedValue(lexicalResult).mockReturnValueOnce(lexical.promise);
+  vi.mocked(store.vecSearch).mockReturnValueOnce(vector.promise);
+  const old = runVectorRecall();
+  await vi.waitFor(() => expect(store.vecSearch).toHaveBeenCalledTimes(1));
+  clearRecallInjection('合成取消'); await old;
+  expect(knowledgeSearch.mock.calls[0][4]?.aborted).toBe(true);
+  expect(lexicalSearch.mock.calls[0][1]?.aborted).toBe(true);
+  expect(vi.mocked(store.vecSearch).mock.calls[0][3]?.signal?.aborted).toBe(true);
+  await runVectorRecall();
+  const text = finalText(), debug = JSON.stringify([recallDebug, knowledge.knowledgeDebug]);
+  kb.resolve(knowledgeResult); lexical.resolve(lexicalResult); vector.resolve(vectorResult());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(finalText()).toBe(text); expect(JSON.stringify([recallDebug, knowledge.knowledgeDebug])).toBe(debug);
+  expect(text).not.toContain('并行 BB 设定'); expect(text).toContain('BB设定');
+});
+
+it('知识检索先完成后文件改变，只丢弃知识，保留仍有效的并行摘要', async () => {
+  const vector = pending<ReturnType<typeof vectorResult>>();
+  vi.spyOn(knowledge, 'searchKnowledge').mockResolvedValue(knowledgeResult);
+  vi.mocked(store.vecSearch).mockReturnValueOnce(vector.promise);
+  const run = runVectorRecall();
+  await vi.waitFor(() => expect(store.vecSearch).toHaveBeenCalledTimes(1));
+  await knowledge.setKnowledgeEnabled(file, false);
+  vector.resolve(vectorResult()); await run;
+  expect(finalText()).toContain('旧剧情摘要'); expect(finalText()).not.toContain('并行 BB 设定');
+  expect(recallDebug.knowledgeStatus).toBe('结果已失效');
+});

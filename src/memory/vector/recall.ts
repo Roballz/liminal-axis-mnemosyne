@@ -38,7 +38,7 @@ import { cleanBody, compactTimeLabel, latestStoryTime, splitTimeLabel } from '..
 import { relativeTimeLabel } from '../timeRel';
 import { normalizeRecallInjectionDepth } from './depth';
 import { RECALL_CACHE_STORAGE_KEY } from './cache';
-import { eligibleKnowledge, embeddingIdentity, knowledgeDebug, knowledgeFingerprint, listKnowledgeMetadata, recallKnowledge } from './knowledge';
+import { eligibleKnowledge, embeddingIdentity, knowledgeDebug, knowledgeFingerprint, listKnowledgeMetadata, searchKnowledge } from './knowledge';
 import {
   previewOf,
   recallDebug,
@@ -451,11 +451,32 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   let knowledgeText = '';
   let knowledgeFailed = !knowledgeStoreReady;
   knowledgeDebug.hits = [];
+  const exclude = [...excluded], selfScope = currentChatScope();
+  const lexicalWanted = summaryWanted && cfg.bm25Candidates > 0 && !!selfScope;
+  const vectorWanted = summaryReady && cfg.rerankCandidates > 0;
+  setRecallStatus('进行中…检索');
+  // Start independent work together. Branches own their results; no late branch
+  // may publish debug/injection state after this run has been superseded.
+  const [knowledgeResult, lexicalResult, vectorResult] = await Promise.allSettled([
+    knowledgeWanted ? searchKnowledge(database, files, queryVectors, knowledgeConfig, signal) : Promise.resolve(undefined),
+    lexicalWanted ? (async () => {
+      const user = [...chat].reverse().find(m => m.is_user && !m.extra?.bbs_omit);
+      return searchBm25({ database, scope: selfScope!, documents: leaves.map(l => ({ id: l.leafId, text: l.document })),
+        queries: [user ? cleanBody(user.mes) : '', ...queries], exclude, topK: cfg.bm25Candidates }, signal);
+    })() : Promise.resolve(undefined),
+    vectorWanted ? vecSearch(database, scopes, queryVectors, {
+      topK: Math.max(1, cfg.rerankCandidates), excludeLeafIds: exclude, signal,
+    }) : Promise.resolve(undefined),
+  ]);
+  signal.throwIfAborted();
+  if (!stillCurrent()) return;
   if (knowledgeWanted) {
-    try { knowledgeText = await recallKnowledge(database, files, queryVectors, knowledgeConfig, signal); }
-    catch (error) {
-      signal.throwIfAborted(); knowledgeFailed = true;
-      knowledgeDebug.status = '检索失败'; recallDebug.detail += `${String(error)}\n`;
+    if (knowledgeResult.status === 'fulfilled' && knowledgeResult.value) {
+      knowledgeText = knowledgeResult.value.text;
+      knowledgeDebug.hits = knowledgeResult.value.hits; knowledgeDebug.status = knowledgeResult.value.status;
+    } else if (knowledgeResult.status === 'rejected') {
+      knowledgeFailed = true;
+      knowledgeDebug.status = '检索失败'; recallDebug.detail += `${String(knowledgeResult.reason)}\n`;
     }
     recallDebug.knowledgeStatus = knowledgeFailed ? '检索失败' : knowledgeText ? '已命中' : '未命中';
   } else knowledgeDebug.status = recallDebug.knowledgeStatus;
@@ -466,21 +487,15 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   let bm25Failed = false;
   try {
     // 2) 后端检索:多路在范围内纯按 embedding 得分取前 rerankCandidates(后端 max 融合,不套阈值),排除窗口内叶子
-    const exclude = [...excluded];
-    setRecallStatus('进行中…检索');
-    const selfScope = currentChatScope();
     let bm25Results: HybridHit[] = [];
-    if (summaryWanted && cfg.bm25Candidates > 0 && selfScope) {
+    if (lexicalWanted) {
       try {
+        if (lexicalResult.status === 'rejected') throw lexicalResult.reason;
+        const lexical = lexicalResult.value!;
         const byId = new Map(leaves.map(l => [l.leafId, l]));
-        const user = [...chat].reverse().find(m => m.is_user && !m.extra?.bbs_omit);
-        const lexical = await searchBm25({ database, scope: selfScope,
-          documents: leaves.map(l => ({ id: l.leafId, text: l.document })),
-          queries: [user ? cleanBody(user.mes) : '', ...queries], exclude, topK: cfg.bm25Candidates }, signal);
-        if (!stillCurrent()) return;
         bm25Results = lexical.hits.flatMap(hit => {
           const leaf = byId.get(hit.id);
-          return leaf ? [{ ...leaf, scope: selfScope, similarity: null, queryIndex: -1, bm25Score: hit.score }] : [];
+          return leaf ? [{ ...leaf, scope: selfScope!, similarity: null, queryIndex: -1, bm25Score: hit.score }] : [];
         });
         setRecallBm25(bm25Results, lexical.persistent ? 'BM25 完成' : 'BM25 内存检索');
       } catch (error) {
@@ -492,11 +507,10 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     }
     if (!stillCurrent()) return;
     let results: VecHit[] = [];
-    if (summaryReady && cfg.rerankCandidates > 0) {
-      try { results = (await vecSearch(database, scopes, queryVectors, {
-        topK: Math.max(1, cfg.rerankCandidates), excludeLeafIds: exclude,
-      })).results; }
-      catch (error) {
+    if (vectorWanted) {
+      if (vectorResult.status === 'fulfilled') results = vectorResult.value!.results;
+      else {
+        const error = vectorResult.reason;
         signal.throwIfAborted();
         summaryReady = false;
         failSummary('embedding 检索失败', error);
@@ -605,7 +619,6 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     : summaryFailure || (summaryWanted ? '未命中' : '无需召回');
   if (knowledgeText) recallDebug.knowledgeStatus = '已注入';
   knowledgeDebug.status = recallDebug.knowledgeStatus;
-  const selfScope = currentChatScope();
   const debugHits = [...ranked];
   const debugKeys = new Set(ranked.map(candidateKey));
   for (const { hit } of selected) if (!debugKeys.has(candidateKey(hit))) debugHits.push({ ...hit, rerankScore: null });

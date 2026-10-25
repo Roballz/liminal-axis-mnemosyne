@@ -6,16 +6,19 @@ import type { BackupJob, BackupResult, HostMessage, WorkerMessage, DiskRequest }
  * IndexedDB snapshot reads, parsing, hashing and validation stay in the worker.
  * There is deliberately no synchronous/main-thread fallback on unsupported WebViews.
  */
-export function runBackupWorker(disk: BackupDisk, job: BackupJob, isCurrent: () => boolean,
+export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, isCurrent: () => boolean,
     createWorker: () => Worker = () => new BackupWorker(),
     onPendingNative?: (message: string) => void): Promise<BackupResult> {
     const unavailable = job.kind === 'preview'
-        ? '后台校验线程不可用；所选文件仍未验证，未恢复或删除。请重新加载插件后重试（需要宿主允许 Web Worker）；此前手动导出的核心包仍可在“档案 / 迁移”导入'
+        ? '后台校验线程不可用；所选文件仍未验证，未恢复或删除。请重新加载插件后重试（需要宿主允许 Web Worker）'
+        : job.kind === 'export' || job.kind === 'import' || job.kind === 'restore'
+        ? '后台迁移线程不可用；本次导出或恢复未完成，原库保留。请重新加载插件后重试（需要宿主允许 Web Worker）'
         : '后台备份线程不可用；已暂停本次备份，旧备份保留。请重新加载插件后重试（需要宿主允许 Web Worker）';
     return new Promise((resolve, reject) => {
         let worker: Worker;
         try { worker = createWorker(); } catch { reject(new Error(unavailable)); return; }
         let finished = false, started = false;
+        const written = new Set<string>();
         const inFlight = new Set<Promise<void>>();
         // Bound a broken startup/worker without releasing the disk writer reservation
         // while a native operation is still pending. Stopping JS is not cancelling IO.
@@ -43,8 +46,17 @@ export function runBackupWorker(disk: BackupDisk, job: BackupJob, isCurrent: () 
             // Detail jobs can only read their exact selected backup, never mutate disk.
             if (job.kind === 'preview' && (request.method !== 'read' || request.key !== job.key || !isCurrent()))
                 throw new Error('备份选择已改变或校验请求越界');
+            if (request.method === 'guard') return isCurrent();
+            if (!disk || job.kind === 'export' || job.kind === 'import') throw new Error('迁移任务不允许访问原生备份文件');
+            const writer = job.kind === 'auto' || job.kind === 'manual' || job.kind === 'before-restore' || job.kind === 'pin';
+            if (request.method === 'read') {
+                if ((job.kind === 'restore' || job.kind === 'pin') &&
+                    (request.key !== job.key && !(job.kind === 'pin' && written.has(request.key)) || !isCurrent()) ||
+                    (job.kind === 'manual' || job.kind === 'before-restore') && !written.has(request.key))
+                    throw new Error('所选备份已改变或文件读取越界');
+            } else if (request.method === 'remove' ? job.kind !== 'auto' : !writer)
+                throw new Error('当前任务不允许修改或列出备份文件');
             switch (request.method) {
-                case 'guard': return isCurrent();
                 case 'list': return disk.list();
                 case 'readPreviews': return disk.readPreviews?.();
                 case 'writePreviews':
@@ -55,7 +67,12 @@ export function runBackupWorker(disk: BackupDisk, job: BackupJob, isCurrent: () 
                     // Recheck on the main thread immediately before native side effects,
                     // not only before the asynchronous worker roundtrip.
                     if (!isCurrent()) throw new Error('档案仍在变化，本次备份已取消');
-                    return disk.write(request.key, request.blob);
+                    if (job.kind === 'pin' && (request.key === job.key || !request.key.startsWith('pinned-v1-')) ||
+                        (job.kind === 'manual' || job.kind === 'before-restore') && !request.key.startsWith(`${job.kind}-v1-`))
+                        throw new Error('备份写入类型或文件越界');
+                    await disk.write(request.key, request.blob);
+                    written.add(request.key);
+                    return;
                 case 'remove':
                     if (!isCurrent()) throw new Error('档案状态改变，保留新备份并暂停轮换');
                     return disk.remove(request.key);

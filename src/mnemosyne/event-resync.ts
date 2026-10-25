@@ -24,15 +24,25 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
     const states = await statuses(lib, child);
     const valid = child.memories.filter(m => states.get(m.id) === 'valid');
     const ids = new Map<string, string>();
-    const signature = (m: MemoryRevision) => [m.hostId, m.content, m.level, m.anchor, m.storyTime, m.seed, m.recall, m.visibility];
+    const signature = (m: MemoryRevision) => JSON.stringify([m.hostId, m.content, m.level, m.anchor, m.storyTime, m.seed, m.recall, m.visibility]);
+    const candidatesBySignature = new Map<string, MemoryRevision[]>(), validById = new Map(valid.map(m => [m.id, m]));
+    for (const memory of valid) {
+        const key = signature(memory), candidates = candidatesBySignature.get(key) ?? [];
+        candidates.push(memory); candidatesBySignature.set(key, candidates);
+    }
     const parentPositions = new Map(parent.refs.map((ref, index) => [ref.message, index]));
     const childPositions = new Map(child.refs.map((ref, index) => [ref.message, index]));
     await lib.transaction(STORES, 'readonly', async tx => {
+        const sourcesById = new Map<string, Promise<import('./model').SourceRef[]>>();
+        const sourcesOf = (memory: MemoryRevision) => {
+            if (!sourcesById.has(memory.id)) sourcesById.set(memory.id, summarySources(tx, memory));
+            return sourcesById.get(memory.id)!;
+        };
         for (const source of projection.valid) {
-            const candidates = valid.filter(m => equal(signature(m), signature(source)));
+            const candidates = candidatesBySignature.get(signature(source)) ?? [];
             if (candidates.length !== 1) continue;
             const target = candidates[0];
-            const sources = await summarySources(tx, source);
+            const sources = await sourcesOf(source);
             const floors = [...sources, ...source.coverage].map(ref => ref.message);
             if (source.anchor) floors.push(source.anchor);
             // Identical text may reuse a SourceRef after a swipe. Re-inheritance must
@@ -43,26 +53,50 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
                     sourceRefMatches(child.branch, parent.refs[index], child.refs[index]) &&
                     parent.snapshot.variants?.[index] === child.snapshot.variants?.[index];
             });
-            if (sameFloors && sourceRefsMatch(child.branch, sources, await summarySources(tx, target)) &&
+            if (sameFloors && sourceRefsMatch(child.branch, sources, await sourcesOf(target)) &&
                 sourceRefsMatch(child.branch, source.coverage, target.coverage)) ids.set(source.id, target.id);
         }
         // Higher summaries also need the same selected dependencies, not just equal prose.
-        let changed = true;
-        while (changed) {
-            changed = false;
-            for (const source of projection.valid) {
-                const target = valid.find(m => m.id === ids.get(source.id));
-                if (!target) continue;
-                const resolve = async (id: string, selection: MemoryRevision[]) => {
-                    const prior = await tx.get<MemoryRevision>('memory_revisions', id);
-                    const next = prior && selection.find(m => m.owner === prior.owner);
-                    // Both high summaries already passed statuses (including explicit
-                    // dependency approvals). Compare their currently selected families.
-                    return next?.id ?? id;
-                };
-                const a = await Promise.all(source.dependencies.map(async id => ids.get(await resolve(id, projection.valid))));
-                const b = await Promise.all(target.dependencies.map(id => resolve(id, valid)));
-                if (a.some(id => !id) || !equal(a, b)) { ids.delete(source.id); changed = true; }
+        const revisions = new Map<string, Promise<MemoryRevision | undefined>>();
+        const resolver = (selection: MemoryRevision[]) => {
+            const owners = new Map<string, MemoryRevision>(), resolved = new Map<string, Promise<string>>();
+            for (const memory of selection) if (!owners.has(memory.owner)) owners.set(memory.owner, memory);
+            return (id: string) => {
+                if (!resolved.has(id)) resolved.set(id, (async () => {
+                    if (!revisions.has(id)) revisions.set(id, tx.get<MemoryRevision>('memory_revisions', id));
+                    const prior = await revisions.get(id)!;
+                    // Both summaries passed statuses, including explicit dependency approvals.
+                    return prior && owners.get(prior.owner)?.id || id;
+                })());
+                return resolved.get(id)!;
+            };
+        };
+        const parentDependency = resolver(projection.valid), childDependency = resolver(valid);
+        const dependencies = new Map<string, { parent: string[]; child: string[] }>();
+        const dependents = new Map<string, Set<string>>();
+        for (const source of projection.valid) {
+            const target = validById.get(ids.get(source.id) ?? '');
+            if (!target) continue;
+            const [parent, child] = await Promise.all([
+                Promise.all(source.dependencies.map(parentDependency)), Promise.all(target.dependencies.map(childDependency)),
+            ]);
+            dependencies.set(source.id, { parent, child });
+            for (const id of parent) {
+                const users = dependents.get(id) ?? new Set(); users.add(source.id); dependents.set(id, users);
+            }
+        }
+        // Removing a child mapping invalidates only its ancestors. The mapping is
+        // consulted again each time, so approved-family dependency failures still cascade.
+        const queue = [...dependencies.keys()], pending = new Set(queue);
+        for (let i = 0; i < queue.length; i++) {
+            const id = queue[i]; pending.delete(id);
+            if (!ids.has(id)) continue;
+            const dependency = dependencies.get(id)!, mapped = dependency.parent.map(id => ids.get(id));
+            if (mapped.some(id => !id) || !equal(mapped, dependency.child)) {
+                ids.delete(id);
+                for (const user of dependents.get(id) ?? []) if (ids.has(user) && !pending.has(user)) {
+                    pending.add(user); queue.push(user);
+                }
             }
         }
     });
@@ -73,12 +107,29 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
         memberships: await tx.all<Membership>('event_memberships', 'owner', c.id),
         progress: await tx.all<Progress>('event_progress', 'owner', c.id),
     }] as const))));
-    const legacyMatch = (source: EventCard, target: EventChain) => {
-        const rows = childRows.get(target.id)!;
-        const signature = (r: EventRevision) => [r.created, r.title, r.status, r.keywords];
-        return !target.inheritance && target.created === source.chain.created && rows.revisions.length === 1 &&
-            [source.meta, ...(source.history?.revisions ?? [])].some(r => equal(signature(r), signature(rows.revisions[0])));
-    };
+    const eventSignature = (created: number, r: EventRevision) => JSON.stringify([created, r.created, r.title, r.status, r.keywords]);
+    const exactByEvent = new Map<string, EventChain[]>(), legacyBySignature = new Map<string, EventChain[]>();
+    for (const chain of childChains) {
+        if (chain.inheritance?.branch === parent.branch.id) {
+            const matches = exactByEvent.get(chain.inheritance.event) ?? [];
+            matches.push(chain); exactByEvent.set(chain.inheritance.event, matches);
+        }
+        const rows = childRows.get(chain.id)!;
+        if (!chain.inheritance && rows.revisions.length === 1) {
+            const key = eventSignature(chain.created, rows.revisions[0]), matches = legacyBySignature.get(key) ?? [];
+            matches.push(chain); legacyBySignature.set(key, matches);
+        }
+    }
+    const legacyByEvent = new Map<string, EventChain[]>(), matchCounts = new Map<string, number>();
+    for (const card of projection.cards) {
+        const matches = new Map<string, EventChain>();
+        for (const key of new Set([card.meta, ...(card.history?.revisions ?? [])].map(r => eventSignature(card.chain.created, r))))
+            for (const chain of legacyBySignature.get(key) ?? []) matches.set(chain.id, chain);
+        legacyByEvent.set(card.chain.id, [...matches.values()]);
+        for (const id of matches.keys()) matchCounts.set(id, (matchCounts.get(id) ?? 0) + 1);
+    }
+    const uncertainTitles = new Set(childChains.filter(c => !c.inheritance && !matchCounts.has(c.id))
+        .flatMap(c => childRows.get(c.id)!.revisions.map(r => r.title)));
     const plan: EventResyncPlan = { parent, child, parentChains, childChains, ids, cards: [], replacements: new Map(), entries: [] };
     const claimed = new Set<string>();
     const revisionIds = (m: EventCard['meta']) => [...m.refs, ...(m.summarized ?? []), ...(m.latestProgress ? [m.latestProgress.memory] : [])];
@@ -89,9 +140,9 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
         if (card.blocked || card.needsReview || needed.some(id => !ids.has(id))) {
             entry.reason = '来源摘要缺失、已修改或待审核'; continue;
         }
-        const exact = childChains.filter(c => c.inheritance?.branch === parent.branch.id && c.inheritance.event === card.chain.id);
-        const candidates = exact.length ? exact : childChains.filter(c => legacyMatch(card, c));
-        if (candidates.length > 1 || candidates.some(c => claimed.has(c.id) || (!c.inheritance && projection.cards.filter(p => legacyMatch(p, c)).length > 1))) {
+        const exact = exactByEvent.get(card.chain.id) ?? [];
+        const candidates = exact.length ? exact : legacyByEvent.get(card.chain.id) ?? [];
+        if (candidates.length > 1 || candidates.some(c => claimed.has(c.id) || (!c.inheritance && (matchCounts.get(c.id) ?? 0) > 1))) {
             entry.reason = '存在多个可能对应的事件'; continue;
         }
         const target = candidates[0];
@@ -109,8 +160,7 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
             entry.action = 'replace'; entry.reason = '补齐／更新未修改的继承事件';
         } else {
             // An old event with an uncertain identity must not silently become a duplicate.
-            const uncertain = childChains.filter(c => !c.inheritance && !projection.cards.some(p => legacyMatch(p, c)));
-            if (uncertain.some(c => childRows.get(c.id)!.revisions.some(r => r.title === card.meta.title))) {
+            if (uncertainTitles.has(card.meta.title)) {
                 entry.reason = '已有同名事件，无法可靠确认来源'; continue;
             }
             entry.action = 'add'; entry.reason = '补回缺失事件';
@@ -122,7 +172,8 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
             progress: history.progress.filter(r => r.memories.every(id => ids.has(id))),
         } });
     }
-    for (const chain of parentChains.filter(c => !projection.cards.some(p => p.chain.id === c.id)))
+    const projectedIds = new Set(projection.cards.map(card => card.chain.id));
+    for (const chain of parentChains.filter(c => !projectedIds.has(c.id)))
         plan.entries.push({ title: '父档案中的事件', archived: !!chain.archived, action: 'skip', reason: '分叉点前无可用版本或来源已失效' });
     check(await current(lib, parent) && await current(lib, child), '档案已改变，请重新预览');
     return plan;

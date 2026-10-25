@@ -5,7 +5,7 @@ import { apiSettings } from '@/api/settings';
 import * as embed from './embed';
 import { localStore } from './store';
 import { deleteKnowledge, editKnowledge, embeddingIdentity, eligibleKnowledge, importKnowledge, knowledgeFingerprint,
-  knowledgeScope, knowledgeText, listKnowledge, readKnowledgeFile, readKnowledgeSource, recallKnowledge, setKnowledgeEnabled, splitKnowledge } from './knowledge';
+  knowledgeDebug, knowledgeScope, knowledgeText, listKnowledge, readKnowledgeFile, readKnowledgeSource, recallKnowledge, searchKnowledge, setKnowledgeEnabled, splitKnowledge } from './knowledge';
 
 const original = structuredClone(JSON.parse(JSON.stringify(apiSettings.vector)));
 const config = { enabled: true, count: 3, threshold: 0.8, maxChars: 6000 };
@@ -50,6 +50,18 @@ it('真实本地向量检索只返回 BB，不连带 AA；重读持久化、角�
   await deleteKnowledge((await listKnowledge(database))[0]);
   expect(await listKnowledge(database)).toEqual([]);
   expect((await localStore.stats(database, [knowledgeScope(file)])).stats[knowledgeScope(file)]).toBe(0);
+});
+
+it('并行工作函数只返回本请求结果，调试状态由当前调用者发布', async () => {
+  const file = await importKnowledge(database, 'parallel.md', '===', ['BB设定']);
+  knowledgeDebug.status = '较新请求'; knowledgeDebug.hits = [{ name: '较新文件', block: 9, score: .9 }];
+  const before = JSON.stringify(knowledgeDebug);
+  const result = await searchKnowledge(database, [file], [embed.encodeFloat32Base64(new Float32Array([0, 1]))], config);
+  expect(result.text).toContain('BB设定'); expect(result.hits).toEqual([{ name: 'parallel.md', block: 1, score: 1 }]);
+  expect(JSON.stringify(knowledgeDebug)).toBe(before);
+  const cancelled = new AbortController(); cancelled.abort(new Error('old caller cancelled'));
+  await expect(recallKnowledge(database, [file], [], config, cancelled.signal)).rejects.toThrow('old caller cancelled');
+  expect(JSON.stringify(knowledgeDebug)).toBe(before);
 });
 
 it('跨批次失败和取消不发布半成品，也不影响已导入的文件', async () => {

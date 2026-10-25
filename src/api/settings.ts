@@ -649,6 +649,7 @@ let sharedChannelsListenerBound = false;
 let sharedExcludesFingerprint = '';
 let sharedExcludesRevision = 0;
 let sharedExcludesListenerBound = false;
+let settingsFlushBound = false;
 
 // hydrate 完成后要通知的订阅者(如 ui.ts:settings 就绪后才能拿到同步过来的主题/导航位置)。
 // 若订阅时已就绪则立刻回调,避免错过时序。
@@ -898,17 +899,43 @@ function hydrateSharedExcludes(): void {
   bindSharedExcludesListener();
 }
 
-/** 写回 extension_settings 并防抖落盘到服务器(跨设备同步的关键)。 */
-function persist(): void {
+// Coalesce the full snapshot itself, not only the host's later disk write.
+const SETTINGS_SAVE_DELAY = 200, SETTINGS_SAVE_MAX_WAIT = 1000;
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+let persistDeadline: ReturnType<typeof setTimeout> | undefined;
+let persistPending = false;
+
+function clearPersistTimers(): void {
+  clearTimeout(persistTimer); clearTimeout(persistDeadline);
+  persistTimer = persistDeadline = undefined;
+}
+
+/** Write a detached snapshot of the latest settings; shared branches sync separately. */
+function persist(): boolean {
   const ctx = getContext();
-  if (!ctx?.extensionSettings) return;
+  if (!ctx?.extensionSettings) return false;
   ctx.extensionSettings[SETTINGS_KEY] = JSON.parse(JSON.stringify(apiSettings));
-  const fingerprint = channelFingerprint(apiSettings.channels);
-  if (fingerprint !== sharedChannelsFingerprint) writeSharedChannels();
-  // 排除名单有改动 → 同步写共享存储并广播(指纹比对防回环)
-  const exFingerprint = excludesFingerprint(apiSettings);
-  if (exFingerprint !== sharedExcludesFingerprint) writeSharedExcludes();
   ctx.saveSettingsDebounced?.();
+  return true;
+}
+
+function flushPendingSettings(): void {
+  clearPersistTimers();
+  if (ready && persistPending) persistPending = !persist();
+}
+
+function schedulePersist(): void {
+  if (!ready) return; // Never overwrite server settings before hydration.
+  persistPending = true;
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(flushPendingSettings, SETTINGS_SAVE_DELAY);
+  persistDeadline ??= setTimeout(flushPendingSettings, SETTINGS_SAVE_MAX_WAIT);
+}
+
+/** Explicit/lifecycle flush also captures edits whose Vue watcher has not run yet. */
+export function flushSettingsNow(): void {
+  clearPersistTimers();
+  if (ready) persistPending = !persist();
 }
 
 /**
@@ -975,6 +1002,10 @@ export function hydrateSettings(): void {
   hydrateSharedExcludes();
 
   ready = true;
+  if (!settingsFlushBound) {
+    settingsFlushBound = true;
+    window.addEventListener('pagehide', flushSettingsNow);
+  }
   for (const cb of readyCbs.splice(0)) {
     try {
       cb();
@@ -984,14 +1015,16 @@ export function hydrateSettings(): void {
   }
 }
 
-watch(
-  apiSettings,
-  () => {
-    if (!ready) return; // hydrate 前不回写,防止默认值覆盖服务器设置
-    persist();
-  },
-  { deep: true },
-);
+watch(apiSettings, schedulePersist, { deep: true });
+// Keep cross-plugin sharing prompt, without fingerprinting these branches on
+// unrelated endpoint/number/appearance edits. Existing fingerprints prevent echo.
+watch(() => apiSettings.channels, () => {
+  if (ready && channelFingerprint(apiSettings.channels) !== sharedChannelsFingerprint) writeSharedChannels();
+}, { deep: true });
+watch(() => [apiSettings.excludedChars, apiSettings.excludedWorldNames,
+  apiSettings.excludedWorldInfoPatterns, apiSettings.customStripTags], () => {
+  if (ready && excludesFingerprint(apiSettings) !== sharedExcludesFingerprint) writeSharedExcludes();
+}, { deep: true });
 
 let chanSeq = 0;
 export function newChannel(): ApiChannel {

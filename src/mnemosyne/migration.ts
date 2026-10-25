@@ -100,7 +100,23 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         const digest = legacyDigests.get(id);
         return digest ? { ...revision, bodySchema: 1, bodyHash: digest, bodyLength: revision.content.length } : revision;
     };
-    const refs = (snapshot: any): any[] => snapshot.blocks.flatMap((b: string) => get('manifest_blocks', b).entries);
+    // Validation may revisit a shared basis thousands of times. Keep only the two
+    // working snapshots, never every expanded historical prefix in memory.
+    const sourceIndexes = new Map<string, { refs: any[]; positions: Map<string, number> }>();
+    const sourceIndex = (snapshot: any) => {
+        let index = sourceIndexes.get(snapshot.id);
+        if (index) sourceIndexes.delete(snapshot.id);
+        else {
+            const entries: any[] = snapshot.blocks.flatMap((b: string) => get('manifest_blocks', b).entries);
+            const positions = new Map<string, number>();
+            entries.forEach((entry, position) => { if (!positions.has(entry.message)) positions.set(entry.message, position); });
+            index = { refs: entries, positions };
+        }
+        sourceIndexes.set(snapshot.id, index);
+        if (sourceIndexes.size > 2) sourceIndexes.delete(sourceIndexes.keys().next().value!);
+        return index;
+    };
+    const refs = (snapshot: any): any[] => sourceIndex(snapshot).refs;
     for (const store of STORES)
         for (const r of maps[store].values()) {
             if (r.story)
@@ -164,7 +180,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             }
         }
         const all = refs(s);
-        check(all.length === s.length && new Set(all.map(r => r.message)).size === all.length, '快照计数/消息重复');
+        check(all.length === s.length && sourceIndex(s).positions.size === all.length, '快照计数/消息重复');
         for (const r of all)
             ref(r, s.story);
         if (s.previous)
@@ -178,6 +194,21 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         }
         for (const id of seen) settledSnapshots.add(id);
     }
+    const branchSnapshots = new Map<string, any[]>(), pinnedSnapshots = new Map<string, Set<any>>();
+    for (const snapshot of maps.history_snapshots.values()) {
+        const group = branchSnapshots.get(snapshot.branch) ?? [];
+        group.push(snapshot); branchSnapshots.set(snapshot.branch, group);
+    }
+    const pin = (id: string) => {
+        const snapshot = get('history_snapshots', id);
+        if (snapshot.snapshotSchema !== 2) return;
+        const group = pinnedSnapshots.get(snapshot.branch) ?? new Set();
+        group.add(snapshot); pinnedSnapshots.set(snapshot.branch, group);
+    };
+    for (const branch of maps.branches.values()) if (branch.fork) pin(branch.fork.snapshot);
+    for (const memory of maps.memory_revisions.values()) pin(memory.sourceRecovery ? memory.sourceRecovery.snapshot : memory.basis);
+    for (const store of ['reviews', 'event_revisions', 'event_memberships', 'event_progress', 'event_processing_receipts', 'table_receipts', 'table_history'] as Store[])
+        for (const record of maps[store].values()) pin(record.snapshot);
     for (const b of maps.branches.values()) {
         check(get('history_snapshots', b.head).branch === b.id && get('memory_views', b.view).branch === b.id, 'Head/视图不属于分支');
         check(Number.isSafeInteger(b.epoch) && b.epoch >= 0, '分支版本非法');
@@ -187,21 +218,16 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             const revision = get('source_revisions', source.revision);
             check(revision.bodySchema !== 1 || maps.source_bodies.has(revision.id), '当前正文载荷缺失');
         }
-        const roots = [head];
+        const history = branchSnapshots.get(b.id) ?? [];
+        const roots = [head, ...(pinnedSnapshots.get(b.id) ?? [])];
         if (b.legacyHead !== undefined) {
             const legacy = get('history_snapshots', b.legacyHead);
             check(legacy.branch === b.id && legacy.snapshotSchema === undefined, '旧历史基线非法');
             roots.push(legacy);
         }
-        const pin = (id: string) => { const s = get('history_snapshots', id); if (s.branch === b.id && s.snapshotSchema === 2) roots.push(s); };
-        for (const snapshot of maps.history_snapshots.values()) if (snapshot.branch === b.id && snapshot.snapshotSchema === 2 && b.sourceRoleRepairs?.some((pair: any) => refs(snapshot).some(r => r.revision === pair.before.revision || r.revision === pair.after.revision))) roots.push(snapshot);
-        for (const branch of maps.branches.values()) if (branch.fork) pin(branch.fork.snapshot);
-        for (const memory of maps.memory_revisions.values()) {
-            if (memory.sourceRecovery) pin(memory.sourceRecovery.snapshot);
-            else pin(memory.basis);
-        }
-        for (const store of ['reviews', 'event_revisions', 'event_memberships', 'event_progress', 'event_processing_receipts', 'table_receipts', 'table_history'] as Store[])
-            for (const record of maps[store].values()) pin(record.snapshot);
+        const repaired = new Set((b.sourceRoleRepairs ?? []).flatMap((pair: any) => [pair.before.revision, pair.after.revision]));
+        if (repaired.size) for (const snapshot of history)
+            if (snapshot.snapshotSchema === 2 && refs(snapshot).some(r => repaired.has(r.revision))) roots.push(snapshot);
         for (const root of roots) {
             let cursor = root;
             while (cursor && !reachable.has(cursor.id)) {
@@ -209,10 +235,11 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
                 cursor = cursor.previous ? get('history_snapshots', cursor.previous) : null;
             }
         }
-        check([...maps.history_snapshots.values()].filter(s => s.branch === b.id).every(s => reachable.has(s.id)), '未提交孤立快照');
+        check(history.every(s => reachable.has(s.id)), '未提交孤立快照');
         if (b.sourceRoleRepairSchema !== undefined || b.sourceRoleRepairs !== undefined) {
             check(b.sourceRoleRepairSchema === 1 && Array.isArray(b.sourceRoleRepairs), '来源角色修复格式非法');
-            const historical = new Set([...maps.history_snapshots.values()].filter(s => s.branch === b.id).flatMap(s => refs(s).map(r => r.revision)));
+            const historical = new Set<string>();
+            for (const snapshot of history) for (const source of refs(snapshot)) historical.add(source.revision);
             const pairs = new Set<string>();
             for (const pair of b.sourceRoleRepairs) {
                 check(pair && Object.keys(pair).length === 3 && Number.isSafeInteger(pair.confirmedAt) && pair.confirmedAt >= 0, '来源角色修复回执非法');
@@ -270,10 +297,11 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             }
         } else {
             check(get('history_snapshots', m.basis).story === m.story, '摘要跨故事');
-            const basisRefs = refs(get('history_snapshots', m.basis));
+            const basis = m.inputRefs.length || m.coverage.length ? sourceIndex(get('history_snapshots', m.basis)) : undefined;
             for (const r of [...m.inputRefs, ...m.coverage]) {
                 ref(r, m.story);
-                check(basisRefs.some(v => v.message === r.message && v.revision === r.revision), '生成来源不属于基线快照');
+                const position = basis!.positions.get(r.message);
+                check(position !== undefined && basis!.refs[position].revision === r.revision, '生成来源不属于基线快照');
             }
         }
         if (m.anchor)
@@ -355,17 +383,18 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         check(r.decision === 'compatible' && ['manual', 'generated_sidecar'].includes(r.origin) && Number.isSafeInteger(r.created), '审核结构非法');
         if (['reviewSchema','sourceRefs','coverage','dependencies'].some(k => k in r)) {
             check(r.reviewSchema === 2 && Array.isArray(r.sourceRefs) && Array.isArray(r.coverage) && Array.isArray(r.dependencies), '审核版本非法');
-            const memory = get('memory_revisions', r.owner), currentRefs = refs(snapshot);
+            const memory = get('memory_revisions', r.owner), current = sourceIndex(snapshot), currentRefs = current.refs;
             const dependencyOnly = memory.level > 0 && !memory.anchor && !memory.inputRefs.length && memory.dependencies.length;
-            const basis = memory.sourceRecovery ? [] : refs(get('history_snapshots', memory.basis));
-            const original = memory.inputRefs.length ? memory.inputRefs : dependencyOnly ? [] : memory.anchor ? basis.slice(0, basis.findIndex(v => v.message === memory.anchor) + 1) : basis;
+            const basis = memory.sourceRecovery || memory.inputRefs.length || dependencyOnly ? undefined : sourceIndex(get('history_snapshots', memory.basis));
+            const original = memory.inputRefs.length ? memory.inputRefs : !basis ? [] : memory.anchor
+                ? basis.refs.slice(0, (basis.positions.get(memory.anchor) ?? -1) + 1) : basis.refs;
             const validateSources = (approved: any[], expected: any[]) => {
                 check(JSON.stringify(approved.map(v => v.message)) === JSON.stringify(expected.map(v => v.message)), '审核来源身份不匹配');
                 let last = -1;
                 for (const v of approved) {
                     ref(v, r.story);
-                    const pos = currentRefs.findIndex(c => c.message === v.message && c.revision === v.revision);
-                    check(pos > last, '审核来源顺序或版本不匹配'); last = pos;
+                    const pos = current.positions.get(v.message) ?? -1;
+                    check(pos > last && currentRefs[pos]?.revision === v.revision, '审核来源顺序或版本不匹配'); last = pos;
                 }
             };
             // Pre-recovery receipts are retained as audit records, but statuses never lets
@@ -374,7 +403,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             validateSources(r.coverage, memory.coverage);
             if (!memory.inputRefs.length && !dependencyOnly) check(JSON.stringify(r.sourceRefs) === JSON.stringify(currentRefs.slice(0, r.sourceRefs.length)), '审核前缀不匹配');
             if (r.coverage.length) {
-                const first = currentRefs.findIndex(v => v.message === r.coverage[0].message);
+                const first = current.positions.get(r.coverage[0].message) ?? -1;
                 check(JSON.stringify(r.coverage) === JSON.stringify(currentRefs.slice(first, first + r.coverage.length)), '审核覆盖不连续');
             }
             memoryRefs(r, r.dependencies);

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({ inventory: vi.fn(), connect: vi.fn(), configur
 vi.mock('@/mnemosyne/core-backup-runtime', async importOriginal => ({
     ...await importOriginal<typeof import('@/mnemosyne/core-backup-runtime')>(),
     getCoreBackups: mocks.connect, configureCoreBackups: mocks.configure, readCoreBackupPreview: mocks.preview,
+    saveCoreBackup: mocks.save, pinCoreBackup: mocks.pin, restoreCoreBackup: mocks.restore,
 }));
 vi.mock('@/mnemosyne/db', async importOriginal => ({ ...await importOriginal<typeof import('@/mnemosyne/db')>(), activeLibrary: mocks.active }));
 vi.mock('@/mnemosyne/bridge', async () => ({
@@ -266,5 +267,5 @@ test('pin and restore retain their verified-file arguments and busy or pending g
     expect(button(root, '从这份核心包恢复').props.disabled).toBe(true); // Refresh revokes the verified details.
     await button(root, '校验这份备份').props.onClick(); await flush();
     await button(root, '固定保留').props.onClick(); await flush();
-    expect(mocks.pin).toHaveBeenCalledWith('auto', 'a'.repeat(64)); expect(text(root)).toContain('不参与自动轮换');
+    expect(mocks.pin).toHaveBeenCalledWith('auto', 'a'.repeat(64), expect.any(Function)); expect(text(root)).toContain('不参与自动轮换');
 });
