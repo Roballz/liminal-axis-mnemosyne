@@ -19,7 +19,6 @@ import { buildEventInstruction } from "./event-prompts";
 import { parseManualEvent } from "./event-response";
 export { parseManualEvent } from "./event-response";
 import {
-  STORES,
   check,
   row,
   type Branch,
@@ -64,6 +63,7 @@ export async function commitManualEvent(
   const output = parseManualEvent(raw, overviewMaxChars);
   const validity = await statuses(lib, view);
   const allowed = view.memories.filter(m => validity.get(m.id) === 'valid');
+  const selectedById = new Map(view.memories.map(m => [m.id, m]));
   const allowedById = new Map(allowed.map(m => [m.id, m]));
   const memoryIds = new Set(memories);
   const existingMemberIds = new Set(card?.members.map(m => m.memory));
@@ -72,7 +72,7 @@ export async function commitManualEvent(
   const progressMemory = latest ? allowedById.get(latest.memory)! : undefined;
   const allowedMembers = allowed.filter(m => memoryIds.has(m.id));
   const priorLatest = card?.meta.latestProgress;
-  const priorSource = priorLatest && await lib.get<MemoryRevision>("memory_revisions", priorLatest.memory);
+  const priorSource = priorLatest && (selectedById.get(priorLatest.memory) ?? await lib.get<MemoryRevision>("memory_revisions", priorLatest.memory));
   const retainedLatest = (card?.meta.overviewMaterialMode ?? 'both') === materialMode && priorLatest && priorSource && allowedMembers.some(m => m.owner === priorSource.owner)
     ? await confirmLatestProgressSource(lib, priorLatest, allowedMembers) : null;
   const latestProgress = latest && progressMemory ? {
@@ -86,9 +86,13 @@ export async function commitManualEvent(
   );
   const summarized =
     card?.meta.summarized ?? card?.progress.flatMap((p) => p.memories) ?? [];
-  const priorFamilies = new Set((await Promise.all(summarized.map(id => lib.get<MemoryRevision>('memory_revisions', id)))).filter(Boolean).map(m => m!.owner));
+  const missing = [...new Set(summarized.filter(id => !selectedById.has(id)))];
+  const previous = missing.length ? await lib.transaction(['memory_revisions'], 'readonly', tx =>
+    Promise.all(missing.map(id => tx.get<MemoryRevision>('memory_revisions', id)))) : [];
+  const priorFamilies = new Set([...summarized.map(id => selectedById.get(id)), ...previous]
+    .filter((m): m is MemoryRevision => !!m).map(m => m.owner));
   const added = memories.filter(id => !priorFamilies.has(allowedById.get(id)!.owner));
-  return lib.transaction(STORES, "readwrite", async (tx) => {
+  return lib.transaction(['branches', 'event_chains', 'event_revisions', 'event_memberships', 'event_progress'], "readwrite", async (tx) => {
     const branch = await tx.get<Branch>("branches", view.branch.id);
     check(
       guard() &&

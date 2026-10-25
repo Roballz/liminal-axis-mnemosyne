@@ -20,6 +20,10 @@ export interface ReplyHost {
     processor?: { messageId?: number; isFinished?: boolean; isStopped?: boolean; abortController?: { signal?: { aborted?: boolean } } } | null;
 }
 interface Receipt { version: 1; epoch: number; scope: string; floor: number; swipe: number; hash: string; state: State }
+interface VerifiedReply {
+    floor: number; text: string; swipe: number; receipt: Receipt; receiptValue: string;
+    errorLabel: string | undefined; hash: string;
+}
 interface Run {
     epoch: number; scope: string; chat: ReplyMessage[]; floor: number; page?: number; type?: string;
     before?: { message: ReplyMessage; text: string; swipe: number };
@@ -64,8 +68,13 @@ export class ReplyFinality {
     private edit?: { scope: string; chat: ReplyMessage[]; floor: number; message: ReplyMessage; swipe: number; expires: number; expectedText: string; text?: string };
     private writes = new Set<Promise<void>>();
     private editSerial = 0;
+    private verified = new WeakMap<ReplyMessage, VerifiedReply>();
+    private verifiedHost?: Pick<ReplyHost, 'scope' | 'chat'>;
     constructor(private host: () => ReplyHost) {}
-    reset() { this.run = undefined; this.cancelEdit(); this.revision++; }
+    reset() {
+        this.run = undefined; this.cancelEdit(); this.revision++;
+        this.verified = new WeakMap(); this.verifiedHost = undefined;
+    }
     start(type?: string, _options?: unknown, dryRun?: boolean) {
         if (dryRun || type === 'quiet' || type === 'impersonate') return;
         const h = this.host(), tail = h.chat.at(-1);
@@ -98,8 +107,9 @@ export class ReplyFinality {
         return Array.isArray(m.swipes) && swipe(m) >= m.swipes.length;
     }
     private async stamp(m: ReplyMessage, floor: number, state: State, run?: Run, quiet = false, current = () => true) {
-        const h = this.host(), text = m.mes, page = swipe(m), epoch = run?.epoch ?? (quiet ? (m.extra?.[REPLY_FINALITY_KEY] as Receipt)?.epoch : undefined) ?? ++this.epoch;
-        const receipt: Receipt = { version: 1, epoch, scope: h.scope, floor, swipe: page, hash: '', state };
+        this.verified.delete(m);
+        const { scope, chat } = this.host(), text = m.mes, page = swipe(m), epoch = run?.epoch ?? (quiet ? (m.extra?.[REPLY_FINALITY_KEY] as Receipt)?.epoch : undefined) ?? ++this.epoch;
+        const receipt: Receipt = { version: 1, epoch, scope, floor, swipe: page, hash: '', state };
         m.extra ??= {};
         m.extra[REPLY_FINALITY_KEY] = receipt;
         // TT restores extra from swipe_info when selecting a page. Mirror only our receipt.
@@ -107,7 +117,7 @@ export class ReplyFinality {
         if (info) { info.extra ??= {}; info.extra[REPLY_FINALITY_KEY] = receipt; }
         if (!quiet) this.revision++;
         const hash = await fingerprint(text), now = this.host();
-        if (h.scope !== now.scope || h.chat !== now.chat || now.chat[floor] !== m || m.mes !== text || swipe(m) !== page ||
+        if (scope !== now.scope || chat !== now.chat || now.chat[floor] !== m || m.mes !== text || swipe(m) !== page ||
             m.extra[REPLY_FINALITY_KEY] !== receipt || (run && !this.current(run)) || !current()) return false;
         receipt.hash = hash;
         if (!quiet) this.revision++;
@@ -225,13 +235,13 @@ export class ReplyFinality {
     }
     /** Only verified plugin-owned summary sidecar hooks may call this. */
     reconcileDerived(floor: number, originalText: string) {
-        const h = this.host(), m = h.chat[floor], receipt = m?.extra?.[REPLY_FINALITY_KEY] as Receipt | undefined;
+        const { scope, chat } = this.host(), m = chat[floor], receipt = m?.extra?.[REPLY_FINALITY_KEY] as Receipt | undefined;
         if (!receipt || !['complete', 'edited'].includes(receipt.state)) return;
         const text = m.mes, page = swipe(m), run = this.run, revision = this.revision;
         const write = (async () => {
             if (receipt.hash !== await fingerprint(originalText)) return;
             const now = this.host();
-            if (now.scope !== h.scope || now.chat !== h.chat || now.chat[floor] !== m || m.mes !== text ||
+            if (now.scope !== scope || now.chat !== chat || now.chat[floor] !== m || m.mes !== text ||
                 swipe(m) !== page || m.extra?.[REPLY_FINALITY_KEY] !== receipt || this.run !== run || this.revision !== revision) return;
             await this.stamp(m, floor, receipt.state, undefined, true);
         })();
@@ -239,23 +249,23 @@ export class ReplyFinality {
         void write.then(() => this.writes.delete(write), () => this.writes.delete(write));
     }
     private targetCurrent(h: ReplyHost, floor: number, scoped = false) {
-        const m = h.chat[floor], text = m.mes, page = swipe(m), role = assistant(m), uncreated = this.uncreatedSwipe(m);
+        const { scope, chat } = h, m = chat[floor], text = m.mes, page = swipe(m), role = assistant(m), uncreated = this.uncreatedSwipe(m);
         const receipt = JSON.stringify(m.extra?.[REPLY_FINALITY_KEY]), revision = this.revision;
         return () => {
             const now = this.host();
-            return now.scope === h.scope && now.chat === h.chat && now.chat[floor] === m && (scoped || this.revision === revision) &&
+            return now.scope === scope && now.chat === chat && now.chat[floor] === m && (scoped || this.revision === revision) &&
                 m.mes === text && swipe(m) === page && assistant(m) === role && this.uncreatedSwipe(m) === uncreated &&
                 JSON.stringify(m.extra?.[REPLY_FINALITY_KEY]) === receipt;
         };
     }
     private diagnosticContext(h: ReplyHost) {
-        const run = this.current(), revision = this.revision, total = h.chat.length, processor = h.processor;
+        const { scope, chat, errorLabel } = h, run = this.current(), revision = this.revision, total = chat.length, processor = h.processor;
         const state = () => JSON.stringify([processor?.messageId, processor?.isFinished, processor?.isStopped,
             processor?.abortController?.signal?.aborted, run?.floor, run?.page, run?.ended, run?.stopped]);
         const observed = state();
         return () => {
             const now = this.host();
-            return now.scope === h.scope && now.chat === h.chat && now.chat.length === total && now.errorLabel === h.errorLabel &&
+            return now.scope === scope && now.chat === chat && now.chat.length === total && now.errorLabel === errorLabel &&
                 now.processor === processor && this.current() === run && this.revision === revision && state() === observed;
         };
     }
@@ -265,19 +275,39 @@ export class ReplyFinality {
     }
     /** Same classification for the gate and diagnostic pages; no mutation or receipt creation. */
     private blockerReason(h: ReplyHost, m: ReplyMessage, floor: number, run: Run | undefined, candidate: boolean): ReplyBlockerReason | undefined | Promise<ReplyBlockerReason | undefined> {
+        if (this.verifiedHost?.scope !== h.scope || this.verifiedHost.chat !== h.chat) {
+            this.verified = new WeakMap();
+            this.verifiedHost = { scope: h.scope, chat: h.chat };
+        }
         if (this.uncreatedSwipe(m)) return 'uncreated';
         const p = h.processor, receipt = m.extra?.[REPLY_FINALITY_KEY] as Receipt | undefined;
         if (p?.messageId === floor && p.isFinished !== true && !p.isStopped && !p.abortController?.signal?.aborted &&
             (!run || candidate)) return 'streaming';
         if (!receipt) return candidate ? 'pending' : hasTTErrorMarker(m.mes, h.errorLabel) ? 'api_error' : undefined;
-        return fingerprint(m.mes).then(hash => {
+        const text = m.mes, page = swipe(m), receiptValue = JSON.stringify(receipt), saved = this.verified.get(m);
+        // Reuse only successful body/receipt checks. A receipt can mutate in place,
+        // so neither its object identity nor the lifecycle revision alone is proof.
+        // Active processor/run gates are checked on every call, including cache hits.
+        const verified = saved && saved.floor === floor && saved.text === text && saved.swipe === page &&
+            saved.receipt === receipt && saved.receiptValue === receiptValue && saved.errorLabel === h.errorLabel ? saved : undefined;
+        const classify = (hash: string): ReplyBlockerReason | undefined => {
             if (receipt.version !== 1) return 'unknown';
             if (receipt.swipe !== swipe(m) || receipt.hash !== hash) return 'changed';
             if (receipt.state === 'aborted' || (candidate && run?.stopped && receipt.state !== 'edited')) return 'aborted';
             if (receipt.state === 'pending') return 'pending';
             if (receipt.state === 'uncertain') return 'api_error';
             if (!['complete', 'edited'].includes(receipt.state)) return 'unknown';
-            if (hasTTErrorMarker(m.mes, h.errorLabel) && receipt.state !== 'edited') return 'api_error';
+            if (!verified && receipt.state !== 'edited' && hasTTErrorMarker(m.mes, h.errorLabel)) return 'api_error';
+        };
+        if (verified) return classify(verified.hash);
+        const cache = this.verified, target = this.targetCurrent(h, floor), context = this.diagnosticContext(h);
+        return fingerprint(text).then(hash => {
+            const problem = classify(hash);
+            // Never publish a late proof after a text, receipt, chat or run change.
+            // The caller still keeps its full range/prefix guard for archival authority.
+            if (!problem && target() && context() && m.extra?.[REPLY_FINALITY_KEY] === receipt)
+                cache.set(m, { floor, text, swipe: page, receipt, receiptValue, errorLabel: h.errorLabel, hash });
+            return problem;
         });
     }
     /** Explicit diagnostic pages only: at most 100 new floors / 10 findings per call.
@@ -333,7 +363,7 @@ export class ReplyFinality {
     private async assertRange(observe: boolean, cutoff?: number, scoped = false) {
         await Promise.all([...this.writes]);
         if (observe) await this.observe();
-        const h = this.host(), run = this.current(), revision = this.revision;
+        const h = this.host(), { scope, chat, errorLabel } = h, run = this.current(), revision = this.revision;
         const processor = h.processor;
         const processorState = (p: ReplyHost['processor']) => JSON.stringify([p?.messageId, p?.isFinished, p?.isStopped, p?.abortController?.signal?.aborted]);
         const observedProcessor = processorState(processor);
@@ -351,7 +381,7 @@ export class ReplyFinality {
             receipt: JSON.stringify(m.extra?.[REPLY_FINALITY_KEY]), role: assistant(m), uncreated: this.uncreatedSwipe(m) }));
         const current = () => {
             const now = this.host();
-            return now.scope === h.scope && now.chat === h.chat && now.errorLabel === h.errorLabel &&
+            return now.scope === scope && now.chat === chat && now.errorLabel === errorLabel &&
                 (scoped ? now.chat.length >= snapshot.length && JSON.stringify(relevantRun()) === runState && relevantProcessor() === prefixProcessor :
                     now.processor === processor && processorState(now.processor) === observedProcessor && this.revision === revision && now.chat.length === snapshot.length) &&
                 snapshot.every((s, i) => now.chat[i] === s.message && s.text === s.message.mes && s.swipe === swipe(s.message) &&

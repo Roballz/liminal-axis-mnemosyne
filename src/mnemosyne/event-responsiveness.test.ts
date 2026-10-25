@@ -7,7 +7,7 @@ import { capture } from './canonical';
 import { eventView, commitEventBatch } from './events';
 import { eventMaterial, prepareEventMaterials } from './event-materials';
 import { commitManualEvent } from './manual-events';
-import { Transaction } from './db';
+import { Library, Transaction } from './db';
 
 const page = parse(readFileSync(new URL('../pages/events/index.vue', import.meta.url), 'utf8')).descriptor;
 const template = page.template!.content;
@@ -96,8 +96,15 @@ test('single-chain projection reads only its own history and rejects a chain fro
       const single = await eventView(lib, view, false, target.chain.id);
       expect(single.cards).toEqual([target]);
       const histories = reads.mock.calls.filter(([store]) => store.startsWith('event_'));
-      expect(histories).toHaveLength(3);
-      expect(histories.every(([, index, key]) => index === 'owner' && key === target.chain.id)).toBe(true);
+      expect(histories).toHaveLength(0); // The verified current projection is already warm.
+      const cold = await Library.open(lib.db.name);
+      try {
+        reads.mockClear();
+        expect((await eventView(cold, view, false, target.chain.id)).cards).toEqual([target]);
+        const coldHistories = reads.mock.calls.filter(([store]) => store.startsWith('event_'));
+        expect(coldHistories).toHaveLength(3);
+        expect(coldHistories.every(([, index, key]) => index === 'owner' && key === target.chain.id)).toBe(true);
+      } finally { cold.close(); }
     } finally { reads.mockRestore(); }
     await lib.transaction(['event_chains'], 'readwrite', tx => tx.add('event_chains', { ...target.chain, id: 'foreign-event', branch: 'other-branch' }));
     expect((await eventView(lib, view, false, 'foreign-event')).cards).toEqual([]);

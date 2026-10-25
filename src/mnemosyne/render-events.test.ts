@@ -60,14 +60,14 @@ function countHostSerializations() {
   return count;
 }
 
-test('155 unchanged historical renders batch whole-host comparisons and derived replay', async () => {
+test('155 unchanged historical renders reuse the host version while batching derived replay', async () => {
   const derive = vi.spyOn(store, 'recomputeDerived');
   disposeEngine = bindEngine();
   const serializations = countHostSerializations();
   for (let i = 0; i < 155; i++) await emit('CHARACTER_MESSAGE_RENDERED', i);
   expect(serializations.calls).toBe(0); expect(derive).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(32); await nextTick();
-  expect(serializations.calls).toBe(2); expect(derive).toHaveBeenCalledOnce();
+  expect(serializations.calls).toBe(0); expect(derive).toHaveBeenCalledOnce();
   expect(store.derivedMeta.leaves).toHaveLength(155);
 });
 

@@ -2,7 +2,7 @@
 import { Library } from './db';
 import { eventView, type EventCard } from './events';
 import { check, row, type Branch, type CapturedView, type EventChain, type EventRevision, type Membership } from './model';
-import { statuses } from './canonical';
+import { statuses, type MemoryStatus } from './canonical';
 
 export interface MembershipHint {
     id: string;
@@ -41,10 +41,15 @@ export async function saveMemberships(lib: Library, view: CapturedView, request:
     check(request.mode !== 'add' || targets.size + (request.newTitle === undefined ? 0 : 1) === 1, '批量加入请选择一条目标链');
     const title = request.newTitle?.trim();
     check(request.newTitle === undefined || !!title && title.length <= 300, '事件链名称需为1至300字');
-    const selected = keys.map(id => view.memories.find(m => m.id === id));
+    const byId = new Map(view.memories.map(memory => [memory.id, memory]));
+    const selected = keys.map(id => byId.get(id));
     check(selected.every(m => m && m.level === 0 && !m.seed && m.story === view.branch.story && m.branch === view.branch.id), '摘要不属于当前分支或不是逐楼摘要');
     check(new Set(selected.map(m => m!.owner)).size === keys.length, '摘要身份重复，请刷新');
-    const projection = await eventView(lib, view);
+    // Bulk add never removes another chain's links. New-chain creation only needs
+    // source validity; replacing one summary's complete membership still reads all chains.
+    const projection = request.mode === 'add' && !targets.size
+        ? { cards: [], validity: await statuses(lib, view) }
+        : await eventView(lib, view, false, request.mode === 'add' ? [...targets][0] : undefined);
     const cards = new Map(projection.cards.map(card => [card.chain.id, card]));
     check([...targets].every(id => cards.has(id)), '事件不存在或不属于当前分支');
     const changes: { card: EventCard | null; adds: string[]; removes: string[] }[] = [];
@@ -112,9 +117,11 @@ export function parseFloorRanges(text: string, maxFloor: number): Set<number> | 
  * Transactionally advancing the branch epoch makes retries idempotent.
  */
 export async function syncGeneratedEventMemberships(lib: Library, view: CapturedView,
-    guard: () => boolean = () => true): Promise<boolean> {
-    const validity = await statuses(lib, view);
-    const leaves = view.memories.filter(m => m.level === 0 && !m.seed && validity.get(m.id) === 'valid' && m.tags?.eventIds?.length);
+    guard: () => boolean = () => true, checkedValidity?: Map<string, MemoryStatus>): Promise<boolean> {
+    const candidates = view.memories.filter(m => m.level === 0 && !m.seed && m.tags?.eventIds?.length);
+    if (!candidates.length) return false;
+    const validity = checkedValidity ?? await statuses(lib, view);
+    const leaves = candidates.filter(m => validity.get(m.id) === 'valid');
     if (!leaves.length) return false;
     // Invert summary tags once. Large stories must not scan every leaf for every chain.
     const tagged = new Map<string, string[]>();
@@ -123,7 +130,7 @@ export async function syncGeneratedEventMemberships(lib: Library, view: Captured
         ids.push(leaf.id);
         tagged.set(id, ids);
     }
-    const { cards } = await eventView(lib, view);
+    const { cards } = await eventView(lib, view, false, undefined, false, { validity });
     const pending = new Map<string, { card: EventCard; memories: string[] }>();
     for (const card of cards) {
         if (card.blocked || card.needsReview) continue;

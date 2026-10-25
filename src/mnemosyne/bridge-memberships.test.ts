@@ -121,7 +121,7 @@ test('both editors read the full branch catalog including archived chains and re
 });
 
 
-test('unlink reads only its chain, then page reuses fresh sync projection without host writes', async () => {
+test('warm unlink reads no event history, then page reuses the checked projection without host writes', async () => {
   let view = await syncDaily();
   const memory = view.memories[0].id;
   const first = await saveMemberships(lib, view, { mode: 'add', memories: [memory], eventIds: [], newTitle: '目标事件' });
@@ -133,8 +133,7 @@ test('unlink reads only its chain, then page reuses fresh sync projection withou
   const all = vi.spyOn(Transaction.prototype, 'all');
   await editEvent(lib, view, card.chain.id, card.meta, { memory, active: false, kind: 'progress' });
   const eventReads = all.mock.calls.filter(([store]) => ['event_chains', 'event_revisions', 'event_memberships', 'event_progress'].includes(store));
-  expect(eventReads.length).toBeGreaterThan(0);
-  expect(eventReads.every(([, index, key]) => index === 'owner' && key === first.created)).toBe(true);
+  expect(eventReads).toEqual([]);
   const before = dailyState.revision;
   const refreshed = await syncDaily();
   all.mockClear();
@@ -145,11 +144,11 @@ test('unlink reads only its chain, then page reuses fresh sync projection withou
   expect(all).not.toHaveBeenCalled();
   expect(ctx.saveChat).not.toHaveBeenCalled(); expect(ctx.saveMetadata).not.toHaveBeenCalled();
   expect(syncedEventProjection(lib, view, before)).toBeNull();
-  // Archive toggles do not advance epoch: an unchanged sync must not reuse old cards.
+  // Archive toggles do not advance epoch: sync checks their lightweight records.
   await setEventArchived(lib, refreshed, first.created!, true);
   const unchangedRevision = dailyState.revision;
   const unchanged = await syncDaily();
-  expect(syncedEventProjection(lib, unchanged, unchangedRevision)).toBeNull();
+  expect(syncedEventProjection(lib, unchanged, unchangedRevision)?.cards.find(c => c.chain.id === first.created)!.chain.archived).toBe(true);
   expect((await eventView(lib, unchanged)).cards.find(c => c.chain.id === first.created)!.chain.archived).toBe(true);
   ctx.chat[1].mes += '来源变化';
   expect(syncedEventProjection(lib, refreshed, before)).toBeNull();

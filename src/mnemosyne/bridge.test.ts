@@ -18,7 +18,7 @@ import { recoverSummaryResponse, summarizeFloor, regenerateHigherSummary } from 
 import { invalidateSummaryAncestors } from '@/memory/apply';
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
-import { Library, activateLibrary, freshLibraryName } from './db';
+import { Library, Transaction, activateLibrary, freshLibraryName } from './db';
 import { serializeDailyActivation, beginVisibleSummaryCommit, bindDaily, syncDaily, dailyState, canonicalLeaves, invalidateDaily, hostVersion, dailyCurrent, captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, confirmFork, dailyBranchChoices, hiddenRoleRepairRefs, dailyBranch, previewArchiveReconnect, reconnectArchive, deleteDailyArchive, chooseNewStory, readDailyReview } from './bridge';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
@@ -571,13 +571,16 @@ test('unchanged refresh and lightweight page scope do not resave or scan sources
     const bridge = await import('./bridge');
     await syncDaily();
     const all = vi.spyOn(lib, 'all'), transaction = vi.spyOn(lib, 'transaction');
+    const rows = vi.spyOn(Transaction.prototype, 'all');
     vi.mocked(ctx.saveChat).mockClear(); vi.mocked(ctx.saveMetadata).mockClear();
     expect((await bridge.dailyBranch())?.id).toBe(dailyState.branch);
     invalidateDaily(); // a UI-derived notification with no actual host change
     await syncDaily(); await syncDaily();
     expect(ctx.saveChat).not.toHaveBeenCalled(); expect(ctx.saveMetadata).not.toHaveBeenCalled();
     expect(all).not.toHaveBeenCalled();
-    expect(transaction.mock.calls.every(([stores,mode]) => mode === 'readonly' && stores.length === 1 && ['branches', 'library_meta'].includes(stores[0]))).toBe(true);
+    expect(transaction.mock.calls.every(([,mode]) => mode === 'readonly')).toBe(true);
+    // Lightweight chain flags are checked even on warm hits (archive does not advance epoch).
+    expect(rows.mock.calls.every(([store]) => store === 'event_chains')).toBe(true);
 });
 
 test.each([false,true])('one native summary call also fills tables and enters current-state injection (custom=%s)', async custom => {

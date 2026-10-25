@@ -1,5 +1,6 @@
 import { STORES, type Store, type Row, check, id } from './model';
 import { readDailySettings, settings } from './event-settings';
+import { LibraryChanges, TransactionChanges } from './change-journal';
 export const DB_PREFIX = 'mnemosyne_daily_';
 export const ACTIVE_KEY = 'mnemosyne_daily_active_v1';
 export const DB_VERSION = 3;
@@ -7,19 +8,38 @@ export function request<T>(r: IDBRequest<T>): Promise<T> {
     return new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 }
 export class Transaction {
-    constructor(readonly native: IDBTransaction) { }
+    constructor(readonly native: IDBTransaction, private readonly changes?: TransactionChanges) { }
     get<T extends Row>(store: Store, key: string): Promise<T | undefined> {
-        return request(this.native.objectStore(store).get(key));
+        return request<T | undefined>(this.native.objectStore(store).get(key)).then(value => {
+            this.changes?.read(store, value);
+            return value;
+        });
     }
     all<T extends Row>(store: Store, index?: 'story' | 'branch' | 'owner', key?: string): Promise<T[]> {
         const s = this.native.objectStore(store);
-        return request(index ? s.index(index).getAll(key) : s.getAll());
+        return request<T[]>(index ? s.index(index).getAll(key) : s.getAll()).then(values => {
+            if (store === 'branches') for (const value of values) this.changes?.read(store, value);
+            return values;
+        });
     }
-    put(store: Store, value: Row): Promise<IDBValidKey> { return request(this.native.objectStore(store).put(value)); }
-    delete(store: Store, key: string): Promise<undefined> { return request(this.native.objectStore(store).delete(key)); }
-    add(store: Store, value: Row): Promise<IDBValidKey> { return request(this.native.objectStore(store).add(value)); }
+    put(store: Store, value: Row): Promise<IDBValidKey> {
+        const pending = this.native.objectStore(store).put(value);
+        this.changes?.write(store, value.id, value);
+        return request(pending);
+    }
+    delete(store: Store, key: string): Promise<undefined> {
+        const pending = this.native.objectStore(store).delete(key);
+        this.changes?.write(store, key);
+        return request(pending);
+    }
+    add(store: Store, value: Row): Promise<IDBValidKey> {
+        const pending = this.native.objectStore(store).add(value);
+        this.changes?.write(store, value.id, value);
+        return request(pending);
+    }
 }
 export class Library {
+    readonly changes = new LibraryChanges();
     private constructor(readonly db: IDBDatabase) { }
     static open(name = `${DB_PREFIX}default`, existingOnly = false): Promise<Library> {
         check(name.startsWith(DB_PREFIX), '不是 Mnemosyne 库');
@@ -45,6 +65,7 @@ export class Library {
     }
     async transaction<T>(stores: readonly Store[], mode: IDBTransactionMode, fn: (tx: Transaction) => Promise<T>): Promise<T> {
         const native = this.db.transaction([...stores], mode);
+        const changes = mode === 'readwrite' ? new TransactionChanges() : undefined;
         const done = new Promise<void>((resolve, reject) => {
             native.oncomplete = () => resolve();
             native.onabort = () => reject(native.error ?? new Error('事务已撤销'));
@@ -52,8 +73,9 @@ export class Library {
         });
         // Network, hashing and timers must never run inside fn.
         try {
-            const result = await fn(new Transaction(native));
+            const result = await fn(new Transaction(native, changes));
             await done;
+            if (changes) this.changes.commit(changes);
             return result;
         }
         catch (error) {

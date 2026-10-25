@@ -1,4 +1,6 @@
 import { sourceSnapshot, sameSourceSnapshot } from '@/memory/source-snapshot';
+import { HostVersionMemo } from './host-version';
+import { sourceNeutralChanges } from './change-journal';
 import { beginBodyEdit, settleBodyEdit, cancelBodyEdit } from './summary-edit-signal';
 import { sourceSyncBaseline } from './source-sync-guard';
 import { membershipProjection, syncGeneratedEventMemberships, type MembershipProjection } from './event-memberships';
@@ -21,7 +23,7 @@ import { apiSettings } from '@/api/settings';
 import { resolveKeepStart } from '@/memory/engine';
 import { clearRecallInjection } from '@/memory/vector/recall';
 import { refreshInjection } from '@/memory/inject';
-import { activeLibrary, ACTIVE_KEY } from './db';
+import { activeLibrary, libraryActivationGeneration, ACTIVE_KEY } from './db';
 import {
     capture,
     synchronize,
@@ -63,6 +65,8 @@ interface DailyCache {
     eventProjection: EventView;
     library: string;
     reviewCount: number;
+    changeVersion: number;
+    activation: number;
 }
 interface SummaryBaseline { scope: string; messages: unknown[]; summaries: unknown }
 const summaryBaselines = new WeakMap<DailyCache, SummaryBaseline>();
@@ -147,8 +151,9 @@ function hostMessageVersion(m: STMessage) {
     return [m.extra?.[MESSAGE_KEY], sourceRole(m), m.mes, m.swipe_id, m.extra?.bbs_omit,
         m.extra?.bbs_leaf, m.extra?.[EVIDENCE_KEY], m.extra?.[MANUAL_KEY], m.extra?.[TABLE_OUTPUT_KEY]];
 }
+const hostVersions = new HostVersionMemo();
 export function hostVersion(): string {
-    return JSON.stringify([hostScope(), (getContext()?.chat ?? []).map(hostMessageVersion), memory.summaries, replyFinality.revision]);
+    return hostVersions.read([hostScope(), (getContext()?.chat ?? []).map(hostMessageVersion), memory.summaries, replyFinality.revision]);
 }
 /** 只有引擎同步提交的可见近期补摘可以沿用版本；正文编辑始终得到新版本。 */
 export function recallHostVersion(): string {
@@ -157,7 +162,8 @@ export function recallHostVersion(): string {
         getContext()?.chat.map(m => !m.is_user && !!m.is_system)]);
 }
 function readableProjection(): DailyCache | null {
-    return injectionCache && injectionCache.host === hostVersion() ? injectionCache : null;
+    return injectionCache && injectionCache.activation === libraryActivationGeneration() &&
+        injectionCache.host === hostVersion() ? injectionCache : null;
 }
 /** 在已校验来源之后、同步落叶之前调用；返回的提交器不得跨 await 使用。 */
 export function beginVisibleSummaryCommit(floor: number): () => void {
@@ -302,7 +308,7 @@ export async function readDailyReview() {
     const branch = await dailyBranch();
     if (!branch) return null;
     const prior = cache;
-    const reusable = prior && prior.library === lib.db.name && prior.host === host &&
+    const reusable = prior && prior.activation === libraryActivationGeneration() && prior.library === lib.db.name && prior.host === host &&
         prior.view.branch.id === branch.id && prior.view.branch.head === branch.head &&
         prior.view.branch.view === branch.view && prior.view.branch.epoch === branch.epoch;
     const view = reusable ? prior.view : await capture(lib, branch.id);
@@ -312,10 +318,15 @@ export async function readDailyReview() {
     return { view, validity, host, generation, lib };
 }
 
-async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView) {
-    const eventProjection = await eventView(lib, view);
+async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView,
+    checkedValidity?: Map<string, MemoryStatus>, previous?: DailyCache) {
+    const eventProjection = await eventView(lib, view, false, undefined, false, { validity: checkedValidity });
     const { cards, validity } = eventProjection;
     check(await current(lib, view), '事件状态已改变，请重试');
+    if (previous?.eventProjection === eventProjection) return {
+        validity, eventProjection, memberships: previous.memberships, eventText: previous.eventText,
+        eventHints: previous.eventHints, eventDirectory: previous.eventDirectory,
+    };
     const safe = cards.filter(c => !c.needsReview && !c.blocked);
     const asHint = (c: typeof cards[number]): EventHint => ({
         id: c.chain.id, title: c.meta.title, status: c.meta.status,
@@ -326,11 +337,10 @@ async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, vie
         eventDirectory: cards.map(c => ({ ...asHint(c), archived: !!c.chain.archived, needsReview: !!c.needsReview || !!c.blocked })),
     };
 }
-/** Reuse only a projection freshly published by this sync; callers still validate dailyCurrent.
- * Unchanged epochs can contain archive-only edits, so an older revision must be reread.
- */
-export function syncedEventProjection(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView, beforeRevision: number): EventView | null {
-    return dailyState.revision !== beforeRevision && cache?.view === view &&
+/** syncDaily also checks lightweight chain organization flags on a warm hit.
+ * A projection published by another entry point is equally reusable. */
+export function syncedEventProjection(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView, _beforeRevision?: number): EventView | null {
+    return cache?.view === view && cache.activation === libraryActivationGeneration() && cache.changeVersion === lib.changes.version &&
         cache.library === lib.db.name && cache.host === hostVersion() ? cache.eventProjection : null;
 }
 export function persistentEventText(): string {
@@ -343,7 +353,7 @@ export async function readDailyMembershipContext() {
     if (!(await replyFinality.assertArchivable(false))()) throw new ReplyFinalityError();
     const host = hostVersion(), generation = dailyState.generation, lib = await activeLibrary();
     const prior = cache ?? lastCache;
-    check(prior && prior.host === host && prior.library === lib.db.name &&
+    check(prior && prior.activation === libraryActivationGeneration() && prior.host === host && prior.library === lib.db.name &&
         (getContext()?.chatMetadata[BINDING_KEY] as { branch?: string } | undefined)?.branch === prior.view.branch.id,
         '档案尚未同步完成，请等待“已归档”后重试');
     const branch = await lib.get<Branch>('branches', prior.view.branch.id);
@@ -355,7 +365,11 @@ export async function readDailyMembershipContext() {
 /** Shared editor catalog: includes archived/review chains, independently of injection cache. */
 export async function readDailyEventEditor() {
     const context = await readDailyMembershipContext();
-    const projection = await eventView(context.lib, context.view);
+    const prior = cache ?? lastCache;
+    const unchangedSources = prior && prior.host === context.host && prior.library === context.lib.db.name &&
+        sourceNeutralChanges(context.lib.changes, prior.changeVersion, prior.view.branch, context.view.branch);
+    const projection = await eventView(context.lib, context.view, false, undefined, false,
+        { validity: unchangedSources ? prior!.validity : undefined });
     check(await dailyCurrent(context.view, context.host, context.generation) && context.lib === await activeLibrary(), '聊天已改变，请重新打开');
     return { ...context, projection };
 }
@@ -399,6 +413,35 @@ function projectView(view: CapturedView, validity: Map<string, MemoryStatus>) {
         reviewCount: [...validity.values()].filter((v) => v === 'needs_review' || v === 'needs_rebuild').length,
     };
 }
+
+/** Preserve independently verified source/table state only across observed, committed
+ * event/table edits. Unknown connections or a lost journal take the full-check path. */
+async function refreshCachedProjection(lib: Awaited<ReturnType<typeof activeLibrary>>, previous: DailyCache, branch: Branch) {
+    const selectedLibrary = activeLibrary();
+    check(await selectedLibrary === lib && selectedLibrary === activeLibrary(), '档案库已切换，请重试');
+    const version = lib.changes.version;
+    const activation = libraryActivationGeneration();
+    const changes = previous.activation === activation &&
+        sourceNeutralChanges(lib.changes, previous.changeVersion, previous.view.branch, branch);
+    const view = sameSourceSnapshot(previous.view.branch, branch) ? previous.view : { ...previous.view, branch };
+    const validity = changes ? previous.validity : await statuses(lib, view);
+    // Always check the small chain records: organization flags intentionally do not advance epoch.
+    const events = await projectEvents(lib, view, validity, previous);
+    const tablesChanged = !changes || changes.tables;
+    const tableText = tablesChanged ? renderTableState(await readTables(lib, branch),
+        new Set(view.memories.filter(memory => validity.get(memory.id) === 'valid').map(memory => memory.id))) : previous.tableText;
+    check(await current(lib, view) && selectedLibrary === activeLibrary() && version === lib.changes.version,
+        '档案在刷新期间改变，请重试');
+    const changed = view !== previous.view || events.eventProjection !== previous.eventProjection ||
+        validity !== previous.validity || tablesChanged;
+    const value: DailyCache = changed ? { ...previous, view, ...events,
+        ...(validity === previous.validity ? {} : projectView(view, validity)),
+        tableText, changeVersion: version, activation } : previous;
+    value.changeVersion = version;
+    const baseline = summaryBaselines.get(previous);
+    if (baseline) summaryBaselines.set(value, baseline);
+    return { value, changed, tablesChanged };
+}
 /** Drain/serialize source synchronization during a library activation. This is not
  * a global lock for independent event/table writers. Never await syncDaily inside
  * action: any refresh belongs after this promise resolves. Settled errors do not
@@ -425,8 +468,8 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             if (!(await replyFinality.assertArchivable())()) throw new ReplyFinalityError();
             check(isActive() && getContext()?.chat === ctx.chat && hostScope() === scope, '聊天已改变');
             const deletionSelector = localStorage.getItem(ACTIVE_KEY), deletionChat = ctx.chat;
-            const lib = await activeLibrary();
-            check(isActive(), '归档通知已取消');
+            const selectedLibrary = activeLibrary(), lib = await selectedLibrary;
+            check(isActive() && selectedLibrary === activeLibrary(), '归档通知已取消');
             if (injectionCache?.library !== lib.db.name) injectionCache = null;
             if (await archiveWasDeleted(lib, scope)) {
                 dailyState.conflict = true;
@@ -447,34 +490,14 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 if (!live || live.head !== reusable.view.branch.head || live.view !== reusable.view.branch.view ||
                     live.epoch !== reusable.view.branch.epoch) injectionCache = null;
                 if (live && live.head === reusable.view.branch.head && live.view === reusable.view.branch.view) {
-                    cache = reusable;
-                    if (live.epoch !== reusable.view.branch.epoch) {
-                        const generation = dailyState.generation,
-                            view = { ...reusable.view, branch: live };
-                        const validity = await statuses(lib, view),
-                            inputs = await readTables(lib, live);
-                        check(
-                            observedHost === hostVersion() && isActive() && generation === dailyState.generation,
-                            '聊天已改变，请重试',
-                        );
-                        cache = {
-                            ...reusable,
-                            view,
-                            ...projectView(view, validity),
-                            ...await projectEvents(lib, view),
-                            tableText: renderTableState(
-                                inputs,
-                                new Set(view.memories.filter((m) => validity.get(m.id) === 'valid').map((m) => m.id)),
-                            ),
-                        };
-                        dailyState.tableRevision++;
-                        dailyState.revision++;
-                    }
+                    const refreshed = await refreshCachedProjection(lib, reusable, live);
                     check(
-                        observedHost === hostVersion() && isActive() && observedGeneration === dailyState.generation,
+                        observedHost === hostVersion() && isActive() && selectedLibrary === activeLibrary() && observedGeneration === dailyState.generation,
                         '聊天已改变，请重试',
                     );
-                    check(observedHost === hostVersion() && isActive() && observedGeneration === dailyState.generation, '聊天已改变');
+                    cache = refreshed.value;
+                    if (refreshed.tablesChanged) dailyState.tableRevision++;
+                    if (refreshed.changed) dailyState.revision++;
                     recordSummaryBaseline(cache);
                     lastCache = injectionCache = cache;
                     summaryCachePolicy = summaryPolicyEpoch;
@@ -657,6 +680,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             ctx.chatMetadata.mnemosyne_archive_v1 = { status: 'saved', scope, branch: branch.id, head: branch.head };
             await ctx.saveMetadata();
             let view = await capture(lib, branch.id);
+            const validityVersion = lib.changes.version;
             let validity = await statuses(lib, view);
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
             dailyState.tableError = '';
@@ -694,32 +718,41 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             const latestBranch = await lib.get<Branch>('branches', branch.id);
             check(latestBranch && latestBranch.head === view.branch.head && latestBranch.view === view.branch.view, '归档视图已改变，请重试');
             if (latestBranch.epoch !== view.branch.epoch) {
+                const neutral = sourceNeutralChanges(lib.changes, validityVersion, view.branch, latestBranch);
                 view = { ...view, branch: latestBranch };
-                validity = await statuses(lib, view);
+                if (!neutral) validity = await statuses(lib, view);
             }
             const inputs = await readTables(lib, view.branch);
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
             // Generated tags become memberships only after canonical source verification.
             // Reproject the new epoch before publishing; never cache a stale event view.
+            const generatedVersion = lib.changes.version;
             if (await syncGeneratedEventMemberships(lib, view,
-                () => host === hostVersion() && isActive() && generation === dailyState.generation)) {
+                () => host === hostVersion() && isActive() && generation === dailyState.generation, validity)) {
                 const updated = await lib.get<Branch>('branches', view.branch.id);
                 check(updated && updated.head === view.branch.head && updated.view === view.branch.view,
                     '事件标签同步后视图已改变');
+                const neutral = sourceNeutralChanges(lib.changes, generatedVersion, view.branch, updated);
+                check(neutral && !neutral.tables, '事件标签同步期间其他来源或表格已改变，请重试');
                 view = { ...view, branch: updated };
             }
+            const projectionVersion = lib.changes.version;
+            const events = await projectEvents(lib, view, validity);
+            check(projectionVersion === lib.changes.version, '档案在刷新期间改变，请重试');
             cache = {
                 view,
                 ...projectView(view, validity),
-                ...await projectEvents(lib, view),
+                ...events,
                 host,
                 library: lib.db.name,
+                changeVersion: projectionVersion,
+                activation: libraryActivationGeneration(),
                 tableText: renderTableState(
                     inputs,
                     new Set(view.memories.filter((m) => validity.get(m.id) === 'valid').map((m) => m.id)),
                 ),
             };
-            check(host === hostVersion() && isActive() && generation === dailyState.generation, '聊天已改变');
+            check(host === hostVersion() && isActive() && selectedLibrary === activeLibrary() && generation === dailyState.generation, '聊天已改变');
             recordSummaryBaseline(cache);
             lastCache = injectionCache = cache;
             summaryCachePolicy = summaryPolicyEpoch;
@@ -753,7 +786,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
 export function dailyTableText(): string {
     return readableProjection()?.tableText ?? '';
 }
-/** Table-only mutations refresh state without re-archiving the chat or rereading source bodies. */
+/** Event/table mutations refresh only changed projections, without archiving host text. */
 export async function refreshDailyTables() {
     if (!cache || cache.host !== hostVersion()) return;
     const previous = cache,
@@ -767,16 +800,14 @@ export async function refreshDailyTables() {
         branch.view !== previous.view.branch.view
     )
         return;
-    const inputs = await readTables(lib, branch);
-    const events = await projectEvents(lib, { ...previous.view, branch });
+    const refreshed = await refreshCachedProjection(lib, previous, branch);
     if (cache !== previous || host !== hostVersion()) return;
-    const permitted = new Set(previous.view.memories.filter((m) => events.validity.get(m.id) === 'valid').map((m) => m.id));
-    cache = { ...previous, ...events, ...projectView(previous.view, events.validity), view: { ...previous.view, branch }, tableText: renderTableState(inputs, permitted) };
+    cache = refreshed.value;
     recordSummaryBaseline(cache);
     lastCache = injectionCache = cache;
     summaryCachePolicy = summaryPolicyEpoch;
-    dailyState.tableRevision++;
-    dailyState.revision++;
+    if (refreshed.tablesChanged) dailyState.tableRevision++;
+    if (refreshed.changed) dailyState.revision++;
     if (installed) refreshInjection();
 }
 export function scheduleDaily() {
@@ -910,6 +941,7 @@ export function bindDaily() {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     replyFinality.reset();
+    hostVersions.clear();
     invalidateReplyDiagnostics();
     installed = true;
     savedHost = '';
@@ -1018,6 +1050,7 @@ export function bindDaily() {
         automaticAgain = false;
         rendered.cancel();
         installed = false;
+        hostVersions.clear();
         unwatch();
         if (typeof document !== 'undefined') document.removeEventListener('click', confirmEdit, true);
         if (timer !== undefined) clearTimeout(timer);

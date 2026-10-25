@@ -411,3 +411,125 @@ test('first-error UI evidence validates only its exact target, not the archive g
     touched.clear(); expect(issue.current()).toBe(true); expect([...touched]).toEqual([0]);
     host.chat[0].mes += '修改'; expect(issue.current()).toBe(false);
 });
+
+test('completed receipts reuse exact body checks; a new stream does not rehash the completed prefix', async () => {
+    host.chat = Array.from({ length: 120 }, (_, i) => message(`已完成正文 ${i} ${'合成内容'.repeat(80)}`));
+    await Promise.all(host.chat.map(async (m, floor) => {
+        m.extra![REPLY_FINALITY_KEY] = { version: 1, epoch: 1, scope: host.scope, floor, swipe: 0,
+            state: 'complete', hash: await model.fingerprint(m.mes) };
+    }));
+    const hash = vi.spyOn(model, 'fingerprint');
+    const first = await guard.assertArchivable(false);
+    expect(hash).toHaveBeenCalledTimes(120); expect(first()).toBe(true);
+    hash.mockClear();
+    const second = await guard.assertArchivable(false);
+    expect(second()).toBe(true); expect(hash).not.toHaveBeenCalled();
+    const page = await guard.inspectBlockers();
+    expect(page.items).toEqual([]); expect(page.examined).toBe(100); expect(hash).not.toHaveBeenCalled();
+
+    stream();
+    await expect(guard.assertArchivable(false)).rejects.toMatchObject({ blocker: { reason: 'streaming' } });
+    await expect(guard.assertSummaryPrefix(120)).resolves.toBeTypeOf('function');
+    expect(hash).not.toHaveBeenCalled();
+    await finish(); hash.mockClear();
+    await guard.assertArchivable(false);
+    expect(hash).toHaveBeenCalledTimes(1); expect(hash).toHaveBeenCalledWith('流式片段');
+    hash.mockClear(); await guard.assertArchivable(false); expect(hash).not.toHaveBeenCalled();
+});
+
+test.each(['same-length-body', 'swipe', 'pending', 'aborted', 'version', 'hash'] as const)('cached completion rejects an unnotified %s mutation', async kind => {
+    host.chat = [message('已确认甲')]; await save(0);
+    const before = await guard.assertArchivable(false), hash = vi.spyOn(model, 'fingerprint');
+    if (kind === 'same-length-body') host.chat[0].mes = '已确认乙';
+    if (kind === 'swipe') host.chat[0].swipe_id = 1;
+    if (kind === 'pending' || kind === 'aborted') receipt().state = kind;
+    if (kind === 'version') receipt().version = 2;
+    if (kind === 'hash') receipt().hash = 'different-hash';
+    expect(before()).toBe(false);
+    await expect(guard.assertArchivable(false)).rejects.toThrow('暂不归档');
+    expect(hash).toHaveBeenCalledTimes(1);
+    // Rejected entries never become reusable successful proofs.
+    await expect(guard.assertArchivable(false)).rejects.toThrow('暂不归档');
+    expect(hash).toHaveBeenCalledTimes(2);
+});
+
+test.each(['receipt-replaced', 'receipt-epoch', 'message-replaced', 'chat-array', 'scope', 'floor', 'reset'] as const)('exact receipt reuse requires the same %s context', async kind => {
+    host.chat = [message('已确认正文')]; await save(0); await guard.assertArchivable(false);
+    const hash = vi.spyOn(model, 'fingerprint');
+    if (kind === 'receipt-replaced') host.chat[0].extra![REPLY_FINALITY_KEY] = { ...receipt() };
+    if (kind === 'receipt-epoch') receipt().epoch++;
+    if (kind === 'message-replaced') host.chat[0] = structuredClone(host.chat[0]);
+    if (kind === 'chat-array') host.chat = host.chat.slice();
+    if (kind === 'scope') host.scope = 'renamed-chat';
+    if (kind === 'floor') host.chat.unshift(message('新增早期用户楼', true));
+    if (kind === 'reset') guard.reset();
+    // Durable receipts can survive explicit copies/renames, but must be validated anew.
+    await expect(guard.assertArchivable(false)).resolves.toBeTypeOf('function');
+    expect(hash).toHaveBeenCalledTimes(1);
+    await guard.assertArchivable(false); expect(hash).toHaveBeenCalledTimes(1);
+});
+
+test('cache hits still check active processor, uncreated swipe and stopped candidate state', async () => {
+    stream(); await finish(); await guard.assertArchivable(false);
+    const hash = vi.spyOn(model, 'fingerprint');
+    host.processor!.isFinished = false;
+    await expect(guard.assertArchivable(false)).rejects.toMatchObject({ blocker: { reason: 'streaming' } });
+    expect(hash).not.toHaveBeenCalled();
+    host.processor!.isFinished = true;
+    host.chat[2].swipes = [];
+    await expect(guard.assertArchivable(false)).rejects.toMatchObject({ blocker: { reason: 'uncreated' } });
+    expect(hash).not.toHaveBeenCalled();
+    delete host.chat[2].swipes;
+    // stop() marks the run synchronously, before its asynchronous aborted receipt is stamped.
+    const stopped = guard.stop();
+    await stopped;
+    await expect(guard.assertArchivable(false)).rejects.toMatchObject({ blocker: { reason: 'aborted' } });
+});
+
+test('cached error-marker proof is invalidated when the localized host label changes', async () => {
+    host.errorLabel = '[旧错误]'; host.chat = [message('完整正文\n[新错误]\n尾部错误')];
+    host.chat[0].extra![REPLY_FINALITY_KEY] = { version: 1, epoch: 1, scope: host.scope, floor: 0, swipe: 0,
+        state: 'complete', hash: await model.fingerprint(host.chat[0].mes) };
+    await guard.assertArchivable(false);
+    const hash = vi.spyOn(model, 'fingerprint'); host.errorLabel = '[新错误]';
+    await expect(guard.assertArchivable(false)).rejects.toMatchObject({ blocker: { reason: 'api_error' } });
+    expect(hash).toHaveBeenCalledTimes(1);
+});
+
+test.each(['earlier-body', 'current-body', 'receipt', 'chat', 'chat-array-in-place', 'scope-in-place', 'generation', 'processor'] as const)('an asynchronous cache miss cannot approve a changed %s', async kind => {
+    host.chat = [message('已确认甲')]; await save(0); await guard.assertArchivable(false);
+    host.chat.push(message('新增确认楼')); await save(1);
+    const expected = await model.fingerprint(host.chat[1].mes), original = model.fingerprint;
+    let release!: (hash: string) => void;
+    const hash = vi.spyOn(model, 'fingerprint').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const pending = guard.assertArchivable(false);
+    await Promise.resolve(); expect(release).toBeTypeOf('function');
+    if (kind === 'earlier-body') host.chat[0].mes = '已确认乙';
+    if (kind === 'current-body') host.chat[1].mes = '当前未确认楼';
+    if (kind === 'receipt') receipt().state = 'pending';
+    if (kind === 'chat') host = { scope: 'other-chat', chat: host.chat.slice() };
+    if (kind === 'chat-array-in-place') host.chat = host.chat.slice();
+    if (kind === 'scope-in-place') host.scope = 'other-chat';
+    if (kind === 'generation') guard.start('regenerate');
+    if (kind === 'processor') host.processor = processor(1);
+    release(expected); await expect(pending).rejects.toThrow('暂不归档');
+    expect(hash).toHaveBeenCalledTimes(1); // Earlier exact completed floor used its cached proof.
+    if (kind === 'current-body') {
+        host.chat[1].mes = '新增确认楼'; hash.mockImplementation(original); hash.mockClear();
+        await guard.assertArchivable(false);
+        expect(hash).toHaveBeenCalledTimes(1); // The late body mismatch did not prime a cache entry.
+    }
+});
+
+test('derived-sidecar writes revoke only their exact cached receipt and cannot bless later manual changes', async () => {
+    stream(); await finish(); await guard.assertArchivable(false);
+    const originalText = host.chat[2].mes;
+    host.chat[2].mes += '<bbs_items>已验证旁注</bbs_items>';
+    guard.reconcileDerived(2, originalText);
+    await expect(guard.assertArchivable()).resolves.toBeTypeOf('function');
+    const hash = vi.spyOn(model, 'fingerprint');
+    await guard.assertArchivable(false); expect(hash).not.toHaveBeenCalled();
+    host.chat[2].mes = host.chat[2].mes.replace('已验证旁注', '未验证旁注');
+    await expect(guard.assertArchivable(false)).rejects.toMatchObject({ blocker: { reason: 'changed' } });
+    expect(hash).toHaveBeenCalledTimes(1);
+});

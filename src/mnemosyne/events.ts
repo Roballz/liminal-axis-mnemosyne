@@ -7,7 +7,8 @@ import { parseStrictJson } from './json';
 import { Library } from './db';
 import { snapshotRefs, summarySources, statuses, capture, current, sameNarrativeRevision } from './canonical';
 import { snapshotVariants } from './current-body';
-import { STORES, row, check, equal, fingerprint, type CapturedView, type EventChain, type EventRevision, type Membership, type Progress, type EventReceipt, type Branch, type Snapshot, type MemoryRevision } from './model';
+import { currentEventCache, publishCurrentEvents, sameEventValidity, type CurrentEventCache } from './event-current-cache';
+import { row, check, equal, fingerprint, type CapturedView, type EventChain, type EventRevision, type Membership, type Progress, type EventReceipt, type Branch, type Snapshot, type MemoryRevision } from './model';
 export interface EventCard {
     issues?: { memory: string; roles: string[]; reason: string; floor?: number; deleted: boolean; text: string }[];
     chain: EventChain;
@@ -28,18 +29,34 @@ export interface EventView {
     validity: Map<string, import('./canonical').MemoryStatus>;
     storedCount: number;
 }
-export async function eventView(lib: Library, view: CapturedView, includeHistory = false, eventId?: string, includeIssues = false): Promise<EventView> {
-    const validStates = await statuses(lib, view);
+export interface EventViewOptions {
+    /** Already verified for this exact captured source/selection/cutoff. Never reuse across an unverified change. */
+    validity?: Map<string, import('./canonical').MemoryStatus>;
+}
+// getAll(owner) breaks equal cutoff/epoch ties by the primary key. Preserve that
+// order when new progress is appended to an already warm Map in commit order.
+const progressOrder = (a: Progress, b: Progress) => a.cutoff - b.cutoff || a.epoch - b.epoch ||
+    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+export async function eventView(lib: Library, view: CapturedView, includeHistory = false, eventId?: string, includeIssues = false, options: EventViewOptions = {}): Promise<EventView> {
+    const validStates = options.validity ?? await statuses(lib, view);
     const valid = view.memories.filter(m => validStates.get(m.id) === 'valid');
     const permitted = new Set(valid.map(m => m.id));
     const live = view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length;
     const selected = new Map(view.memories.map(m => [m.owner, m]));
     const positions = new Map(view.refs.map((ref, index) => [ref.message, index]));
-    const result = await lib.transaction(STORES, 'readonly', async (tx) => {
+    let publish: CurrentEventCache | undefined;
+    const result = await lib.transaction(['branches', 'event_chains', 'event_revisions', 'event_memberships', 'event_progress',
+        'memory_revisions', 'history_snapshots', 'manifest_blocks'], 'readonly', async (tx) => {
+        const working = live && !includeHistory ? await currentEventCache(lib, tx, view) : undefined;
         // Single-chain work must not reproject every unrelated chain on each batch job.
         const requested = eventId === undefined ? undefined : await tx.get<EventChain>('event_chains', eventId);
         const chains = eventId === undefined ? await tx.all<EventChain>('event_chains', 'branch', view.branch.id)
             : requested?.branch === view.branch.id && requested.story === view.branch.story ? [requested] : [];
+        if (eventId === undefined && working?.projection && equal(chains, working.chains) &&
+            sameEventValidity(validStates, working.projection.validity)) {
+            publish = working;
+            return working.projection;
+        }
         // Share reads only inside this projection. Never reuse across a branch/epoch change.
         const memories = new Map(view.memories.map(m => [m.id, Promise.resolve<MemoryRevision | undefined>(m)]));
         const readMemory = (id: string) => {
@@ -121,7 +138,10 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             }));
         };
         for (const chain of chains) {
-            const [revisions, memberships, allProgress] = await Promise.all([
+            const compact = working?.rows.get(chain.id);
+            const [revisions, memberships, allProgress] = compact
+                ? [compact.revision ? [compact.revision] : [], [...compact.members.values()], [...compact.progress.values()]]
+                : await Promise.all([
                 tx.all<EventRevision>('event_revisions', 'owner', chain.id),
                 tx.all<Membership>('event_memberships', 'owner', chain.id),
                 tx.all<Progress>('event_progress', 'owner', chain.id),
@@ -168,6 +188,7 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             if (!meta)
                 continue;
             const latest = new Map<string, Membership>();
+            const latestOriginal = new Map<string, Membership>();
             const memberDetails = new Map<string, MemoryRevision>();
             for (const original of memberships) {
                 const previous = await readMemory(original.memory);
@@ -182,6 +203,7 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
                 if (eligible && includeHistory) history.memberships.push(m);
                 if (live || eligible) {
                     latest.set(previous.owner, m);
+                    latestOriginal.set(previous.owner, original);
                     memberDetails.set(memory.id, memory);
                 }
             }
@@ -199,9 +221,9 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
                 // Current workbench retains historical text locally; recall still requires every dependency.
                 if (p.memories.every(m => memberSet.has(m) && permitted.has(m)) && (live || eligible)) progress.push(p);
             }
-            progress.sort((a,b) => a.cutoff - b.cutoff || a.epoch - b.epoch);
+            progress.sort(progressOrder);
             if (live && meta.overview === undefined) {
-                const history = allProgress.sort((a,b) => a.cutoff - b.cutoff || a.epoch - b.epoch);
+                const history = allProgress.sort(progressOrder);
                 meta = { ...meta, overview: history.map(p => p.text).join('\n'), summarized: [...new Set(history.flatMap(p => p.memories))] };
             }
             const blocked = live && members.some(m => !permitted.has(m.memory));
@@ -209,9 +231,26 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             if (!live && (meta.summarized?.some(id => !memberSet.has(id)) || (meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))))) meta = { ...meta, overview: '', summarized: [], latestProgress: null };
             cards.push({ chain, meta, members, removedMembers: [...latest.values()].filter(m => !m.active), progress, needsReview, blocked, memberDetails: [...memberDetails.values()],
                 ...(includeHistory ? { history } : {}) });
+            if (working) working.rows.set(chain.id, { revision: revisions[0], members: latestOriginal,
+                progress: new Map(allProgress.map(record => [record.id, record])) });
         }
-        return { cards, valid, validity: validStates, storedCount: chains.length };
+        const projection = { cards, valid, validity: validStates, storedCount: chains.length };
+        if (working) {
+            if (eventId === undefined) {
+                const present = new Set(chains.map(chain => chain.id));
+                for (const id of working.rows.keys()) if (!present.has(id)) working.rows.delete(id);
+                working.chains = chains; working.projection = projection;
+            }
+            // Keep only family identities still referenced by compact current links.
+            // Hundreds of obsolete membership revisions must not linger in a side Map.
+            working.families = new Map();
+            for (const rows of working.rows.values()) for (const [family, member] of rows.members)
+                working.families.set(member.memory, family);
+            publish = working;
+        }
+        return projection;
     });
+    if (publish && lib.changes.version === publish.version) publishCurrentEvents(lib, publish);
     // Hash only after the IndexedDB transaction has completed.
     if (includeHistory) for (const card of result.cards)
         card.inheritanceKey = await fingerprint([!!card.chain.archived, card.meta, card.members, card.progress, card.history]);
@@ -382,7 +421,7 @@ export function parseEventOutput(raw: string, batch: EventBatch): EventOutput {
 export async function commitEventBatch(lib: Library, batch: EventBatch, output: EventOutput, isCurrent: () => boolean = () => true): Promise<EventReceipt> {
     // Revalidate untrusted structured input too, not just the text parser entry point.
     parseEventOutput(JSON.stringify(output), batch);
-    return lib.transaction(STORES, 'readwrite', async (tx) => {
+    return lib.transaction(['branches', 'event_chains', 'event_revisions', 'event_memberships', 'event_progress', 'event_processing_receipts'], 'readwrite', async (tx) => {
         const previous = await tx.get<EventReceipt>('event_processing_receipts', batch.operation);
         if (previous) {
             check(previous.fingerprint === batch.fingerprint && equal(previous.output, output), '操作ID冲突');
@@ -491,9 +530,10 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
     const latestProgress = patch.confirmOverview
         ? await confirmLatestProgressSource(lib, retainedProgress, valid.filter(m => patch.summarized?.includes(m.id)))
         : retainedProgress;
-    return lib.transaction(STORES, 'readwrite', async (tx) => {
+    return lib.transaction(['branches', 'event_chains', 'event_revisions', 'event_memberships'], 'readwrite', async (tx) => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
-        check(guard() && branch && branch.epoch === view.branch.epoch, '视图已改变，请刷新');
+        check(guard() && branch && branch.story === view.branch.story && branch.epoch === view.branch.epoch &&
+            branch.head === view.branch.head && branch.view === view.branch.view, '视图已改变，请刷新');
         branch.epoch++;
         let key = eventId;
         if (!key) {
@@ -603,7 +643,7 @@ export async function resolveEventReceipt(lib: Library, view: CapturedView, rece
 
 /** Explicit user deletion: scoped transaction removes this chain, never source memories. */
 export async function deleteEvent(lib: Library, view: CapturedView, eventId: string, guard: () => boolean = () => true) {
-    await lib.transaction(STORES, 'readwrite', async tx => {
+    await lib.transaction(['branches', 'event_chains', 'event_revisions', 'event_memberships', 'event_progress', 'event_processing_receipts'], 'readwrite', async tx => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
         const chain = await tx.get<EventChain>('event_chains', eventId);
         check(guard() && branch && branch.epoch === view.branch.epoch && chain?.branch === branch.id, '事件已改变，请刷新');
