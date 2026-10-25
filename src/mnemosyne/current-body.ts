@@ -1,5 +1,5 @@
 import type { Transaction } from './db';
-import { check, type Block, type Branch, type CurrentRevision, type MemoryRevision, type Revision, type Row, type Snapshot, type SourceBody, type SourceRef, type Store, type TableCommit } from './model';
+import { check, type Block, type Branch, type CurrentRevision, type MemoryRevision, type Revision, type Snapshot, type SourceBody, type SourceRef, type TableCommit } from './model';
 
 /** A descriptor is evidence, not permission to substitute a different revision's text. */
 export async function readSource(tx: Transaction, id: string): Promise<CurrentRevision | undefined> {
@@ -24,17 +24,16 @@ export async function snapshotVariants(tx: Transaction, snapshot: Snapshot): Pro
     return result;
 }
 
-const evidenceStores: Store[] = ['memory_revisions', 'reviews', 'event_revisions', 'event_memberships',
-    'event_progress', 'event_processing_receipts', 'custom_table_rows', 'table_receipts', 'table_history'];
-
 /** Reclaim only records born under this policy, inside the same transaction as head publication.
  * Legacy rows are not converted or removed. Metadata evidence is a descriptor root, never a body root.
  * Read reference metadata, not historical text; scope deletion to this branch's superseded snapshots.
  */
 export async function retireCurrentBodies(tx: Transaction, branch: Branch, previousRefs: SourceRef[], current?: {
     refs: SourceRef[]; memories: MemoryRevision[];
-}) {
-    if (current) {
+}, forceFull = false) {
+    // The explicit full mode is also used by maintenance/differential checks;
+    // it rebuilds reference evidence and runs every original reclamation step.
+    if (current && !forceFull) {
         const live = new Map(current.refs.map(ref => [ref.message, ref.revision]));
         if (previousRefs.every(ref => live.get(ref.message) === ref.revision)) {
             // An additive head cannot retire a prior body. Skip the history sweep
@@ -75,15 +74,9 @@ export async function retireCurrentBodies(tx: Transaction, branch: Branch, previ
             }
         }
     }
-    const collect = (value: unknown) => {
-        if (!value || typeof value !== 'object') return;
-        const item = value as { message?: unknown; revision?: unknown; basis?: unknown; snapshot?: unknown };
-        if (typeof item.message === 'string' && typeof item.revision === 'string') sourceRoots.add(item.revision);
-        if (typeof item.basis === 'string') snapshotRoots.add(item.basis);
-        if (typeof item.snapshot === 'string') snapshotRoots.add(item.snapshot);
-        for (const child of Object.values(value)) if (child && typeof child === 'object') collect(child);
-    };
-    for (const store of evidenceStores) for (const item of await tx.all<Row>(store, 'story', branch.story)) collect(item);
+    const evidence = await tx.retentionRoots(branch.story, forceFull);
+    for (const id of evidence.snapshotRoots) snapshotRoots.add(id);
+    for (const id of evidence.sourceRoots) sourceRoots.add(id);
     const remove = snapshots.filter(s => s.snapshotSchema === 2 && s.branch === branch.id && !snapshotRoots.has(s.id));
     const removedIds = new Set(remove.map(s => s.id));
     const remaining = snapshots.filter(s => !removedIds.has(s.id));

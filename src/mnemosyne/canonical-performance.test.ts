@@ -19,7 +19,7 @@ async function rows(lib: Library) {
 }
 async function collectorIsAlreadySettled(lib: Library, branchId: string, previous: SourceRef[]) {
     const view = await capture(lib, branchId), before = await rows(lib);
-    await lib.transaction(STORES, 'readwrite', tx => retireCurrentBodies(tx, view.branch, previous));
+    await lib.transaction(STORES, 'readwrite', tx => retireCurrentBodies(tx, view.branch, previous, undefined, true));
     expect(await rows(lib)).toEqual(before);
 }
 
@@ -159,7 +159,7 @@ test('a new connection and scope use the cold hash path', async () => {
     } finally { other?.close(); lib.close(); }
 });
 
-test.each([0, 500, 2000])('ordinary turn sequence with %i historical summaries measures the remaining sweep', async historyCount => {
+test.each([0, 500, 2000])('ordinary turn sequence with %i historical summaries reuses verified reference roots', async historyCount => {
     const lib = await Library.open(freshLibraryName()), input = observation(40);
     try {
         const branch = await synchronize(lib, input), before = await capture(lib, branch.id);
@@ -188,7 +188,9 @@ test.each([0, 500, 2000])('ordinary turn sequence with %i historical summaries m
             await collectorIsAlreadySettled(lib, branch.id, prior.refs);
         }
         expect(counts.map(c => c.hashes)).toEqual([2, 2, 1, 2]);
-        expect(counts.map(c => c.historicalRows)).toEqual([0, historyCount + 40, 0, 0]);
+        // The independent full collector after the first append establishes a
+        // committed reference baseline; subsequent ordinary turns must reuse it.
+        expect(counts.map(c => c.historicalRows)).toEqual([0, 0, 0, 0]);
         console.info('append retention sequence', { historyCount, counts });
     } finally { lib.close(); }
 });

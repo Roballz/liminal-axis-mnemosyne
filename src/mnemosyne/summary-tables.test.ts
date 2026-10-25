@@ -2,7 +2,7 @@ import { withoutTableHistory } from './fixtures';
 import { expect, test, vi } from 'vitest';
 import { fixture } from './fixtures';
 import { capture, statuses, synchronize } from './canonical';
-import { Transaction } from './db';
+import { DB_VERSION, Transaction } from './db';
 import {
     newTable,
     saveTable,
@@ -220,7 +220,7 @@ test('new schema instructions, lock policy and hidden rows survive core export/r
             restored = await restoreLibrary(pack, false);
         try {
             expect((await exportLibrary(restored)).data).toEqual(pack.data);
-            expect(restored.db.version).toBe(4);
+            expect(restored.db.version).toBe(DB_VERSION);
         } finally {
             restored.close();
         }

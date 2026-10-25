@@ -4,7 +4,7 @@ import { fixture, observation } from './fixtures';
 import { capture, synchronize, forkBranch } from './canonical';
 import { newTable, saveTable, applyRows, readTables, parseSummaryTables, commitSummaryTables } from './tables';
 import { exportLibrary, restoreLibrary } from './migration';
-import { Library, freshLibraryName } from './db';
+import { DB_VERSION, Library, freshLibraryName } from './db';
 import { previewArchiveDeletion, commitArchiveDeletion } from './archive-deletion';
 import { STORES, fingerprint, type TableDef, type TableRow, type Branch, type TableCommit } from './model';
 
@@ -210,7 +210,7 @@ test('physical v1 upgrade adds history and current body stores without replacing
         request.onsuccess = () => { request.result.close(); resolve(); }; request.onerror = () => reject(request.error);
     });
     const lib = await Library.open(name);
-    expect(lib.db.version).toBe(4); expect((await lib.get('stories', 'preserved'))?.id).toBe('preserved');
+    expect(lib.db.version).toBe(DB_VERSION); expect((await lib.get('stories', 'preserved'))?.id).toBe('preserved');
     expect(await lib.all('table_history')).toEqual([]);
     expect(await lib.all('source_bodies')).toEqual([]);
     expect(await lib.all('memory_selection_nodes')).toEqual([]); lib.close();

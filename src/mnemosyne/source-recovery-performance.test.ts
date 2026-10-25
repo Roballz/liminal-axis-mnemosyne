@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, expect, test, vi } from 'vitest';
 import { fixture } from './fixtures';
 import { capture, statuses, synchronize } from './canonical';
-import { Library, Transaction, freshLibraryName } from './db';
+import { DB_VERSION, Library, Transaction, freshLibraryName } from './db';
 import { STORES, row, type MemoryRevision } from './model';
 
 afterEach(() => vi.restoreAllMocks());
@@ -31,7 +31,7 @@ test('upgrading an existing v3 database indexes its old summary rows without rew
     legacy.close();
     const lib = await Library.open(name);
     try {
-        expect(lib.db.version).toBeGreaterThan(3);
+        expect(lib.db.version).toBe(DB_VERSION);
         expect(await lib.all('memory_revisions', 'branch_host', ['old-branch', 'old-host'])).toEqual([original]);
         expect(await lib.get('memory_revisions', original.id)).toEqual(original);
         expect(await lib.all('memory_revisions', 'branch_host', ['another-branch', 'old-host'])).toEqual([]);

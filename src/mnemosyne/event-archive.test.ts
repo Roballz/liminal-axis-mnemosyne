@@ -4,6 +4,7 @@ import { batchFixture, output, observation } from './fixtures';
 import { capture, synchronize } from './canonical';
 import { commitEventBatch, eventView, setEventArchived, wrapEvents, editEvent } from './events';
 import { exportLibrary, restoreLibrary } from './migration';
+import { DB_VERSION } from './db';
 import { fingerprint, type EventChain } from './model';
 
 test('archive/unarchive only changes organization; recall and all event facts stay intact', async () => {
@@ -52,7 +53,7 @@ test('v4 archive flags round-trip, old v3 is readable, invalid archive metadata 
   const pack = await exportLibrary(lib);
   expect(pack.version).toBe(15);
   const restored = await restoreLibrary(pack, false);
-  expect(restored.db.version).toBe(4);
+  expect(restored.db.version).toBe(DB_VERSION);
   expect((await exportLibrary(restored)).data).toEqual(pack.data);
   expect((await eventView(restored, await capture(restored, branch.id))).cards[0].chain.archived).toBe(true);
   restored.close();
