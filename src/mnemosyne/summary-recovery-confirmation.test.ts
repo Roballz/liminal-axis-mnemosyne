@@ -188,7 +188,7 @@ test('155 recovered L0 summaries commit in one epoch without host edits or API c
  expect(await lib.transaction(['history_snapshots','manifest_blocks'],'readonly',tx=>summarySources(tx,last))).toEqual(next.refs);
  expect(JSON.stringify(next.memories.filter(m=>!m.level)).length).toBeLessThan(200000);
  expect(dailyState).toMatchObject({pending:false,error:'',review:1});
- await expect(exportLibrary(lib)).resolves.toMatchObject({version:14});
+ await expect(exportLibrary(lib)).resolves.toMatchObject({version:15});
 },15000);
 test('ordinary keep still rejects recovery; single explicit retain survives sync, reopen, export restore and fork',async()=>{
  const view=await recovered(1,false), original=view.memories[0];

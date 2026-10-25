@@ -76,11 +76,14 @@ const editing = ref(false),
   latestMemory = ref(""),
   keywords = ref("");
 const progressSources = computed(() => {
+  void editing.value; // Reopening the same card captures a fresh formView.
   const card = cards.value.find(c => c.chain.id === editId.value);
+  const selected = new Map(formView?.memories.map(memory => [memory.id, memory]));
+  const floors = new Map(formView?.refs.map((ref, floor) => [ref.message, floor]));
   return (card?.members ?? []).flatMap(member => {
-    const source = formView?.memories.find(m => m.id === member.memory);
+    const source = selected.get(member.memory);
     if (!source) return [];
-    const floor = formView!.refs.findIndex(r => r.message === source.anchor);
+    const floor = floors.get(source.anchor ?? '') ?? -1;
     return [{ value: source.id, label: `#${floor} ${source.storyTime} ${source.content.slice(0, 40)}` }];
   });
 });
@@ -112,6 +115,10 @@ const archiveMode = ref(false),
 const visibleCards = computed(() =>
   cards.value.filter((card) => !!card.chain.archived === archiveMode.value),
 );
+const pendingById = computed(() => new Map(cards.value.map(card => [card.chain.id, eventPending(card)])));
+const cardLimit = ref(40);
+const shownCards = computed(() => visibleCards.value.slice(0, cardLimit.value));
+watch([() => dailyState.scope, archiveMode], () => { cardLimit.value = 40; });
 let pressTimer: ReturnType<typeof setTimeout> | undefined,
   held = false,
   pressX = 0,
@@ -583,7 +590,7 @@ onBeforeUnmount(() => {
       }}
     </p>
     <details
-      v-for="card in visibleCards"
+      v-for="card in shownCards"
       :key="`${archiveMode}:${card.chain.id}`"
       class="mn-card mn-event-card"
       :open="!!expandedCards[card.chain.id]"
@@ -609,7 +616,7 @@ onBeforeUnmount(() => {
         <div class="mn-event-meta">
           <span
             >{{ statusName(card.meta.status) }} ·
-            {{ card.members.length }} 条关联<span v-if="eventPending(card)">
+            {{ card.members.length }} 条关联<span v-if="pendingById.get(card.chain.id)">
               · 概要待更新</span><span v-else-if="eventCoverageUpgradeNeeded(card)"> · 可重建分批覆盖</span></span
           ><span class="mn-actions"
             ><button :disabled="busy || jobState.busy || manualEventState.busy || membershipUi.loading" @click.stop.prevent="openMemberships({ eventId: card.chain.id })">批量加入</button>
@@ -629,11 +636,11 @@ onBeforeUnmount(() => {
       </summary>
       <template v-if="expandedCards[card.chain.id]">
       <hr />
-      <div v-if="eventPending(card) || eventCoverageUpgradeNeeded(card)" class="mn-card">
+      <div v-if="pendingById.get(card.chain.id) || eventCoverageUpgradeNeeded(card)" class="mn-card">
         <p v-if="card.blocked">关联摘要待审核，请先处理。</p>
         <p v-else-if="!card.members.length">暂无关联摘要，请先加入摘要。</p>
         <p v-else-if="card.needsReview">概要来源已变化，请更新概要。</p>
-        <p v-else-if="eventPending(card)">概要待更新，可手动修改或使用 AI 更新。</p>
+        <p v-else-if="pendingById.get(card.chain.id)">概要待更新，可手动修改或使用 AI 更新。</p>
         <p v-else>当前概要已保留，可更新覆盖记录。</p>
         <details v-if="card.issues?.length">
           <summary>查看问题摘要（{{ card.issues.length }}）</summary>
@@ -702,6 +709,9 @@ onBeforeUnmount(() => {
       </details>
       </template>
     </details>
+    <div v-if="shownCards.length < visibleCards.length" class="mn-actions">
+      <button type="button" @click="cardLimit += 40">显示更多事件（{{ shownCards.length }} / {{ visibleCards.length }}）</button>
+    </div>
     <ModalMask :open="!!archiveMenu" @close="!busy && (archiveMenu = null)">
       <section
         class="mn-dialog mn-archive-menu"

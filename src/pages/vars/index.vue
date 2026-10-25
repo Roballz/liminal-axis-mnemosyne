@@ -79,7 +79,8 @@ const jsonError = ref('');
 function loadTier(t: VarTier) {
   const tpl = memory.varTemplates[t];
   editorTree.value = JSON.parse(JSON.stringify(tpl.json ?? {}));
-  editorJson.value = Object.keys(tpl.json).length ? JSON.stringify(tpl.json, null, 2) : '{\n\n}';
+  editorJson.value = editorMode.value === 'source'
+    ? Object.keys(tpl.json).length ? JSON.stringify(tpl.json, null, 2) : '{\n\n}' : '';
   editorMeaning.value = tpl.meaning;
   editorRule.value = tpl.rule;
   jsonError.value = '';
@@ -90,9 +91,6 @@ function switchTier(t: VarTier) {
   loadTier(t);
 }
 loadTier(editorTier.value); // 初始优先载入角色层;群聊/未进入时回退聊天层
-
-// 树形编辑改动 → 同步一份到源码文本(切到源码时不落后)
-watch(editorTree, v => { editorJson.value = JSON.stringify(v, null, 2); }, { deep: true });
 
 // 切模式:进树形时用源码文本重解析(接住用户在源码里的编辑);进源码时用树重渲染
 function switchMode(m: 'tree' | 'source') {

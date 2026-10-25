@@ -69,13 +69,20 @@ it('自动隐藏开关均排除尚未隐藏的叶子，真正隐藏后才召回�
 });
 
 it('摘要与知识库共享一次 query/embedding，独立额度并按摘要后顺序注入；再次运行命中缓存', async () => {
+  const readAll = vi.spyOn(IDBIndex.prototype, 'getAll'), readOne = vi.spyOn(IDBObjectStore.prototype, 'get');
   await runVectorRecall();
   expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(1);
   expect(embed.embedTexts).toHaveBeenCalledTimes(1);
   expect(finalText()).toContain('旧剧情摘要'); expect(finalText()).toContain('BB设定');
   expect(finalText().indexOf('【额外信息】')).toBeGreaterThan(finalText().indexOf('旧剧情摘要'));
+  expect(readAll.mock.contexts.some(index => (index as IDBIndex).objectStore.name === 'files')).toBe(false);
+  expect(readOne.mock.contexts.some(store => (store as IDBObjectStore).name === 'files')).toBe(false);
+  expect(readOne.mock.contexts.filter(store => (store as IDBObjectStore).name === 'file_blocks')).toHaveLength(1);
+  readAll.mockClear(); readOne.mockClear();
   const text = finalText(); await runVectorRecall();
   expect(finalText()).toBe(text); expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(1);
+  expect(readAll.mock.contexts.map(index => (index as IDBIndex).objectStore.name)).toEqual(['file_metadata', 'file_metadata']);
+  expect(readOne).not.toHaveBeenCalled();
   settings.apiSettings.vector.knowledge.threshold = 1;
   await runVectorRecall(); expect(rewrite.rewriteQuery).toHaveBeenCalledTimes(2);
 });
@@ -116,7 +123,7 @@ it('召回中知识库被删除，丢弃旧命中，缓存不复用', async () =
 });
 
 it('知识库读取失败不阻断摘要召回', async () => {
-  vi.spyOn(knowledge, 'listKnowledge').mockRejectedValue(new Error('storage unavailable'));
+  vi.spyOn(knowledge, 'listKnowledgeMetadata').mockRejectedValue(new Error('storage unavailable'));
   await runVectorRecall(); expect(finalText()).toContain('旧剧情摘要');
 });
 

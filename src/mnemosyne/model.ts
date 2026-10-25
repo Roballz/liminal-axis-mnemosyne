@@ -4,7 +4,7 @@ export const SCHEMA = 1;
 export const STORES = [
     'stories', 'branches', 'source_messages', 'source_revisions', 'source_bodies', 'history_snapshots',
     'manifest_blocks', 'host_bindings', 'message_mappings', 'memories', 'memory_revisions',
-    'memory_views', 'reviews', 'event_chains', 'event_revisions', 'event_memberships',
+    'memory_views', 'memory_selection_nodes', 'reviews', 'event_chains', 'event_revisions', 'event_memberships',
     'event_progress', 'event_processing_receipts', 'custom_table_defs', 'custom_table_rows',
     'table_receipts', 'table_history', 'library_meta',
 ] as const;
@@ -133,6 +133,22 @@ export interface MemoryRevision extends Row {
 export interface MemoryView extends Row {
     branch: string;
     selections: Record<string, string>;
+}
+/** Physical v2 view. The public/read model remains MemoryView with full selections. */
+export interface CompactMemoryView extends Row {
+    branch: string;
+    selectionSchema: 2;
+    root: string | null;
+    count: number;
+}
+/** Immutable, branch-local hash-trie node. Order is only the original mapping's
+ * enumeration order; exact family IDs remain the selection identity. */
+export interface MemorySelectionNode extends Row {
+    branch: string;
+    prefix: string;
+    children: Record<string, string>;
+    entries: [string, string, number][];
+    count: number;
 }
 export interface Review extends Row {
     reviewSchema?: 2;

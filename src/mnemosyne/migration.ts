@@ -4,9 +4,10 @@ import { isRoleOnlyPair } from './source-equivalence';
 import { Library, freshLibraryName, activateLibrary } from './db';
 import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
+import { validateMemorySelections } from './memory-selections';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
     schema: 1;
     created: number;
     excluded: string[];
@@ -19,11 +20,11 @@ export async function exportLibrary(lib: Library): Promise<Package> {
     const data = await lib.transaction(STORES, 'readonly', async (tx) => {
         const result = {} as Record<Store, Row[]>;
         for (const store of STORES)
-            result[store] = await tx.all(store);
+            result[store] = await tx.rawAll(store);
         return result;
     });
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
-    const base = { format: 'mnemosyne-daily' as const, version: 14 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 15 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     await validateCurrentData(base);
     return { ...base, checksum: await fingerprint(base) };
@@ -34,7 +35,8 @@ const FIELDS: Record<Store, string[]> = {
     source_revisions: ['role', 'content', 'fingerprint', 'provenance'], history_snapshots: ['previous', 'blocks', 'length', 'created'],
     manifest_blocks: ['entries'], host_bindings: ['scope', 'generation', 'intent'], message_mappings: ['message', 'hostKey'],
     memories: ['hostId'], memory_revisions: ['content', 'fingerprint', 'basis', 'inputRefs', 'coverage', 'dependencies', 'declaration', 'level', 'anchor', 'storyTime', 'recall', 'visibility', 'seed', 'hostId'],
-    memory_views: ['selections'], reviews: ['snapshot', 'decision', 'origin', 'created'], event_chains: ['created'],
+    memory_views: ['selections'], memory_selection_nodes: ['prefix', 'children', 'entries', 'count'],
+    reviews: ['snapshot', 'decision', 'origin', 'created'], event_chains: ['created'],
     event_revisions: ['title', 'status', 'keywords', 'snapshot', 'cutoff', 'epoch', 'created', 'refs'],
     event_memberships: ['memory', 'kind', 'origin', 'locked', 'active', 'epoch', 'snapshot', 'cutoff'],
     event_progress: ['text', 'memories', 'snapshot', 'cutoff', 'operation', 'epoch'],
@@ -51,8 +53,9 @@ export async function validateCurrentData(pack: Omit<Package, 'checksum'>): Prom
     validateStructure(pack, await validateBodyHashes(pack));
 }
 function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: ReadonlyMap<string, string> = new Map()) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
-    const stores: readonly Store[] = STORES.filter(s => !(s === 'table_history' && pack.version < 11) && !(s === 'source_bodies' && pack.version < 12));
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    const stores: readonly Store[] = STORES.filter(s => !(s === 'table_history' && pack.version < 11) &&
+        !(s === 'source_bodies' && pack.version < 12) && !(s === 'memory_selection_nodes' && pack.version < 15));
     check(pack.data && Object.keys(pack.data).length === stores.length && Object.keys(pack.data).every(s => stores.includes(s as Store)), '迁移模块不完整');
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
@@ -76,7 +79,9 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             if (pack.version >= 12) optional.push(...(store === 'source_revisions' ? ['bodySchema', 'bodyHash', 'bodyLength'] : store === 'history_snapshots' ? ['snapshotSchema'] : store === 'manifest_blocks' ? ['variants'] : store === 'branches' ? ['legacyHead'] : []));
             if (pack.version >= 13 && store === 'memory_revisions') optional.push('sourceRecovery');
             if (pack.version >= 14 && store === 'event_revisions') optional.push('overviewCoverage', 'overviewMaterialMode');
-            const required = store === 'source_revisions' && (r as any).bodySchema === 1 && pack.version >= 12 ? FIELDS[store].filter(k => k !== 'content') : FIELDS[store];
+            if (pack.version >= 15 && store === 'memory_views') optional.push('selectionSchema', 'root', 'count');
+            const required = store === 'source_revisions' && (r as any).bodySchema === 1 && pack.version >= 12 ? FIELDS[store].filter(k => k !== 'content')
+                : store === 'memory_views' && (r as any).selectionSchema === 2 && pack.version >= 15 ? ['selectionSchema', 'root', 'count'] : FIELDS[store];
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
             check(Object.keys(r).every(k => fields.includes(k)) && required.every(k => k in r), `字段不合法 ${store}`);
             maps[store].set(r.id, r);
@@ -297,11 +302,8 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             }
         }
     }
-    for (const v of maps.memory_views.values())
-        for (const [family, key] of Object.entries(v.selections)) {
-            const m = get('memory_revisions', key as string);
-            check(m.owner === family && m.branch === v.branch, '摘要选择错误');
-        }
+    validateMemorySelections([...maps.memory_views.values()], [...maps.memory_selection_nodes.values()],
+        id => get('memory_revisions', id));
     for (const chain of maps.event_chains.values()) {
         check(chain.story === get('branches', chain.branch).story, '事件链跨故事');
         if (chain.archiveSchema !== undefined || chain.archived !== undefined)

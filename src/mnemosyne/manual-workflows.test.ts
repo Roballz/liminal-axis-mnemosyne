@@ -686,7 +686,7 @@ test("manual backfill runs while automatic filling is disabled, sends original d
     false,
   );
   const pack = await exportLibrary(lib);
-  expect(pack.version).toBe(14);
+  expect(pack.version).toBe(15);
   const restored = await restoreLibrary(pack, false);
   expect(
     (await restored.all<TableRow>("custom_table_rows"))[0].bodySources,

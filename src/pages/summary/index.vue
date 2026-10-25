@@ -9,6 +9,7 @@ import { addSummary, appendOpToLatestLeaf, deleteLeafAt, deleteSummary, deleteSu
 import { apiSettings } from '@/api/settings';
 import { batchBackfill, batchState, cancelBatchBackfill, engineState, floorBackfillState, isAiFloor, resummarizeNow, summarizeFloor, summarizeSelected, syncHiddenNow } from '@/memory/engine';
 import { estimateInjectionTokenBreakdown, refreshInjection, selectViewNodes, type ViewNode } from '@/memory/inject';
+import { createNodeFloorIndex } from '@/memory/select';
 import { compactTimeLabel, formatRange, splitTimeLabel } from '@/memory/timeTag';
 import { relativeTimeLabel, weekdayLabel } from '@/memory/timeRel';
 import { derivedMeta, memory, recomputeDerived } from '@/memory/store';
@@ -41,6 +42,7 @@ const resetViewStates = () => {
   exitSelectMode();
   publicOpen.value = false;
   visibleLimit.value = 40;
+  pendingPage.value = 0;
 };
 let offChatChanged: (() => void) | null = null;
 onMounted(() => {
@@ -224,6 +226,10 @@ function clearFocus() {
 /* ============ 未摘要楼层 ============
  * derivedMeta.pendingFloors = AI 楼且无有效叶子,由旧到新;此处倒序展示(新楼在前)。 */
 const pendingFloors = computed(() => [...derivedMeta.pendingFloors].sort((a, b) => b - a));
+const pendingPage = ref(0), pendingPageSize = 40;
+const pendingPages = computed(() => Math.max(1, Math.ceil(pendingFloors.value.length / pendingPageSize)));
+const shownPendingFloors = computed(() => pendingFloors.value.slice(pendingPage.value * pendingPageSize, (pendingPage.value + 1) * pendingPageSize));
+watch(pendingPages, count => { pendingPage.value = Math.min(pendingPage.value, count - 1); });
 const summarizingFloor = computed<number | null>(() => {
   // derivedMeta.rev 让切聊天后的 computed 重新核对当前 chatId。
   void derivedMeta.rev;
@@ -334,7 +340,7 @@ const byId = computed<Map<string, ViewNode>>(() => {
     m.set(s.id, {
       id: s.id, kind: 'comp', level: s.level, text: s.text,
       timeStart: s.timeStart, timeEnd: s.timeEnd, timeLabel: s.timeLabel,
-      createdAt: s.createdAt, childIds: s.childIds ?? [],
+      createdAt: s.createdAt, childIds: [...(s.childIds ?? [])],
       msgIndex: s.imported ? (s.importedFloorEnd ?? -1) : -1,
       active: s.imported === true,
       atomic: s.imported === true,
@@ -345,26 +351,11 @@ const byId = computed<Map<string, ViewNode>>(() => {
   return m;
 });
 
-/** 递归解析某节点覆盖的叶子楼层集合(comp 取全部后代有效叶子;失效 child 取不到则跳过)。 */
+const floorIndex = computed(() => createNodeFloorIndex(byId.value));
+
+/** 当前森林变化时重建范围索引;搜索输入和排序比较不再重复展开后代。 */
 function nodeFloors(n: ViewNode, map: Map<string, ViewNode>): [number, number] {
-  const acc: number[] = [];
-  const seen = new Set<string>();
-  const walk = (x: ViewNode): void => {
-    if (seen.has(x.id)) return;
-    seen.add(x.id);
-    if (x.atomic) {
-      if (typeof x.floorStart === 'number') acc.push(x.floorStart);
-      if (typeof x.floorEnd === 'number') acc.push(x.floorEnd);
-      return;
-    }
-    if (x.kind === 'leaf') { acc.push(x.msgIndex); return; }
-    for (const cid of x.childIds) {
-      const c = map.get(cid);
-      if (c) walk(c);
-    }
-  };
-  walk(n);
-  return acc.length ? [Math.min(...acc), Math.max(...acc)] : [-1, -1];
+  return (map === byId.value ? floorIndex.value : createNodeFloorIndex(map))(n);
 }
 
 /** ViewNode → 展示行核心字段(供卡片渲染) */
@@ -508,31 +499,25 @@ function toggleExpand(id: string) {
   expanded.value = next;
 }
 
-/** 搜索视图:遍历**全森林**(含已压缩深层节点),命中平铺、按楼层倒序。 */
+const searchableRows = computed(() => {
+  const map = byId.value, roots = new Set(rootNodes.value.map(n => n.id));
+  return [...map.values()].map(node => {
+    const base = toRow(node, map);
+    const time = base.timeStart || base.timeEnd ? formatRange(base.timeStart, base.timeEnd)
+      : base.timeLabel ? compactTimeLabel(base.timeLabel) : '';
+    return { row: { ...base, isChild: !roots.has(node.id) }, text: node.text.toLowerCase(), time: time.toLowerCase() };
+  }).sort((a, b) => b.row.floorHi - a.row.floorHi);
+});
+
+/** 搜索仍覆盖全森林;正文、时间和楼层范围只随数据变化更新。 */
 function buildSearchRows(): DisplayRow[] {
-  const map = byId.value;
   const q = searchQuery.value.trim();
   const qLower = q.toLowerCase();
   // 楼层查询:纯数字 / #数字 → 命中覆盖该楼的节点
   const floorNum = /^#?\d+$/.test(q) ? Number(q.replace(/^#/, '')) : null;
-  const rootIdSet = new Set(rootNodes.value.map(n => n.id));
-
-  const rows: DisplayRow[] = [];
-  for (const n of map.values()) {
-    const base = toRow(n, map);
-    let hit = false;
-    if (n.text && n.text.toLowerCase().includes(qLower)) hit = true;
-    if (!hit && floorNum !== null && base.floorLo >= 0 && floorNum >= base.floorLo && floorNum <= base.floorHi) hit = true;
-    if (!hit) {
-      const t = base.timeStart || base.timeEnd ? formatRange(base.timeStart, base.timeEnd) : (base.timeLabel ? compactTimeLabel(base.timeLabel) : '');
-      if (t && t.toLowerCase().includes(qLower)) hit = true;
-    }
-    if (!hit) continue;
-    // 命中的根行可编辑/删除;已被压缩的深层节点只读(展开语义一致,避免误删祖先链)
-    const isRoot = rootIdSet.has(n.id);
-    rows.push({ ...base, isChild: !isRoot });
-  }
-  return rows.sort((a, b) => b.floorHi - a.floorHi);
+  return searchableRows.value.filter(({ row, text, time }) => text.includes(qLower) || time.includes(qLower) ||
+    (floorNum !== null && row.floorLo >= 0 && floorNum >= row.floorLo && floorNum <= row.floorHi))
+    .map(item => item.row);
 }
 
 /** 平铺视图行:搜索命中平铺 / 选择态的根;默认视图不走这里(由 SummaryNode 递归渲染)。 */
@@ -1125,7 +1110,7 @@ provide(SUMMARY_CTX, {
       </div>
       <div class="bbs-pending-chips">
         <button
-          v-for="f in pendingFloors"
+          v-for="f in shownPendingFloors"
           :key="f"
           class="bbs-pending-chip"
           type="button"
@@ -1136,6 +1121,11 @@ provide(SUMMARY_CTX, {
           <span v-if="summarizingFloor === f" class="bbs-pending-spin"></span>
           <template v-else>#{{ f }}</template>
         </button>
+      </div>
+      <div v-if="pendingPages > 1" class="bbs-actions">
+        <button class="bbs-btn bbs-btn-sm" type="button" aria-label="上一页待摘要楼层" :disabled="pendingPage === 0" @click="pendingPage--">上一页</button>
+        <span>第 {{ pendingPage + 1 }} / {{ pendingPages }} 页</span>
+        <button class="bbs-btn bbs-btn-sm" type="button" aria-label="下一页待摘要楼层" :disabled="pendingPage + 1 >= pendingPages" @click="pendingPage++">下一页</button>
       </div>
     </div>
 

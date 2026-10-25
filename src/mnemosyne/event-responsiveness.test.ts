@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test, vi } from 'vitest';
 import * as Vue from 'vue';
 import { parse, compileTemplate } from 'vue/compiler-sfc';
+import ts from 'typescript';
 import { fixture, batchFixture, output } from './fixtures';
 import { capture } from './canonical';
 import { eventView, commitEventBatch } from './events';
@@ -11,11 +12,18 @@ import { Library, Transaction } from './db';
 
 const page = parse(readFileSync(new URL('../pages/events/index.vue', import.meta.url), 'utf8')).descriptor;
 const template = page.template!.content;
-const start = template.indexOf('    <details\n      v-for="card in visibleCards"');
+const start = template.indexOf('    <details\n      v-for="card in shownCards"');
+expect(start).toBeGreaterThan(-1);
 const compiled = compileTemplate({ source: template.slice(start, template.indexOf('    <ModalMask', start)), filename: 'events-test.vue', id: 'test' });
-expect(start).toBeGreaterThan(-1); expect(compiled.errors).toEqual([]);
+expect(compiled.errors).toEqual([]);
 const render = new Function('Vue', compiled.code.replace(/import \{([^}]+)\} from "vue"/g,
   (_, names: string) => `const {${names.replace(/ as /g, ': ')}} = Vue`).replace('export function render', 'return function render'))(Vue);
+const script = page.scriptSetup!.content;
+const stateStart = script.indexOf('const visibleCards ='), stateEnd = script.indexOf('let pressTimer:', stateStart);
+expect(stateStart).toBeGreaterThan(-1); expect(stateEnd).toBeGreaterThan(stateStart);
+const cardState = new Function('Vue', 'cards', 'archiveMode', 'dailyState', 'eventPending',
+  `const {computed,ref,watch}=Vue;\n${ts.transpile(script.slice(stateStart, stateEnd), { target: ts.ScriptTarget.ES2022 })}
+  return {visibleCards,shownCards,pendingById,cardLimit};`);
 
 test('closed event cards, histories and member details never mount hidden full summaries', () => {
   const memories = Array.from({ length: 1000 }, (_, i) => ({ id: `memory-${i}`, content: `正文${i}:` + '长'.repeat(10000) }));
@@ -24,21 +32,33 @@ test('closed event cards, histories and member details never mount hidden full s
     members: memories.slice(i * 10, i * 10 + 10).map(m => ({ id: m.id, memory: m.id })) }));
   const byId = new Map(memories.map(m => [m.id, m.content]));
   const text = vi.fn((id: string) => byId.get(id));
-  const context = { visibleCards: cards, archiveMode: false, apiSettings: { ui: { showInternalIds: false } }, pages: {},
+  const scope = Vue.effectScope();
+  const state = scope.run(() => cardState(Vue, Vue.shallowRef(cards), Vue.ref(false), Vue.reactive({ scope: 'fixture' }), () => false));
+  const context = Vue.proxyRefs({ ...state, archiveMode: false, apiSettings: { ui: { showInternalIds: false } }, pages: {},
     expandedCards: {} as Record<string, boolean>, expandedHistory: {} as Record<string, boolean>, expandedMembers: {} as Record<string, boolean>,
     busy: false, jobState: { busy: false }, manualEventState: { busy: false }, membershipUi: { loading: false },
-    statusName: () => '', eventPending: () => false, eventCoverageUpgradeNeeded: () => false,
-    eventOverview: (c: any) => c.meta.overview, members: (c: any) => c.members.slice(0, 10), text };
+    statusName: () => '', eventCoverageUpgradeNeeded: () => false,
+    eventOverview: (c: any) => c.meta.overview, members: (c: any) => c.members.slice(0, 10), text });
+  const nodes = (node: any): any[] => !node || typeof node !== 'object' ? [] :
+    [node, ...(Array.isArray(node.children) ? node.children.flatMap(nodes) : [])];
   const bodies = (node: any): number => !node || typeof node !== 'object' ? 0 :
     (typeof node.children === 'string' && node.children.length >= 10000 ? 1 : 0) +
     (Array.isArray(node.children) ? node.children.reduce((n: number, c: any) => n + bodies(c), 0) : 0);
-  expect(bodies(render(context, []))).toBe(0); expect(text).not.toHaveBeenCalled();
-  context.expandedCards['chain-0'] = true;
-  expect(bodies(render(context, []))).toBe(0); expect(text).not.toHaveBeenCalled();
-  context.expandedHistory['chain-0'] = true;
-  expect(bodies(render(context, []))).toBe(0); expect(text).toHaveBeenCalledTimes(10);
-  text.mockClear(); context.expandedMembers['memory-0'] = true;
-  expect(bodies(render(context, []))).toBe(1); expect(text).toHaveBeenCalledTimes(11);
+  try {
+    const first = render(context, []);
+    const mountedCards = (node: any) => nodes(node).filter(n => n.type === 'details' && String(n.props?.class).includes('mn-event-card'));
+    expect(mountedCards(first)).toHaveLength(40);
+    expect(bodies(first)).toBe(0); expect(text).not.toHaveBeenCalled();
+    nodes(first).find(n => n.type === 'button' && String(n.children).includes('显示更多事件')).props.onClick();
+    expect(context.cardLimit).toBe(80); expect(mountedCards(render(context, []))).toHaveLength(80);
+    expect(text).not.toHaveBeenCalled();
+    context.expandedCards['chain-0'] = true;
+    expect(bodies(render(context, []))).toBe(0); expect(text).not.toHaveBeenCalled();
+    context.expandedHistory['chain-0'] = true;
+    expect(bodies(render(context, []))).toBe(0); expect(text).toHaveBeenCalledTimes(10);
+    text.mockClear(); context.expandedMembers['memory-0'] = true;
+    expect(bodies(render(context, []))).toBe(1); expect(text).toHaveBeenCalledTimes(11);
+  } finally { scope.stop(); }
 });
 
 test('event bodies resolve through the message index without scanning the chat source array', async () => {

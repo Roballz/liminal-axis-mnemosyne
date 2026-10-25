@@ -47,11 +47,14 @@ const booleanOptions = [
   { value: 'false', label: '否' },
 ];
 const table = computed(() => tables.value.find((t) => t.id === tableId.value));
-const filtered = computed(() =>
-  rows.value.filter(
-    (r) => !r.deleted && (showHidden.value || !r.hidden) && JSON.stringify(r.values).includes(search.value),
-  ),
-);
+// Build searchable payload text only when searching, once per refreshed row set.
+const searchRows = computed(() => rows.value.map(row => ({ row, text: JSON.stringify(row.values) })));
+const filtered = computed(() => {
+  const query = search.value;
+  const visible = (row: TableRow) => !row.deleted && (showHidden.value || !row.hidden);
+  return query ? searchRows.value.filter(({ row, text }) => visible(row) && text.includes(query)).map(({ row }) => row)
+    : rows.value.filter(visible);
+});
 const shown = computed(() => filtered.value.slice(page.value * 20, page.value * 20 + 20));
 const selectionItems = computed(() =>
   screen.value === 'design' ? (table.value?.columns ?? []) : shown.value,

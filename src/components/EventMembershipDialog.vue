@@ -27,16 +27,25 @@ watch(membershipPicking, async picking => {
 });
 watch([range, keyword], () => { rowPage.value = 0; });
 watch(chainQuery, () => { chainPage.value = 0; });
+const rowSearch = computed(() => (session.value?.rows ?? []).map(row => ({ row,
+  text: row.text.toLocaleLowerCase(), time: row.time.toLocaleLowerCase() })));
+const chainSearch = computed(() => (session.value?.cards ?? []).map(card => ({ card,
+  text: card.meta.title.toLocaleLowerCase() })));
 const filter = computed(() => {
   try {
     const floors = parseFloorRanges(range.value, (session.value?.view.refs.length ?? 1) - 1);
     const q = keyword.value.trim().toLocaleLowerCase();
-    return { error: '', rows: (session.value?.rows ?? []).filter(row => (!floors || floors.has(row.floor)) &&
-      (!q || row.text.toLocaleLowerCase().includes(q) || row.time.toLocaleLowerCase().includes(q))) };
+    const rows = q ? rowSearch.value.filter(({ row, text, time }) => (!floors || floors.has(row.floor)) &&
+      (text.includes(q) || time.includes(q))).map(({ row }) => row)
+      : (session.value?.rows ?? []).filter(row => !floors || floors.has(row.floor));
+    return { error: '', rows };
   } catch (error) { return { error: (error as Error).message, rows: [] }; }
 });
 const pageRows = computed(() => filter.value.rows.slice(rowPage.value * pageSize, (rowPage.value + 1) * pageSize));
-const chainRows = computed(() => (session.value?.cards ?? []).filter(card => card.meta.title.toLocaleLowerCase().includes(chainQuery.value.trim().toLocaleLowerCase())));
+const chainRows = computed(() => {
+  const query = chainQuery.value.trim().toLocaleLowerCase();
+  return query ? chainSearch.value.filter(item => item.text.includes(query)).map(item => item.card) : session.value?.cards ?? [];
+});
 const pageChains = computed(() => chainRows.value.slice(chainPage.value * pageSize, (chainPage.value + 1) * pageSize));
 const pickedRows = computed(() => session.value?.rows.filter(row => selected.value.has(row.id)) ?? []);
 const allowed = computed(() => session.value?.mode !== 'single' || !!session.value.rows[0]?.valid);

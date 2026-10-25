@@ -25,7 +25,7 @@ import { getContext, type STMessage } from '@/st/context';
 import { apiSettings, engineActiveHere } from '@/api/settings';
 import type { VecHit } from '@/api/baibaoku';
 import { vecSearch } from './store';
-import { deriveMemory, getLeaf, leafValid } from '../apply';
+import { getLeaf, leafValid } from '../apply';
 import { MEMORY_BRIEFING_NOTE, MEMORY_BRIEFING_END } from '../prompts';
 import { embedTexts, encodeFloat32Base64, rerankDocuments } from './embed';
 import { recallInputChat, rewriteQuery } from './rewrite';
@@ -38,7 +38,7 @@ import { cleanBody, compactTimeLabel, latestStoryTime, splitTimeLabel } from '..
 import { relativeTimeLabel } from '../timeRel';
 import { normalizeRecallInjectionDepth } from './depth';
 import { RECALL_CACHE_STORAGE_KEY } from './cache';
-import { eligibleKnowledge, embeddingIdentity, knowledgeDebug, knowledgeFingerprint, listKnowledge, recallKnowledge } from './knowledge';
+import { eligibleKnowledge, embeddingIdentity, knowledgeDebug, knowledgeFingerprint, listKnowledgeMetadata, recallKnowledge } from './knowledge';
 import {
   previewOf,
   recallDebug,
@@ -358,7 +358,6 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   };
   const leaves = eligibleLeaves();
   const canonicalAtStart = canonicalLeaves();
-  const plans = deriveMemory(chat).plans;
   const now = latestStoryTime(chat);
   const leafFingerprint = (items = eligibleLeaves()) => {
     const tags = new Map(canonicalLeaves().map(l => [l.leafId, l.tags]));
@@ -377,10 +376,10 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     catch (error) { signal.throwIfAborted(); failSummary('事件读取失败', error); canonicalView = null; }
   }
   if (!stillCurrent()) return;
-  let files: Awaited<ReturnType<typeof listKnowledge>> = [];
+  let files: Awaited<ReturnType<typeof listKnowledgeMetadata>> = [];
   let knowledgeStoreReady = true;
   if (knowledgeConfig.enabled) {
-    try { files = await listKnowledge(database); }
+    try { files = await listKnowledgeMetadata(database); }
     catch { signal.throwIfAborted(); knowledgeStoreReady = false; knowledgeDebug.status = '读取失败'; }
   }
   if (!stillCurrent()) return;
@@ -401,14 +400,16 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
       canonicalView.refs.slice(0, chat.length), canonicalPolicy] : null,
     chat.map(m => [m.name, m.is_user, m.is_system, m.swipe_id, m.mes, m.extra?.bbs_omit,
       m.extra?.type, m.extra?.bbs_internal_notice, leafValid(m) ? getLeaf(m) : null]),
-    ctx.name1, ctx.name2, memory.summaries, plans, now, eventCards, currentEventHints(),
+    // Every plan input is already included in the exact leaf/delta snapshot
+    // above. Replaying the entire chat just to hash its derived plans is redundant.
+    ctx.name1, ctx.name2, memory.summaries, now, eventCards, cfg.rrfContextEnabled ? currentEventHints() : null,
   ])}` : null;
   if (!stillCurrent()) return;
   const cached = cacheKey ? loadRecallCache() : null;
   let reuse = cached?.key === cacheKey;
   if (reuse) {
     try {
-      if (knowledgeConfig.enabled && knowledgeFingerprint(await listKnowledge(database)) !== fingerprint) reuse = false;
+      if (knowledgeConfig.enabled && knowledgeFingerprint(await listKnowledgeMetadata(database)) !== fingerprint) reuse = false;
       if (canonicalView && (canonicalLib !== await activeLibrary() || !await current(canonicalLib!, canonicalView))) reuse = false;
     } catch (error) {
       signal.throwIfAborted(); reuse = false;
@@ -584,7 +585,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   // Each route revalidates only its own evidence. Never discard a valid other route.
   if (knowledgeConfig.enabled && knowledgeStoreReady) {
     try {
-      if (knowledgeFingerprint(await listKnowledge(database)) !== fingerprint) throw new Error('知识库已改变');
+      if (knowledgeFingerprint(await listKnowledgeMetadata(database)) !== fingerprint) throw new Error('知识库已改变');
     } catch (error) {
       signal.throwIfAborted(); knowledgeFailed = true; knowledgeText = ''; knowledgeDebug.hits = [];
       recallDebug.knowledgeStatus = '结果已失效'; recallDebug.detail += `${String(error)}\n`;

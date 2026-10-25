@@ -4,7 +4,7 @@ import { Library, activateLibrary, freshLibraryName } from './db';
 import { bindDaily, syncDaily, invalidateDaily, captureSummaryEvidence, attachSummaryEvidence, confirmFork, dailyState } from './bridge';
 import { capture, statuses, keepSummary } from './canonical';
 import { exportLibrary, restoreLibrary } from './migration';
-import { withoutTableHistory } from './fixtures';
+import { withoutCompactSelections, withoutTableHistory } from './fixtures';
 import { fingerprint, row, STORES } from './model';
 import { editLeafAt } from '@/memory/apply';
 import { eventView, editEvent } from './events';
@@ -27,7 +27,7 @@ afterEach(()=>{dispose?.();lib.close();vi.restoreAllMocks();vi.unstubAllGlobals(
 test.each([11,12])('v%s ancestor backup preserves newer host summary as unresolved and remains exportable', async version=>{
  const ancestor=await syncDaily();
  const backup=await exportLibrary(lib);
- if(version===11){withoutTableHistory(backup);backup.data.table_history=[];}
+ if(version===11){withoutTableHistory(backup);backup.data.table_history=[];}else{withoutCompactSelections(backup);}
  backup.version=version as 11|12;backup.counts=Object.fromEntries(Object.entries(backup.data).map(([k,v])=>[k,v.length])) as any;const {checksum,...base}=backup;backup.checksum=await fingerprint(base);
  ctx.getCurrentChatId=()=> 'child';ctx.chat.push(message(true,'new question'),message(false,'new reply'));invalidateDaily();
  await confirmFork(ancestor.branch.id,2);
@@ -48,7 +48,7 @@ test.each([11,12])('v%s ancestor backup preserves newer host summary as unresolv
  expect((await statuses(lib,view)).get(missing[0].id)).toBe('needs_review');
  expect(dailyState).toMatchObject({pending:false,error:'',archived:4,summaries:2,review:1});
  expect((await eventView(lib,view)).valid.map(m=>m.id)).not.toContain(missing[0].id);
- const saved=await exportLibrary(lib);expect(saved.version).toBe(14);
+ const saved=await exportLibrary(lib);expect(saved.version).toBe(15);
  const restored=await restoreLibrary(saved,false);
  try {expect(await exportLibrary(restored)).toMatchObject({data:saved.data});expect((await statuses(restored,await capture(restored,view.branch.id))).get(missing[0].id)).toBe('needs_review');}finally{restored.close();}
  const files=new Map<string,Blob>();

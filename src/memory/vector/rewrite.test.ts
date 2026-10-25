@@ -4,6 +4,7 @@ import * as host from '@/st/context';
 import type { STMessage } from '@/st/context';
 import * as bridge from '@/mnemosyne/bridge';
 import * as engine from '../engine';
+import * as apply from '../apply';
 import * as transport from './embed';
 import { JAILBREAK_PROMPT } from '../prompts';
 import { memory } from '../store';
@@ -61,4 +62,36 @@ it.each([
   expect(result.context?.eventIds).toEqual(['E']);
   expect(apiSettings.prompts.jailbreak).toBe(custom);
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each([
+  { contextOn: false, hole: true, cutoffs: [1] },
+  { contextOn: true, hole: true, cutoffs: [3, 1] },
+  { contextOn: true, hole: false, cutoffs: [3] },
+])('CONTEXT=$contextOn hole=$hole 只重放不同截止点，复用请求中已检查的事件目录', async ({ contextOn, hole, cutoffs }) => {
+  const chat = [message(true, '第一段正文'), message(false, '中间正文'), message(true, '最新正文')];
+  for (const [i, m] of chat.entries()) {
+    if (i === 1 && hole) continue;
+    m.extra = { bbs_leaf: { id: `synthetic-${i}`, text: '合成摘要', createdAt: 1, v: 1,
+      delta: { npcs: { add: [{ name: i === 0 ? '截止前人物' : '截止后人物' }] } } } };
+  }
+  vi.spyOn(host, 'getContext').mockReturnValue({ chat, getRequestHeaders: () => ({}) } as any);
+  vi.spyOn(engine, 'resolveKeepStart').mockReturnValue(0);
+  const derive = vi.spyOn(apply, 'deriveMemory');
+  const hints = vi.spyOn(bridge, 'currentEventHints').mockReturnValue([{ id: 'sent', title: '请求前事件', status: 'open' }]);
+  Object.assign(apiSettings.vector.queryRewrite, { url: 'https://synthetic.invalid/v1', model: 'synthetic' });
+  apiSettings.vector.recall.rrfContextEnabled = contextOn;
+  const send = vi.spyOn(transport, 'fetchWithTimeoutRetry').mockImplementation(async () => {
+    hints.mockReturnValue([{ id: 'late', title: '请求后事件', status: 'open' }]);
+    return Response.json({ choices: [{ message: { content: 'Q: 合成问题\nCONTEXT: {"participants":[],"eventIds":["sent","late"]}' } }] });
+  });
+  const result = await rewriteQuery(undefined, chat);
+  expect(derive.mock.calls.map(call => call[1])).toEqual(cutoffs);
+  expect(hints).toHaveBeenCalledTimes(contextOn ? 1 : 0);
+  expect(result.context?.eventIds).toEqual(contextOn ? ['sent'] : []);
+  const messages = JSON.parse(send.mock.calls[0][1].body as string).messages;
+  const snapshot = messages.filter((m: any) => m.role !== 'system').map((m: any) => m.content).join('\n');
+  expect(snapshot).toContain('截止前人物');
+  if (hole) expect(snapshot).not.toContain('截止后人物');
+  else expect(snapshot).toContain('截止后人物');
 });

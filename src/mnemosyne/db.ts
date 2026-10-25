@@ -1,21 +1,40 @@
 import { STORES, type Store, type Row, check, id } from './model';
 import { readDailySettings, settings } from './event-settings';
 import { LibraryChanges, TransactionChanges } from './change-journal';
+import { materializeMemoryView } from './memory-selections';
+import type { CompactMemoryView, MemoryView, MemorySelectionNode } from './model';
 export const DB_PREFIX = 'mnemosyne_daily_';
 export const ACTIVE_KEY = 'mnemosyne_daily_active_v1';
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
+export type StoreIndex = 'story' | 'branch' | 'owner' | 'branch_host';
 export function request<T>(r: IDBRequest<T>): Promise<T> {
     return new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 }
 export class Transaction {
+    private readonly selectionNodes = new Map<string, Promise<Row | undefined>>();
     constructor(readonly native: IDBTransaction, private readonly changes?: TransactionChanges) { }
     get<T extends Row>(store: Store, key: string): Promise<T | undefined> {
-        return request<T | undefined>(this.native.objectStore(store).get(key)).then(value => {
+        if (store === 'memory_views') return this.rawGet<MemoryView | CompactMemoryView>(store, key).then(value =>
+            value ? materializeMemoryView(value, id => this.rawGet<MemorySelectionNode>('memory_selection_nodes', id)) as Promise<unknown> as Promise<T> : undefined);
+        return this.rawGet<T>(store, key);
+    }
+    rawGet<T extends Row>(store: Store, key: string): Promise<T | undefined> {
+        const cached = store === 'memory_selection_nodes' ? this.selectionNodes.get(key) : undefined;
+        if (cached) return cached as Promise<T | undefined>;
+        const pending = request<T | undefined>(this.native.objectStore(store).get(key)).then(value => {
             this.changes?.read(store, value);
             return value;
         });
+        if (store === 'memory_selection_nodes') this.selectionNodes.set(key, pending);
+        return pending;
     }
-    all<T extends Row>(store: Store, index?: 'story' | 'branch' | 'owner', key?: string): Promise<T[]> {
+    all<T extends Row>(store: Store, index?: StoreIndex, key?: IDBValidKey): Promise<T[]> {
+        if (store === 'memory_views') return this.rawAll<MemoryView | CompactMemoryView>(store, index, key).then(values =>
+            Promise.all(values.map(value => materializeMemoryView(value,
+                id => this.rawGet<MemorySelectionNode>('memory_selection_nodes', id)))) as Promise<unknown> as Promise<T[]>);
+        return this.rawAll<T>(store, index, key);
+    }
+    rawAll<T extends Row>(store: Store, index?: StoreIndex, key?: IDBValidKey): Promise<T[]> {
         const s = this.native.objectStore(store);
         return request<T[]>(index ? s.index(index).getAll(key) : s.getAll()).then(values => {
             if (store === 'branches') for (const value of values) this.changes?.read(store, value);
@@ -23,16 +42,19 @@ export class Transaction {
         });
     }
     put(store: Store, value: Row): Promise<IDBValidKey> {
+        if (store === 'memory_selection_nodes') this.selectionNodes.delete(value.id);
         const pending = this.native.objectStore(store).put(value);
         this.changes?.write(store, value.id, value);
         return request(pending);
     }
     delete(store: Store, key: string): Promise<undefined> {
+        if (store === 'memory_selection_nodes') this.selectionNodes.delete(key);
         const pending = this.native.objectStore(store).delete(key);
         this.changes?.write(store, key);
         return request(pending);
     }
     add(store: Store, value: Row): Promise<IDBValidKey> {
+        if (store === 'memory_selection_nodes') this.selectionNodes.delete(value.id);
         const pending = this.native.objectStore(store).add(value);
         this.changes?.write(store, value.id, value);
         return request(pending);
@@ -54,6 +76,9 @@ export class Library {
                     for (const key of ['story', 'branch', 'owner'])
                         s.createIndex(key, key);
                 }
+                const revisions = r.transaction!.objectStore('memory_revisions');
+                if (!revisions.indexNames.contains('branch_host'))
+                    revisions.createIndex('branch_host', ['branch', 'hostId']);
             };
             r.onerror = () => reject(r.error);
             r.onblocked = () => reject(new Error('数据库升级被另一个标签页阻塞，请关闭旧标签页'));
@@ -64,7 +89,8 @@ export class Library {
         });
     }
     async transaction<T>(stores: readonly Store[], mode: IDBTransactionMode, fn: (tx: Transaction) => Promise<T>): Promise<T> {
-        const native = this.db.transaction([...stores], mode);
+        const included = stores.includes('memory_views') ? [...new Set([...stores, 'memory_selection_nodes' as const])] : [...stores];
+        const native = this.db.transaction(included, mode);
         const changes = mode === 'readwrite' ? new TransactionChanges() : undefined;
         const done = new Promise<void>((resolve, reject) => {
             native.oncomplete = () => resolve();
@@ -88,7 +114,7 @@ export class Library {
         }
     }
     get<T extends Row>(store: Store, key: string) { return this.transaction([store], 'readonly', tx => tx.get<T>(store, key)); }
-    all<T extends Row>(store: Store, index?: 'story' | 'branch' | 'owner', key?: string) {
+    all<T extends Row>(store: Store, index?: StoreIndex, key?: IDBValidKey) {
         return this.transaction([store], 'readonly', tx => tx.all<T>(store, index, key));
     }
     close() { this.db.close(); }

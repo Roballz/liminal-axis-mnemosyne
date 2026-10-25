@@ -103,7 +103,7 @@ export async function previewArchiveDeletion(lib: Library, branchId: string): Pr
 export async function commitArchiveDeletion(lib: Library, plan: ArchiveDeletionPlan, guard: () => boolean) {
     await lib.transaction(STORES, 'readwrite', async tx => {
         check(guard(), '聊天已改变，请重新预览删除');
-        for (const store of STORES) check(equal(await tx.all(store), plan.before.data[store]), '档案已改变，请重新预览删除');
+        for (const store of STORES) check(equal(await tx.rawAll(store), plan.before.data[store]), '档案已改变，请重新预览删除');
         for (const store of STORES) for (const id of plan.remove[store]) await tx.delete(store, id);
         await tx.put('library_meta', plan.origins);
         const marker = await tx.get<DeletionMarker>('library_meta', DELETIONS_KEY);

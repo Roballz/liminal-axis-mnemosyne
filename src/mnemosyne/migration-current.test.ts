@@ -6,8 +6,8 @@ import { withoutTableHistory } from './fixtures';
 import { fingerprint, STORES } from './model';
 import { exportLibrary, restoreLibrary, validateData, type Package } from './migration';
 
-async function sample(): Promise<Package> {
-    const data = Object.fromEntries(STORES.map(s => [s, []])) as unknown as Package['data'];
+async function sample(version: Package['version'] = 12): Promise<Package> {
+    const data = Object.fromEntries(STORES.filter(s => s !== 'memory_selection_nodes' || version >= 15).map(s => [s, []])) as unknown as Package['data'];
     const content = '完整正文🙂';
     data.stories.push({ id: 's', schema: 1, created: 1 } as any);
     data.branches.push({ id: 'b', schema: 1, story: 's', head: 'h', view: 'v', epoch: 1, fork: null } as any);
@@ -18,7 +18,7 @@ async function sample(): Promise<Package> {
     data.source_bodies.push({ id: 'r', schema: 1, story: 's', owner: 'm', content } as any);
     data.manifest_blocks.push({ id: 'block', schema: 1, story: 's', owner: 'current:b', entries: [{ message: 'm', revision: 'r' }], variants: [0] } as any);
     data.history_snapshots.push({ id: 'h', schema: 1, story: 's', branch: 'b', owner: 'current:b', snapshotSchema: 2, previous: null, blocks: ['block'], length: 1, created: 1 } as any);
-    return resign({ format: 'mnemosyne-daily', version: 12, schema: 1, created: 1, excluded: [], data, counts: {} as Package['counts'], checksum: '' });
+    return resign({ format: 'mnemosyne-daily', version, schema: 1, created: 1, excluded: [], data, counts: {} as Package['counts'], checksum: '' });
 }
 async function resign(pack: Package): Promise<Package> {
     pack.counts = Object.fromEntries(Object.entries(pack.data).map(([key, value]) => [key, value.length])) as Package['counts'];
@@ -26,12 +26,12 @@ async function resign(pack: Package): Promise<Package> {
     pack.checksum = await fingerprint(base);
     return pack;
 }
-test('v12 round trip preserves complete current bodies and absent historical descriptor bodies', async () => {
-    const pack = await sample();
+test.each([12, 13, 14, 15] as const)('v%s round trip preserves complete current bodies and absent historical descriptor bodies', async version => {
+    const pack = await sample(version);
     pack.data.source_revisions.push({ ...pack.data.source_revisions[0], id: 'zold' });
     await resign(pack);
     const lib = await restoreLibrary(pack, false);
-    try { expect((await exportLibrary(lib)).data).toEqual(pack.data); } finally { lib.close(); }
+    try { expect((await exportLibrary(lib)).data).toEqual({ ...pack.data, memory_selection_nodes: [] }); } finally { lib.close(); }
 });
 test('missing current body and forged body identity are rejected', async () => {
     const pack = await sample();

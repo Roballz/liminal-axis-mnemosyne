@@ -55,8 +55,7 @@ function cleanFloor(m: STMessage): string {
  * 构造状态快照文本(只含滚出窗口、长期有效的 items/plans)。
  * upTo = 第一个无叶子楼的索引(快照截到它之前)。无有意义内容返回空串。
  */
-function buildStateSnapshot(chat: STMessage[], upTo: number): string {
-  const st = deriveMemory(chat, upTo);
+function buildStateSnapshot(st: ReturnType<typeof deriveMemory>): string {
   const lines: string[] = [];
   if (Object.values(st.protagonist).some(Boolean)) {
     lines.push(`主角当前档案:\n${fmtProtagonist(st.protagonist)}`);
@@ -96,9 +95,17 @@ function findSnapshotCut(chat: STMessage[], windowStart: number): number {
  *  - 状态快照不独立成 system,而是**拼进对话消息正文**(放在 cut 点前一条之后、洞楼之前),
  *    保持中间无 system,从而兼容「system 只能在开头」的渠道。
  */
-function buildMessages(chat: STMessage[]): ChatMsg[] {
+function buildMessages(chat: STMessage[]): { messages: ChatMsg[]; eventIds: Set<string> } {
   const windowStart = resolveKeepStart(chat);
   const cut = findSnapshotCut(chat, windowStart);
+  // Synchronous, request-local reuse. A full-chat catalog and an earlier cutoff
+  // must never share state; matching cutoffs may use the same exact replay.
+  const states = new Map<number, ReturnType<typeof deriveMemory>>();
+  const stateAt = (end: number) => {
+    let state = states.get(end);
+    if (!state) { state = deriveMemory(chat, end); states.set(end, state); }
+    return state;
+  };
 
   // 开头唯一 system:系统提示词 +(可选)历史剧情摘要,合并为一条,保证 system 只出现在开头
   const history = renderHistoryNodes(selectHistoryNodesBefore(memory.summaries, chat, windowStart));
@@ -111,8 +118,8 @@ function buildMessages(chat: STMessage[]): ChatMsg[] {
     if (jb) systemContent = `${jb}\n\n${systemContent}`;
   }
   const contextOn = apiSettings.vector.recall.rrfContextEnabled;
-  const catalog = contextCatalog(chat);
-  if (contextOn) systemContent += `\n${CONTEXT_PROTOCOL}\n可引用事项目录：${JSON.stringify(catalog)}`;
+  const catalog = contextOn ? contextCatalog(chat, stateAt(chat.length)) : undefined;
+  if (catalog) systemContent += `\n${CONTEXT_PROTOCOL}\n可引用事项目录：${JSON.stringify(catalog)}`;
   const messages: ChatMsg[] = [{ role: 'system', content: systemContent }];
 
   // 平铺窗口对话(纯 user/assistant),记录原 msgIndex 以定位快照插入点
@@ -128,7 +135,7 @@ function buildMessages(chat: STMessage[]): ChatMsg[] {
   }
 
   // 状态快照:拼进对话消息正文(不独立成 system)。语义 = 截止 cut(第一个无叶子楼)之前的确凿状态。
-  const snapshot = buildStateSnapshot(chat, cut);
+  const snapshot = buildStateSnapshot(stateAt(cut));
   if (snapshot) {
     if (!convo.length) {
       // 窗口无可用对话消息 → 兜底放一条 user 承载(仍非 system)
@@ -154,7 +161,7 @@ function buildMessages(chat: STMessage[]): ChatMsg[] {
 
   // 收尾提示词
   messages.push({ role: 'user', content: QUERY_REWRITE_TAIL + (contextOn ? `\n${CONTEXT_PROTOCOL}` : '') });
-  return messages;
+  return { messages, eventIds: new Set(catalog?.events.map(event => event.id) ?? []) };
 }
 
 /** 保持原 Query 路径语义:只移除端点后缀,由宿主追加 /chat/completions,不自动补 /v1。 */
@@ -245,7 +252,7 @@ export async function rewriteQuery(signal?: AbortSignal, inputChat?: STMessage[]
   const chat = inputChat ?? recallInputChat(ctx?.chat ?? []);
   if (!chat.length) throw new Error('无对话上下文可重写');
 
-  const messages = buildMessages(chat);
+  const { messages, eventIds } = buildMessages(chat);
   const queryParams = {
     temperature: 0.1,
     top_p: 0.8,
@@ -295,8 +302,9 @@ export async function rewriteQuery(signal?: AbortSignal, inputChat?: STMessage[]
   const parsed = parseResponse(raw);
   if (!parsed.queries.length) throw new Error('Query 重写未解析出任何检索 query');
   if (parsed.context) {
-    const catalog = contextCatalog(chat);
-    parsed.context.eventIds = parsed.context.eventIds.filter(id => catalog.events.some(e => e.id === id));
+    // Restrict the answer to the exact directory sent with this request. The
+    // recall caller still verifies its host/branch/settings before using it.
+    parsed.context.eventIds = parsed.context.eventIds.filter(id => eventIds.has(id));
   }
   return parsed;
 }
@@ -304,8 +312,7 @@ export async function rewriteQuery(signal?: AbortSignal, inputChat?: STMessage[]
 const CONTEXT_PROTOCOL = `本轮在 INTENT 和 Q 行之外，追加一行 CONTEXT: {"participants":["当前正文实际在场人物的规范名字"],"eventIds":[]}。
 只从最新正文判断当前场景，不把历史摘要中被提及者算作在场；优先沿用目录人物名字。高概率相关才填事件ID，只能引用目录已有ID，拿不准留空。没有相关事件时 eventIds 为空；人物不明时也留空。计划/悬念关联已停用，不输出 planIds。
 这些标识只用于额外召回偏好，不写入 Q，不因目录出现某事件就让所有查询围绕它，仍保持原有多角度检索。`;
-function contextCatalog(chat: STMessage[]) {
-  const st = deriveMemory(chat);
+function contextCatalog(chat: STMessage[], st: ReturnType<typeof deriveMemory>) {
   const ctx = getContext();
   return {
     participants: [...new Set([ctx?.name1, ctx?.name2, ...st.npcs.map(n => n.name), ...chat.flatMap(m => getLeaf(m)?.tags?.participants ?? [])].filter((s): s is string => !!s))].slice(0, 200),

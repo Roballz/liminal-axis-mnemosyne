@@ -60,33 +60,69 @@ const backendStore: VectorStore = {
 /* ============ 本地实现:IndexedDB + JS 余弦 ============ */
 
 const DB_NAME = 'mnemosyne_vec_local';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'items';
+const META = 'item_metadata';
+const VERSIONS = 'scope_versions';
 
-/** IndexedDB 单库单表:key = [database, scope, leafId];by_scope 索引按 [database, scope] 取整段。 */
+/** Payload rows, small hash rows and scope revisions are maintained atomically. */
 let dbPromise: Promise<IDBDatabase> | null = null;
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+  const opening: Promise<IDBDatabase> = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+    let cancelled = false;
+    const fail = (error: unknown) => {
+      cancelled = true;
+      if (dbPromise === opening) dbPromise = null;
+      reject(error);
+    };
+    req.onblocked = () => fail(new Error('本地向量索引升级被旧页面占用，请关闭旧页面后重试'));
     req.onupgradeneeded = () => {
+      if (cancelled) { req.transaction!.abort(); return; }
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         const os = db.createObjectStore(STORE, { keyPath: ['database', 'scope', 'leafId'] });
         os.createIndex('by_scope', ['database', 'scope'], { unique: false });
       }
+      if (!db.objectStoreNames.contains(META)) {
+        const meta = db.createObjectStore(META, { keyPath: ['database', 'scope', 'leafId'] });
+        meta.createIndex('by_scope', ['database', 'scope']);
+        const versions = db.createObjectStore(VERSIONS, { keyPath: ['database', 'scope'] });
+        // Additive, atomic backfill: existing vector and body rows are untouched.
+        const cursor = req.transaction!.objectStore(STORE).openCursor();
+        cursor.onsuccess = () => {
+          const item = cursor.result;
+          if (!item) return;
+          const value = item.value as LocalRecord;
+          meta.put(metadataOf(value));
+          versions.put({ database: value.database, scope: value.scope, revision: 1 });
+          item.continue();
+        };
+      }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      if (cancelled) { db.close(); return; }
+      db.onversionchange = () => { db.close(); if (dbPromise === opening) dbPromise = null; reconciliation = undefined; };
+      resolve(db);
+    };
+    req.onerror = () => fail(req.error);
   });
+  dbPromise = opening;
   return dbPromise;
 }
 
-function txDone(tx: IDBTransaction): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
+function writeTransaction<T>(db: IDBDatabase, action: (tx: IDBTransaction) => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const tx = db.transaction([STORE, META, VERSIONS], 'readwrite');
+    let result: T, error: unknown;
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = tx.onabort = () => reject(error || tx.error || new Error('向量索引写入被取消'));
+    void (async () => {
+      try { result = await action(tx); }
+      catch (e) { error = e; try { tx.abort(); } catch { reject(e); } }
+    })();
   });
 }
 
@@ -111,6 +147,22 @@ interface LocalRecord {
   storyTime: string | null;
   msgIndex: number | null;
 }
+type LocalMetadata = Pick<LocalRecord, 'database' | 'scope' | 'leafId' | 'docHash' | 'payloadHash'>;
+function metadataOf(row: LocalRecord): LocalMetadata {
+  return { database: row.database, scope: row.scope, leafId: row.leafId,
+    docHash: row.docHash, payloadHash: row.payloadHash };
+}
+async function scopeVersion(tx: IDBTransaction, database: string, scope: string): Promise<number> {
+  return (await reqDone(tx.objectStore(VERSIONS).get([database, scope])))?.revision ?? 0;
+}
+async function advanceScope(tx: IDBTransaction, database: string, scope: string): Promise<number> {
+  const revision = await scopeVersion(tx, database, scope) + 1;
+  tx.objectStore(VERSIONS).put({ database, scope, revision });
+  return revision;
+}
+type Present = { leafId: string; docHash: string; payloadHash: string };
+let reconciliation: { database: string; scope: string; revision: number; present: Present[];
+  missing: string[]; stalePayload: string[] } | undefined;
 
 /** 取某 [database, scope] 下全部记录(规模 = 当前聊天叶子数,单角色可控)。 */
 async function getScopeRows(database: string, scope: string): Promise<LocalRecord[]> {
@@ -153,47 +205,50 @@ export const localStore: VectorStore = {
   async upsert(database, scope, items) {
     if (!items.length) return { upserted: 0 };
     const db = await openDb();
-    const tx = db.transaction(STORE, 'readwrite');
-    const os = tx.objectStore(STORE);
-    for (const it of items) {
-      const rec: LocalRecord = {
-        database,
-        scope,
-        leafId: it.leafId,
-        docHash: it.docHash,
-        payloadHash: it.payloadHash,
-        vector: decodeFloat32Base64(it.vector),
-        dim: it.dim,
-        document: it.document,
-        mesFull: it.mesFull ?? null,
-        storyTime: it.storyTime ?? null,
-        msgIndex: it.msgIndex ?? null,
-      };
-      os.put(rec);
-    }
-    await txDone(tx);
-    return { upserted: items.length };
+    return writeTransaction(db, async tx => {
+      const os = tx.objectStore(STORE);
+      for (const it of items) {
+        const rec: LocalRecord = {
+          database,
+          scope,
+          leafId: it.leafId,
+          docHash: it.docHash,
+          payloadHash: it.payloadHash,
+          vector: decodeFloat32Base64(it.vector),
+          dim: it.dim,
+          document: it.document,
+          mesFull: it.mesFull ?? null,
+          storyTime: it.storyTime ?? null,
+          msgIndex: it.msgIndex ?? null,
+        };
+        os.put(rec);
+        tx.objectStore(META).put(metadataOf(rec));
+      }
+      await advanceScope(tx, database, scope);
+      return { upserted: items.length };
+    });
   },
 
   async updatePayload(database, scope, items) {
     if (!items.length) return { updated: 0 };
-    const rows = await getScopeRows(database, scope);
-    const byId = new Map(rows.map(row => [row.leafId, row]));
     const db = await openDb();
-    const tx = db.transaction(STORE, 'readwrite');
-    const os = tx.objectStore(STORE);
-    let updated = 0;
-    for (const it of items) {
-      const rec = byId.get(it.leafId);
-      if (!rec) continue;
-      rec.payloadHash = it.payloadHash;
-      rec.mesFull = it.mesFull ?? null;
-      rec.storyTime = it.storyTime ?? null;
-      os.put(rec);
-      updated++;
-    }
-    await txDone(tx);
-    return { updated };
+    return writeTransaction(db, async tx => {
+      const os = tx.objectStore(STORE);
+      const rows = await Promise.all(items.map(item => reqDone<LocalRecord | undefined>(os.get([database, scope, item.leafId]))));
+      let updated = 0;
+      for (const [i, it] of items.entries()) {
+        const rec = rows[i];
+        if (!rec) continue;
+        rec.payloadHash = it.payloadHash;
+        rec.mesFull = it.mesFull ?? null;
+        rec.storyTime = it.storyTime ?? null;
+        os.put(rec);
+        tx.objectStore(META).put(metadataOf(rec));
+        updated++;
+      }
+      if (updated) await advanceScope(tx, database, scope);
+      return { updated };
+    });
   },
 
   // max 融合:每个叶子取它在各 query 上的最高余弦,跨 scope 同叶子合并留最高分。
@@ -249,53 +304,68 @@ export const localStore: VectorStore = {
 
   // 删 scope 下不在 present 的陈旧叶子;返回后端没有 / hash 变了的 leafId(需重 embed)。
   async reconcile(database, scope, present) {
-    const rows = await getScopeRows(database, scope);
-    const presentMap = new Map(present.map(p => [String(p.leafId), {
-      docHash: String(p.docHash ?? ''),
-      payloadHash: String(p.payloadHash ?? ''),
-    }]));
-    const existing = new Map(rows.map(r => [String(r.leafId), {
-      docHash: String(r.docHash),
-      payloadHash: String(r.payloadHash ?? ''),
-    }]));
+    const checked = present.map(item => ({ ...item }));
+    const db = await openDb();
+    const result = await writeTransaction(db, async tx => {
+      let revision = await scopeVersion(tx, database, scope);
+      const prior = reconciliation;
+      if (prior?.database === database && prior.scope === scope && prior.revision === revision &&
+        prior.present.length === checked.length && checked.every((item, i) => item.leafId === prior.present[i].leafId &&
+          item.docHash === prior.present[i].docHash && item.payloadHash === prior.present[i].payloadHash)) {
+        return { revision, deleted: 0, missing: [...prior.missing], stalePayload: [...prior.stalePayload] };
+      }
+      const rows = await reqDone<LocalMetadata[]>(tx.objectStore(META).index('by_scope').getAll([database, scope]));
+      const presentMap = new Map(checked.map(p => [String(p.leafId), {
+        docHash: String(p.docHash ?? ''),
+        payloadHash: String(p.payloadHash ?? ''),
+      }]));
+      const existing = new Map(rows.map(r => [String(r.leafId), {
+        docHash: String(r.docHash),
+        payloadHash: String(r.payloadHash ?? ''),
+      }]));
 
-    const toDelete: string[] = [];
-    for (const id of existing.keys()) if (!presentMap.has(id)) toDelete.push(id);
+      const toDelete: string[] = [];
+      for (const id of existing.keys()) if (!presentMap.has(id)) toDelete.push(id);
 
-    const missing: string[] = [];
-    const stalePayload: string[] = [];
-    for (const [id, hashes] of presentMap) {
-      const cur = existing.get(id);
-      if (cur === undefined || cur.docHash !== hashes.docHash) missing.push(id);
-      else if (cur.payloadHash !== hashes.payloadHash) stalePayload.push(id);
-    }
+      const missing: string[] = [];
+      const stalePayload: string[] = [];
+      for (const [id, hashes] of presentMap) {
+        const cur = existing.get(id);
+        if (cur === undefined || cur.docHash !== hashes.docHash) missing.push(id);
+        else if (cur.payloadHash !== hashes.payloadHash) stalePayload.push(id);
+      }
 
-    if (toDelete.length) {
-      const db = await openDb();
-      const tx = db.transaction(STORE, 'readwrite');
-      const os = tx.objectStore(STORE);
-      for (const id of toDelete) os.delete([database, scope, id]);
-      await txDone(tx);
-    }
-    return { deleted: toDelete.length, missing, stalePayload };
+      if (toDelete.length) {
+        const os = tx.objectStore(STORE);
+        for (const id of toDelete) {
+          os.delete([database, scope, id]);
+          tx.objectStore(META).delete([database, scope, id]);
+        }
+        revision = await advanceScope(tx, database, scope);
+      }
+      return { revision, deleted: toDelete.length, missing, stalePayload };
+    });
+    const { revision, deleted, missing, stalePayload } = result;
+    reconciliation = { database, scope, revision, present: checked, missing: [...missing], stalePayload: [...stalePayload] };
+    return { deleted, missing, stalePayload };
   },
 
   async clearScope(database, scope) {
-    const rows = await getScopeRows(database, scope);
-    if (!rows.length) return { deleted: 0 };
     const db = await openDb();
-    const tx = db.transaction(STORE, 'readwrite');
-    const os = tx.objectStore(STORE);
-    for (const r of rows) os.delete([database, r.scope, r.leafId]);
-    await txDone(tx);
-    return { deleted: rows.length };
+    return writeTransaction(db, async tx => {
+      const os = tx.objectStore(STORE);
+      const keys = await reqDone(os.index('by_scope').getAllKeys([database, scope]));
+      for (const key of keys) { os.delete(key); tx.objectStore(META).delete(key); }
+      if (keys.length) await advanceScope(tx, database, scope);
+      return { deleted: keys.length };
+    });
   },
 
   async stats(database, scopes) {
     const out: Record<string, number> = {};
+    const db = await openDb();
     for (const s of scopes) {
-      const rows = await getScopeRows(database, s);
-      out[s] = rows.length;
+      out[s] = await reqDone(db.transaction(META, 'readonly').objectStore(META).index('by_scope').count([database, s]));
     }
     return { stats: out };
   },

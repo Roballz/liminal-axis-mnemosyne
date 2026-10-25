@@ -7,7 +7,7 @@ import type { BackupDisk } from '@/st/native-backups';
 
 /** Actual legacy rows, not current-only descriptors relabelled as an old format. */
 async function legacyPackage(length: number, version: Package['version'] = 13): Promise<Package> {
-    const stores = STORES.filter(s => !(s === 'source_bodies' && version < 12) && !(s === 'table_history' && version < 11));
+    const stores = STORES.filter(s => !(s === 'source_bodies' && version < 12) && !(s === 'table_history' && version < 11) && !(s === 'memory_selection_nodes' && version < 15));
     const data = Object.fromEntries(stores.map(s => [s, []])) as unknown as Package['data'];
     const content = 'Synthetic retained historical body';
     data.stories.push({ id: 'story', schema: 1, created: 1 } as any);
@@ -53,7 +53,7 @@ test.each(['oldest-first', 'head-first'])('5k/10k legacy chains validate with li
     expect(counts[1]).toBeLessThanOrEqual(counts[0] * 2 + 8);
 });
 
-test.each(Array.from({ length: 14 }, (_, i) => (i + 1) as Package['version']))('v%s retains old rows and rejects malformed predecessor graphs', async version => {
+test.each(Array.from({ length: 15 }, (_, i) => (i + 1) as Package['version']))('v%s retains old rows and rejects malformed predecessor graphs', async version => {
     const pack = await legacyPackage(12, version), original = JSON.stringify(pack);
     await expect(validateCurrentData(pack)).resolves.toBeUndefined();
     expect(JSON.stringify(pack)).toBe(original);
@@ -169,7 +169,7 @@ test('20k dependency chain is iterative and rejects a cycle after the long tail'
     expect(() => validateData(pack)).toThrow('摘要依赖循环');
 });
 
-test.each(Array.from({ length: 14 }, (_, i) => (i + 1) as Package['version']))('v%s shared summaries retain graph rejection guards after settled paths', async version => {
+test.each(Array.from({ length: 15 }, (_, i) => (i + 1) as Package['version']))('v%s shared summaries retain graph rejection guards after settled paths', async version => {
     const pack = await legacyPackage(1, version); addSummaries(pack, 30);
     expect(() => validateData(pack)).not.toThrow();
     const cycle = structuredClone(pack);

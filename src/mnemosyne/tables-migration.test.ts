@@ -5,7 +5,7 @@ import { capture } from './canonical';
 import { commitEventBatch } from './events';
 import { exportLibrary, restoreLibrary } from './migration';
 import { ACTIVE_KEY, activateLibrary } from './db';
-import { fingerprint, type TableDef, type TableRow } from './model';
+import { fingerprint, type MemorySelectionNode, type TableDef, type TableRow } from './model';
 async function tableFixture() {
     const f = await fixture(2);
     const def = newTable(f.view, '合成约定表');
@@ -153,8 +153,8 @@ test('bad count, checksum and secret settings are rejected before opening replac
 test('cross-story selections are rejected as domain corruption rather than repaired', async () => {
     const { lib } = await fixture();
     const pack = await exportLibrary(lib);
-    const view = pack.data.memory_views[0] as any;
-    view.selections.invented_family = Object.values(view.selections)[0];
+    const leaf = (pack.data.memory_selection_nodes as MemorySelectionNode[]).find(node => node.entries.length > 1)!;
+    leaf.entries[0][1] = leaf.entries[1][1]; // Valid route and existing revision, but the wrong family owner.
     await expect(restoreLibrary(pack, false)).rejects.toThrow('摘要选择错误');
     lib.close();
 });

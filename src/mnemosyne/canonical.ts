@@ -5,7 +5,9 @@ import { unlinkDeletedEventSources, eventSourcesChecked } from './event-source-s
 import { inheritForkMemory } from './fork-memory';
 import type { SummaryTags } from '@/memory/contextTags';
 import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
+import { sourcePrefixes } from './source-prefixes';
 import { observationHashes } from './observation-hashes';
+import { publishMemoryView } from './memory-selections';
 import { Library, Transaction } from './db';
 import {
     STORES,
@@ -278,6 +280,11 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         }[] = [];
         const sidecars: { revision: MemoryRevision; host: HostMemory }[] = [];
         let recovered = false;
+        const bases = new Map<string, Snapshot | undefined>();
+        const readBasis = async (id: string) => {
+            if (!bases.has(id)) bases.set(id, await tx.get<Snapshot>('history_snapshots', id));
+            return bases.get(id);
+        };
         for (const [i, item] of observation.memories.entries()) {
             let host = item;
             let family = familyByHost.get(host.hostId);
@@ -355,7 +362,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 newRevisions.push({ revision, host });
             }
             if (host.basisSnapshot === revision.basis && !revision.sourceRecovery &&
-                !(await tx.get<Snapshot>('history_snapshots', revision.basis))) {
+                !(await readBasis(revision.basis))) {
                 revision = { ...revision, sourceRecovery: { version: 1, reason: 'missing_basis', snapshot: branch.head } };
                 // Newly built revisions are inserted below; existing poisoned identities are
                 // repaired in place so events and historical selections keep their references.
@@ -417,17 +424,22 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         let selection = previous;
         if (!previous || !equal(previous.selections, selections)) {
             const view: MemoryView = { ...row('mv'), branch: branch.id, selections };
-            await tx.add('memory_views', view);
+            await publishMemoryView(tx, view, previous);
             branch.view = view.id;
             selection = view;
         }
         // Repair only this branch's summary metadata, including previously committed unselected
         // revisions. No source text is scanned, and no missing historical record is invented.
-        const bases = new Map<string, Snapshot | undefined>();
         const hostProofs = new Map<string, HostMemory[]>();
-        for (const host of observation.memories) if (host.basisSnapshot)
-            hostProofs.set(host.hostId, [...(hostProofs.get(host.hostId) ?? []), host]);
-        const history = hostProofs.size ? await tx.all<MemoryRevision>('memory_revisions', 'branch', branch.id) : [];
+        for (const host of observation.memories) if (host.basisSnapshot) {
+            // A present basis cannot require missing-basis repair. Check the small
+            // snapshot record first, before looking at any historical summary rows.
+            if (!(await readBasis(host.basisSnapshot))) hostProofs.set(host.hostId, [...(hostProofs.get(host.hostId) ?? []), host]);
+        }
+        // The physical index is exact and stays current across connections/imports.
+        // No cached "repair complete" flag can hide a newly arrived old revision.
+        const history = (await Promise.all([...hostProofs.keys()].map(hostId =>
+            tx.all<MemoryRevision>('memory_revisions', 'branch_host', [branch.id, hostId])))).flat();
         for (const memory of history) {
             if (memory.sourceRecovery) continue;
             if (!hostProofs.get(memory.hostId)?.some(host => host.basisSnapshot === memory.basis &&
@@ -520,41 +532,33 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
             [...new Set(view.memories.filter(m => !m.sourceRecovery).map((m) => m.basis))].map((key) => tx.get<Snapshot>('history_snapshots', key)),
         );
         check(snapshots.every(Boolean), '摘要基线缺失');
-        const unknownBases = new Set(view.memories.filter((m) => !m.sourceRecovery && !m.inputRefs.length).map((m) => m.basis));
+        const unknownBases = new Set(view.memories.filter((m) => !m.sourceRecovery && !m.inputRefs.length && !dependencyOnly(m)).map((m) => m.basis));
         const legacySnapshots = snapshots.filter((s) => unknownBases.has(s!.id));
         const blocks = await Promise.all(
             [...new Set(legacySnapshots.flatMap((s) => s!.blocks))].map((key) => tx.get<Block>('manifest_blocks', key)),
         );
         check(blocks.every(Boolean), '缺少历史清单块');
-        const blockMap = new Map(blocks.map((b) => [b!.id, b!]));
         const positions = new Map(view.refs.map((r, i) => [r.message, i]));
         const refByMessage = new Map(view.refs.map((r) => [r.message, r]));
-        const bases = new Map(
-            legacySnapshots.map((snapshot) => {
-                const refs = snapshot!.blocks.flatMap((key) => blockMap.get(key)!.entries);
-                check(refs.length === snapshot!.length, '历史清单计数错误');
-                let prefix = 0;
-                while (
-                    prefix < refs.length &&
-                    sourceRefMatches(view.branch, refs[prefix], view.refs[prefix])
-                )
-                    prefix++;
-                return [
-                    snapshot!.id,
-                    { refs, prefix, positions: new Map(refs.map((r, i) => [r.message, i])) },
-                ] as const;
-            }),
-        );
+        const bases = sourcePrefixes(view.branch, view.refs, legacySnapshots as Snapshot[], blocks as Block[]);
         const reviews = await tx.all<Review>('reviews', 'branch', view.branch.id);
         const compatible = new Map<string, Review>();
+        const selectedById = new Map(view.memories.map(m => [m.id, m]));
         const selectedByOwner = new Map(view.memories.map(m => [m.owner, m]));
-        for (const review of reviews.sort((a,b) => a.created - b.created)) {
-            let memory = view.memories.find(m => m.id === review.owner);
+        const equivalent = new Map<string, MemoryRevision | undefined>();
+        const resolveSelected = async (id: string) => {
+            if (equivalent.has(id)) return equivalent.get(id);
+            let memory = selectedById.get(id);
             if (!memory) {
-                const prior = await tx.get<MemoryRevision>('memory_revisions', review.owner);
+                const prior = await tx.get<MemoryRevision>('memory_revisions', id);
                 const selected = prior && selectedByOwner.get(prior.owner);
                 if (prior && selected && sameNarrativeRevision(prior, selected)) memory = selected;
             }
+            equivalent.set(id, memory);
+            return memory;
+        };
+        for (const review of reviews.sort((a,b) => a.created - b.created)) {
+            const memory = await resolveSelected(review.owner);
             if (!memory) continue;
             if (review.reviewSchema !== 2) {
                 if (view.cutoff === view.snapshot.length && review.snapshot === view.snapshot.id) compatible.set(memory.id, review);
@@ -572,13 +576,12 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
             if (coverage.length && (start < 0 || !sourceRefsMatch(view.branch, coverage, view.refs.slice(start, start + coverage.length)))) continue;
             compatible.set(memory.id, review);
         }
-        const byId = new Map(view.memories.map((m) => [m.id, m]));
+        const byId = new Map(selectedById);
         const deps = new Set(view.memories.flatMap(m => compatible.get(m.id)?.dependencies ?? m.dependencies));
         for (const id of deps) {
             if (byId.has(id)) continue;
-            const previous = await tx.get<MemoryRevision>('memory_revisions', id);
-            const selected = previous && selectedByOwner.get(previous.owner);
-            if (previous && selected && sameNarrativeRevision(previous, selected)) byId.set(id, selected);
+            const selected = await resolveSelected(id);
+            if (selected) byId.set(id, selected);
         }
         const result = new Map<string, MemoryStatus>(),
             active = new Set<string>();
@@ -596,13 +599,13 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
                 const requiredLength = memory.inputRefs.length || dependencyOnly(memory)
                     ? 0
                     : memory.anchor
-                      ? (basis.positions.get(memory.anchor) ?? -1) + 1
-                      : basis.refs.length;
+                      ? basis.through(memory.anchor)
+                      : basis.length;
                 if (
                     !compatible.has(memory.id) &&
                     (memory.inputRefs.length
                         ? memory.inputRefs.some((r) => !sourceRefMatches(view.branch, r, refByMessage.get(r.message)))
-                        : basis.prefix < requiredLength)
+                        : !dependencyOnly(memory) && basis.prefix < requiredLength)
                 )
                     status = 'needs_review';
                 if (memory.coverage.length && !compatible.has(memory.id)) {
@@ -675,7 +678,7 @@ export async function confirmRecoveredSummaries(lib: Library, view: CapturedView
         const next: MemoryView = { ...row('mv'), branch: branch.id, selections: { ...selection.selections } };
         for (const revision of revisions) next.selections[revision.owner] = revision.id;
         await Promise.all(revisions.map(revision => tx.add('memory_revisions', revision)));
-        await tx.add('memory_views', next);
+        await publishMemoryView(tx, next, selection);
         branch.view = next.id;
         branch.epoch++;
         await tx.put('branches', branch);
@@ -780,7 +783,7 @@ export async function forkBranch(lib: Library, parent: CapturedView, scope: stri
         }
         const mapMemory = await inheritForkMemory(tx, parent, branch, binding, selection, events);
         await inheritTableHistory(tx, liveParent!, branch, parent.refs, parent.snapshot.variants?.slice(0, parent.cutoff), mapMemory);
-        await tx.add('memory_views', selection);
+        await publishMemoryView(tx, selection);
         await tx.add('branches', branch);
         check(guard(), '聊天已改变，本次分叉已撤销');
         return branch;

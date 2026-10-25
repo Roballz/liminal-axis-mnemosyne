@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Icon from '@/components/Icon.vue';
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -12,6 +12,9 @@ const props = withDefaults(
 );
 
 const expanded = ref(props.open);
+// Defer heavy slots until their first use; retain mounted editors after closing.
+const mounted = ref(props.open);
+watch(expanded, open => { if (open) mounted.value = true; }, { flush: 'sync' });
 
 // 用 grid-template-rows 0fr<->1fr 做高度过渡,无需测量 scrollHeight,内容自适应。
 </script>
@@ -25,7 +28,7 @@ const expanded = ref(props.open);
     <div class="bbs-collapsible-outer">
       <div class="bbs-collapsible-inner">
         <div class="bbs-collapsible-body">
-          <slot />
+          <slot v-if="mounted" />
         </div>
       </div>
     </div>

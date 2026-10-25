@@ -43,7 +43,7 @@ function session(mode: 'single' | 'bulk' = 'bulk') { return { mode, floor: mode 
   cards: Array.from({ length: 25 }, (_, i) => ({ chain: { id: `event-${i}` }, meta: { title: `事件 ${i}` }, members: i === 0 ? [{ memory: 'm-0' }] : [] })) } as any; }
 function mount() { const root = make('root'), app = renderer.createApp(Panel); app.provide(ssrContextKey, {}); app.mount(root); return { root, app }; }
 beforeEach(() => { membershipSession.value = null; membershipPicking.value = false; membershipSelected.value = new Set(); active = null; state.commit.mockReset(); });
-afterEach(() => { membershipSession.value = null; });
+afterEach(() => { membershipSession.value = null; vi.restoreAllMocks(); });
 test('rendered bulk picker mounts only 20 rows, retains selection across row/chain pages and filters', async () => {
   const { root, app } = mount(); membershipSession.value = session(); await flush();
   const rows = () => nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox');
@@ -97,4 +97,24 @@ test('single-card filters retain selection and close/reopen resets unsaved chang
   expect(nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox')).toHaveLength(20);
   expect(nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox' && n.props.checked)).toHaveLength(1);
   app.unmount();
+});
+
+test('picker normalizes captured summary and chain text once, and invalidates on a new session', async () => {
+  const { root, app } = mount();
+  const data = session(); membershipSession.value = data; await flush();
+  const normalize = vi.spyOn(String.prototype, 'toLocaleLowerCase');
+  const isSource = (value: unknown) => String(value).includes('合成摘要') || /^事件 \d+$/.test(String(value));
+  try {
+    field(root, '摘要关键词').props['onUpdate:modelValue']('灯'); await flush();
+    expect(normalize.mock.contexts.filter(value => String(value).includes('合成摘要'))).toHaveLength(55);
+    normalize.mockClear(); field(root, '摘要关键词').props['onUpdate:modelValue']('灯会'); await flush();
+    expect(normalize.mock.contexts.filter(isSource)).toHaveLength(0);
+    field(root, '查找事件链').props['onUpdate:modelValue']('事件'); await flush();
+    expect(normalize.mock.contexts.filter(value => /^事件 \d+$/.test(String(value)))).toHaveLength(25);
+    normalize.mockClear(); field(root, '查找事件链').props['onUpdate:modelValue']('事件 2'); await flush();
+    expect(normalize.mock.contexts.filter(value => /^事件 \d+$/.test(String(value)) && String(value) !== '事件 2')).toHaveLength(0);
+    membershipSession.value = session(); await flush(); normalize.mockClear();
+    field(root, '摘要关键词').props['onUpdate:modelValue']('调查'); await flush();
+    expect(normalize.mock.contexts.filter(value => String(value).includes('合成摘要'))).toHaveLength(55);
+  } finally { app.unmount(); }
 });

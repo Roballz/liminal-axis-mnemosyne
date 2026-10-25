@@ -1,5 +1,5 @@
 import { afterEach, test, expect, vi } from 'vitest';
-import { fixture, output } from './fixtures';
+import { fixture, output, withoutCompactSelections } from './fixtures';
 import { capture, synchronize, type HostObservation } from './canonical';
 import { eventView, editEvent, prepareEventBatch, commitEventBatch } from './events';
 import { saveMemberships } from './event-memberships';
@@ -184,7 +184,7 @@ test('settings default/migration, Unicode limit and backup roundtrip preserve ol
     expect(buildEventInstruction(41)).toContain('不超过1200字');
     expect(buildEventInstruction(61)).toContain('不超过1500字');
     await saveDailySettings();
-    const pack = await exportLibrary(lib); expect(pack.version).toBe(14);
+    const pack = await exportLibrary(lib); expect(pack.version).toBe(15);
     restored = await restoreLibrary(pack, false); await activateLibrary(restored);
     settings.overviewMaxChars = 1; await loadDailySettings();
     expect(settings.overviewMaxChars).toBe(1200); expect(settings.overviewBatchTokens).toBe(90000); expect(settings.overviewMaterialMode).toBe('summary');
@@ -194,7 +194,7 @@ test('settings default/migration, Unicode limit and backup roundtrip preserve ol
     const badMode = structuredClone(pack) as any;
     badMode.data.library_meta.find((r: any) => r.id === 'daily-settings').value.overviewMaterialMode = 'arbitrary-secret-string';
     expect(() => validateData(badMode)).toThrow('设置白名单');
-    const old = structuredClone(pack) as any; old.version = 13;
+    const old = withoutCompactSelections(structuredClone(pack)) as any; old.version = 13;
     const oldSettings = old.data.library_meta.find((r: any) => r.id === 'daily-settings').value;
     delete oldSettings.overviewMaxChars; delete oldSettings.overviewBatchTokens; delete oldSettings.overviewMaterialMode;
     const { checksum: _, ...base } = old; old.checksum = await fingerprint(base);

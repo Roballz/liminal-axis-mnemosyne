@@ -220,7 +220,7 @@ test('new schema instructions, lock policy and hidden rows survive core export/r
             restored = await restoreLibrary(pack, false);
         try {
             expect((await exportLibrary(restored)).data).toEqual(pack.data);
-            expect(restored.db.version).toBe(3);
+            expect(restored.db.version).toBe(4);
         } finally {
             restored.close();
         }
@@ -277,7 +277,7 @@ test('legacy v1 packages restore without changing IDs or legacy manual policy', 
         pack.checksum = await fingerprint(base);
         const restored = await restoreLibrary(pack, false);
         try {
-            expect((await exportLibrary(restored)).data).toEqual({ ...pack.data, table_history: [], source_bodies: [] });
+            expect((await exportLibrary(restored)).data).toEqual({ ...pack.data, table_history: [], source_bodies: [], memory_selection_nodes: [] });
         } finally {
             restored.close();
         }

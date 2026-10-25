@@ -57,3 +57,13 @@ it('计划卡和摘要标签不显示历史计划关联，最近写入诊断只�
   chatId = 'other-chat';
   expect(await renderToString(createSSRApp(SummaryPage))).not.toContain('模型未返回');
 });
+
+it('1000 个待摘要楼层只挂载当前页的 40 个按钮，批量计数保留完整范围', async () => {
+  const chat = Array.from({ length: 1000 }, (_, i) => ({ name: '合成角色', is_user: false, is_system: false, mes: `未摘要剧情 ${i}` }));
+  vi.spyOn(context, 'getContext').mockReturnValue({ chat, chatMetadata: {}, getCurrentChatId: () => 'synthetic-pending' } as any);
+  recomputeDerived();
+  const html = await renderToString(createSSRApp(SummaryPage));
+  expect(html.match(/class="bbs-pending-chip"/g)).toHaveLength(40);
+  expect(html).toContain('1000'); expect(html).toContain('第 1 / 25 页');
+  expect(html).toContain('下一页待摘要楼层'); expect(html).toContain('#999'); expect(html).not.toContain('>#0<');
+});

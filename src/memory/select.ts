@@ -41,37 +41,28 @@ export function selectViewNodes(
 ): ViewNode[] {
   const { byId, roots } = view;
 
-  const collectLeaves = (n: ViewNode, acc: ViewNode[]): void => {
+  // One post-order aggregate per node: eligibility and chronological sort key
+  // do not need a freshly expanded descendant array at each ancestor/comparison.
+  type SelectionInfo = { intact: boolean; eligible: boolean; first: number };
+  const memo = new Map<string, SelectionInfo>();
+  const info = (n: ViewNode): SelectionInfo => {
+    const cached = memo.get(n.id);
+    if (cached) return cached;
     if (n.kind === 'leaf' || n.atomic) {
-      acc.push(n);
-      return;
+      const result = { intact: true, eligible: leafEligible(n), first: n.atomic ? n.floorStart ?? n.msgIndex : n.msgIndex };
+      memo.set(n.id, result); return result;
     }
-    for (const cid of n.childIds) {
-      const c = byId.get(cid);
-      if (c) collectLeaves(c, acc);
+    memo.set(n.id, { intact: false, eligible: false, first: Number.MAX_SAFE_INTEGER }); // Cycle guard.
+    let intact = n.childIds.length > 0, eligible = intact, first = Number.MAX_SAFE_INTEGER;
+    for (const id of n.childIds) {
+      const child = byId.get(id);
+      if (!child) { intact = eligible = false; continue; }
+      const result = info(child);
+      intact &&= result.intact; eligible &&= result.eligible;
+      first = Math.min(first, result.first);
     }
-  };
-  // 完好:每个 childId 都能解析(无悬空)且子节点自身也完好;叶子恒完好。memoized。
-  const intactMemo = new Map<string, boolean>();
-  const isIntact = (n: ViewNode): boolean => {
-    if (n.kind === 'leaf' || n.atomic) return true;
-    const cached = intactMemo.get(n.id);
-    if (cached !== undefined) return cached;
-    intactMemo.set(n.id, false); // 防环:递归未归前先占位 false
-    let ok = n.childIds.length > 0;
-    for (const cid of n.childIds) {
-      const c = byId.get(cid);
-      if (!c || !isIntact(c)) { ok = false; break; } // 悬空 child ⇒ 不完整
-    }
-    intactMemo.set(n.id, ok);
-    return ok;
-  };
-  // 可作为整体代表:完好 + 全部后代叶子都合格。
-  const canRepresent = (n: ViewNode): boolean => {
-    if (!isIntact(n)) return false;
-    const ls: ViewNode[] = [];
-    collectLeaves(n, ls);
-    return ls.length > 0 && ls.every(leafEligible);
+    const result = { intact, eligible: intact && eligible, first };
+    memo.set(n.id, result); return result;
   };
 
   const chosen: ViewNode[] = [];
@@ -80,10 +71,10 @@ export function selectViewNodes(
     if (visited.has(n.id)) return;
     visited.add(n.id);
     if (n.kind === 'leaf' || n.atomic) {
-      if (leafEligible(n)) chosen.push(n);
+      if (info(n).eligible) chosen.push(n);
       return;
     }
-    if (canRepresent(n)) {
+    if (info(n).eligible) {
       chosen.push(n);
       return;
     }
@@ -95,16 +86,51 @@ export function selectViewNodes(
   for (const r of roots) visit(r);
 
   // 时间序拼接:叶子用楼层序;压缩节点用其最早后代叶子的楼层序
-  const sortKey = (n: ViewNode): number => {
-    if (n.kind === 'leaf') return n.msgIndex;
-    if (n.atomic) return n.floorStart ?? n.msgIndex;
-    const ls: ViewNode[] = [];
-    collectLeaves(n, ls);
-    return ls.length
-      ? Math.min(...ls.map(l => l.atomic ? (l.floorStart ?? l.msgIndex) : l.msgIndex))
-      : Number.MAX_SAFE_INTEGER;
+  return chosen.sort((a, b) => info(a).first - info(b).first);
+}
+
+/** One immutable forest view owns this range index. In-place source edits must
+ * produce a new view/index; malformed cycles conservatively use a visited walk. */
+export function createNodeFloorIndex(byId: Map<string, ViewNode>): (node: ViewNode) => [number, number] {
+  const memo = new Map<string, [number, number]>(), active = new Set<string>();
+  const cycle = Symbol('cyclic-forest');
+  let acyclic = true;
+  const terminal = (n: ViewNode): number[] => n.atomic
+    ? [n.floorStart, n.floorEnd].filter((v): v is number => typeof v === 'number')
+    : n.kind === 'leaf' ? [n.msgIndex] : [];
+  const range = (values: number[]): [number, number] => values.length ? [Math.min(...values), Math.max(...values)] : [-1, -1];
+  const visit = (n: ViewNode): [number, number] => {
+    const cached = memo.get(n.id); if (cached) return cached;
+    if (active.has(n.id)) throw cycle;
+    if (n.kind === 'leaf' || n.atomic) { const result = range(terminal(n)); memo.set(n.id, result); return result; }
+    active.add(n.id);
+    let lo = Infinity, hi = -Infinity;
+    for (const id of n.childIds) {
+      const child = byId.get(id); if (!child) continue;
+      const [a, b] = visit(child);
+      if (a === -1 && b === -1) continue;
+      lo = Math.min(lo, a); hi = Math.max(hi, b);
+    }
+    active.delete(n.id);
+    const result: [number, number] = lo === Infinity ? [-1, -1] : [lo, hi];
+    memo.set(n.id, result); return result;
   };
-  return chosen.sort((a, b) => sortKey(a) - sortKey(b));
+  return node => {
+    if (acyclic) {
+      try { return visit(node); }
+      catch (error) { if (error !== cycle) throw error; acyclic = false; memo.clear(); active.clear(); }
+    }
+    const cached = memo.get(node.id); if (cached) return cached;
+    const seen = new Set<string>(), pending = [node]; let lo = Infinity, hi = -Infinity;
+    while (pending.length) {
+      const current = pending.pop()!; if (seen.has(current.id)) continue; seen.add(current.id);
+      if (current.kind === 'leaf' || current.atomic) {
+        for (const floor of terminal(current)) { lo = Math.min(lo, floor); hi = Math.max(hi, floor); }
+      } else for (const id of current.childIds) { const child = byId.get(id); if (child) pending.push(child); }
+    }
+    const result: [number, number] = lo === Infinity ? [-1, -1] : [lo, hi];
+    memo.set(node.id, result); return result;
+  };
 }
 
 /* ============ 生活小档案:三投放层选择(纯函数,注入与测试共用) ============ */

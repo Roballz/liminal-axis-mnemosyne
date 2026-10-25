@@ -201,7 +201,7 @@ test('physical v1 upgrade adds history and current body stores without replacing
     await new Promise<void>((resolve, reject) => {
         const request = indexedDB.open(name, 1);
         request.onupgradeneeded = () => {
-            for (const store of STORES.filter(s => s !== 'table_history' && s !== 'source_bodies')) {
+            for (const store of STORES.filter(s => s !== 'table_history' && s !== 'source_bodies' && s !== 'memory_selection_nodes')) {
                 const native = request.result.createObjectStore(store, { keyPath: 'id' });
                 for (const key of ['story', 'branch', 'owner']) native.createIndex(key, key);
             }
@@ -210,9 +210,10 @@ test('physical v1 upgrade adds history and current body stores without replacing
         request.onsuccess = () => { request.result.close(); resolve(); }; request.onerror = () => reject(request.error);
     });
     const lib = await Library.open(name);
-    expect(lib.db.version).toBe(3); expect((await lib.get('stories', 'preserved'))?.id).toBe('preserved');
+    expect(lib.db.version).toBe(4); expect((await lib.get('stories', 'preserved'))?.id).toBe('preserved');
     expect(await lib.all('table_history')).toEqual([]);
-    expect(await lib.all('source_bodies')).toEqual([]); lib.close();
+    expect(await lib.all('source_bodies')).toEqual([]);
+    expect(await lib.all('memory_selection_nodes')).toEqual([]); lib.close();
     const oldOpenError = await new Promise<DOMException | null>(resolve => {
         const old = indexedDB.open(name, 2);
         old.onerror = () => resolve(old.error);
@@ -250,7 +251,7 @@ test('v10 backup enters baseline-only history and roundtrip never claims old val
             expect(view.branch.tableHistoryGap).toBe(true);
             expect(await readTables(restored, view.branch)).toEqual([]);
             const backup = await exportLibrary(restored);
-            expect(backup.version).toBe(14);
+            expect(backup.version).toBe(15);
             expect((backup.data.table_history as TableCommit[]).some(h => h.rows.some(r => r.values.v === '旧包最新值'))).toBe(true);
         } finally { restored.close(); }
     } finally { f.lib.close(); }

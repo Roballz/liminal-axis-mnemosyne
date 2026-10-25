@@ -26,8 +26,32 @@ export async function batchFixture(count = 5) {
     return { ...data, batch };
 }
 
+/** Build real pre-v15 synthetic fixtures while preserving view IDs and selection order. */
+export function withoutCompactSelections(pack: import('./migration').Package) {
+    const nodes = new Map((pack.data.memory_selection_nodes ?? [])
+        .map(r => [r.id, r as import('./model').MemorySelectionNode]));
+    pack.data.memory_views = pack.data.memory_views.map(value => {
+        if (!('selectionSchema' in value)) return value;
+        const { selectionSchema: _schema, root, count, ...identity } = value as import('./model').CompactMemoryView;
+        const entries: import('./model').MemorySelectionNode['entries'] = [], seen = new Set<string>();
+        const pending = root ? [root] : [];
+        while (pending.length) {
+            const id = pending.pop()!, node = nodes.get(id);
+            if (!node || seen.has(id)) throw new Error('Legacy fixture requires complete selection nodes');
+            seen.add(id); entries.push(...node.entries); pending.push(...Object.values(node.children));
+        }
+        if (entries.length !== count) throw new Error('Legacy fixture selection count mismatch');
+        entries.sort((a, b) => a[2] - b[2] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+        return { ...identity, selections: Object.fromEntries(entries.map(([family, revision]) => [family, revision])) };
+    });
+    delete (pack.data as Partial<typeof pack.data>).memory_selection_nodes;
+    delete (pack.counts as Partial<typeof pack.counts>).memory_selection_nodes;
+    return pack;
+}
+
 /** Remove only fields unavailable in pre-table-history package fixtures. */
 export function withoutTableHistory(pack: import('./migration').Package) {
+    withoutCompactSelections(pack);
     // Construct an actual old-format synthetic package, never just relabel v12 rows.
     for (const revision of pack.data.event_revisions as import('./model').EventRevision[]) { delete revision.overviewCoverage; delete revision.overviewMaterialMode; }
     const bodies = new Map((pack.data.source_bodies ?? []).map(r => [r.id, r as import('./model').SourceBody]));
