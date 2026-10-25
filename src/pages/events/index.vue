@@ -19,6 +19,7 @@ import TableTextField from "@/components/TableTextField.vue";
 import EventResponseReview from "@/components/EventResponseReview.vue";
 import {
   syncDaily,
+  syncedEventProjection,
   hostScope,
   hostVersion,
   dailyState,
@@ -28,6 +29,7 @@ import { activeLibrary } from "@/mnemosyne/db";
 import { previewEventResync, commitEventResync, type EventResyncPlan } from "@/mnemosyne/event-resync";
 import {
   eventView,
+  eventViewIssues,
   editEvent,
   deleteEvent,
   setEventArchived,
@@ -301,9 +303,11 @@ async function refresh() {
   loading.value = true;
   error.value = "";
   try {
+    const beforeRevision = dailyState.revision;
     const captured = await syncDaily(), lib = await activeLibrary();
     const host = hostVersion(), generation = dailyState.generation, capturedRevision = dailyState.revision;
-    const data = await eventView(lib, captured, false, undefined, true);
+    const projected = syncedEventProjection(lib, captured, beforeRevision);
+    const data = projected ? await eventViewIssues(lib, captured, projected) : await eventView(lib, captured, false, undefined, true);
     if (!live()) return;
     const valid = await dailyCurrent(captured, host, generation) && lib === await activeLibrary();
     if (!live()) return;

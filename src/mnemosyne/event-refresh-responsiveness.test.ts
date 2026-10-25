@@ -16,7 +16,7 @@ const teardownStart = source.indexOf('onBeforeUnmount(() => {', watchEnd);
 const teardownEnd = source.indexOf('\n});', teardownStart) + 4;
 if ([queueStart, queueEnd, watchStart, watchEnd, teardownStart].some(index => index < 0)) throw new Error('Refresh source extraction no longer matches the page');
 const script = ts.transpile(source.slice(queueStart, queueEnd) + '\nwatch(() => dailyState.revision, queueRefresh);\n' + source.slice(watchStart, watchEnd) + '\n' + source.slice(teardownStart, teardownEnd), { target: ts.ScriptTarget.ES2022 });
-type Scenario = 'self-revision' | 'burst' | 'invalid-once' | 'scope-change' | 'unmount';
+type Scenario = 'self-revision' | 'burst' | 'invalid-once' | 'scope-change' | 'unmount' | 'cached';
 async function probe(kind: Scenario) {
   const state = Vue.reactive({ revision: 0, generation: 0, scope: 'same-chat' });
   const refs = { busy: Vue.ref(false), loading: Vue.ref(false), error: Vue.ref(''), view: Vue.shallowRef<any>(null), cards: Vue.shallowRef<any[]>([]), storedCount: Vue.ref(0) };
@@ -27,9 +27,11 @@ async function probe(kind: Scenario) {
     activeLibrary: async () => lib,
     syncDaily: async () => {
       if (++syncs > 8) throw new Error('Unexpected refresh loop');
-      if (kind === 'self-revision' && syncs === 1) state.revision++;
+      if (['self-revision', 'cached'].includes(kind) && syncs === 1) state.revision++;
       return { id: state.scope };
     },
+    syncedEventProjection: () => kind === 'cached' ? { cards: [{ title: state.scope }], storedCount: 1 } : null,
+    eventViewIssues: async (_lib: object, _view: any, projection: any) => projection,
     eventView: async (_lib: object, view: any) => {
       reads++; active++; maxConcurrent = Math.max(maxConcurrent, active);
       if (delayed && reads === 1) await new Promise<void>(done => { resolve = done; });
@@ -40,7 +42,7 @@ async function probe(kind: Scenario) {
   };
   const factory = new Function('Vue', 'deps', `
     const { watch, ref } = Vue;
-    const { busy, loading, error, view, cards, storedCount, dailyState, hostScope, hostVersion, activeLibrary, syncDaily, eventView, dailyCurrent } = deps;
+    const { busy, loading, error, view, cards, storedCount, dailyState, hostScope, hostVersion, activeLibrary, syncDaily, syncedEventProjection, eventViewIssues, eventView, dailyCurrent } = deps;
     let viewHost = '', viewGeneration = 0, teardown;
     const pages = ref({}), expandedCards = ref({}), expandedHistory = ref({}), expandedMembers = ref({});
     const notice = ref(''), editing = ref(false), removing = ref(null), resyncPlan = ref(null), archiveMenu = ref(null), archiveMode = ref(false);
@@ -64,7 +66,7 @@ async function probe(kind: Scenario) {
     await new Promise(done => setTimeout(done, 0)); await flush();
     expect(reads).toBe(settledReads);
     expect(refs.error.value).toBe('');
-    expect(maxConcurrent).toBe(1);
+    expect(maxConcurrent).toBe(kind === 'cached' ? 0 : 1);
     return { syncs, reads, view: refs.view.value?.id ?? null, cards: refs.cards.value.map(card => card.title) };
   } finally { queue.teardown(); effect.stop(); }
 }
@@ -83,4 +85,8 @@ test('scope change during a projection discards old rows and publishes only the 
 });
 test('unmount during a projection neither publishes stale rows nor launches a retry', async () => {
   expect(await probe('unmount')).toEqual({ syncs: 1, reads: 1, view: null, cards: [] });
+});
+
+test('fresh sync projection publishes without a second event read or notification loop', async () => {
+  expect(await probe('cached')).toEqual({ syncs: 1, reads: 0, view: 'same-chat', cards: ['same-chat'] });
 });

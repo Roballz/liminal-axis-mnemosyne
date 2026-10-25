@@ -67,7 +67,6 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             return ok;
         };
         const cards: EventCard[] = [];
-        const diagnosticFloors = new Map<string, Map<string, number>>();
         const equivalents = new Map<string, string>();
         const resolveMemory = async (id: string): Promise<string> => {
             if (equivalents.has(id)) return equivalents.get(id)!;
@@ -207,37 +206,8 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
             }
             const blocked = live && members.some(m => !permitted.has(m.memory));
             const needsReview = live && ((!!meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))) || meta.refs.some(id => !permitted.has(id)) || !!meta.summarized?.some(id => !memberSet.has(id) || !permitted.has(id)));
-            const issues: NonNullable<EventCard['issues']> = [];
-            if (includeIssues && (blocked || needsReview)) {
-                const references = new Map<string, string[]>();
-                const add = (id: string, role: string, membershipRequired = true) => {
-                    if (permitted.has(id) && (!membershipRequired || memberSet.has(id))) return;
-                    references.set(id, [...(references.get(id) ?? []), role]);
-                };
-                for (const m of members) add(m.memory, '关联成员');
-                for (const id of new Set([...meta.refs, ...(meta.summarized ?? [])])) add(id, '旧概要', false);
-                for (const id of meta.summarized ?? []) if (!memberSet.has(id)) add(id, '已解除关联');
-                if (meta.latestProgress) add(meta.latestProgress.memory, '最新进展');
-                for (const [id, roles] of references) {
-                    const memory = await readMemory(id);
-                    const deleted = !!memory?.anchor && !positions.has(memory.anchor);
-                    let floor = memory?.anchor ? positions.get(memory.anchor) : undefined;
-                    if (deleted && memory) {
-                        const basis = await readSnapshot(memory.basis);
-                        if (basis && !diagnosticFloors.has(basis.id)) diagnosticFloors.set(basis.id,
-                            new Map((await snapshotRefs(tx, basis)).map((ref, index) => [ref.message, index])));
-                        floor = basis ? diagnosticFloors.get(basis.id)?.get(memory.anchor!) : undefined;
-                    }
-                    const state = validStates.get(id);
-                    const reason = deleted ? '来源楼层已删除' : state === 'needs_review' ? '来源变化，摘要待审核'
-                        : state === 'needs_rebuild' ? '下级摘要变化，需重建' : state === 'excluded' ? '摘要未参与记忆'
-                        : !memberSet.has(id) && permitted.has(id) ? '已解除关联，旧内容仍引用'
-                        : '旧摘要已被替换或移出当前视图';
-                    issues.push({ memory: id, roles: [...new Set(roles)], reason, floor, deleted, text: memory?.content ?? '' });
-                }
-            }
             if (!live && (meta.summarized?.some(id => !memberSet.has(id)) || (meta.latestProgress && (!permitted.has(meta.latestProgress.memory) || !memberSet.has(meta.latestProgress.memory))))) meta = { ...meta, overview: '', summarized: [], latestProgress: null };
-            cards.push({ chain, meta, members, removedMembers: [...latest.values()].filter(m => !m.active), progress, needsReview, blocked, issues, memberDetails: [...memberDetails.values()],
+            cards.push({ chain, meta, members, removedMembers: [...latest.values()].filter(m => !m.active), progress, needsReview, blocked, memberDetails: [...memberDetails.values()],
                 ...(includeHistory ? { history } : {}) });
         }
         return { cards, valid, validity: validStates, storedCount: chains.length };
@@ -245,7 +215,54 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
     // Hash only after the IndexedDB transaction has completed.
     if (includeHistory) for (const card of result.cards)
         card.inheritanceKey = await fingerprint([!!card.chain.archived, card.meta, card.members, card.progress, card.history]);
-    return result;
+    return includeIssues ? eventViewIssues(lib, view, result) : result;
+}
+/** Add workbench diagnostics to an existing projection without rereading all events/statuses. */
+export async function eventViewIssues(lib: Library, view: CapturedView, projection: EventView): Promise<EventView> {
+    if (!projection.cards.some(card => card.blocked || card.needsReview)) return projection;
+    const permitted = new Set(projection.valid.map(m => m.id));
+    const validStates = projection.validity;
+    const positions = new Map(view.refs.map((ref, index) => [ref.message, index]));
+    return lib.transaction(['memory_revisions', 'history_snapshots', 'manifest_blocks'], 'readonly', async tx => {
+        const memories = new Map([...projection.cards.flatMap(c => c.memberDetails ?? []), ...view.memories].map(m => [m.id, m]));
+        const readMemory = async (id: string) => memories.get(id) ?? tx.get<MemoryRevision>('memory_revisions', id);
+        const diagnosticFloors = new Map<string, Map<string, number>>();
+        const cards: EventCard[] = [];
+        for (const card of projection.cards) {
+            if (!card.blocked && !card.needsReview) { cards.push(card); continue; }
+            const { meta, members } = card;
+            const memberSet = new Set(members.map(m => m.memory));
+            const issues: NonNullable<EventCard['issues']> = [];
+            const references = new Map<string, string[]>();
+            const add = (id: string, role: string, membershipRequired = true) => {
+                if (permitted.has(id) && (!membershipRequired || memberSet.has(id))) return;
+                references.set(id, [...(references.get(id) ?? []), role]);
+            };
+            for (const m of members) add(m.memory, '关联成员');
+            for (const id of new Set([...meta.refs, ...(meta.summarized ?? [])])) add(id, '旧概要', false);
+            for (const id of meta.summarized ?? []) if (!memberSet.has(id)) add(id, '已解除关联');
+            if (meta.latestProgress) add(meta.latestProgress.memory, '最新进展');
+            for (const [id, roles] of references) {
+                const memory = await readMemory(id);
+                const deleted = !!memory?.anchor && !positions.has(memory.anchor);
+                let floor = memory?.anchor ? positions.get(memory.anchor) : undefined;
+                if (deleted && memory) {
+                    const basis = await tx.get<Snapshot>('history_snapshots', memory.basis);
+                    if (basis && !diagnosticFloors.has(basis.id)) diagnosticFloors.set(basis.id,
+                        new Map((await snapshotRefs(tx, basis)).map((ref, index) => [ref.message, index])));
+                    floor = basis ? diagnosticFloors.get(basis.id)?.get(memory.anchor!) : undefined;
+                }
+                const state = validStates.get(id);
+                const reason = deleted ? '来源楼层已删除' : state === 'needs_review' ? '来源变化，摘要待审核'
+                    : state === 'needs_rebuild' ? '下级摘要变化，需重建' : state === 'excluded' ? '摘要未参与记忆'
+                    : !memberSet.has(id) && permitted.has(id) ? '已解除关联，旧内容仍引用'
+                    : '旧摘要已被替换或移出当前视图';
+                issues.push({ memory: id, roles: [...new Set(roles)], reason, floor, deleted, text: memory?.content ?? '' });
+            }
+            cards.push({ ...card, issues });
+        }
+        return { ...projection, cards };
+    });
 }
 export const EVENT_PROMPT = `你只整理事件，不重新生成摘要，不结算物品、人物、变量。
 围绕具体事项、目标、约定、冲突或重要变化归组。相同人物/地点/物品或时间接近不等于同事件。
@@ -451,7 +468,7 @@ export async function editEvent(lib: Library, view: CapturedView, eventId: strin
     kind: 'progress' | 'reference';
 }, guard: () => boolean = () => true) {
     check(patch.title.trim() && patch.title.length <= 300, '事件标题不能为空或过长');
-    const { valid, cards } = await eventView(lib, view);
+    const { valid, cards } = await eventView(lib, view, false, eventId ?? undefined);
     const existing = cards.find(c => c.chain.id === eventId);
     // Membership-only changes must still work for pre-limit overviews, without rewriting them.
     if (patch.overview !== undefined && patch.overview !== existing?.meta.overview)

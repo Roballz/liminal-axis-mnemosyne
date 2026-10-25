@@ -5,9 +5,9 @@ import SummaryTags from '@/pages/summary/SummaryTags.vue';
 import { SUMMARY_CTX } from '@/pages/summary/ctx';
 import { beforeEach, afterEach, expect, test, vi } from 'vitest';
 import { Library, Transaction, activateLibrary, freshLibraryName } from './db';
-import { bindDaily, syncDaily, invalidateDaily, readDailyMembershipContext, refreshDailyTables, currentMembershipHints, readDailyEventEditor } from './bridge';
+import { bindDaily, syncDaily, invalidateDaily, readDailyMembershipContext, refreshDailyTables, currentMembershipHints, readDailyEventEditor, syncedEventProjection, dailyState } from './bridge';
 import { saveMemberships } from './event-memberships';
-import { eventView, setEventArchived } from './events';
+import { eventView, setEventArchived, editEvent } from './events';
 import { ReplyFinality } from './reply-finality';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
@@ -118,4 +118,39 @@ test('both editors read the full branch catalog including archived chains and re
   expect(html).toContain('相关事件:');
   expect(html.match(/class="mn-floor-event-names"[^>]*>归档也可选<\/span>/g)).toHaveLength(1);
   expect(html).not.toContain('bbs-tag-links');
+});
+
+
+test('unlink reads only its chain, then page reuses fresh sync projection without host writes', async () => {
+  let view = await syncDaily();
+  const memory = view.memories[0].id;
+  const first = await saveMemberships(lib, view, { mode: 'add', memories: [memory], eventIds: [], newTitle: '目标事件' });
+  view = await syncDaily();
+  await saveMemberships(lib, view, { mode: 'add', memories: [memory], eventIds: [], newTitle: '其他事件' });
+  view = await syncDaily();
+  const card = (await eventView(lib, view)).cards.find(c => c.chain.id === first.created)!;
+  vi.mocked(ctx.saveChat).mockClear(); vi.mocked(ctx.saveMetadata).mockClear();
+  const all = vi.spyOn(Transaction.prototype, 'all');
+  await editEvent(lib, view, card.chain.id, card.meta, { memory, active: false, kind: 'progress' });
+  const eventReads = all.mock.calls.filter(([store]) => ['event_chains', 'event_revisions', 'event_memberships', 'event_progress'].includes(store));
+  expect(eventReads.length).toBeGreaterThan(0);
+  expect(eventReads.every(([, index, key]) => index === 'owner' && key === first.created)).toBe(true);
+  const before = dailyState.revision;
+  const refreshed = await syncDaily();
+  all.mockClear();
+  const projection = syncedEventProjection(lib, refreshed, before)!;
+  expect(projection.cards.find(c => c.chain.id === first.created)!.members).toHaveLength(0);
+  expect(projection.cards.find(c => c.chain.id !== first.created)!.members).toHaveLength(1);
+  expect(currentMembershipHints()?.get('real-bridge-leaf')!.map(h => h.id)).not.toContain(first.created);
+  expect(all).not.toHaveBeenCalled();
+  expect(ctx.saveChat).not.toHaveBeenCalled(); expect(ctx.saveMetadata).not.toHaveBeenCalled();
+  expect(syncedEventProjection(lib, view, before)).toBeNull();
+  // Archive toggles do not advance epoch: an unchanged sync must not reuse old cards.
+  await setEventArchived(lib, refreshed, first.created!, true);
+  const unchangedRevision = dailyState.revision;
+  const unchanged = await syncDaily();
+  expect(syncedEventProjection(lib, unchanged, unchangedRevision)).toBeNull();
+  expect((await eventView(lib, unchanged)).cards.find(c => c.chain.id === first.created)!.chain.archived).toBe(true);
+  ctx.chat[1].mes += '来源变化';
+  expect(syncedEventProjection(lib, refreshed, before)).toBeNull();
 });

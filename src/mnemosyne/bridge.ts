@@ -6,7 +6,7 @@ import { ReplyFinality, ReplyFinalityError, type ReplyBlocker, type ReplyBlocker
 import { toast } from '@/st/toast';
 import { archiveWasDeleted, allowArchiveCreation, commitArchiveDeletion, type ArchiveDeletionPlan } from './archive-deletion';
 import { normalizeTags, type SummaryTags, type EventHint } from '@/memory/contextTags';
-import { eventView, renderPersistentEvents } from './events';
+import { eventView, renderPersistentEvents, type EventView } from './events';
 import { previewReconnect, commitReconnect } from './binding-recovery';
 import { readTables, renderTableState, commitSummaryTables, type SummaryTablePlan } from './tables';
 import { TABLE_OUTPUT_KEY } from './summary-tables';
@@ -60,6 +60,7 @@ interface DailyCache {
     eventHints: EventHint[];
     eventDirectory: EventHint[];
     memberships: MembershipProjection;
+    eventProjection: EventView;
     library: string;
     reviewCount: number;
 }
@@ -312,17 +313,25 @@ export async function readDailyReview() {
 }
 
 async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView) {
-    const { cards, validity } = await eventView(lib, view);
+    const eventProjection = await eventView(lib, view);
+    const { cards, validity } = eventProjection;
     check(await current(lib, view), '事件状态已改变，请重试');
     const safe = cards.filter(c => !c.needsReview && !c.blocked);
     const asHint = (c: typeof cards[number]): EventHint => ({
         id: c.chain.id, title: c.meta.title, status: c.meta.status,
         latest: c.meta.latestProgress ? `${c.meta.latestProgress.time} ${c.meta.latestProgress.text}`.trim() : undefined,
     });
-    return { validity, memberships: membershipProjection(view, cards), eventText: renderPersistentEvents(safe),
+    return { validity, eventProjection, memberships: membershipProjection(view, cards), eventText: renderPersistentEvents(safe),
         eventHints: safe.map(asHint),
         eventDirectory: cards.map(c => ({ ...asHint(c), archived: !!c.chain.archived, needsReview: !!c.needsReview || !!c.blocked })),
     };
+}
+/** Reuse only a projection freshly published by this sync; callers still validate dailyCurrent.
+ * Unchanged epochs can contain archive-only edits, so an older revision must be reread.
+ */
+export function syncedEventProjection(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView, beforeRevision: number): EventView | null {
+    return dailyState.revision !== beforeRevision && cache?.view === view &&
+        cache.library === lib.db.name && cache.host === hostVersion() ? cache.eventProjection : null;
 }
 export function persistentEventText(): string {
     return readableProjection()?.eventText ?? '';
