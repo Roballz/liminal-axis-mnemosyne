@@ -14,7 +14,7 @@ import { summaryPermission, dailyTableText, persistentEventText } from '@/mnemos
 import { apiSettings, engineActiveHere } from '@/api/settings';
 import type { STMessage } from '@/st/context';
 import { getContext } from '@/st/context';
-import { buildSceneLocationIndex, classifyNpcPresence, findCurrentSceneId, getLeaf, itemReachableAtScene, leafValid } from './apply';
+import { buildSceneLocationIndex, createNpcPresenceClassifier, findCurrentSceneId, getLeaf, itemReachableAtScene, leafValid } from './apply';
 import { fmtItems, fmtPlans, fmtResolvedPlans, renderVarsState, selectRecentResolvedPlans, MEMORY_BRIEFING_NOTE, MEMORY_BRIEFING_END } from './prompts';
 import { fmtLifeDetail } from './lifeDetails';
 import { itemInjectionMode } from './items';
@@ -408,13 +408,14 @@ function relationHead(relation: string | undefined): string {
  */
 function fmtNpcContext(npcs: MemNpc[], scenes: MemScene[], here: string, locationPath: string[] | undefined, now: string): string {
   if (!npcs.length) return '';
+  const presence = createNpcPresenceClassifier(scenes, here, locationPath);
   const main: MemNpc[] = [];
   const present: MemNpc[] = [];
   const nearby: MemNpc[] = [];
   const absent: MemNpc[] = [];
   for (const n of npcs) {
     if (n.important) { main.push(n); continue; } // 主要角色单列,不再进在场判定
-    const p = classifyNpcPresence(n, scenes, here, locationPath); // 与 NPC 页共用同一权威判定
+    const p = presence(n); // 与 NPC 页共用同一权威判定,本批只解析一次主角位置
     if (p === 'present') present.push(n);
     else if (p === 'nearby') nearby.push(n);
     else absent.push(n);

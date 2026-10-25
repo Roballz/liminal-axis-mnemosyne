@@ -7,7 +7,7 @@ import { NPC_AFFINITY_FIELDS, affinityLevelFromInput, fmtNpcAffinity } from '@/m
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import ModalMask from '@/components/ModalMask.vue';
 import SummaryOnlyNotice from '@/components/SummaryOnlyNotice.vue';
-import { classifyNpcPresence, editNpc, removeNpc, setNpcFollow, setNpcImportant, setProtagonist, upsertNpc, addLifeDetail, removeLifeDetail, updateLifeDetail } from '@/memory/apply';
+import { createNpcPresenceClassifier, editNpc, removeNpc, setNpcFollow, setNpcImportant, setProtagonist, upsertNpc, addLifeDetail, removeLifeDetail, updateLifeDetail } from '@/memory/apply';
 import { derivedMeta, memory } from '@/memory/store';
 import { ageDisplay } from '@/memory/timeRel';
 import type { MemLifeDetail, MemNpc } from '@/memory/types';
@@ -174,9 +174,10 @@ const buckets = computed(() => {
   const absent: MemNpc[] = [];
   const here = memory.state.location || '';
   const locPath = memory.state.locationPath;
+  const presence = createNpcPresenceClassifier(memory.scenes, here, locPath);
   for (const n of memory.npcs) {
     if (n.important) continue; // 主要角色单列,不进在场判定
-    const p = classifyNpcPresence(n, memory.scenes, here, locPath);
+    const p = presence(n);
     (p === 'present' ? present : p === 'nearby' ? nearby : absent).push(n);
   }
   present.sort(sortByCreated);

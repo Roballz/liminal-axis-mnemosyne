@@ -1,7 +1,9 @@
 import { apiSettings, currentCharKey } from '@/api/settings';
 import { getContext, type STMessage } from '@/st/context';
+import { saveChatNow, scheduleChatSave, reportChatSaveError } from '@/st/chat-save';
 import { reactive } from 'vue';
-import { deriveMemory, getLeaf, leafValid } from './apply';
+import { deriveMemory, expandVarMacros, getLeaf, leafValid, mergeTemplates } from './apply';
+import { DerivedInputs } from './derived-inputs';
 import { isAiFloor, pendingAiFloors } from './engine';
 import { latestStoryTime } from './timeTag';
 import type { BaibaiMemory, LeafExtra, MemSummary, StoredDelta, VarTemplate, VarTier } from './types';
@@ -51,13 +53,26 @@ function optText(v: unknown): string | undefined {
   return scalarText(v) || undefined;
 }
 
-/** 重放 chat 得到 state/items/plans,原地写回;并刷新 derivedMeta */
-export function recomputeDerived(): void {
+let derivedChat: STMessage[] | null | undefined;
+let derivedInputs = new DerivedInputs();
+
+/** 重放 chat 得到 state/items/plans,原地写回;显示通知可复用未变输入。 */
+export function recomputeDerived(onlyIfChanged = false): void {
   const ctx = getContext();
   // 欢迎页(未进入任何聊天)getCurrentChatId 为空,但 chat 里可能残留上次的 #0,
   // 不属于任何聊天的楼层不该被判为「未摘要」,故此时视作无 chat。
   const chat = ctx?.getCurrentChatId?.() ? ctx.chat ?? null : null;
-  const d = deriveMemory(chat);
+  // Expand the actual runtime macro values once, then derive from that same seed.
+  // A template containing a dynamic host macro must still invalidate the view.
+  const seed = expandVarMacros(mergeTemplates(memory.varTemplates));
+  const inputs = [ctx?.getCurrentChatId?.(), ctx?.characterId, currentCharKey(), ctx?.groupId, ctx?.name1, ctx?.name2, seed,
+    memory.summaries.map(s => [s.imported, s.importedFloorStart, s.importedFloorEnd]),
+    chat?.map(m => m ? [m.name, m.is_user, m.is_system, m.mes, m.swipe_id,
+      m.extra?.bbs_omit, m.extra?.bbs_hidden, m.extra?.bbs_internal_notice, m.extra?.type, getLeaf(m)] : null)];
+  if (onlyIfChanged && chat === derivedChat && derivedInputs.matches(inputs)) return;
+  const proof = new DerivedInputs();
+  proof.remember(inputs);
+  const d = deriveMemory(chat, undefined, seed);
   memory.state.time = d.state.time;
   memory.state.location = d.state.location;
   memory.state.locationPath = d.state.locationPath;
@@ -104,31 +119,23 @@ export function recomputeDerived(): void {
   // 待摘要楼层(AI 楼且无有效叶子),供摘要页「未摘要楼层」列表逐楼补摘
   derivedMeta.pendingFloors = chat ? pendingAiFloors(chat) : [];
   derivedMeta.rev++; // 通知外部视图(楼内面板)派生已刷新
+  derivedChat = chat;
+  derivedInputs = proof; // Only a successfully published derived state may be reused.
 }
 
 /* ============ 落盘:叶子在 chat 文件,森林在 metadata ============ */
-
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 防抖落盘叶子(写进 chat 文件)。合并连续多楼摘要为一次 saveChat。 */
 export function scheduleLeafFlush(): void {
   const ctx = getContext();
   if (!ctx?.saveChat) return;
-  if (flushTimer) clearTimeout(flushTimer);
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    void ctx.saveChat();
-  }, 1500);
+  scheduleChatSave(ctx);
 }
 
 /** 立即落盘(切聊天/卸载前调用,避免丢未落盘叶子) */
 export function flushLeavesNow(): void {
-  if (flushTimer) {
-    clearTimeout(flushTimer);
-    flushTimer = null;
-  }
   const ctx = getContext();
-  void ctx?.saveChat?.();
+  if (ctx?.saveChat) void saveChatNow(ctx).catch(reportChatSaveError);
 }
 
 /**

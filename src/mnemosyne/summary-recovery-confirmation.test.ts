@@ -70,7 +70,8 @@ test('mixed 24 recovered and 131 ordinary L0 reviews confirm together without re
  const host=JSON.stringify(ctx.chat), captureSpy=vi.spyOn(canonical,'capture'), syncSpy=vi.spyOn(canonical,'synchronize');
  const apiCall=vi.spyOn(api,'requestCompletion'), mainApiCall=vi.spyOn(api,'requestViaMainApi');ctx.saveChat.mockClear();
  let next=await retainRecoveredSummaries(view,originals.map(m=>m.id),guardFor(view));
- expect(next.branch.epoch).toBe(view.branch.epoch+1);expect(captureSpy).toHaveBeenCalledTimes(1);expect(syncSpy).toHaveBeenCalledTimes(1);
+ // Synchronization now returns its checked projection; no second full capture is needed.
+ expect(next.branch.epoch).toBe(view.branch.epoch+1);expect(captureSpy).not.toHaveBeenCalled();expect(syncSpy).toHaveBeenCalledTimes(1);
  expect(ctx.saveChat).not.toHaveBeenCalled();expect(apiCall).not.toHaveBeenCalled();expect(mainApiCall).not.toHaveBeenCalled();expect(JSON.stringify(ctx.chat)).toBe(host);
  expect([...(await statuses(lib,next)).values()].every(s=>s==='valid')).toBe(true);
  for(const original of originals) {
@@ -169,7 +170,7 @@ test('155 recovered L0 summaries commit in one epoch without host edits or API c
  ctx.saveChat.mockClear();
  const next=await retainRecoveredSummaries(view,originals.map(m=>m.id),guardFor(view));
  expect(next.branch.epoch).toBe(view.branch.epoch+1);
- expect(captureSpy).toHaveBeenCalledTimes(1);expect(syncSpy).toHaveBeenCalledTimes(1);
+ expect(captureSpy).not.toHaveBeenCalled();expect(syncSpy).toHaveBeenCalledTimes(1);
  expect(ctx.saveChat).not.toHaveBeenCalled();expect(apiCall).not.toHaveBeenCalled();expect(mainApiCall).not.toHaveBeenCalled();expect(JSON.stringify(ctx.chat)).toBe(before);
  const validity=await statuses(lib,next);
  for(const original of originals) {

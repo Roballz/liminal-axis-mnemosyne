@@ -174,6 +174,7 @@ function scanMissing(): void {
 // Merge the burst into one DOM scan and one shared reactive tick.
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let needsScan = false, needsTick = false, needsRebuild = false;
+const affectedFloors = new Set<number>();
 function queueRefresh(scan: boolean, tick: boolean, rebuild = false, delay = 50): void {
   if (!enabled || (!activeNow() && !rebuild)) return;
   needsScan ||= scan; needsTick ||= tick; needsRebuild ||= rebuild;
@@ -182,16 +183,23 @@ function queueRefresh(scan: boolean, tick: boolean, rebuild = false, delay = 50)
     refreshTimer = null;
     const scan = needsScan, tick = needsTick, rebuild = needsRebuild;
     needsScan = needsTick = needsRebuild = false;
+    const floors = [...affectedFloors]; affectedFloors.clear();
     // A chat switch must dispose the previous chat even when the destination
     // excludes this engine. rebuildAll itself only remounts in an active chat.
     if (rebuild) rebuildAll();
     else if (activeNow() && scan) scanMissing();
+    else if (activeNow()) for (const idx of floors) {
+      const el = mesEl(idx);
+      if (!el || !isRealAiReply(getContext()?.chat?.[idx])) removeFloor(idx);
+      else injectFloor(idx, el);
+    }
     if (activeNow() && tick) bumpTick();
   }, delay);
 }
 function cancelRefresh(): void {
   if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = null; needsScan = needsTick = needsRebuild = false;
+  affectedFloors.clear();
 }
 function onRendered(): void { queueRefresh(true, true); }
 function onSwiped(): void { queueRefresh(true, true); }
@@ -216,12 +224,39 @@ function bindEvents(): void {
   if (et.MORE_MESSAGES_LOADED) on(et.MORE_MESSAGES_LOADED, () => queueRefresh(true, false));
 }
 
-/** 盯聊天区:ST 重渲消息时补挂被冲掉的 host。防抖避免流式生成期高频触发。 */
+function affectedFloor(el: Element): void {
+  const idx = Number(el.getAttribute('mesid'));
+  if (Number.isInteger(idx) && idx >= 0) affectedFloors.add(idx);
+}
+
+/** Body fragments do not change mounted panels. Reconcile only message roots
+ * added/removed by the host, or a message whose panel has actually disappeared. */
+function onChatMutations(records: MutationRecord[]): void {
+  if (!activeNow()) return;
+  for (const record of records) {
+    const target = record.target.nodeType === 1 ? record.target as Element : null;
+    const floor = target?.closest('.mes[mesid]');
+    if (floor) {
+      const mounted = mountedByFloor.get(Number(floor.getAttribute('mesid')));
+      if (!mounted?.host.isConnected || !floor.contains(mounted.host)) affectedFloor(floor);
+      continue;
+    }
+    for (const node of [...record.addedNodes, ...record.removedNodes]) {
+      if (node.nodeType !== 1) continue;
+      const el = node as Element;
+      if (el.matches('.mes[mesid]')) affectedFloor(el);
+      else el.querySelectorAll('.mes[mesid]').forEach(affectedFloor);
+    }
+  }
+  if (affectedFloors.size) queueRefresh(false, false, false, 200);
+}
+
+/** 盯聊天区:仅补挂结构变化所影响的楼层,不因正文内部更新全页扫描。 */
 function startObserver(): void {
   if (observer) return;
   const chatEl = document.getElementById('chat');
   if (!chatEl) return;
-  observer = new MutationObserver(() => queueRefresh(true, false, false, 200));
+  observer = new MutationObserver(onChatMutations);
   observer.observe(chatEl, { childList: true, subtree: true });
 }
 function stopObserver(): void {

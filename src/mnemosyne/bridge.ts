@@ -16,6 +16,7 @@ import { TABLE_OUTPUT_KEY } from './summary-tables';
 import { reactive, ref, shallowRef, watch } from 'vue';
 import { locateReply } from '@/st/reply-location';
 import { getContext, type STMessage } from '@/st/context';
+import { saveChatNow } from '@/st/chat-save';
 import { chatRenderBatch } from '@/st/render-batch';
 import { derivedMeta, memory } from '@/memory/store';
 import { getLeaf, leafValid } from '@/memory/apply';
@@ -34,7 +35,7 @@ import {
     type HostMemory,
     type MemoryStatus,
 } from './canonical';
-import { row, check, type CapturedView, type SourceRef, type Branch, type Binding } from './model';
+import { row, check, type CapturedView, type SourceRef, type Branch, type Binding, type MemoryView, type MemoryRevision } from './model';
 export const dailyState = reactive({
     status: '未归档',
     error: '',
@@ -656,7 +657,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             // Host writes happen first. If canonical fails, these IDs remain retryable; there is no cross-store atomicity claim.
             if (dirty || savedHost !== host) ctx.chatMetadata.mnemosyne_ids_pending = true;
             if (ctx.chatMetadata.mnemosyne_ids_pending) {
-                await ctx.saveChat();
+                await saveChatNow(ctx, () => scope === hostScope() && host === hostVersion());
                 delete ctx.chatMetadata.mnemosyne_ids_pending;
             }
             check(
@@ -670,7 +671,10 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 getContext()?.chat === deletionChat && localStorage.getItem(ACTIVE_KEY) === deletionSelector && dailyState.tableRevision === deletionTables;
             const baseline = await sourceSyncBaseline(lib, observation);
             check(deletionGuard(), '聊天在归档校验期间改变，待重试');
-            const branch = await synchronize(lib, observation, { ...baseline, isCurrent: deletionGuard });
+            const synchronized: { view?: CapturedView } = {};
+            const branch = await synchronize(lib, observation, { ...baseline, isCurrent: deletionGuard },
+                view => { synchronized.view = view; });
+            const synchronizedVersion = lib.changes.version;
             savedHost = host;
             check(
                 scope === hostScope() && isActive() && generation === dailyState.generation && host === hostVersion(),
@@ -679,7 +683,25 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             ctx.chatMetadata[BINDING_KEY] = { scope, branch: branch.id };
             ctx.chatMetadata.mnemosyne_archive_v1 = { status: 'saved', scope, branch: branch.id, head: branch.head };
             await ctx.saveMetadata();
-            let view = await capture(lib, branch.id);
+            // The successful write already read and checked current body payloads.
+            // Metadata persistence can yield to another writer; only reuse that
+            // transaction's projection while its exact branch is still current.
+            const savedView = synchronized.view;
+            const refreshed = savedView && lib.changes.version === synchronizedVersion
+                ? await lib.transaction(['branches', 'memory_views', 'memory_revisions'], 'readonly', async tx => {
+                    const live = await tx.get<Branch>('branches', branch.id);
+                    if (!sameSourceSnapshot(live, savedView.branch)) return;
+                    const selection = await tx.get<MemoryView>('memory_views', live!.view);
+                    if (!sameSourceSnapshot(selection, savedView.selection)) return;
+                    // Recovery annotations may be repaired in place. Re-read those
+                    // mutable rows after the host save, even for an unchanged view ID.
+                    const memories = await Promise.all(Object.values(selection!.selections)
+                        .map(id => tx.get<MemoryRevision>('memory_revisions', id)));
+                    if (!memories.every((memory): memory is MemoryRevision => !!memory)) return;
+                    return { ...savedView, branch: live!, selection: selection!, memories };
+                }) : undefined;
+            let view = refreshed && lib.changes.version === synchronizedVersion
+                ? refreshed : await capture(lib, branch.id);
             const validityVersion = lib.changes.version;
             let validity = await statuses(lib, view);
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
@@ -860,7 +882,7 @@ export async function chooseNewStory() {
             delete m.extra[MANUAL_KEY];
         }
     }
-    await ctx.saveChat();
+    await saveChatNow(ctx);
     await ctx.saveMetadata();
     invalidateDaily();
     return syncDaily();

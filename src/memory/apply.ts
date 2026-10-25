@@ -579,6 +579,12 @@ export function itemReachableAtScene(
  */
 export function findCurrentSceneId(scenes: MemScene[], here: string, locationPath?: string[]): string {
   const byId = new Map(scenes.map(s => [s.id, s]));
+  return findCurrentSceneIdWithIndex(scenes, here, locationPath, byId);
+}
+
+function findCurrentSceneIdWithIndex(
+  scenes: MemScene[], here: string, locationPath: string[] | undefined, byId: ReadonlyMap<string, MemScene>,
+): string {
 
   // 1) 权威路径:精确 → 最长存在前缀
   const lp = normScenePath(locationPath);
@@ -635,14 +641,30 @@ export function classifyNpcPresence(
   locationPath?: string[],
 ): NpcPresence {
   if (npc.follow === true) return 'present';
-  // 主角当前节点:走权威 findCurrentSceneId(优先 locationPath 精确定位,再模糊兜底)
-  const cur = scenes.find(s => s.id === findCurrentSceneId(scenes, here, locationPath)) ?? null;
-  if (!cur) return sceneNameReachable(npc.location, here) ? 'present' : 'absent';
-  // NPC 所在地同样解析成节点后比路径
-  const n = scenes.find(s => s.id === findCurrentSceneId(scenes, npc.location ?? '')) ?? null;
-  if (!n) return sceneNameReachable(npc.location, here) ? 'present' : 'absent';
-  const rel = sceneRelation(cur.path, n.path);
-  return rel === 'same' ? 'present' : rel === 'near' ? 'nearby' : 'absent';
+  return createNpcPresenceClassifier(scenes, here, locationPath)(npc);
+}
+
+/** 一次同步遍历共用场景索引和主角定位;场景/位置变化后须新建,不跨渲染或异步任务缓存。 */
+export function createNpcPresenceClassifier(
+  scenes: MemScene[], here: string, locationPath?: string[],
+): (npc: MemNpc) => NpcPresence {
+  const byId = new Map<string, MemScene>();
+  for (const scene of scenes) {
+    // 与原 scenes.find 保持首个同 id 节点的语义。
+    const id = scene.id;
+    if (!byId.has(id)) byId.set(id, scene);
+  }
+  const currentId = findCurrentSceneIdWithIndex(scenes, here, locationPath, byId);
+  const current = byId.get(currentId);
+  return npc => {
+    if (npc.follow === true) return 'present';
+    if (!current) return sceneNameReachable(npc.location, here) ? 'present' : 'absent';
+    const npcId = findCurrentSceneIdWithIndex(scenes, npc.location ?? '', undefined, byId);
+    const located = byId.get(npcId);
+    if (!located) return sceneNameReachable(npc.location, here) ? 'present' : 'absent';
+    const rel = sceneRelation(current.path, located.path);
+    return rel === 'same' ? 'present' : rel === 'near' ? 'nearby' : 'absent';
+  };
 }
 
 /** 包含式双向匹配(地名命名粗细不一时的兜底);空串不匹配。供 findCurrentSceneId 内部用。 */
@@ -1473,10 +1495,11 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
 export function deriveMemory(
   chat: STMessage[] | null,
   upToExclusive?: number,
+  seed?: Record<string, JsonValue>,
 ): Pick<BaibaiMemory, 'state' | 'protagonist' | 'items' | 'plans' | 'scenes' | 'npcs' | 'itemLog' | 'lifeDetails' | 'vars'> {
   const mem = createEmptyMemory();
   // 变量从三层合并模板起算(无 chat 也返回初始状态);seed 时展开模板里的 ST 宏({{user}} 等)
-  mem.vars = expandVarMacros(mergeTemplates(memory.varTemplates));
+  mem.vars = seed === undefined ? expandVarMacros(mergeTemplates(memory.varTemplates)) : deepCloneJson(seed);
   if (!chat) return { state: mem.state, protagonist: mem.protagonist, items: mem.items, plans: mem.plans, scenes: mem.scenes, npcs: mem.npcs, itemLog: mem.itemLog, lifeDetails: mem.lifeDetails, vars: mem.vars };
   const end = typeof upToExclusive === 'number' ? Math.min(upToExclusive, chat.length) : chat.length;
   for (let i = 0; i < end; i++) {

@@ -1,5 +1,5 @@
 import type { Transaction } from './db';
-import { check, type Block, type Branch, type CurrentRevision, type Revision, type Row, type Snapshot, type SourceBody, type SourceRef, type Store } from './model';
+import { check, type Block, type Branch, type CurrentRevision, type MemoryRevision, type Revision, type Row, type Snapshot, type SourceBody, type SourceRef, type Store, type TableCommit } from './model';
 
 /** A descriptor is evidence, not permission to substitute a different revision's text. */
 export async function readSource(tx: Transaction, id: string): Promise<CurrentRevision | undefined> {
@@ -31,7 +31,25 @@ const evidenceStores: Store[] = ['memory_revisions', 'reviews', 'event_revisions
  * Legacy rows are not converted or removed. Metadata evidence is a descriptor root, never a body root.
  * Read reference metadata, not historical text; scope deletion to this branch's superseded snapshots.
  */
-export async function retireCurrentBodies(tx: Transaction, branch: Branch, previousRefs: SourceRef[]) {
+export async function retireCurrentBodies(tx: Transaction, branch: Branch, previousRefs: SourceRef[], current?: {
+    refs: SourceRef[]; memories: MemoryRevision[];
+}) {
+    if (current) {
+        const live = new Map(current.refs.map(ref => [ref.message, ref.revision]));
+        if (previousRefs.every(ref => live.get(ref.message) === ref.revision)) {
+            // An additive head cannot retire a prior body. Skip the history sweep
+            // only if every old current-policy snapshot has a positive, live root.
+            // Merely being an append is insufficient: unrooted blocks still need cleanup.
+            const roots = new Set([branch.head, branch.legacyHead, branch.fork?.snapshot,
+                ...current.memories.flatMap(memory => [memory.basis, memory.sourceRecovery?.snapshot])]);
+            if (branch.tableHead) {
+                const table = await tx.get<TableCommit>('table_history', branch.tableHead);
+                if (table) roots.add(table.snapshot);
+            }
+            const owned = await tx.all<Snapshot>('history_snapshots', 'branch', branch.id);
+            if (owned.every(snapshot => snapshot.snapshotSchema !== 2 || roots.has(snapshot.id))) return;
+        }
+    }
     const branches = await tx.all<Branch>('branches', 'story', branch.story);
     const snapshots = await tx.all<Snapshot>('history_snapshots', 'story', branch.story);
     const blockRows = await Promise.all([...new Set(snapshots.flatMap(s => s.blocks))].map(id => tx.get<Block>('manifest_blocks', id)));

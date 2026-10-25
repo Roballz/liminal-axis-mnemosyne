@@ -6,7 +6,7 @@ import * as canonical from './canonical';
 import { saveMemberships } from './event-memberships';
 import { editEvent, eventView, setEventArchived } from './events';
 import { newTable, saveTable } from './tables';
-import { fingerprint } from './model';
+import { fingerprint, type Branch, type MemoryRevision } from './model';
 import { REPLY_FINALITY_KEY } from './reply-finality';
 import { memory } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
@@ -126,5 +126,58 @@ test('library activation immediately revokes cached getters even before the next
         expect(bridge.canonicalLeaves()).toEqual([]);
         expect(bridge.syncedEventProjection(other, view)).toBeNull();
         await expect(bridge.readDailyMembershipContext()).rejects.toThrow('档案尚未同步');
+    } finally { other.close(); }
+});
+
+test('one appended user floor hashes only that body through the complete warm bridge', async () => {
+    const before = await setup(100);
+    const digest = vi.spyOn(crypto.subtle, 'digest');
+    const capture = vi.spyOn(canonical, 'capture');
+    ctx.chat.push({ name: '用户', is_user: true, is_system: false, mes: '本轮新问题', extra: {} });
+    const after = await bridge.syncDaily();
+    expect(digest).toHaveBeenCalledTimes(2);
+    expect(capture).not.toHaveBeenCalled(); // The committed transaction already checked the body payloads.
+    expect(after.refs.slice(0, before.refs.length)).toEqual(before.refs);
+    expect(after.sources.get(after.refs.at(-1)!.revision)?.content).toBe('本轮新问题');
+    expect(after.memories.map(memory => memory.id)).toEqual(before.memories.map(memory => memory.id));
+});
+
+test('a foreign branch advance during metadata save forces a fresh captured view', async () => {
+    const before = await setup();
+    const other = await Library.open(lib.db.name);
+    let epoch = 0;
+    try {
+        vi.mocked(ctx.saveMetadata).mockImplementationOnce(async () => {}).mockImplementationOnce(async () => {
+            await other.transaction(['branches'], 'readwrite', async tx => {
+                const branch = (await tx.get<Branch>('branches', before.branch.id))!;
+                epoch = branch.epoch + 1;
+                await tx.put('branches', { ...branch, epoch } as Branch);
+            });
+        });
+        const capture = vi.spyOn(canonical, 'capture');
+        ctx.chat.push({ name: '用户', is_user: true, is_system: false, mes: '合成追加', extra: {} });
+        const after = await bridge.syncDaily();
+        expect(capture).toHaveBeenCalledTimes(1);
+        expect(after.branch.epoch).toBe(epoch);
+    } finally { other.close(); }
+});
+
+test('selected recovery metadata written during host save is reread even without a foreign epoch change', async () => {
+    const before = await setup(), memoryId = before.memories[0].id;
+    const other = await Library.open(lib.db.name);
+    try {
+        vi.mocked(ctx.saveMetadata).mockImplementationOnce(async () => {}).mockImplementationOnce(async () => {
+            await other.transaction(['memory_revisions'], 'readwrite', async tx => {
+                const memory = (await tx.get<MemoryRevision>('memory_revisions', memoryId))!;
+                await tx.put('memory_revisions', { ...memory,
+                    sourceRecovery: { version: 1, reason: 'missing_basis', snapshot: before.snapshot.id },
+                } as MemoryRevision);
+            });
+        });
+        ctx.chat.push({ name: '用户', is_user: true, is_system: false, mes: '合成追加', extra: {} });
+        const after = await bridge.syncDaily();
+        expect(after.memories[0].sourceRecovery?.reason).toBe('missing_basis');
+        expect(bridge.canonicalLeaves()).toHaveLength(0);
+        expect(bridge.dailyState.review).toBe(1);
     } finally { other.close(); }
 });
