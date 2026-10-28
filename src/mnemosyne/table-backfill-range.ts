@@ -14,5 +14,13 @@ export function useTableBackfillRange(choices: Ref<BackfillChoice[]>, total: Ref
     const automatic = () => { startEdited.value = false; start.value = suggested.value; };
     const reset = () => { end.value = total.value - 1; automatic(); };
     const markEdited = () => { startEdited.value = true; };
-    return { start, end, startEdited, selected, suggested, valid, caughtUp, automatic, reset, markEdited };
+    /** Called only after a batch has been persisted; a deliberate historical refill keeps its own cursor. */
+    const advance = (tables: readonly string[], confirmedEnd: number) => {
+        const committed = new Set(tables);
+        for (const choice of choices.value) {
+            if (committed.has(choice.id)) choice.last = Math.max(choice.last, confirmedEnd);
+        }
+        start.value = confirmedEnd + 1;
+    };
+    return { start, end, startEdited, selected, suggested, valid, caughtUp, automatic, reset, markEdited, advance };
 }

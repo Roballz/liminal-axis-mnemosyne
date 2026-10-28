@@ -1,8 +1,8 @@
 import { cleanBody } from '@/memory/timeTag';
 import { reactive } from "vue";
 import { getContext } from "@/st/context";
-import { activeLibrary, type Library } from "./db";
-import { snapshotRefs, capture, statuses } from "./canonical";
+import { activeLibrary, libraryActivationGeneration, type Library } from "./db";
+import { snapshotRefs, statuses } from "./canonical";
 import {
   dailyState,
   hostVersion,
@@ -19,11 +19,30 @@ import {
 import { sendEvent, sendReviewEvent, type EventSender } from "./manual-events";
 import { eventJsonText } from "./event-response";
 import { parseStrictJson } from "./json";
-import { check, equal, type Branch, type Snapshot, type TableCommit } from "./model";
+import { check, equal, type Branch, type MemoryRevision, type MemoryView, type Snapshot, type TableCommit } from "./model";
+/** Approximate 180k input tokens for ordinary Chinese across DeepSeek/Gemini.
+ * This is the complete prompt's UTF-16 length, never a hard token guarantee. */
+export const TABLE_BACKFILL_MAX_CHARS = 270000;
+export interface TableBackfillBudget {
+  start: number;
+  end: number;
+  bodyChars: number;
+  tableChars: number;
+  instructionChars: number;
+  totalChars: number;
+  limitChars: number;
+}
+export interface TableBackfillProgress {
+  tables: string[];
+  start: number;
+  end: number;
+  completed: number;
+}
 export const backfillState = reactive({
   busy: false,
   status: "",
   completed: 0,
+  budget: null as TableBackfillBudget | null,
 });
 let stopped = false;
 let cancelPendingReview: (() => void) | undefined;
@@ -111,23 +130,33 @@ export interface TableBackfillReview {
 }
 export async function runTableBackfill(
   ranges: BackfillRange[],
-  maxChars = 96000,
+  maxChars = TABLE_BACKFILL_MAX_CHARS,
   sender?: EventSender,
   batchSize = 20,
   isCurrent: () => boolean = () => true,
   reviewer?: (review: TableBackfillReview) => Promise<boolean>,
+  onCommitted?: (progress: TableBackfillProgress) => void,
 ) {
   check(!backfillState.busy, "补表正在进行");
   check(Number.isSafeInteger(batchSize) && batchSize > 0, "每批楼数必须为正整数");
+  check(Number.isSafeInteger(maxChars) && maxChars > 0, "补表材料预算必须为正整数");
   check(ranges.length && new Set(ranges.map(r => r.table)).size === ranges.length, "请选择不重复的表");
   check(isCurrent(), "聊天已改变，请重新打开");
   backfillState.busy = true;
   stopped = false;
   backfillState.completed = 0;
+  backfillState.status = "";
+  backfillState.budget = null;
   try {
-    const initial = await syncDaily(), lib = await activeLibrary();
+    const selectedLibrary = activeLibrary(), activation = libraryActivationGeneration();
+    const initial = await syncDaily(), lib = await selectedLibrary;
     const host = hostVersion(), generation = dailyState.generation;
-    const guard = () => !stopped && isCurrent() && host === hostVersion() && generation === dailyState.generation;
+    const guard = () => !stopped && isCurrent() && host === hostVersion() && generation === dailyState.generation &&
+      selectedLibrary === activeLibrary() && activation === libraryActivationGeneration();
+    check(guard(), "聊天或档案库改变，补表停止");
+    // Retain the verified immutable source objects once. Each batch receives its
+    // own small view/branch wrapper: table commits must not mutate bridge caches.
+    const sourceView = { ...initial, branch: { ...initial.branch } };
     const groups = new Map<string, BackfillRange[]>();
     for (const range of ranges) {
       check(Number.isSafeInteger(range.start) && Number.isSafeInteger(range.end) && range.start >= 0 && range.end >= range.start && range.end < initial.cutoff, "补表楼层范围无效（楼号从0开始）");
@@ -139,22 +168,38 @@ export async function runTableBackfill(
       for (let start = range.start; start <= range.end && !stopped; start += batchSize) {
         const end = Math.min(start + batchSize - 1, range.end);
         check(guard(), "聊天改变，补表停止");
-        const view = await capture(lib, initial.branch.id), tables = await readTables(lib, view.branch);
-        const valid = await statuses(lib, view);
+        const view = await lib.transaction(['branches', 'memory_views', 'memory_revisions'], 'readonly', async tx => {
+          const branch = await tx.get<Branch>('branches', sourceView.branch.id);
+          check(branch && branch.head === sourceView.branch.head && branch.view === sourceView.branch.view,
+            "补表正文或摘要来源已改变，请重新打开");
+          const selection = await tx.get<MemoryView>('memory_views', branch.view);
+          check(selection, '摘要视图缺失');
+          // Recovery flags can change in place, including through another DB
+          // connection without an epoch bump. Refresh selected summary metadata,
+          // while retaining the immutable body snapshot across all batches.
+          const memories = await Promise.all(Object.values(selection.selections)
+            .map(key => tx.get<MemoryRevision>('memory_revisions', key)));
+          check(memories.every(Boolean), '摘要版本缺失');
+          return { ...sourceView, branch, selection, memories: memories as MemoryRevision[] };
+        });
+        const tables = await readTables(lib, view.branch), valid = await statuses(lib, view);
         const inputs = group.map(r => {
           const input = tables.find(t => t.def.id === r.table);
           check(input && input.def.columns.length, "表已删除或没有字段");
           return { ...input, def: { ...input.def, ai: true }, rows: input.rows.filter(row => row.sources.every(id => valid.get(id) === 'valid')) };
         });
-        const prompt = summaryTablesPrompt(inputs), refs = view.refs.slice(start, end + 1);
+        const prompt = summaryTablesPrompt(inputs, null), refs = view.refs.slice(start, end + 1);
         const body = refs.map((ref, i) => {
           const source = view.sources.get(ref.revision);
           return { floor: start + i, role: source?.role,
             body: getContext()?.chat[start + i]?.extra?.bbs_omit ? null : source ? cleanBody(source.content) : undefined };
         });
-        const user = prompt.user + "\n【所选正文，null为番外不填写】\n" + JSON.stringify(body);
+        const bodyHeading = "\n【所选正文，null为番外不填写】\n", bodyText = JSON.stringify(body);
+        const user = prompt.user + bodyHeading + bodyText;
         const system = prompt.system + "\n这是独立补表，只返回根对象 customTables，包含所有选中的表；不生成摘要或修改其他状态。历史范围可能与已填内容重叠：已有内容不另建、不重复更新或追加；只补充缺失事实。";
-        check(system.length + user.length <= maxChars, "补表完整材料超过预算，未发送；请减少每批楼数或可见表内容");
+        backfillState.budget = { start, end, bodyChars: bodyText.length, tableChars: prompt.user.length,
+          instructionChars: system.length + bodyHeading.length, totalChars: system.length + user.length, limitChars: maxChars };
+        check(backfillState.budget.totalChars <= maxChars, "补表完整材料超过预算，已暂停，未发送；请调整每批楼数或可见表内容后继续");
         check((await dailyCurrent(view, host, generation)) && guard(), "补表材料已改变");
         backfillState.status = `${inputs.map(t => t.def.name).join('、')}：#${start} → #${end}`;
         const raw = await (sender ?? (reviewer ? sendReviewEvent : sendEvent))([{ role: 'system', content: system }, { role: 'user', content: user }]);
@@ -179,6 +224,10 @@ export async function runTableBackfill(
               const plan = parse(text);
               await commitSummaryTables(lib, view, plan, [], () => live() && guard(), { start, end, refs });
               saved = true;
+              backfillState.completed++;
+              // Publish only durable progress, before any later UI refresh can
+              // fail. A retry must never lose an already committed batch.
+              onCommitted?.({ tables: group.map(r => r.table), start, end, completed: backfillState.completed });
             } finally { saving = false; }
           },
         };
@@ -189,7 +238,6 @@ export async function runTableBackfill(
           if (!accepted || stopped) { stopped = true; break; }
           check(saved, '补表返回尚未确认保存');
         } else await review.confirm(raw);
-        backfillState.completed++;
         await refreshDailyTables();
       }
     }

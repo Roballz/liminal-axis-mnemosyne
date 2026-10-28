@@ -45,3 +45,32 @@ test('fully confirmed and empty chats have no valid automatic request, while del
         r.start.value = 0; r.end.value = 10; expect(r.valid.value).toBe(false);
     } finally { r.scope.stop(); }
 });
+
+test('committed shared batches update selected progress and the next start without changing the requested end', () => {
+    const r = setup();
+    try {
+        r.choices.value[0].selected = true; r.choices.value[1].selected = true;
+        expect(r.start.value).toBe(3);
+        r.advance(['a', 'b'], 4);
+        expect(r.choices.value.map(c => c.last)).toEqual([5, 4, -1]);
+        expect(r.start.value).toBe(5); expect(r.end.value).toBe(9);
+        r.advance(['a', 'b'], 6);
+        expect(r.choices.value.map(c => c.last)).toEqual([6, 6, -1]);
+        expect(r.start.value).toBe(7); expect(r.startEdited.value).toBe(false);
+    } finally { r.scope.stop(); }
+});
+
+test('historical refill advances its own cursor while preserving later confirmed progress', () => {
+    const r = setup();
+    try {
+        r.choices.value[0].last = 9; r.choices.value[0].selected = true;
+        r.start.value = 0; r.end.value = 4; r.markEdited();
+        r.advance(['a'], 1);
+        expect(r.choices.value[0].last).toBe(9);
+        expect(r.start.value).toBe(2); expect(r.end.value).toBe(4);
+        expect(r.startEdited.value).toBe(true); expect(r.valid.value).toBe(true);
+        r.advance(['a'], 3);
+        expect(r.start.value).toBe(4); expect(r.choices.value[0].last).toBe(9);
+        r.reset(); expect(r.start.value).toBe(10); expect(r.end.value).toBe(9);
+    } finally { r.scope.stop(); }
+});

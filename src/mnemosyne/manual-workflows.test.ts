@@ -19,16 +19,19 @@ import {
   prepareFloorEvent,
   prepareFloorEventUpdate,
   prepareEventRewrite,
+  type EventSender,
 } from "./manual-events";
 import { newTable, saveTable, readTables, applyRows } from "./tables";
 import {
   tableLastFloors,
   runTableBackfill,
   stopTableBackfill,
+  backfillState,
+  TABLE_BACKFILL_MAX_CHARS,
 } from "./table-backfill";
 import { runEvents, stopDailyJob, settings, jobState } from "./jobs";
 import { exportLibrary, restoreLibrary } from "./migration";
-import type { TableDef, TableRow } from "./model";
+import type { Branch, MemoryRevision, Snapshot, TableDef, TableRow } from "./model";
 const answer = JSON.stringify({
   title: "一天约会",
   status: "open",
@@ -886,6 +889,193 @@ test('configured shared batches wait for valid confirmation too; cancelling late
   await expect(runTableBackfill([{table:one.id,start:0,end:1}],96000,sender,0)).rejects.toThrow('正整数');
   expect(sender).toHaveBeenCalledTimes(2);
 });
+function backfillBody(messages: Parameters<EventSender>[0]) {
+  return JSON.parse(messages[1].content.split('\n【所选正文，null为番外不填写】\n')[1]) as
+    { floor: number; role: string; body: string | null }[];
+}
+
+test('backfill fixed batches advance without repeating bodies, reuse archived sources and include newly committed rows', async () => {
+  const def = await table();
+  await syncDaily(); // Measure an already archived chat; setup reads are not batch work.
+  const reads = vi.spyOn(Transaction.prototype, 'get'), committed = vi.fn();
+  const floors: number[][] = [];
+  const sender = vi.fn(async (messages: Parameters<EventSender>[0]) => {
+    floors.push(backfillBody(messages).map(body => body.floor));
+    const batch = floors.length;
+    for (let previous = 1; previous < batch; previous++)
+      expect(messages[1].content).toContain(`已保存批次${previous}`);
+    expect(committed).toHaveBeenCalledTimes(batch - 1);
+    return JSON.stringify({ customTables: [{ table_id: def.id, add: [{ detail: `已保存批次${batch}` }], update: [] }] });
+  });
+  await runTableBackfill([{ table: def.id, start: 0, end: 5 }], undefined, sender, 2, () => true, undefined, committed);
+  expect(floors).toEqual([[0, 1], [2, 3], [4, 5]]);
+  expect(reads.mock.calls.filter(([store]) => store === 'source_revisions' || store === 'source_bodies')).toEqual([]);
+  expect(committed.mock.calls.map(([progress]) => progress)).toEqual([
+    { tables: [def.id], start: 0, end: 1, completed: 1 },
+    { tables: [def.id], start: 2, end: 3, completed: 2 },
+    { tables: [def.id], start: 4, end: 5, completed: 3 },
+  ]);
+  expect(backfillState.completed).toBe(3);
+  expect((await lib.all<TableRow>('custom_table_rows')).map(record => record.values.detail).sort())
+    .toEqual(['已保存批次1', '已保存批次2', '已保存批次3']);
+});
+
+test('backfill rereads foreign summary recovery metadata between batches without an epoch change', async () => {
+  const def = await table(), before = await syncDaily(), memoryId = before.memories[0].id;
+  const detail = '待人工核对的摘要派生表行';
+  await applyRows(lib, before, def, [{ row_id: null, values: { detail } }], false, [memoryId]);
+  await syncDaily();
+  const other = await Library.open(lib.db.name);
+  const raw = JSON.stringify({ customTables: [{ table_id: def.id, add: [], update: [] }] });
+  let calls = 0, reviews = 0;
+  const sender = vi.fn(async (messages: Parameters<EventSender>[0]) => {
+    const batch = calls++;
+    expect(backfillBody(messages).map(body => body.floor)).toEqual(batch === 0 ? [0, 1] : [2, 3]);
+    if (batch === 0) expect(messages[1].content).toContain(detail);
+    else expect(messages[1].content).not.toContain(detail);
+    return raw;
+  });
+  try {
+    await runTableBackfill([{ table: def.id, start: 0, end: 3 }], undefined, sender, 2, () => true, async review => {
+      await review.confirm(raw);
+      if (reviews++ === 0) {
+        const branch = await other.get<Branch>('branches', before.branch.id);
+        await other.transaction(['memory_revisions'], 'readwrite', async tx => {
+          const memory = (await tx.get<MemoryRevision>('memory_revisions', memoryId))!;
+          await tx.put('memory_revisions', { ...memory,
+            sourceRecovery: { version: 1, reason: 'missing_basis', snapshot: before.snapshot.id },
+          } as MemoryRevision);
+        });
+        expect(await other.get<Branch>('branches', before.branch.id)).toEqual(branch);
+      }
+      return true;
+    });
+    expect(sender).toHaveBeenCalledTimes(2);
+    expect(backfillState.completed).toBe(2);
+    // Filtering model input must preserve the user's stored row and its provenance.
+    const record = (await lib.all<TableRow>('custom_table_rows'))[0];
+    expect(record.values.detail).toBe(detail);
+    expect(record.sources).toEqual([memoryId]);
+  } finally { other.close(); }
+});
+
+test('backfill exceeding a later batch budget pauses without resizing it and preserves committed progress', async () => {
+  ctx.chat[2].mes = '第二批材料甲'.repeat(600);
+  ctx.chat[3].mes = '第二批材料乙'.repeat(600);
+  const def = await table(), committed = vi.fn();
+  const sender = vi.fn(async () => JSON.stringify({
+    customTables: [{ table_id: def.id, add: [{ detail: '已保存第0至1楼' }], update: [] }],
+  }));
+  await expect(runTableBackfill([{ table: def.id, start: 0, end: 5 }], 5000, sender, 2, () => true, undefined, committed))
+    .rejects.toThrow('超过预算');
+  expect(sender).toHaveBeenCalledTimes(1);
+  expect(committed.mock.calls).toEqual([[{ tables: [def.id], start: 0, end: 1, completed: 1 }]]);
+  expect(backfillState.completed).toBe(1);
+  const budget = backfillState.budget!;
+  const body = [2, 3].map(floor => ({ floor, role: ctx.chat[floor].is_user ? 'user' : 'assistant', body: ctx.chat[floor].mes }));
+  expect(budget).toMatchObject({ start: 2, end: 3, limitChars: 5000, bodyChars: JSON.stringify(body).length });
+  expect(budget.totalChars).toBe(budget.bodyChars + budget.tableChars + budget.instructionChars);
+  expect(budget.totalChars).toBeGreaterThan(5000);
+  // A one-floor retry would fit, but changing the user's batch is not automatic.
+  expect(budget.totalChars - budget.bodyChars + JSON.stringify(body.slice(0, 1)).length).toBeLessThanOrEqual(5000);
+  const progress = await tableLastFloors(lib, (await syncDaily()).branch);
+  expect(progress.floors[def.id]).toBe(1);
+  expect((await lib.all<TableRow>('custom_table_rows'))[0].values.detail).toBe('已保存第0至1楼');
+});
+
+test('backfill uses its complete request allowance above 96000 table characters and reports exact material sizes', async () => {
+  const def = await table();
+  await applyRows(lib, await syncDaily(), def, [{ row_id: null, values: { detail: '合成表内容'.repeat(22000) } }], false);
+  const sender = vi.fn(async (messages: Parameters<EventSender>[0]) => {
+    const budget = backfillState.budget!;
+    expect(budget.tableChars).toBeGreaterThan(96000);
+    expect(budget.bodyChars).toBe(JSON.stringify(backfillBody(messages)).length);
+    expect(budget.totalChars).toBe(messages.reduce((total, message) => total + message.content.length, 0));
+    expect(budget.totalChars).toBe(budget.bodyChars + budget.tableChars + budget.instructionChars);
+    expect(budget.limitChars).toBe(TABLE_BACKFILL_MAX_CHARS);
+    expect(budget.totalChars).toBeLessThanOrEqual(budget.limitChars);
+    return JSON.stringify({ customTables: [{ table_id: def.id, add: [], update: [] }] });
+  });
+  await runTableBackfill([{ table: def.id, start: 0, end: 1 }], undefined, sender, 2);
+  expect(sender).toHaveBeenCalledTimes(1);
+});
+
+test.each(['cancel', 'request failure'] as const)('backfill %s cannot report an uncommitted batch as successful', async outcome => {
+  const def = await table(), committed = vi.fn();
+  const sender = vi.fn(async () => {
+    if (outcome === 'request failure') throw new Error('合成请求失败');
+    return JSON.stringify({ customTables: [{ table_id: def.id, add: [{ detail: '未确认' }], update: [] }] });
+  });
+  const job = runTableBackfill([{ table: def.id, start: 0, end: 5 }], undefined, sender, 2, () => true,
+    async () => false, committed);
+  if (outcome === 'request failure') await expect(job).rejects.toThrow('合成请求失败');
+  else await job;
+  expect(sender).toHaveBeenCalledTimes(1);
+  expect(committed).not.toHaveBeenCalled();
+  expect(backfillState.completed).toBe(0);
+  expect(await lib.all('custom_table_rows')).toEqual([]);
+  expect(await lib.all('table_receipts')).toEqual([]);
+});
+
+test('backfill refuses a late confirmation after the archive head changes without a host edit', async () => {
+  const def = await table(), before = await syncDaily(), committed = vi.fn();
+  const raw = JSON.stringify({ customTables: [{ table_id: def.id, add: [], update: [] }] });
+  const sender = vi.fn(async () => raw);
+  await expect(runTableBackfill([{ table: def.id, start: 0, end: 1 }], undefined, sender, 2, () => true, async review => {
+    await lib.transaction(['branches', 'history_snapshots'], 'readwrite', async tx => {
+      const branch = (await tx.get<Branch>('branches', before.branch.id))!;
+      const snapshot = (await tx.get<Snapshot>('history_snapshots', branch.head))!;
+      const replacement = { ...snapshot, id: `${snapshot.id}-changed-head`, previous: snapshot.id };
+      await tx.add('history_snapshots', replacement);
+      await tx.put('branches', { ...branch, head: replacement.id, epoch: branch.epoch + 1 });
+    });
+    await review.confirm(raw);
+    return true;
+  }, committed)).rejects.toThrow('迟到');
+  expect(sender).toHaveBeenCalledTimes(1);
+  expect(committed).not.toHaveBeenCalled();
+  expect(await lib.all('table_receipts')).toEqual([]);
+});
+
+test('backfill rejects a late result after switching to a restored library with identical branch IDs', async () => {
+  const def = await table(), committed = vi.fn(), originalName = lib.db.name;
+  const restored = await restoreLibrary(await exportLibrary(lib), false);
+  const raw = JSON.stringify({ customTables: [{ table_id: def.id, add: [{ detail: '迟到结果' }], update: [] }] });
+  const sender = vi.fn(async () => raw);
+  try {
+    await expect(runTableBackfill([{ table: def.id, start: 0, end: 1 }], undefined, sender, 2, () => true, async review => {
+      await activateLibrary(restored);
+      await review.confirm(raw);
+      return true;
+    }, committed)).rejects.toThrow('迟到');
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(committed).not.toHaveBeenCalled();
+    expect(await restored.all('table_receipts')).toEqual([]);
+  } finally {
+    lib = await Library.open(originalName);
+    await activateLibrary(lib);
+    restored.close();
+  }
+  expect(await lib.all('table_receipts')).toEqual([]);
+  expect(backfillState.completed).toBe(0);
+});
+
+test('backfill publishes durable progress even if the following projection refresh fails', async () => {
+  const def = await table(), committed = vi.fn();
+  const bridge = await import('./bridge');
+  vi.spyOn(bridge, 'refreshDailyTables').mockRejectedValueOnce(new Error('合成刷新失败'));
+  const sender = vi.fn(async () => JSON.stringify({
+    customTables: [{ table_id: def.id, add: [{ detail: '已落库' }], update: [] }],
+  }));
+  await expect(runTableBackfill([{ table: def.id, start: 0, end: 5 }], undefined, sender, 2, () => true, undefined, committed))
+    .rejects.toThrow('合成刷新失败');
+  expect(sender).toHaveBeenCalledTimes(1);
+  expect(committed.mock.calls).toEqual([[{ tables: [def.id], start: 0, end: 1, completed: 1 }]]);
+  expect(backfillState.completed).toBe(1);
+  expect((await lib.all<TableRow>('custom_table_rows'))[0].values.detail).toBe('已落库');
+  expect((await tableLastFloors(lib, (await syncDaily()).branch)).floors[def.id]).toBe(1);
+});
+
 test('editing a table while reviewing its response rejects the old response without a second API call', async () => {
   const def = await table(), raw = JSON.stringify({customTables:[{table_id:def.id,add:[],update:[]}]});
   const sender = vi.fn(async () => raw);

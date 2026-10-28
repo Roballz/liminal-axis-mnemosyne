@@ -264,7 +264,9 @@ export async function readTables(lib: Library, branch: Branch): Promise<TableInp
 export function visibleCells(def: TableDef, record: TableRow) {
     return Object.fromEntries(def.columns.filter((c) => c.id in record.values).map((c) => [c.id, record.values[c.id]]));
 }
-export function summaryTablesPrompt(tables: TableInput[]) {
+// Independent backfill passes null and checks its complete request (including
+// body text) once, so the ordinary summary limit cannot hide budget details.
+export function summaryTablesPrompt(tables: TableInput[], maxChars: number | null = 96000) {
     const enabled = tables.filter((t) => t.def.ai && t.def.columns.length);
     if (!enabled.length) return { system: '', user: '' };
     const system = `\n【自定义表：与本次摘要在同一个 JSON 对象返回】
@@ -292,7 +294,7 @@ replace（覆写）输出新值；append（追加）只输出新增片段；lock
                 rows: rows.map((r) => ({ row_id: r.id, values: visibleCells(def, r) })),
             })),
         );
-    check(system.length + user.length <= 96000, '自定义表超过 96000 字符，请隐藏无需发送的行后再摘要；未截断表格');
+    if (maxChars !== null) check(system.length + user.length <= maxChars, `自定义表超过 ${maxChars} 字符，请隐藏无需发送的行后再摘要；未截断表格`);
     return { system, user };
 }
 export function parseSummaryTables(value: unknown, inputs: TableInput[], branch: string): SummaryTablePlan | null {
