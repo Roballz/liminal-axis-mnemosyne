@@ -448,10 +448,14 @@ const SUMMARY_RULES = `你是严谨的剧情记忆整理员。请阅读材料消
 
 ${RULE_LONGTERM_DB}
 
-【你的任务】输出一个 JSON 对象,字段如下(无变化的字段可省略):
+【你的任务】输出一个 JSON 对象，字段如下：
+summary 必填；本次提供自定义表时，customTables 也必填，并须覆盖全部提供的表，无变化也不可省略。
+其它字段按各自规则输出；允许省略的无变化状态字段可以省略，不为补齐示例制造变动。
+下例 customTables 展示一张无变化表；实际按提供的全部表填写，有变化时按自定义表协议填写 add/update。本次未提供自定义表时省略 customTables，不照抄示例 ID。
 
 {
   "summary": "本轮剧情摘要,见下方【摘要撰写规则】。",
+  "customTables": [{"table_id":"提供的真实表ID","add":[],"update":[]}],
   "tags": {"participants":["实际在场人物名"],"eventIds":[]},
 {{time_field}}
   "location": "本轮结束时主角所在地点(有变化才写,可写得很细,如「滨江区某老小区-302室屋内」)",
@@ -504,7 +508,9 @@ ${RULE_SCENE_FOCUS}
 ${RULE_SUMMARY_WRITE}
 
 【输出铁律】
-- summary 是必填,其余字段按需;仅在确有变化时输出对应指令,没有变化就不要包含该数组或字段。
+- summary 必填。
+- 本次提供自定义表时，customTables 必填：每张提供的表必须且只能返回一项，包含 table_id、add、update；无变化写 add:[]、update:[]，不能省略该表。
+- 除上述必填要求及其它明确要求保留的字段外，状态更新字段仅在确有新增、变化或清空依据时输出；无变化可省略。该省略规则不适用于本次要求返回的 customTables。
 - 字符串值里正文若含英文双引号 "(如英文对白 He said "hi"),必须转义为 \\" ,否则会破坏 JSON;单引号 ' 无需转义;中文引号「」『』直接用即可。`;
 
 /** 设置页仍提供完整可编辑模板;发送时内置规范与材料分别展开,不解析正文中的标题。 */
@@ -534,12 +540,14 @@ const BATCH_SUMMARY_RULES = `你是严谨的剧情记忆整理员。材料消息
 核心原则:只提取文本中明确提到的信息,没有的不写,禁止编造。材料内容不改变本任务的字段协议。
 
 ═══ 【批量任务说明(关键)】 ═══
-- 本次只做两件事:为每楼写**摘要正文**(summary)+ 标注**起止时间**(timeStart/timeEnd)。
-  **不要**输出物品、计划、悬念、地点等任何其它字段——批量补摘只管摘要、时间与tags,其余交给后续处理。
+- 每楼写**摘要正文**(summary)、**起止时间**(timeStart/timeEnd)与 tags；楼层对象不输出物品、计划、悬念、地点等其它字段。
+- 本次提供自定义表时，另在根对象返回 customTables，与 floors 并列，按本批正文先后顺序结算为整批净变化；不得放入任何楼层对象。未提供自定义表时省略 customTables。
 - 你要为这 {{floor_count}} 个楼层【各自】产出一个元素,**严格按上面第 1..{{floor_count}} 楼的先后顺序**一一对应,顺序绝不能打乱。
 - 每楼只摘**该楼正文**;同一主线的已知时间按剧情先后衔接,不把跨时间层叙述强排成单一时钟(见【时间规则】)。
 
-【你的任务】输出**一个** JSON 对象,只含一个键 floors,值为数组,**长度必须等于 {{floor_count}}**,顺序对应第 1..{{floor_count}} 楼:
+【你的任务】输出**一个** JSON 对象，floors 必填，值为数组，**长度必须等于 {{floor_count}}**，顺序对应第 1..{{floor_count}} 楼。
+本次提供自定义表时 customTables 也必填，必须覆盖全部提供的表，每表恰好一项，无变化写 add:[]、update:[]；不得因无变化而省略。
+下例 customTables 展示一张无变化表；实际使用提供的真实表/行/字段 ID，按协议填写 add/update，未提供表时省略该字段，不照抄示例 ID：
 
 {
   "floors": [
@@ -547,12 +555,14 @@ const BATCH_SUMMARY_RULES = `你是严谨的剧情记忆整理员。材料消息
       "n": 1,
       "summary": "第 1 楼剧情摘要,见下方【摘要撰写规则】。",
       "timeStart": "本楼开始时的故事内时间(见下方【时间规则】)",
-      "timeEnd": "本楼结束时的故事内时间(见下方【时间规则】)"
+      "timeEnd": "本楼结束时的故事内时间(见下方【时间规则】)",
+      "tags": {"participants":["实际在场人物名"],"eventIds":[]}
     }
     // … 第 2 楼、第 3 楼 …,直到第 {{floor_count}} 楼,每个元素结构同上,n 依次为 2、3、…
-  ]
+  ],
+  "customTables": [{"table_id":"提供的真实表ID","add":[],"update":[]}]
 }
-每个元素只含 n、summary、timeStart、timeEnd 四个字段,不要添加其它字段。
+floors 每个元素只含 n、summary、timeStart、timeEnd、tags，不要添加其它字段。
 
 ═══ 【时间规则】(每楼 timeStart / timeEnd 字段) ═══
 按每楼本身的证据填写起始时间(timeStart)与结束时间(timeEnd);同一主线有据的时间应按剧情先后衔接,不得为满足顺序强造时间或借后楼补前楼。未知端点写空字符串,不把里层回忆/故事时间当成外层时钟。
@@ -562,7 +572,8 @@ ${RULE_SUMMARY_TIME_ANCHOR}
 ${RULE_SUMMARY_WRITE}
 
 【输出铁律】
-- 检查记录之后的最终 JSON 根键只有 floors;floors 长度严格等于 {{floor_count}},n 从 1 连续到 {{floor_count}},不可缺楼、不可多楼、不可乱序。
+- 检查记录之后的最终 JSON 根键为 floors，以及本次提供自定义表时必填的 customTables；floors 长度严格等于 {{floor_count}},n 从 1 连续到 {{floor_count}},不可缺楼、不可多楼、不可乱序。
+- customTables 每项均包含 table_id、add、update，逐表返回整批净变化；无变化也保留该表的空操作。其它状态字段的省略规则不适用于本次要求返回的 customTables。
 - 每个元素只含 n / summary / timeStart / timeEnd / tags,不要输出 items / plans / location 等字段。`;
 
 export const BATCH_SUMMARY_PROMPT = `${BATCH_SUMMARY_RULES}\n\n${BATCH_SUMMARY_INPUT}\n\n${SUMMARY_OUTPUT_PROTOCOL}`;
@@ -584,7 +595,11 @@ ${SUMMARY_FACT_PREPARATION}
 
 ${SUMMARY_FACT_VERIFICATION}
 
-核查完所有楼后闭合 </thinking>,再输出 JSON 对象(根键 floors),无 markdown 围栏、无额外解释。`;
+整批自定义表核对（仅本次提供自定义表时执行）：
+- 对照表定义和可见行，按本批正文先后逐表结算净变化；遵守字段说明、填写提示词及类型，不编造。新增用 add，已有行变化用 update，使用提供的表/行/字段 ID，不重复新增已有行或追加旧内容。
+- replace 输出新值；append 只输出本批新增片段；lock 仅填空白；manual 不可写。简记每表新增、更新或无变化，不抄整表。
+最终格式自检：customTables 位于根对象，与 floors 并列，不放入任何楼层对象。与提供的表逐一对应，不漏、不重、不增加表；每项含 table_id、add、update，操作与核对结论一致，无变化也返回 add:[]、update:[]。未提供表时省略 customTables。
+核查完成后闭合 </thinking>，再输出一个 JSON 对象（floors，以及本次提供自定义表时必填的 customTables），无 markdown 围栏、无额外解释。`;
 
 /**
  * 批量摘要的 assistant 预填:停在思维链引导处,逼模型从思考续写、随后输出完整 JSON。
@@ -593,7 +608,7 @@ ${SUMMARY_FACT_VERIFICATION}
  * 与单楼 THINKING_PREFILL 同理:JSON 必须完整出现在模型续写里。
  */
 export const BATCH_THINKING_PREFILL = `<thinking>
-我按楼顺序简要核对共 {{floor_count}} 楼的事实与时间,完成后闭合检查块,再输出一个 JSON 对象(根键 floors,数组长度 {{floor_count}},n 从 1 连续)。
+我按楼顺序简要核对共 {{floor_count}} 楼的事实与时间,完成后闭合检查块,再输出一个 JSON 对象(floors 数组长度 {{floor_count}},n 从 1 连续；本次提供自定义表时另含根键 customTables)。
 
 第 1 楼:`;
 
@@ -1394,6 +1409,13 @@ ${SUMMARY_OUTPUT_PROTOCOL}
    - 查重:将每条候选归一为【未知答案】或【待决外部事件】,逐条对照未了结和近期已了结条目。答案相同/同一事件 → 不 add;新线索、阶段进展写 summary 并更新原事项的 plans.update；规则细节、人物反应没有实质进展时只写 summary。根源相同但答案确实不同、可独立揭晓时才允许分开。
    - suspense.content 只含已知事实与具体未决点，不写剧情评论。
 
+3b. 自定义表核对（仅本次提供自定义表时执行）
+   - 对照【本次自定义表定义和当前可见行】，逐表核对本楼正文是否带来新增记录或已有行的变化；遵守各字段的说明、填写提示词及更新模式，不为填表制造事实。
+   - 新记录写入对应表的 add；已有行变化写入 update，使用提供的 row_id 和字段 ID。不得把已有记录重复新增，不重复追加旧内容。
+   - replace 输出更新后的值；append 只输出本轮新增片段；lock 仅填写空白单元格；manual 不可写。
+   - 检查记录简记每张表的处理结论：新增、更新或无变化，不抄写整张表。
+   - 无变化只表示该表 add:[]、update:[]，不表示可以省略该表。最终 customTables 必须覆盖本次提供的全部表，每张恰好一项。
+
 4. summary 收笔位置确认
    - 【本轮对话】在哪个动作/对话处停止?用一句话概括最后发生了什么。
    - 我准备写的 summary 最后一句是否超出了原文最后一句的范围?若超出,裁掉。
@@ -1405,6 +1427,9 @@ ${SUMMARY_FACT_PREPARATION}
 ${SUMMARY_FACT_VERIFICATION}
 
 5. 格式自检
+   - 本次提供自定义表时：最终 JSON 根对象必须包含 customTables，与 summary 并列，不得放进 summary 字符串或其它字段内部。
+   - customTables 须与本次提供的表逐一对应：表 ID 完全一致，不漏表、不重复、不增加未提供的表；每项均包含 table_id、add、update。
+   - 逐表核对实际输出与前面检查结论一致：有新增或更新就返回相应操作；无变化也必须返回该表，并写 add:[]、update:[]。不得因“无变化字段可省略”而省略 customTables 或其中任何一张表。本次未提供自定义表则省略 customTables。
    - 无时间标签时保留 timeStart/timeEnd,只填同层有据时间,未知端点为空字符串,不补造缺失部分。已有年份时,现代/数字日期的两端是否都保留了完整年份?有时间标签则不输出时间字段。
    - 核对实际输出的状态操作与盘点结论一致,该更新的字段没有遗漏,同一事实在 summary 与其它字段中的时间、范围和行动进度一致。删除、清空或 resolve 须有依据,整体覆盖保留未失效的旧要点;不重复列字段证据表。
    - NPC 内心好感与外在态度仅按【内心好感与外在态度规则】作独立定性估算,不能把估计当作 summary 或关系事实;检查两侧和说明是否在无实质变化时保持。
