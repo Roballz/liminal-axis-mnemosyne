@@ -31,7 +31,9 @@ export async function recordTableWrite(tx: Transaction, branch: Branch, defs: Ta
     const snapshot = await tx.get<Snapshot>('history_snapshots', branch.head);
     check(prior && snapshot, '表格历史不完整');
     const sequence = prior.sequence + 1;
-    const checkpoint = prior.depth >= 63;
+    // The first successful write after a gap establishes a complete current baseline.
+    // Keep its predecessor so earlier cutoffs still see the original uncertainty.
+    const checkpoint = prior.gap || prior.depth >= 63;
     // Projection retains abandoned tombstones for old receipts. They must not enter a new checkpoint.
     const base = checkpoint ? await tableStateAt(tx, prior.id) : { defs: [], rows: [] };
     const state = {
@@ -39,9 +41,10 @@ export async function recordTableWrite(tx: Transaction, branch: Branch, defs: Ta
         rows: [...new Map([...base.rows, ...rows].map(r => [r.id, r])).values()] };
     const commit: TableCommit = { ...row('th'), story: branch.story, branch: branch.id,
         previous: prior.id, parent: prior.id, snapshot: branch.head, cutoff: snapshot.length,
-        sequence, depth: checkpoint ? 0 : prior.depth + 1, kind: 'write', operation, checkpoint, gap: !!branch.tableHistoryGap, ...state };
+        sequence, depth: checkpoint ? 0 : prior.depth + 1, kind: 'write', operation, checkpoint, gap: false, ...state };
     await tx.add('table_history', commit);
     branch.tableHead = commit.id;
+    branch.tableHistoryGap = false;
 }
 
 export async function tableStateAt(tx: Transaction, head: string | null) {
@@ -158,18 +161,27 @@ export async function reconcileTableHistory(tx: Transaction, branch: Branch, ref
     const prior = (await tx.get<TableCommit>('table_history', branch.tableHead))!;
     const target = await compatibleTableHead(tx, prior.id, refs, variants);
     if (target?.id === prior.id) return;
+    const gap = target ? target.gap : await missingTableBaseline(tx, prior);
     // Repeated edits after the same rollback do not create another table transition.
     // Real writes create a new write head, so their later rollback remains recorded.
     if (prior.kind === 'restore' && prior.parent === (target?.id ?? null) &&
-        !prior.defs.length && !prior.rows.length && prior.gap === (!target || target.gap)) return;
+        !prior.defs.length && !prior.rows.length && prior.gap === gap) return;
     await adoptProjection(tx, branch, await tableStateAt(tx, target?.id ?? null));
     const commit: TableCommit = { ...row('th'), story: branch.story, branch: branch.id,
-        previous: prior.id, parent: target?.id ?? null, snapshot: branch.head, cutoff: refs.length,
+        previous: prior.id, parent: target?.id ?? null, snapshot: branch.head, cutoff: !target && !gap ? 0 : refs.length,
         sequence: prior.sequence + 1, depth: target ? target.depth + 1 : 0, kind: 'restore', operation: '', checkpoint: !target,
-        gap: !target || target.gap, defs: [], rows: [] };
+        gap, defs: [], rows: [] };
     await tx.add('table_history', commit);
     branch.tableHead = commit.id;
     branch.tableHistoryGap = commit.gap;
+}
+
+/** A missing compatible source is not a gap when the adopted history is known empty. */
+async function missingTableBaseline(tx: Transaction, prior: TableCommit) {
+    if (prior.gap) return true;
+    const state = await tableStateAt(tx, prior.id);
+    // Deleted records are still evidence that table history existed.
+    return !!(state.defs.length || state.rows.length);
 }
 
 /** Copy eligible state ancestry once. No mutable parent table/row is shared with the child. */
@@ -207,11 +219,12 @@ export async function inheritTableHistory(tx: Transaction, parent: Branch, branc
         await tx.add('table_history', copied);
         branch.tableHead = copied.id;
     }
-    branch.tableHistoryGap = !target || target.gap;
+    branch.tableHistoryGap = target ? target.gap
+        : await missingTableBaseline(tx, (await tx.get<TableCommit>('table_history', parent.tableHead!))!);
     if (!target) {
         const baseline: TableCommit = { ...row('th'), story: branch.story, branch: branch.id, previous: null, parent: null,
-            snapshot: branch.head, cutoff: refs.length, sequence: 1, depth: 0, kind: 'inherit', operation: '',
-            checkpoint: true, gap: true, defs: [], rows: [] };
+            snapshot: branch.head, cutoff: branch.tableHistoryGap ? refs.length : 0, sequence: 1, depth: 0, kind: 'inherit', operation: '',
+            checkpoint: true, gap: branch.tableHistoryGap, defs: [], rows: [] };
         await tx.add('table_history', baseline); branch.tableHead = baseline.id;
     }
     await adoptProjection(tx, branch, await tableStateAt(tx, branch.tableHead!));

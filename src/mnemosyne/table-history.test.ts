@@ -1,10 +1,10 @@
 import 'fake-indexeddb/auto';
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 import { fixture, observation } from './fixtures';
 import { capture, synchronize, forkBranch } from './canonical';
 import { newTable, saveTable, applyRows, readTables, parseSummaryTables, commitSummaryTables } from './tables';
 import { exportLibrary, restoreLibrary } from './migration';
-import { DB_VERSION, Library, freshLibraryName } from './db';
+import { DB_VERSION, Library, Transaction, freshLibraryName } from './db';
 import { previewArchiveDeletion, commitArchiveDeletion } from './archive-deletion';
 import { STORES, fingerprint, type TableDef, type TableRow, type Branch, type TableCommit } from './model';
 
@@ -370,4 +370,105 @@ test('A to B to A swipe keeps abandoned batch cursor rolled back to last retaine
         expect(await f.values()).toEqual(['A重新确认']);
         expect((await tableLastFloors(f.lib, (await capture(f.lib, f.branch.id)).branch)).floors[f.def.id]).toBe(5);
     } finally { f.lib.close(); }
+});
+
+
+test.each(['fork', 'edit'] as const)('known-empty history never creates a gap on %s, even with an old nonzero cutoff', async (action) => {
+    const f = await fixture(2);
+    try {
+        // Old empty checkpoints can be anchored after the requested fork/edit position.
+        await f.lib.transaction(['table_history'], 'readwrite', async tx => {
+            const head = (await tx.get<TableCommit>('table_history', f.branch.tableHead!))!;
+            await tx.put('table_history', { ...head, cutoff: f.view.snapshot.length });
+        });
+        const branch = action === 'fork'
+            ? await forkBranch(f.lib, await capture(f.lib, f.branch.id, 2), 'empty-child')
+            : await synchronize(f.lib, observation(1));
+        const view = await capture(f.lib, branch.id);
+        expect(view.branch.tableHistoryGap).toBe(false);
+        expect(await readTables(f.lib, view.branch)).toEqual([]);
+        const head = (await f.lib.get<TableCommit>('table_history', view.branch.tableHead!))!;
+        expect(head.gap).toBe(false);
+        expect(head.cutoff).toBe(0);
+        const child = await forkBranch(f.lib, await capture(f.lib, branch.id, 0), 'empty-grandchild');
+        expect(child.tableHistoryGap).toBe(false);
+        const restored = await restoreLibrary(await exportLibrary(f.lib), false); restored.close();
+    } finally { f.lib.close(); }
+});
+
+test.each(['create', 'backfill', 'no-op backfill'] as const)('%s replaces a sticky gap with a current checkpoint without rewriting old history', async (action) => {
+    const f = await setup();
+    try {
+        await f.write('保留已有行');
+        // Reproduce the old writer: valid current tables still carry the earlier gap.
+        await f.lib.transaction(['branches', 'table_history'], 'readwrite', async tx => {
+            const branch = (await tx.get<Branch>('branches', f.branch.id))!;
+            const head = (await tx.get<TableCommit>('table_history', branch.tableHead!))!;
+            await tx.put('table_history', { ...head, gap: true });
+            await tx.put('branches', { ...branch, tableHistoryGap: true });
+        });
+        const old = await capture(f.lib, f.branch.id);
+        await f.advance(2);
+        const view = await capture(f.lib, f.branch.id);
+        if (action === 'create') {
+            await saveTable(f.lib, view, newTable(view, '新基线表'));
+        } else {
+            const inputs = await readTables(f.lib, view.branch);
+            const plan = parseSummaryTables([{ table_id: f.def.id,
+                add: action === 'backfill' ? [{ v: '补填行' }] : [], update: [] }], inputs, f.branch.id)!;
+            plan.tableHead = view.branch.tableHead;
+            await commitSummaryTables(f.lib, view, plan, [], () => true,
+                { start: 0, end: 1, refs: view.refs.slice(0, 2) });
+        }
+        const current = await capture(f.lib, f.branch.id);
+        const head = (await f.lib.get<TableCommit>('table_history', current.branch.tableHead!))!;
+        expect(current.branch.tableHistoryGap).toBe(false);
+        expect(head).toMatchObject({ gap: false, checkpoint: true, depth: 0, cutoff: current.snapshot.length });
+        expect(head.rows.some(r => r.values.v === '保留已有行')).toBe(true);
+        expect((await f.lib.get<TableCommit>('table_history', old.branch.tableHead!))!.gap).toBe(true);
+        const child = await forkBranch(f.lib, current, 'fresh-baseline');
+        expect(child.tableHistoryGap).toBe(false);
+        const earlier = await forkBranch(f.lib, await capture(f.lib, f.branch.id, 2), 'old-gap');
+        expect(earlier.tableHistoryGap).toBe(true);
+        expect(await f.values(earlier.id)).toEqual(['保留已有行']);
+        const restored = await restoreLibrary(await exportLibrary(f.lib), false); restored.close();
+    } finally { f.lib.close(); }
+});
+
+test('new table after a real gap starts clean now but does not fabricate an earlier baseline', async () => {
+    const f = await setup();
+    try {
+        await f.write('旧版留下的表值');
+        const { withoutTableHistory } = await import('./fixtures');
+        const legacy = withoutTableHistory(await exportLibrary(f.lib)); legacy.version = 10;
+        const { checksum, ...base } = legacy; legacy.checksum = await fingerprint(base);
+        const lib = await restoreLibrary(legacy, false);
+        try {
+            await synchronize(lib, observation(0));
+            expect((await capture(lib, f.branch.id)).branch.tableHistoryGap).toBe(true);
+            await synchronize(lib, observation(2));
+            const view = await capture(lib, f.branch.id);
+            await saveTable(lib, view, newTable(view, '重新开始'));
+            const current = await capture(lib, f.branch.id);
+            expect(current.branch.tableHistoryGap).toBe(false);
+            expect((await readTables(lib, current.branch)).map(t => t.def.name)).toEqual(['重新开始']);
+            await synchronize(lib, observation(0));
+            const earlier = await capture(lib, f.branch.id);
+            expect(earlier.branch.tableHistoryGap).toBe(true);
+            expect(await readTables(lib, earlier.branch)).toEqual([]);
+            const restored = await restoreLibrary(await exportLibrary(lib), false); restored.close();
+        } finally { lib.close(); }
+    } finally { f.lib.close(); }
+});
+
+test('ordinary writes do not reload table projections to clear an already false gap', async () => {
+    const f = await setup();
+    const all = vi.spyOn(Transaction.prototype, 'all');
+    try {
+        all.mockClear();
+        await f.write('正常写入');
+        expect(all.mock.calls.filter(([store]) => store === 'table_history')).toHaveLength(0);
+        expect(all.mock.calls.filter(([store]) => store === 'custom_table_defs')).toHaveLength(1);
+        expect(all.mock.calls.filter(([store]) => store === 'custom_table_rows')).toHaveLength(2);
+    } finally { all.mockRestore(); f.lib.close(); }
 });
