@@ -384,8 +384,7 @@ onBeforeUnmount(() => {
       >
         <button class="mn-card-open" @click="activate(() => run(() => openTable(def)))">
           <strong>{{ def.name }}</strong
-          ><small>{{ def.columns.length }} 个字段 · {{ def.ai ? '随摘要填写' : '仅手动填写' }}</small>
-          <p v-if="def.description">{{ def.description }}</p></button
+          ><small>{{ def.columns.length }} 个字段 · {{ def.ai ? '随摘要填写' : '仅手动填写' }}</small></button
         ><button class="mn-more" :aria-label="`管理${def.name}`" @pointerdown.stop @click.stop="menu = def">
           ···
         </button>
@@ -438,7 +437,7 @@ onBeforeUnmount(() => {
             @change="run(() => save({ ...plain(table!), ai: !table!.ai }))"
           />随原生摘要一起填写（同一次模型请求）</label
         >
-        <p class="mn-muted">字段顺序就是表内顺序，行列表展示前两个字段。长按字段可进入多选。</p>
+        <p class="mn-muted">字段顺序就是表内顺序，行列表仅展示第一个字段的内容。长按字段可进入多选。</p>
         <article
           v-for="col in table.columns"
           :key="col.id"
@@ -527,12 +526,8 @@ onBeforeUnmount(() => {
             class="mn-card-open"
             @click="activate(() => (selectMode ? toggle(record.id) : editRecord(record)))"
           >
-            <span
-              v-for="(col, index) in table.columns.slice(0, 2)"
-              :key="col.id"
-              :class="index ? 'mn-record-secondary' : 'mn-record-primary'"
-              ><small>{{ col.name }}</small
-              ><span>{{ display(record.values[col.id]) }}</span></span
+            <span v-if="table.columns.length" class="mn-record-primary"
+              ><span>{{ display(record.values[table.columns[0].id]) }}</span></span
             ><small v-if="record.hidden" class="mn-badge">已隐藏 · 不注入</small></button
           ><span class="mn-muted">›</span>
         </article>

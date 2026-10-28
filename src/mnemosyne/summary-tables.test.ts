@@ -19,6 +19,7 @@ import { fingerprint, type TableDef, type TableRow } from './model';
 async function setup() {
     const f = await fixture(2),
         def = newTable(f.view, '合成事项表');
+    def.description = '仅供填表和摘要 AI 使用的表格说明';
     def.columns = [
         {
             id: 'title',
@@ -57,9 +58,11 @@ test('summary input contains definitions, writing instructions and visible rows,
         expect(prompt.system).toContain('"add"');
         expect(prompt.system).toContain('"update"');
         expect(prompt.user).toContain('只填写正文已发生的约定');
+        expect(prompt.user).toContain(f.def.description);
         expect(prompt.user).toContain('可见约定');
         expect(prompt.user).not.toContain('隐藏敏感记录');
-        expect(renderTableState(inputs)).toContain('可见约定');
+        expect(renderTableState(inputs)).toBe('[自定义表 · 当前可见记录]\n合成事项表:\n- 名称: 可见约定；进展: 开始；次数: 1');
+        expect(renderTableState(inputs)).not.toContain(f.def.description);
         expect(renderTableState(inputs)).not.toContain('隐藏敏感记录');
     } finally {
         f.lib.close();

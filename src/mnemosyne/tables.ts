@@ -448,15 +448,17 @@ export function renderTableState(inputs: TableInput[], allowed?: Set<string>): s
     const tables = inputs
         .map(({ def, rows }) => ({
             name: def.name,
-            description: def.description,
             rows: rows
                 .filter((r) => !r.deleted && !r.hidden && (!allowed || r.sources.every((id) => allowed.has(id))))
                 .map((r) =>
-                    Object.fromEntries(
-                        def.columns.filter((c) => c.id in r.values).map((c) => [c.name, r.values[c.id]]),
-                    ),
+                    '- ' + def.columns
+                        .filter((c) => c.id in r.values)
+                        .map((c) => `${c.name}: ${r.values[c.id]}`)
+                        .join('；'),
                 ),
         }))
         .filter((t) => t.rows.length);
-    return tables.length ? '[自定义表 · 当前可见记录]\n' + JSON.stringify(tables) : '';
+    return tables.length
+        ? '[自定义表 · 当前可见记录]\n' + tables.map((t) => `${t.name}:\n${t.rows.join('\n')}`).join('\n\n')
+        : '';
 }
