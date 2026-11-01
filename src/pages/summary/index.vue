@@ -35,6 +35,8 @@ const events = computed(() => {
 
 // 切聊天:重置临时视图态(展开/搜索/选择),避免上个聊天的残留跨聊天带过来。
 const resetViewStates = () => {
+  cancelSummaryPress();
+  summaryPressHeld = false;
   expanded.value = new Set();
   searchQuery.value = '';
   searchOpen.value = false;
@@ -539,12 +541,61 @@ function highlightParts(text: string): Array<{ t: string; hit: boolean }> {
 }
 
 /* ---- 选择模式:进出、勾选、连续性约束、合并 ---- */
+// 全页共用一个计时器；切换成多选平铺卡后仍能拦住松手产生的 click。
+let summaryPressTimer: ReturnType<typeof setTimeout> | undefined;
+let summaryPressHeld = false;
+let summaryPressPointer = -1, summaryPressX = 0, summaryPressY = 0;
+function cancelSummaryPress() {
+  if (summaryPressTimer !== undefined) clearTimeout(summaryPressTimer);
+  summaryPressTimer = undefined;
+  summaryPressPointer = -1;
+}
+function startSummaryPress(event: PointerEvent) {
+  cancelSummaryPress();
+  summaryPressHeld = false; // 上次手势可能没有派发 click，不能吞掉这次正常点击。
+  if (selectMode.value || searching.value || event.button !== 0 || !event.isPrimary) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target || target.closest('button, input, textarea, select, a, label, [contenteditable], [role="button"]')) return;
+  const card = target.closest<HTMLElement>('.bbs-summary-card[data-summary-id]');
+  const id = card?.dataset.summaryId;
+  if (!card || !id) return;
+  summaryPressPointer = event.pointerId;
+  summaryPressX = event.clientX;
+  summaryPressY = event.clientY;
+  summaryPressTimer = setTimeout(() => {
+    cancelSummaryPress();
+    if (!card.isConnected || selectMode.value || searching.value || !rootNodes.value.some(node => node.id === id)) return;
+    summaryPressHeld = true;
+    enterSelectMode();
+    selectedIds.value = new Set([id]);
+  }, 500);
+}
+function moveSummaryPress(event: PointerEvent) {
+  if (event.pointerId === summaryPressPointer &&
+      Math.abs(event.clientX - summaryPressX) + Math.abs(event.clientY - summaryPressY) > 12) cancelSummaryPress();
+}
+function finishSummaryPress(event: MouseEvent) {
+  cancelSummaryPress();
+  if (!summaryPressHeld) return;
+  summaryPressHeld = false;
+  if (event.detail === 0) return; // 键盘触发的点击不属于长按松手。
+  event.preventDefault();
+  event.stopPropagation();
+}
+function summaryPressContextMenu(event: MouseEvent) {
+  if (summaryPressTimer !== undefined || summaryPressHeld) event.preventDefault();
+}
+onUnmounted(cancelSummaryPress);
+
 function enterSelectMode() {
+  cancelSummaryPress();
   selectMode.value = true;
   selectedIds.value = new Set();
   expanded.value = new Set(); // 折叠所有展开,只操作根
 }
 function exitSelectMode() {
+  cancelSummaryPress();
+  summaryPressHeld = false;
   selectMode.value = false;
   selectedIds.value = new Set();
 }
@@ -774,7 +825,11 @@ function saveEdit() {
 
 // Bound the mounted card count; search and select-all still use the complete forest.
 const visibleLimit = ref(40);
-watch([searchQuery, selectMode], () => { visibleLimit.value = 40; });
+watch([searchQuery, selectMode], ([query, selecting], [previousQuery]) => {
+  cancelSummaryPress();
+  // 进入多选保留已加载数量，否则长按第 41 条以后的卡片会让选中项从屏幕消失。
+  if (query !== previousQuery || !selecting) visibleLimit.value = 40;
+});
 const displayedCount = computed(() => searching.value || selectMode.value ? visibleRows.value.length : rootNodes.value.length);
 
 // Compressed roots include their valid leaf descendants in bulk publication.
@@ -830,7 +885,18 @@ provide(SUMMARY_CTX, {
 </script>
 
 <template>
-  <section class="bbs-page">
+  <section
+    class="bbs-page"
+    :class="{ 'bbs-summary-pressable': !selectMode && !searching }"
+    @pointerdown.passive="startSummaryPress"
+    @pointermove.passive="moveSummaryPress"
+    @pointerup="cancelSummaryPress"
+    @pointercancel="cancelSummaryPress"
+    @pointerleave="cancelSummaryPress"
+    @wheel.passive="cancelSummaryPress"
+    @click.capture="finishSummaryPress"
+    @contextmenu="summaryPressContextMenu"
+  >
     <SummaryReviewPanel />
     <!-- ===== 眼下局势卡:当前场面快照(覆盖型;省略=不动,清空=落幕) ===== -->
     <div class="bbs-fold-section">
@@ -1018,7 +1084,7 @@ provide(SUMMARY_CTX, {
           class="bbs-btn bbs-btn-sm"
           type="button"
           :disabled="!rootNodes.length || searching"
-          title="勾选连续的多条摘要,手动合并成一条总结"
+          title="勾选连续的多条摘要,手动合并成一条总结；也可长按卡片进入多选"
           @click="enterSelectMode"
         >
           <Icon name="checklist" /><span class="bbs-btn-label">多选</span>
@@ -2150,6 +2216,14 @@ provide(SUMMARY_CTX, {
    供 SummaryNode.vue 与本页平铺列表共用(scoped 不跨组件)。此处只留本页专属:选择模式 + 底部操作条。 */
 
 /* 选择模式:卡片左侧腾出复选框列,横向布局;整卡可点,指针提示可点 */
+@media (pointer: coarse) {
+  /* 仅默认列表可多选的根卡禁用原生长按选字；子卡、搜索与编辑区保留原行为。 */
+  .bbs-summary-pressable :deep(.bbs-summary-card[data-summary-id] > .bbs-summary-main) {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
 .bbs-summary-list.is-selecting .bbs-summary-card {
   display: flex;
   align-items: flex-start;

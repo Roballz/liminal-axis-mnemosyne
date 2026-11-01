@@ -31,6 +31,7 @@ const isChild = computed(() => props.depth > 0);
   <div class="bbs-node">
     <article
       class="bbs-summary-card"
+      :data-summary-id="!isChild ? node.id : undefined"
       :class="{ 'is-deep': row.level > 0, 'is-child': isChild, 'is-expanded': isExpanded && expandable }"
     >
       <div class="bbs-summary-main">
