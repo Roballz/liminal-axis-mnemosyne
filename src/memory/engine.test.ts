@@ -721,6 +721,156 @@ describe.each(['automatic', 'manual'] as const)('compression audit output (%s)',
 });
 
 
+describe('automatic contiguous compression', () => {
+  const original = {
+    leafBatchThreshold: settings.apiSettings.leafBatchThreshold,
+    leafKeepRecent: settings.apiSettings.leafKeepRecent,
+    resummaryThreshold: settings.apiSettings.resummaryThreshold,
+    higherResummaryThreshold: settings.apiSettings.higherResummaryThreshold,
+    summaryMaxRetries: settings.apiSettings.summaryMaxRetries,
+  };
+
+  beforeEach(() => {
+    Object.assign(settings.apiSettings, {
+      leafBatchThreshold: 8, leafKeepRecent: 0, resummaryThreshold: 5,
+      higherResummaryThreshold: 3, summaryMaxRetries: 0,
+    });
+  });
+  afterEach(() => Object.assign(settings.apiSettings, original));
+
+  const range = (start: number, count: number) => Array.from({ length: count }, (_, i) => start + i);
+  const leafId = (floor: number) => `contiguous-leaf-${floor}`;
+  const withLeaf = (floor: number) => message(false, {
+    extra: { bbs_leaf: { ...leaf(), id: leafId(floor), text: `Summary at floor ${floor}.`, createdAt: floor } },
+  });
+
+  function seedLeaves(floors: number[]) {
+    const chat = Array.from({ length: Math.max(...floors) + 1 }, () => message());
+    for (const floor of floors) chat[floor] = withLeaf(floor);
+    useChat(chat);
+    return chat;
+  }
+
+  function group(id: string, level: number, floors: number[], createdAt = floors[0]) {
+    memory.summaries.push({
+      id, level, text: `Existing ${id}.`, auto: true, createdAt, childIds: floors.map(leafId),
+    });
+    return id;
+  }
+
+  it('does not combine isolated floors #403, #417, #567 and #576 to meet a threshold', async () => {
+    settings.apiSettings.leafBatchThreshold = 4;
+    const floors = [403, 417, 567, 576], chat = seedLeaves(floors);
+    expect(await checkResummary()).toBe(0);
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+    expect(memory.summaries).toHaveLength(0);
+    expect(floors.map(floor => chat[floor].extra?.bbs_leaf?.id)).toEqual(floors.map(leafId));
+  });
+
+  it('preserves an early isolated L0 and compresses the later run of eight', async () => {
+    seedLeaves(range(0, 17));
+    group('middle-L1', 1, range(1, 8));
+    expect(await checkResummary()).toBe(1);
+    expect(client.requestViaMainApi).toHaveBeenCalledOnce();
+    expect(memory.summaries.at(-1)).toMatchObject({ level: 1, childIds: range(9, 8).map(leafId) });
+    expect(memory.summaries.flatMap(node => node.childIds)).not.toContain(leafId(0));
+  });
+
+  it('does not combine five L1 nodes across a retained L0', async () => {
+    seedLeaves(range(0, 11));
+    [[0, 1], [2, 3], [5, 6], [7, 8], [9, 10]].forEach((floors, i) => group(`L1-${i}`, 1, floors));
+    expect(await checkResummary()).toBe(0);
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+    expect(memory.summaries).toHaveLength(5);
+    expect(memory.summaries.flatMap(node => node.childIds)).not.toContain(leafId(4));
+  });
+
+  it.each([2, 3])('L%s cannot cross a lower-level break but can compress a later complete run', async level => {
+    seedLeaves(range(0, 9));
+    group('isolated', level, [0, 1]);
+    group('later-a', level, [3, 4]);
+    group('later-b', level, [5, 6]);
+    expect(await checkResummary()).toBe(0);
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+
+    group('later-c', level, [7, 8]);
+    expect(await checkResummary()).toBe(1);
+    expect(client.requestViaMainApi).toHaveBeenCalledOnce();
+    expect(memory.summaries.at(-1)).toMatchObject({
+      level: level + 1, childIds: ['later-a', 'later-b', 'later-c'],
+    });
+    expect(memory.summaries.flatMap(node => node.childIds)).not.toContain('isolated');
+    expect(memory.summaries.flatMap(node => node.childIds)).not.toContain(leafId(2));
+  });
+
+  it('combines five contiguous L1 nodes in floor order even when created in reverse order', async () => {
+    seedLeaves(range(0, 10));
+    for (const i of [4, 3, 2, 1, 0]) group(`L1-${i}`, 1, [i * 2, i * 2 + 1], 100 - i);
+    expect(await checkResummary()).toBe(1);
+    expect(memory.summaries.at(-1)).toMatchObject({
+      level: 2, childIds: range(0, 5).map(i => `L1-${i}`),
+    });
+    const sent = vi.mocked(client.requestViaMainApi).mock.calls[0][0].map(msg => msg.content).join('\n');
+    expect(sent.indexOf('Existing L1-0.')).toBeLessThan(sent.indexOf('Existing L1-4.'));
+  });
+
+  it('excludes the most recent L0 roots before finding a complete run', async () => {
+    settings.apiSettings.leafKeepRecent = 3;
+    const chat = seedLeaves(range(0, 13));
+    group('middle-L1', 1, [1, 2]);
+    // Eleven L0 roots exist, but after retaining the newest three the run has only seven.
+    expect(await checkResummary()).toBe(0);
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+
+    chat.push(withLeaf(13));
+    expect(await checkResummary()).toBe(1);
+    expect(memory.summaries.at(-1)).toMatchObject({ level: 1, childIds: range(3, 8).map(leafId) });
+    const collected = new Set(memory.summaries.flatMap(node => node.childIds));
+    for (const floor of [0, 11, 12, 13]) expect(collected.has(leafId(floor))).toBe(false);
+  });
+
+  it.each(['missing', 'swipe'] as const)('treats an AI floor with a %s summary as a break', async kind => {
+    settings.apiSettings.leafBatchThreshold = 4;
+    const chat = seedLeaves(range(0, 5));
+    if (kind === 'missing') delete chat[2].extra!.bbs_leaf;
+    else chat[2].swipe_id = 1;
+    expect(await checkResummary()).toBe(0);
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+    expect(memory.summaries).toHaveLength(0);
+  });
+
+  it('allows normal user, system and omitted-message gaps between consecutive AI summaries', async () => {
+    settings.apiSettings.leafBatchThreshold = 4;
+    const floors = [0, 2, 4, 6], chat = seedLeaves(floors);
+    chat[1] = message(true);
+    chat[3] = message(false, { is_system: true, extra: { type: 'narrator' } });
+    chat[5] = message(false, { extra: { bbs_omit: true } });
+    expect(await checkResummary()).toBe(1);
+    expect(memory.summaries.at(-1)).toMatchObject({ level: 1, childIds: floors.map(leafId) });
+  });
+
+  it('keeps existing manual mixed-level merging independent of automatic thresholds and retention', async () => {
+    settings.apiSettings.leafKeepRecent = 100;
+    seedLeaves(range(0, 5));
+    group('manual-L1', 1, [0, 1]);
+    expect(await summarizeSelected([leafId(2), 'manual-L1'])).toMatchObject({ made: 1 });
+    expect(memory.summaries.at(-1)).toMatchObject({
+      level: 2, auto: false, childIds: ['manual-L1', leafId(2)],
+    });
+  });
+
+  it('uses the newly created L1 when the same call cascades into a contiguous L2', async () => {
+    seedLeaves(range(0, 16));
+    const previous = range(0, 4).map(i => group(`previous-${i}`, 1, [i * 2, i * 2 + 1]));
+    expect(await checkResummary()).toBe(2);
+    expect(client.requestViaMainApi).toHaveBeenCalledTimes(2);
+    expect(memory.summaries).toHaveLength(6);
+    const [newL1, newL2] = memory.summaries.slice(-2);
+    expect(newL1).toMatchObject({ level: 1, childIds: range(8, 8).map(leafId) });
+    expect(newL2).toMatchObject({ level: 2, childIds: [...previous, newL1.id] });
+  });
+});
+
 describe('返回复用通过真实摘要写入路径', () => {
   it('失败返回修好后复用，关窗草稿保留且不新增 API 请求', async () => {
     const chat = [message(true), message()]; useChat(chat);

@@ -987,22 +987,22 @@ function exportPublicApiDocument() {
           <span class="bbs-field-label">每次总结 AI 消息数</span>
           <input v-model.number="apiSettings.leafBatchThreshold" class="bbs-input bbs-num" type="number" min="0" />
         </label>
-        <p class="bbs-field-hint">每次总结多少条摘要,不计算 user 楼层,0 为关闭自动总结。</p>
+        <p class="bbs-field-hint">连续达到此数量的 L0 摘要才合并为 L1。用户回复不计数；未摘要的 AI 楼层或其他层级会断开，零散摘要保留。0 为关闭自动总结。</p>
         <label class="bbs-num-row">
           <span class="bbs-field-label">总结时保留摘要数</span>
           <input v-model.number="apiSettings.leafKeepRecent" class="bbs-input bbs-num" type="number" min="0" />
         </label>
-        <p class="bbs-field-hint">总结时在末尾保留这么多条摘要不压缩,让隐藏区始终留一截细节、避免总结后信息断崖。例:每次总结 12、这里填 3,则攒够 15 条才总结,压最旧 12 条,留最新 3 条摘要。0 为攒够即全压(旧行为),默认 3。</p>
+        <p class="bbs-field-hint">最新的这些 L0 摘要不参与自动总结，其余部分仅合并数量达标的连续段。例：每次总结 12、这里填 3，连续 15 条时合并前 12 条、保留后 3 条。0 为不额外保留，默认 3。</p>
         <label class="bbs-num-row">
           <span class="bbs-field-label">二次总结</span>
           <input v-model.number="apiSettings.resummaryThreshold" class="bbs-input bbs-num" type="number" min="0" />
         </label>
-        <p class="bbs-field-hint">L1 总结达到多少条后压成一条 L2,0 为关闭。默认 7。</p>
+        <p class="bbs-field-hint">连续达到此数量的 L1 总结才合并为 L2，不跨过保留的 L0 或其他层级。0 为关闭，默认 7。</p>
         <label class="bbs-num-row">
           <span class="bbs-field-label">高层总结</span>
           <input v-model.number="apiSettings.higherResummaryThreshold" class="bbs-input bbs-num" type="number" min="0" />
         </label>
-        <p class="bbs-field-hint">L2 及以上总结达到多少条后再压一层。高层正文更长,建议使用较小阈值；0 为关闭,默认 3。</p>
+        <p class="bbs-field-hint">L2 及以上仅合并连续且同层级的总结，达到此数量后再压一层。高层正文更长，建议使用较小阈值；0 为关闭，默认 3。</p>
         <label class="bbs-num-row">
           <span class="bbs-field-label">附带近期已完成计划</span>
           <input v-model.number="apiSettings.recentResolvedPlansCount" class="bbs-input bbs-num" type="number" min="0" />

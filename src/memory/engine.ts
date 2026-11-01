@@ -27,6 +27,7 @@ import { scheduleVectorIndex } from './vector';
 import { invalidateRecallCache } from './vector/cache';
 import { clearRecallInjection } from './vector/recall';
 import { reactive, watch } from 'vue';
+import { collectAutoSummaryRoots, selectAutoSummaryBatch, type AutoSummaryLeaf, type AutoSummaryRoot } from './auto-resummary';
 
 function llmString(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
@@ -1653,40 +1654,22 @@ function joinNodesForResummary(nodes: Array<{ text: string; timeStart?: string; 
   };
 }
 
-/** 压缩用的根节点视图:带起止时间(叶子直接取,comp 取已聚合的范围),供向上合并时取边界。 */
-interface RootView {
-  id: string;
-  text: string;
-  createdAt: number;
-  timeStart?: string;
-  timeEnd?: string;
-}
-
-/** 某层级「未被收纳的根节点」,按时间/楼层升序。level0=叶子(扫 chat),level≥1=森林。 */
-function rootsAtLevel(level: number, chat: STMessage[]): RootView[] {
-  const collected = new Set<string>();
-  for (const s of memory.summaries) for (const c of s.childIds) collected.add(c);
-
-  if (level === 0) {
-    const out: RootView[] = [];
-    for (let i = 0; i < chat.length; i++) {
-      if (chat[i]?.extra?.bbs_omit) continue; // 番外楼:不进森林压缩
-      if (!leafValid(chat[i])) continue;
-      const lf = getLeaf(chat[i]) as LeafExtra;
-      if (collected.has(lf.id)) continue; // 已被某 L1 收纳
-      out.push({ id: lf.id, text: llmString(lf.text), createdAt: lf.createdAt, timeStart: llmOptionalScalar(lf.timeStart), timeEnd: llmOptionalScalar(lf.timeEnd) }); // 已按楼层序
-    }
-    return out;
+/** 自动总结保留完整 AI 顺序；未摘/失效楼仍占一个位置，不能被筛选后悄悄跨过。 */
+function autoSummaryRoots(chat: STMessage[]): AutoSummaryRoot[] {
+  const aiFloors: number[] = [], leaves: AutoSummaryLeaf[] = [];
+  for (let i = 0; i < chat.length; i++) {
+    if (!isAiFloor(chat[i])) continue;
+    aiFloors.push(i);
+    if (!leafValid(chat[i])) continue;
+    const lf = getLeaf(chat[i]) as LeafExtra;
+    leaves.push({ id: lf.id, floor: i, text: lf.text, createdAt: lf.createdAt, timeStart: lf.timeStart, timeEnd: lf.timeEnd });
   }
-  return memory.summaries
-    .filter(s => s.level === level && !collected.has(s.id))
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
-    .map(s => ({ id: s.id, text: llmString(s.text), createdAt: s.createdAt, timeStart: llmOptionalScalar(s.timeStart), timeEnd: llmOptionalScalar(s.timeEnd) }));
+  return collectAutoSummaryRoots(leaves, memory.summaries, aiFloors);
 }
 
 /**
  * 可逆层级压缩(不删底层)。
- * 从最低层往上逐层检查:某层「未被收纳的根节点」攒够该层阈值时,
+ * 从最低层往上逐层检查:窗口内连续、同层级的根节点达到该层阈值时,
  * 用 AI 把这批的**叙事文本**融合成一条上层节点,childIds 收纳它们(底层全部保留)。
  * 一次调用会向上连锁(加叶子→可能生 L1→可能生 L2…),按各层阈值递归。
  */
@@ -1700,6 +1683,7 @@ export async function checkResummary(manual = false): Promise<number | 'pending'
   const chat = ctx.chat ?? [];
 
   let made = 0; // 本次连锁共生成的总结条数
+  let roots: AutoSummaryRoot[] | undefined;
 
   // 最高现存压缩层级,作为连锁上限(+1 容纳新生成的层)
   const maxLevel = memory.summaries.reduce((m, s) => Math.max(m, s.level), 0);
@@ -1708,12 +1692,13 @@ export async function checkResummary(manual = false): Promise<number | 'pending'
     const threshold = thresholdForLevel(level);
     if (!threshold || threshold < 2) continue;
 
-    const roots = rootsAtLevel(level, chat);
-    // 叶子层(L0→L1)保留最近 N 条不压:门槛抬到 阈值+保留数,但下面仍只压最旧的 阈值 条,
-    // newest 的 N 条自然留作根、继续被逐条注入,避免「一次全压塌成 L1」的注入断崖。
-    // 仅 level 0 生效(更高层已是压缩散文,再留无意义);keep=0 即退回旧行为。
+    // 一次同步检测共用覆盖索引；真正生成新节点后才为下一层重建，避免使用异步前的旧森林。
+    roots ??= autoSummaryRoots(chat);
+    // 先排除末尾保留的 L0，再寻找最旧的完整连续段；零散旧叶子不参与凑数。
     const keep = level === 0 ? Math.max(0, apiSettings.leafKeepRecent) : 0;
-    if (roots.length < threshold + keep) continue;
+    const batch = selectAutoSummaryBatch(roots, level, threshold, keep).map(n => ({ ...n,
+      text: llmString(n.text), timeStart: llmOptionalScalar(n.timeStart), timeEnd: llmOptionalScalar(n.timeEnd) }));
+    if (!batch.length) continue;
 
     const sender = resolveSender('resummary');
     if ('error' in sender) {
@@ -1721,9 +1706,7 @@ export async function checkResummary(manual = false): Promise<number | 'pending'
       return made;
     }
 
-    const batch = roots.slice(0, threshold);
-    const sources = collectSelectableNodes(chat);
-    const responseGuard = summaryResponseGuard(chat, Math.max(-1, ...batch.map(n => sources.get(n.id)?.floorHi ?? chat.length - 1)), batch.map(n => n.id));
+    const responseGuard = summaryResponseGuard(chat, batch[batch.length - 1].floorHi, batch.map(n => n.id));
     const { content, hints } = joinNodesForResummary(batch);
     // 传**输出层级**(level+1):L1(普通总结,300-500字)/ L2+(二次总结,字数随输入动态)
     const prompt = buildResummaryPrompt({ user: ctx.name1, char: ctx.name2, content, level: level + 1 });
@@ -1772,6 +1755,7 @@ export async function checkResummary(manual = false): Promise<number | 'pending'
         refreshInjection();
       }, responseGuard, preview, manual);
       if (preview) return 'pending';
+      roots = undefined;
       // 不 break:继续外层 for,上一层可能也攒够了 → 连锁压更高层
     } catch (e) {
       engineState.lastError = e instanceof Error ? e.message : String(e);

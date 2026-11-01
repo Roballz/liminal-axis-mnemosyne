@@ -271,12 +271,6 @@ const resummaryRunning = ref(false);
 const resummaryHint = ref('');
 let resummaryHintTimer: ReturnType<typeof setTimeout> | null = null;
 
-// 总结节奏:实际约每「保留最近 AI 消息数 + 每次总结 AI 消息数」楼总结一次——
-// 最近 keepRecent 条发全文不摘,更早的摘成叶子,叶子攒够 leafBatchThreshold 条压一次总结。
-// 阈值关闭(<2)时不显示节奏句。
-const resummaryEvery = computed(() => (Math.max(0, apiSettings.keepRecent) + apiSettings.leafBatchThreshold + apiSettings.leafKeepRecent) * 2);
-const showCadence = computed(() => apiSettings.leafBatchThreshold >= 2);
-
 // 纯前端估算当前实际注入量。derivedMeta.rev 补上 chat/is_system 这类非 Vue 响应式数据的刷新信号。
 const injectionTokenEstimate = computed(() => {
   void derivedMeta.rev;
@@ -301,9 +295,7 @@ async function doResummarize() {
     } else if (made > 0) {
       resummaryHint.value = `已生成 ${made} 条总结`;
     } else {
-      // 未达阈值:补一句动态节奏,告诉用户大概每多少楼总结一次
-      const cadence = showCadence.value ? `,约每 ${resummaryEvery.value} 楼总结一次` : '';
-      resummaryHint.value = `当前没有达到总结阈值的摘要${cadence}`;
+      resummaryHint.value = '当前没有数量达标的连续同层摘要';
     }
   } finally {
     resummaryRunning.value = false;
