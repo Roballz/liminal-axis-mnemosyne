@@ -5,7 +5,7 @@ import ModalMask from '@/components/ModalMask.vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import TableTextField from '@/components/TableTextField.vue';
 import { activeLibrary } from '@/mnemosyne/db';
-import { dailyBranch, dailyState, hostScope, refreshDailyTables } from '@/mnemosyne/bridge';
+import { dailyBranch, dailyState, hostScope, refreshDailyTables, tableConflicts, previewTableConflict, resolveTableConflict } from '@/mnemosyne/bridge';
 import { newTable, saveTable, applyRows, cellLocked } from '@/mnemosyne/tables';
 import { check, row, type Branch, type TableDef, type TableRow, type Column } from '@/mnemosyne/model';
 const tables = shallowRef<TableDef[]>([]),
@@ -108,6 +108,28 @@ async function run(fn: () => Promise<unknown>) {
   } finally {
     busy.value = false;
   }
+}
+const conflict = shallowRef<Awaited<ReturnType<typeof previewTableConflict>> | null>(null);
+function conflictText(inputs: { def: TableDef; rows: TableRow[] }[]) {
+  return inputs.filter(t => !t.def.deleted).map(({ def, rows }) => {
+    const visible = rows.filter(r => !r.deleted && !r.hidden);
+    return def.name + '（' + visible.length + ' 行）\n' + visible.slice(0, 20).map(r =>
+      def.columns.map(c => c.name + '：' + display(r.values[c.id])).join('；')).join('\n') +
+      (visible.length > 20 ? '\n仅预览前20行，选择会应用完整版本。' : '');
+  }).join('\n\n');
+}
+const conflictBefore = computed(() => conflict.value ? conflictText(conflict.value.before) : '');
+const conflictAfter = computed(() => conflict.value?.proposed ? conflictText(conflict.value.proposed) : '');
+async function openConflict() {
+  const first = tableConflicts.value[0];
+  if (first) conflict.value = await previewTableConflict(first.floor);
+}
+async function chooseConflict(incoming: boolean) {
+  const preview = conflict.value;
+  if (!preview) return;
+  await resolveTableConflict(preview, incoming);
+  conflict.value = null;
+  await refresh();
 }
 async function scopeForWrite() {
   const scope = hostScope(),
@@ -289,6 +311,7 @@ function selectByPress(id: string) {
   if (!selected.value.includes(id)) selected.value = [...selected.value, id];
 }
 function closeDialogs() {
+  conflict.value = null;
   menu.value = null;
   definitionDialog.value = false;
   fieldDialog.value = false;
@@ -362,7 +385,10 @@ onBeforeUnmount(() => {
       </button>
     </header>
     <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
-    <p v-if="dailyState.tableError" class="mn-warning" role="alert">{{ dailyState.tableError }}</p>
+    <p v-if="dailyState.tableError" class="mn-warning" role="alert">
+      {{ dailyState.tableError }}
+      <button v-if="tableConflicts.length" class="mn-danger" :disabled="busy || dailyState.pending" @click="run(openConflict)">冲突</button>
+    </p>
     <p v-if="branch?.tableHistoryGap" class="mn-warning" role="status">此位置没有完整表格历史；未带入未来表值。旧基线和撤离版本仍保留在核心备份中。</p>
     <p v-if="loading" class="mn-muted" role="status">正在读取表格…</p>
     <template v-if="screen === 'list'">
@@ -558,6 +584,22 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </template>
+    <ModalMask :open="!!conflict" @close="!busy && (conflict = null)">
+      <section v-if="conflict" class="mn-dialog">
+        <h3>#{{ conflict.floor }} 楼填表冲突</h3>
+        <p>选择本次采用的表格版本。原有历史保留；摘要不删除。</p>
+        <h4>当前版本</h4>
+        <pre class="mn-conflict-preview">{{ conflictBefore || '无可见记录' }}</pre>
+        <button :disabled="busy" @click="run(() => chooseConflict(false))">使用当前版本，丢弃本次填表</button>
+        <h4>待写入版本</h4>
+        <p>恢复这次请求时的整组表格，再写入本次填表内容；会替换此后对表格的修改。</p>
+        <pre v-if="conflict.proposed" class="mn-conflict-preview">{{ conflictAfter || '无可见记录' }}</pre>
+        <p v-else class="mn-warning">{{ conflict.proposalError }}</p>
+        <button :disabled="busy || !conflict.proposed" @click="run(() => chooseConflict(true))">使用待写入版本</button>
+        <p v-if="error" class="mn-warning" role="alert">{{ error }}</p>
+        <button :disabled="busy" @click="conflict = null">取消</button>
+      </section>
+    </ModalMask>
     <ModalMask :open="!!menu" @close="menu = null"
       ><div class="mn-dialog mn-menu" role="dialog" aria-label="管理表格">
         <h3>{{ menu?.name }}</h3>
@@ -666,3 +708,7 @@ onBeforeUnmount(() => {
     >
   </section>
 </template>
+
+<style scoped>
+.mn-conflict-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28vh; overflow: auto; font: inherit; }
+</style>

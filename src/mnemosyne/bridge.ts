@@ -10,7 +10,8 @@ import { archiveWasDeleted, allowArchiveCreation, commitArchiveDeletion, type Ar
 import { normalizeTags, type SummaryTags, type EventHint } from '@/memory/contextTags';
 import { eventView, renderPersistentEvents, type EventView } from './events';
 import { previewReconnect, commitReconnect } from './binding-recovery';
-import { readTables, renderTableState, commitSummaryTables, type SummaryTablePlan } from './tables';
+import { readTables, renderTableState, commitSummaryTables, previewTablePlan, type SummaryTablePlan } from './tables';
+import { tableStateAt } from './table-history';
 import { TABLE_OUTPUT_KEY } from './summary-tables';
 /** The only daily-library module that observes the ST host. */
 import { reactive, ref, shallowRef, watch } from 'vue';
@@ -35,7 +36,7 @@ import {
     type HostMemory,
     type MemoryStatus,
 } from './canonical';
-import { row, check, type CapturedView, type SourceRef, type Branch, type Binding, type MemoryView, type MemoryRevision } from './model';
+import { row, check, type CapturedView, type SourceRef, type Branch, type Binding, type MemoryView, type MemoryRevision, type TableDef, type TableRow } from './model';
 export const dailyState = reactive({
     status: '未归档',
     error: '',
@@ -51,6 +52,7 @@ export const dailyState = reactive({
     conflict: false,
     revision: 0,
 });
+export const tableConflicts = shallowRef<{ floor: number; reason: string }[]>([]);
 let installed = false;
 interface DailyCache {
     view: CapturedView;
@@ -217,7 +219,7 @@ export function invalidateDaily(reason = '档案视图已更新', hostNotificati
     if (!hostNotification) summaryPolicyEpoch++;
     promptHistory = null;
     const scope = hostScope();
-    if (dailyState.scope !== scope) { reason = '已切换聊天'; invalidateReplyDiagnostics(); }
+    if (dailyState.scope !== scope) { tableConflicts.value = []; reason = '已切换聊天'; invalidateReplyDiagnostics(); }
     scheduledHost = hostVersion();
     injectionCache = hostNotification ? appendedProjection(scheduledHost) : null;
     parallelHost = null;
@@ -483,7 +485,6 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             if (
                 reusable &&
                 metadataBinding?.branch === reusable.view.branch.id &&
-                !dailyState.tableError &&
                 reusable.host === observedHost &&
                 reusable.library === lib.db.name
             ) {
@@ -706,6 +707,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             let validity = await statuses(lib, view);
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
             dailyState.tableError = '';
+            const conflicts: typeof tableConflicts.value = [];
             const receipts = new Set((await lib.all('table_receipts', 'branch', branch.id)).map((r) => r.id));
             for (const [floor, message] of ctx.chat.entries()) {
                 const saved = message.extra?.[TABLE_OUTPUT_KEY] as
@@ -732,9 +734,11 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                         () => host === hostVersion() && isActive() && generation === dailyState.generation,
                     );
                 } catch (error) {
-                    dailyState.tableError = `摘要已保存，#${floor} 楼填表待处理：${String((error as Error).message)}。可刷新重试；若表已改动，请重新生成该楼摘要以替代旧请求。`;
+                    conflicts.push({ floor, reason: String((error as Error).message) });
+                    dailyState.tableError = `摘要已保存，#${floor} 楼填表待处理：${String((error as Error).message)}。`;
                 }
             }
+            tableConflicts.value = conflicts;
             // Table sidecars may have advanced epoch during this sync. Capture that commit before
             // publishing event context; never cache a newer event projection under an older view.
             const latestBranch = await lib.get<Branch>('branches', branch.id);
@@ -1236,4 +1240,57 @@ export async function deleteDailyArchive(lib: Awaited<ReturnType<typeof activeLi
     if (!plan.scopes.includes(scope)) {
         try { await syncDaily(); } catch { /* Deletion succeeded; normal archive status reports any refresh blocker. */ }
     }
+}
+
+
+/** Read once on opening the conflict dialog; ordinary page refreshes never load history. */
+export async function previewTableConflict(floor: number) {
+    const view = await syncDaily(), lib = await activeLibrary();
+    const ctx = getContext(), scope = hostScope(), host = hostVersion(), generation = dailyState.generation;
+    const message = ctx?.chat[floor], saved = message?.extra?.[TABLE_OUTPUT_KEY] as
+        { version: number; leaf: string; text: string; plan: SummaryTablePlan } | undefined;
+    check(ctx && message && saved?.version === 2 && saved.plan.branch === view.branch.id &&
+        saved.leaf === getLeaf(message)?.id && saved.text === getLeaf(message)?.text &&
+        tableConflicts.value.some(item => item.floor === floor), '填表冲突已改变，请重新打开');
+    const snapshot = sourceSnapshot(saved), plan = sourceSnapshot(saved.plan) as SummaryTablePlan;
+    const before = await lib.transaction(['custom_table_defs', 'custom_table_rows'], 'readonly', async tx => {
+        const defs = (await tx.all<TableDef>('custom_table_defs', 'branch', view.branch.id)).filter(def => !def.deleted);
+        return Promise.all(defs.map(async def => ({ def, rows: (await tx.all<TableRow>('custom_table_rows', 'owner', def.id)).filter(r => !r.deleted) })));
+    });
+    let proposed: typeof before | null = null, proposalError = '';
+    try {
+        check(plan.tableHead, '旧请求缺少历史版本');
+        const state = await lib.transaction(['table_history'], 'readonly', tx => tableStateAt(tx, plan.tableHead!));
+        proposed = previewTablePlan(state.defs.filter(d => !d.deleted).map(def => ({ def,
+            rows: state.rows.filter(r => r.owner === def.id && !r.deleted) })), plan);
+    } catch (error) { proposalError = (error as Error).message; }
+    check(host === hostVersion() && generation === dailyState.generation && lib === await activeLibrary() &&
+        await current(lib, view), '聊天或表格已改变，请重新打开');
+    return { view, lib, ctx, scope, host, generation, floor, message, saved, snapshot, plan, before, proposed, proposalError };
+}
+export async function resolveTableConflict(preview: Awaited<ReturnType<typeof previewTableConflict>>, incoming: boolean) {
+    const { lib, view, ctx, message, saved, scope, host, generation, plan } = preview;
+    const guard = () => getContext()?.chat === ctx.chat && hostScope() === scope && hostVersion() === host &&
+        dailyState.generation === generation && message.extra?.[TABLE_OUTPUT_KEY] === saved && sameSourceSnapshot(saved, preview.snapshot);
+    await serializeDailyActivation(async () => {
+        check(guard() && lib === await activeLibrary() && await current(lib, view), '聊天或表格已改变，请重新选择冲突版本');
+        if (incoming) {
+            check(preview.proposed, '待写入版本无法恢复：' + preview.proposalError);
+            const validity = await statuses(lib, view);
+            const source = view.memories.find(m => m.hostId === saved.leaf && validity.get(m.id) === 'valid');
+            check(source, '此摘要来源已失效，不能应用旧填表');
+            await commitSummaryTables(lib, view, plan, [source.id], guard, undefined, true);
+        } else {
+            // Explicitly discarding the unapplied sidecar never rolls back a table write.
+            delete message.extra![TABLE_OUTPUT_KEY];
+            try { await saveChatNow(ctx); }
+            catch (error) {
+                if (!Object.hasOwn(message.extra!, TABLE_OUTPUT_KEY)) message.extra![TABLE_OUTPUT_KEY] = saved;
+                throw error;
+            }
+        }
+        // Force one reconciliation to clear resolved errors and discover any other pending floor.
+        cache = lastCache = injectionCache = null;
+    });
+    return syncDaily();
 }

@@ -1,5 +1,5 @@
 import { readSource, snapshotVariants, retireCurrentBodies } from './current-body';
-import { ensureTableHistory, reconcileTableHistory, inheritTableHistory } from './table-history';
+import { ensureTableHistory, reconcileTableHistory, inheritTableHistory, rebaseTableAnnotations } from './table-history';
 import { eventView } from './events';
 import { unlinkDeletedEventSources, eventSourcesChecked } from './event-source-sync';
 import { inheritForkMemory } from './fork-memory';
@@ -256,7 +256,25 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
             { snapshot: priorSnapshot, refs: priorRefs, variants: priorVariants });
         branch.head = snapshot.id;
         if (!oldHead) await ensureTableHistory(tx, branch);
-        else if (oldHead !== branch.head) await reconcileTableHistory(tx, branch, refs, variants);
+        else if (oldHead !== branch.head) {
+            // Summary writes can add managed display annotations to a message.
+            // They must not undo a user's table edits as if the story had rewound.
+            const generated = new Map(observation.memories.filter(m => m.generatedSidecar && m.anchorKey)
+                .map(m => [m.anchorKey!, m]));
+            const strip = (text: string) => text.replace(/\n?<bbs_(items|vars)>[\s\S]*?<\/bbs_\1>/g, '').trimEnd();
+            let annotationsOnly = priorRefs.length <= refs.length, changed = false;
+            for (let i = 0; annotationsOnly && i < priorRefs.length; i++) {
+                const old = priorRefs[i], next = refs[i];
+                if (old.message !== next.message || priorVariants[i] !== variants[i]) { annotationsOnly = false; break; }
+                if (old.revision === next.revision) continue;
+                changed = true;
+                const host = observation.messages[i], evidence = generated.get(host.key);
+                const source = evidence?.inputRefs?.some(r => equal(r, old)) ? await readSource(tx, old.revision) : undefined;
+                annotationsOnly = !!source && source.role === host.role && strip(source.content) === strip(host.content);
+            }
+            if (!(annotationsOnly && changed && await rebaseTableAnnotations(tx, branch, priorRefs, refs, priorVariants)))
+                await reconcileTableHistory(tx, branch, refs, variants);
+        }
         const families = await tx.all<Memory>('memories', 'owner', binding.id);
         const familyByHost = new Map(families.map((m) => [m.hostId, m]));
         const previous = branch.view ? await tx.get<MemoryView>('memory_views', branch.view) : undefined;

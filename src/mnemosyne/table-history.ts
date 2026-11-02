@@ -230,3 +230,46 @@ export async function inheritTableHistory(tx: Transaction, parent: Branch, branc
     await adoptProjection(tx, branch, await tableStateAt(tx, branch.tableHead!));
     await tx.put('branches', parent);
 }
+
+/** Move unchanged values across a proven plugin-annotation-only source update.
+ * A new history node retains the old snapshot; no old history is rewritten. */
+export async function rebaseTableAnnotations(tx: Transaction, branch: Branch, before: SourceRef[], after: SourceRef[], variants: number[]) {
+    const head = (await tx.get<TableCommit>('table_history', branch.tableHead!))!;
+    const target = await compatibleTableHead(tx, head.id, before, variants);
+    if (target?.id !== head.id) return false;
+    const replacements = new Map(before.map((ref, i) => [ref.revision, after[i]]));
+    const changedRows: TableRow[] = [];
+    for (const record of await tx.all<TableRow>('custom_table_rows', 'branch', branch.id)) {
+        if (!record.bodySources?.some(ref => replacements.get(ref.revision)?.revision !== undefined &&
+            replacements.get(ref.revision)!.revision !== ref.revision)) continue;
+        const updated = { ...record, bodySources: record.bodySources.map(ref => replacements.get(ref.revision) ?? ref) };
+        await tx.put('custom_table_rows', updated); changedRows.push(updated);
+    }
+    await recordTableWrite(tx, branch, [], changedRows, 'annotation:' + head.id);
+    // The rebased values keep their original cutoff, not the appended reply tail.
+    const commit = (await tx.get<TableCommit>('table_history', branch.tableHead!))!;
+    await tx.put('table_history', { ...commit, cutoff: head.cutoff } as TableCommit);
+    return true;
+}
+/** Only transparent, proven annotation transitions may rebase an in-flight plan. */
+export async function tablePlanHeadMatches(tx: Transaction, current: string | undefined, expected: string) {
+    const seen = new Set<string>();
+    while (current && current !== expected) {
+        if (seen.has(current)) return false;
+        seen.add(current);
+        const commit = await tx.get<TableCommit>('table_history', current);
+        if (!commit || commit.operation !== 'annotation:' + commit.parent || commit.kind !== 'write') return false;
+        current = commit.parent ?? undefined;
+    }
+    return current === expected;
+}
+
+/** Explicit user resolution: adopt a displayed historical value set as the new
+ * baseline. The previous history stays reachable; concurrency counters advance. */
+export async function selectTableHistory(tx: Transaction, branch: Branch, head: string) {
+    const chosen = await tx.get<TableCommit>('table_history', head);
+    check(chosen && chosen.branch === branch.id && chosen.story === branch.story, '所选表格历史不属于当前档案');
+    await adoptProjection(tx, branch, await tableStateAt(tx, head));
+    const state = await projection(tx, branch.id);
+    await recordTableWrite(tx, branch, state.defs, state.rows, 'resolve:' + head);
+}

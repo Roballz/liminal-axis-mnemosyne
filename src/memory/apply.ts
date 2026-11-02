@@ -1,3 +1,4 @@
+import { TABLE_OUTPUT_KEY } from '@/mnemosyne/summary-tables';
 import { notifySummaryEdit } from '@/mnemosyne/summary-edit-signal';
 import { PLAN_TEXT_MAX_CHARS } from './limits';
 import { normalizeTags, shortText, resolvePlanRef, type SummaryTags } from './contextTags';
@@ -2203,6 +2204,7 @@ export function deleteLeafAt(index: number): boolean {
   const chat = getContext()?.chat;
   if (!chat || !chat[index]?.extra?.bbs_leaf) return false;
   delete (chat[index].extra as Record<string, unknown>).bbs_leaf;
+  delete chat[index].extra![TABLE_OUTPUT_KEY];
   recomputeDerived();
   pruneBrokenComps();
   scheduleLeafFlush();
@@ -2441,6 +2443,7 @@ export function deleteSummarySubtrees(rootIds: string[]): DeleteSummarySubtreesR
       const leaf = getLeaf(message);
       if (!leaf || !leafIds.has(leaf.id)) continue;
       delete (message.extra as Record<string, unknown>).bbs_leaf;
+      delete message.extra![TABLE_OUTPUT_KEY];
       leaves++;
     }
   }

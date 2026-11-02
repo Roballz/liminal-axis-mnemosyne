@@ -16,7 +16,8 @@ export interface Package {
     checksum: string;
 }
 const EXCLUDED = ['host-chat-files', 'chat-state-delta', 'knowledge-files-and-vectors', 'vector-indexes', 'api-secrets'];
-export async function exportLibrary(lib: Library): Promise<Package> {
+/** Consistent raw snapshot for deletion planning. Not a validated export. */
+export async function snapshotLibraryForDeletion(lib: Library): Promise<Package> {
     const data = await lib.transaction(STORES, 'readonly', async (tx) => {
         const result = {} as Record<Store, Row[]>;
         for (const store of STORES)
@@ -26,8 +27,12 @@ export async function exportLibrary(lib: Library): Promise<Package> {
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
     const base = { format: 'mnemosyne-daily' as const, version: 15 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
-    await validateCurrentData(base);
     return { ...base, checksum: await fingerprint(base) };
+}
+export async function exportLibrary(lib: Library): Promise<Package> {
+    const pack = await snapshotLibraryForDeletion(lib);
+    await validateCurrentData(pack);
+    return pack;
 }
 const FIELDS: Record<Store, string[]> = {
     stories: ['created'], branches: ['head', 'view', 'epoch', 'fork'], source_messages: [],

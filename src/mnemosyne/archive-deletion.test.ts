@@ -131,3 +131,19 @@ test('editing a reused source after deleting its originating child retires body 
         restored.close();
     } finally { lib.close(); }
 });
+
+test('an independent archive with malformed review sources can be deleted while retained data stays validated', async () => {
+    const { lib, branch, view } = await fixture(1);
+    try {
+        await keepSummary(lib, view, view.memories[0].id);
+        const review = (await lib.all<any>('reviews'))[0];
+        await lib.transaction(['reviews'], 'readwrite', tx => tx.put('reviews', { ...review, sourceRefs: [] }));
+        await expect(exportLibrary(lib)).rejects.toThrow('审核来源身份不匹配');
+        const other = await synchronize(lib, observation(1, 'kept-independent'));
+        const kept = await capture(lib, other.id);
+        await expect(previewArchiveDeletion(lib, other.id)).rejects.toThrow('暂时不能删除');
+        await commitArchiveDeletion(lib, await previewArchiveDeletion(lib, branch.id), () => true);
+        expect(await capture(lib, other.id)).toEqual(kept);
+        await expect(exportLibrary(lib)).resolves.toBeDefined();
+    } finally { lib.close(); }
+});

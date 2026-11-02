@@ -1,5 +1,5 @@
 import type { Library } from './db';
-import { exportLibrary, validateCurrentData, type Package } from './migration';
+import { snapshotLibraryForDeletion, validateCurrentData, type Package } from './migration';
 import { STORES, check, equal, type Binding, type Branch, type Row, type Store, type Revision, type Snapshot, type Mapping } from './model';
 
 export interface DeletionMarker extends Row { value: { version: 1; scopes: string[] } }
@@ -37,7 +37,7 @@ export interface ArchiveDeletionPlan {
 }
 /** Preview exact records; shared parent history is never silently removed. */
 export async function previewArchiveDeletion(lib: Library, branchId: string): Promise<ArchiveDeletionPlan> {
-    const before = await exportLibrary(lib), data = before.data;
+    const before = await snapshotLibraryForDeletion(lib), data = before.data;
     const branch = data.branches.find(b => b.id === branchId) as Branch | undefined;
     check(branch, '档案已不存在，请刷新列表');
     const branches = new Set([branch.id]);

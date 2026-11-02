@@ -69,3 +69,37 @@ test('primary key matching is exact and case-sensitive; missing keys are rejecte
         expect(plan?.tables[0].operations).toHaveLength(2);
     } finally { f.lib.close(); }
 });
+
+test('no-change summary plans record completion without changing table history or data versions', async () => {
+    const f = await setup();
+    try {
+        const inputs = await readTables(f.lib, f.view.branch);
+        const plan = parseSummaryTables(ai(f.def), inputs, f.branch.id)!;
+        plan.tableHead = f.view.branch.tableHead;
+        await commitSummaryTables(f.lib, f.view, plan, [f.view.memories[0].id]);
+        const branch = await f.lib.get<any>('branches', f.branch.id);
+        expect(branch.tableHead).toBe(plan.tableHead);
+        expect(branch.epoch).toBe(f.view.branch.epoch);
+        expect((await f.lib.get<TableDef>('custom_table_defs', f.def.id))!.dataVersion).toBe(inputs[0].def.dataVersion);
+        expect(await f.lib.all('table_receipts')).toHaveLength(1);
+    } finally { f.lib.close(); }
+});
+test('AI add must not update an existing hidden primary-key row in the commit transaction', async () => {
+    const f = await setup();
+    try {
+        await applyRows(f.lib, f.view, f.def, [{ row_id: null, values: { key: 'hidden-key', detail: '保留' }, hidden: true }], false);
+        const view = await capture(f.lib, f.branch.id);
+        const plan = parseSummaryTables(ai(f.def, [{ key: 'hidden-key', detail: '不能覆盖' }]), await readTables(f.lib, view.branch), f.branch.id)!;
+        await expect(commitSummaryTables(f.lib, view, plan, [view.memories[0].id])).rejects.toThrow('隐藏行');
+        expect((await f.lib.all<TableRow>('custom_table_rows'))[0].values.detail).toBe('保留');
+    } finally { f.lib.close(); }
+});
+
+test('no-change response skips building a primary-key index over all existing rows', async () => {
+    const f = await setup();
+    try {
+        const inputs = await readTables(f.lib, f.view.branch);
+        Object.defineProperty(inputs[0], 'rows', { get() { throw new Error('Unexpected full row scan'); } });
+        expect(parseSummaryTables(ai(f.def), inputs, f.branch.id)!.tables[0].operations).toEqual([]);
+    } finally { f.lib.close(); }
+});

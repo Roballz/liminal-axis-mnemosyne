@@ -1754,3 +1754,117 @@ test('summary event hints reuse the exact captured prefix without rereading arch
     expect(bodyReads).toBe(0);
     expect(await eventHintsBefore(lib, selected, 0)).toEqual([]);
 });
+
+async function failedTableSidecar() {
+    const { newTable, saveTable, readTables, parseSummaryTables, applyRows } = await import('./tables');
+    const { attachTableResult, TABLE_OUTPUT_KEY } = await import('./summary-tables');
+    let view = await syncDaily();
+    const def = newTable(view, '失败请求回归');
+    def.columns = [{ id: 'key', name: '序号', type: 'text', mode: 'replace', description: '' }];
+    await saveTable(lib, view, def);
+    view = await capture(lib, view.branch.id);
+    const plan = parseSummaryTables([{ table_id: def.id, add: [{ key: '旧请求' }], update: [] }],
+        await readTables(lib, view.branch), view.branch.id)!;
+    plan.tableHead = view.branch.tableHead;
+    attachTableResult(ctx.chat, 1, plan);
+    await applyRows(lib, view, (await lib.get<any>('custom_table_defs', def.id))!,
+        [{ row_id: null, values: { key: '已补齐' } }], false);
+    await syncDaily();
+    expect(dailyState.tableError).toContain('历史已改变');
+    return { TABLE_OUTPUT_KEY, saved: ctx.chat[1].extra![TABLE_OUTPUT_KEY] };
+}
+test('failed table sidecar settles revision-driven UI refresh instead of looping full archives', async () => {
+    await failedTableSidecar();
+    const { watch, nextTick } = await import('vue');
+    let notifications = 0;
+    const stop = watch(() => dailyState.revision, () => {
+        if (++notifications <= 4) void syncDaily();
+    });
+    const revision = dailyState.revision, tableRevision = dailyState.tableRevision;
+    const captureSpy = vi.spyOn(canonical, 'capture');
+    vi.mocked(ctx.saveMetadata).mockClear(); vi.mocked(ctx.saveChat).mockClear();
+    try {
+        for (let i = 0; i < 5; i++) { await syncDaily(); await nextTick(); }
+        expect(notifications).toBe(0);
+        expect(dailyState.revision).toBe(revision);
+        expect(dailyState.tableRevision).toBe(tableRevision);
+        expect(captureSpy).not.toHaveBeenCalled();
+        expect(ctx.saveMetadata).not.toHaveBeenCalled(); expect(ctx.saveChat).not.toHaveBeenCalled();
+        expect(dailyState.tableError).toContain('历史已改变');
+    } finally { stop(); }
+});
+
+test('summary-generated variable annotations do not roll back a manual table deletion or block the next table result', async () => {
+    const { newTable, saveTable, applyRows } = await import('./tables');
+    const { runSummary, engineState } = await import('@/memory/engine');
+    const { flushLeavesNow } = await import('@/memory/store');
+    let view = await syncDaily();
+    const def = newTable(view, '删除后继续填表');
+    def.columns = [{ id: 'key', name: '序号', type: 'text', mode: 'replace', description: '' }];
+    await saveTable(lib, view, def); view = await syncDaily();
+    await applyRows(lib, view, (await lib.get<any>('custom_table_defs', def.id))!, [{ row_id: null, values: { key: '旧行' } }], false);
+    view = await syncDaily();
+    const record = (await lib.all<any>('custom_table_rows'))[0];
+    await applyRows(lib, view, (await lib.get<any>('custom_table_defs', def.id))!, [{ row_id: record.id, values: {}, delete: true }], false);
+    await bridge.refreshDailyTables();
+    ctx.name1 = 'User'; ctx.name2 = 'Character'; ctx.saveMetadataDebounced = vi.fn();
+    const oldMode = api.apiSettings.summaryOnlyMode;
+    api.apiSettings.summaryOnlyMode = false;
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    vi.spyOn(client, 'requestViaMainApi').mockResolvedValue(JSON.stringify({ summary: '新摘要',
+        vars: [{ op: 'set', path: 'test', value: '新变量' }],
+        customTables: [{ table_id: def.id, add: [{ key: '新行' }], update: [] }] }));
+    try {
+        await runSummary(1, { checkResummary: false });
+        expect(engineState.lastError).toBe('');
+        expect(ctx.chat[1].mes).toContain('bbs_vars');
+        await syncDaily();
+        expect(dailyState.tableError).toBe('');
+        expect((await lib.all<any>('custom_table_rows')).filter(r => !r.deleted).map(r => r.values.key)).toEqual(['新行']);
+    } finally { api.apiSettings.summaryOnlyMode = oldMode; flushLeavesNow(); }
+});
+
+test.each([false, true])('explicit conflict choice applies one version and stops old requests (incoming=%s)', async incoming => {
+    await failedTableSidecar();
+    const preview = await bridge.previewTableConflict(1);
+    expect(preview.before.flatMap(t => t.rows.map(r => r.values.key))).toEqual(['已补齐']);
+    expect(preview.proposed?.flatMap(t => t.rows.map(r => r.values.key))).toEqual(['旧请求']);
+    await bridge.resolveTableConflict(preview, incoming);
+    expect(dailyState.tableError).toBe('');
+    expect(bridge.tableConflicts.value).toHaveLength(0);
+    expect((await lib.all<any>('custom_table_rows')).filter(r => !r.deleted).map(r => r.values.key))
+        .toEqual([incoming ? '旧请求' : '已补齐']);
+    expect(ctx.chat[1].extra!.bbs_leaf!.text).toBe('合成旧摘要');
+    await syncDaily();
+    expect(dailyState.tableError).toBe('');
+    await expect(exportLibrary(lib)).resolves.toBeDefined();
+});
+test('conflict preview cannot override later edits or a changed chat; save failure retains the pending result', async () => {
+    const { TABLE_OUTPUT_KEY, saved } = await failedTableSidecar();
+    const preview = await bridge.previewTableConflict(1);
+    vi.mocked(ctx.saveChat).mockRejectedValueOnce(new Error('save failed'));
+    await expect(bridge.resolveTableConflict(preview, false)).rejects.toThrow('save failed');
+    expect(ctx.chat[1].extra![TABLE_OUTPUT_KEY]).toBe(saved);
+    const branch = (await dailyBranch())!;
+    await lib.transaction(['branches'], 'readwrite', tx => tx.put('branches', { ...branch, epoch: branch.epoch + 1 } as typeof branch));
+    await expect(bridge.resolveTableConflict(preview, true)).rejects.toThrow('已改变');
+    ctx.getCurrentChatId = () => 'other';
+    await expect(bridge.resolveTableConflict(preview, false)).rejects.toThrow('已改变');
+});
+
+test.each(['single', 'subtree'])('deleting summaries removes pending table results without applying them (%s)', async mode => {
+    const { TABLE_OUTPUT_KEY } = await failedTableSidecar();
+    const { deleteLeafAt, deleteSummarySubtrees } = await import('@/memory/apply');
+    const { flushLeavesNow } = await import('@/memory/store');
+    const before = await lib.all('custom_table_rows');
+    try {
+        if (mode === 'single') expect(deleteLeafAt(1)).toBe(true);
+        else expect(deleteSummarySubtrees([ctx.chat[1].extra!.bbs_leaf!.id]).leaves).toBe(1);
+        expect(ctx.chat[1].extra![TABLE_OUTPUT_KEY]).toBeUndefined();
+        await syncDaily();
+        expect(dailyState.tableError).toBe('');
+        expect(await lib.all('custom_table_rows')).toEqual(before);
+    } finally { flushLeavesNow(); }
+});

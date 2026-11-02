@@ -1,4 +1,4 @@
-import { TABLE_STORES, ensureTableHistory, recordTableWrite } from './table-history';
+import { TABLE_STORES, ensureTableHistory, recordTableWrite, tablePlanHeadMatches, selectTableHistory } from './table-history';
 import { parseStrictJson } from './json';
 import { Library, type Transaction } from './db';
 import { current, statuses, snapshotRefs } from './canonical';
@@ -437,6 +437,7 @@ export function parseSummaryTables(value: unknown, inputs: TableInput[], branch:
             }),
         ];
         check(operations.length <= 200, '单表每次最多200行变更');
+        if (!operations.length) return { id: input.def.id, version: input.def.version, dataVersion: input.def.dataVersion ?? 0, operations };
         const keyIndex = primaryIndex(input.def, input.rows);
         const touched = new Set<string>();
         for (let i = 0; i < operations.length; i++) {
@@ -468,8 +469,8 @@ export async function assertTablePlan(tx: Transaction, plan: SummaryTablePlan, m
                 !def.deleted &&
                 (manual || def.ai) &&
                 def.branch === plan.branch &&
-                def.version === item.version &&
-                (def.dataVersion ?? 0) === item.dataVersion,
+                (!item.operations.length || (def.version === item.version &&
+                (def.dataVersion ?? 0) === item.dataVersion)),
             '填表期间表格已改变，旧结果未应用',
         );
     }
@@ -482,6 +483,7 @@ export async function commitSummaryTables(
     sources: string[],
     guard: () => boolean = () => true,
     body?: { start: number; end: number; refs: SourceRef[] },
+    resolveHistory = false,
 ) {
     const digest = await fingerprint(body ? [plan, body] : plan);
     if (body) check(Number.isInteger(body.start) && Number.isInteger(body.end) && body.start >= 0 && body.end < view.cutoff && body.start <= body.end && JSON.stringify(body.refs) === JSON.stringify(view.refs.slice(body.start, body.end + 1)), '补表正文范围无效');
@@ -506,10 +508,22 @@ export async function commitSummaryTables(
             const branch = await tx.get<Branch>('branches', plan.branch);
             check(branch && branch.id === view.branch.id && branch.epoch === view.branch.epoch, '迟到填表结果已拒绝');
             check((sources.length > 0 || !!body) && sources.every((id) => view.memories.some((m) => m.id === id)), '填表来源缺失');
-            if (plan.tableHead !== undefined) check(plan.tableHead === branch.tableHead, '表格历史已改变，旧填表结果未应用');
+            if (resolveHistory) {
+                check(plan.tableHead, '旧请求缺少历史版本，不能自动恢复');
+                check(guard(), '聊天已改变，冲突处理已取消');
+                await selectTableHistory(tx, branch, plan.tableHead);
+            }
+            if (!resolveHistory && plan.tableHead !== undefined && plan.tables.some(t => t.operations.length)) check(await tablePlanHeadMatches(tx, branch.tableHead, plan.tableHead), '表格历史已改变，旧填表结果未应用');
             await ensureTableHistory(tx, branch);
             const changedRows: TableRow[] = [], changedDefs: TableDef[] = [];
-            await assertTablePlan(tx, plan, !!body);
+            if (resolveHistory) {
+                const tables = await Promise.all(plan.tables.map(async item => {
+                    const def = await tx.get<TableDef>('custom_table_defs', item.id);
+                    check(def, '历史表不存在');
+                    return { ...item, version: def.version, dataVersion: def.dataVersion ?? 0 };
+                }));
+                await assertTablePlan(tx, { ...plan, tables }, !!body);
+            } else await assertTablePlan(tx, plan, !!body);
             check(guard(), '聊天已改变，填表结果未应用');
             for (const item of plan.tables) {
                 const def = (await tx.get<TableDef>('custom_table_defs', item.id))!;
@@ -524,6 +538,7 @@ export async function commitSummaryTables(
                         !op.row_id || (record && record.owner === def.id && !record.deleted && !record.hidden),
                         '填表行已失效',
                     );
+                    check(!record?.hidden, '隐藏行不能由 AI 修改');
                     check(!record || !touched.has(record.id), '同一批次重复操作同一行或主键');
                     const matched = !!record;
                     record ??= {
@@ -552,9 +567,11 @@ export async function commitSummaryTables(
                     await tx.put('custom_table_rows', changed);
                     changedRows.push(changed);
                 }
-                const changedDef = { ...def, dataVersion: (def.dataVersion ?? 0) + 1 };
-                await tx.put('custom_table_defs', changedDef);
-                changedDefs.push(changedDef);
+                if (item.operations.length || body) {
+                    const changedDef = { ...def, dataVersion: (def.dataVersion ?? 0) + 1 };
+                    await tx.put('custom_table_defs', changedDef);
+                    changedDefs.push(changedDef);
+                }
                 await tx.add('table_receipts', {
                     id: `${plan.operation}:${def.id}`,
                     schema: 1,
@@ -570,10 +587,12 @@ export async function commitSummaryTables(
                 } as any);
             }
             check(guard(), '聊天已改变，填表结果未应用');
-            await recordTableWrite(tx, branch, changedDefs, changedRows, plan.operation);
-            check(guard(), '聊天已改变，填表结果未应用');
-            branch.epoch++;
-            await tx.put('branches', branch);
+            if (changedDefs.length || resolveHistory) {
+                await recordTableWrite(tx, branch, changedDefs, changedRows, plan.operation);
+                check(guard(), '聊天已改变，填表结果未应用');
+                branch.epoch++;
+                await tx.put('branches', branch);
+            }
             view.branch = branch;
         },
     );
@@ -595,4 +614,24 @@ export function renderTableState(inputs: TableInput[], allowed?: Set<string>): s
     return tables.length
         ? '[自定义表 · 当前可见记录]\n' + tables.map((t) => `${t.name}:\n${t.rows.join('\n')}`).join('\n\n')
         : '';
+}
+
+/** Value-only conflict preview using the same merge/key rules as the write path. */
+export function previewTablePlan(inputs: TableInput[], plan: SummaryTablePlan): TableInput[] {
+    const projected = inputs.map(input => ({ def: input.def, rows: input.rows.map(r => ({ ...r, values: { ...r.values } })) }));
+    for (const item of plan.tables) {
+        const input = projected.find(t => t.def.id === item.id);
+        check(input && !input.def.deleted, '请求时的表定义不存在');
+        const index = primaryIndex(input.def, input.rows);
+        for (const [i, op] of item.operations.entries()) {
+            const prior = op.row_id ? index.byId.get(op.row_id) : matchPrimary(input.def, index, op.values);
+            check(!op.row_id || prior, '请求时的表行不存在');
+            check(!prior?.hidden && !op.delete && op.hidden === undefined, '填表操作不可修改隐藏行或删除行');
+            const next = { ...(prior ?? { id: 'preview-' + i, owner: input.def.id, deleted: false, sources: [] }),
+                values: mergeCells(input.def, prior?.values ?? {}, !op.row_id && prior ? upsertValues(input.def, prior.values, op.values) : op.values, true) } as TableRow;
+            stagePrimary(input.def, index, prior, next, !prior);
+        }
+        input.rows = [...index.byId.values()];
+    }
+    return projected;
 }
