@@ -203,8 +203,10 @@ describe('summary fact workflow', () => {
 
   it('uses brief visible records and keeps each checklist within a compact size budget', () => {
     for (const [checklist, maxChars] of [
-      [THINKING_CHECKLIST, 6500],
-      [buildBatchThinking(2).checklist, 1600],
+      // 单楼清单扩充字段核对规则后约 7200 字符,保留适度增长余量。
+      [THINKING_CHECKLIST, 8000],
+      // 批量清单扩充后约 1850 字符,采用同样的有界余量。
+      [buildBatchThinking(2).checklist, 2200],
       [RESUMMARY_THINKING_CHECKLIST, 1300],
     ] as const) {
       expectFactWorkflow(checklist);
