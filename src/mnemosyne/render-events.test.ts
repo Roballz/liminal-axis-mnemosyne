@@ -169,20 +169,22 @@ test('rebinding cancels old pending renders and an old disposer cannot disable t
   expect(dailyState.generation).toBeGreaterThan(before);
 });
 
-test('a blocked serial writer permits only one automatic job plus one latest-state follow-up', async () => {
+test('a blocked serial writer coalesces changed notifications into one latest-state archive', async () => {
   let release!: () => void;
   const held = serializeDailyActivation(() => new Promise<void>(resolve => { release = resolve; }));
   await Promise.resolve(); await Promise.resolve();
   const validate = vi.spyOn(ReplyFinality.prototype, 'assertArchivable');
   try {
     for (let i = 0; i < 12; i++) {
+      ctx.chat[154].extra!.bbs_leaf!.text = `Latest summary ${i}`;
       await emit('CHARACTER_MESSAGE_RENDERED', i);
       await vi.advanceTimersByTimeAsync(232);
     }
     expect(validate).not.toHaveBeenCalled();
   } finally { release(); }
   await held; await drainSync();
-  expect(validate).toHaveBeenCalledOnce();
+  expect(validate).toHaveBeenCalledTimes(2); // One cold pass checks finality before and after binding.
+  expect(canonicalLeaves().find(leaf => leaf.hostId === 'leaf-154')?.document).toBe('Latest summary 11');
   await vi.advanceTimersByTimeAsync(200); await drainSync();
   expect(validate).toHaveBeenCalledTimes(2);
   await vi.advanceTimersByTimeAsync(1_000); await drainSync();
@@ -195,6 +197,7 @@ test('a queued automatic job becomes a no-op after pagehide before the writer re
   await Promise.resolve(); await Promise.resolve();
   const validate = vi.spyOn(ReplyFinality.prototype, 'assertArchivable');
   try {
+    ctx.chat[154].extra!.bbs_leaf!.text = 'Changed before disposal';
     await emit('CHARACTER_MESSAGE_RENDERED', 154);
     await vi.advanceTimersByTimeAsync(232);
     win.dispatchEvent(new Event('pagehide'));
