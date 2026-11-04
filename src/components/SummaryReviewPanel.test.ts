@@ -39,8 +39,8 @@ function result(count = 155, recovery = true) {
   const memories = Array.from({ length: count }, (_, i) => ({ id: `memory-${i}`, owner: `owner-${i}`, hostId: `leaf-${i}`, level: 0, content: `摘要${i}：` + '合成摘要正文'.repeat(2_000), ...(recovery ? { sourceRecovery: { reason: 'missing_basis' } } : {}) }));
   return { view: { branch: { id: 'branch', head: 'head', view: 'view', epoch: 1 }, memories, refs: [] }, validity: new Map(memories.map(m => [m.id, 'needs_review'])), host: 'host', generation: 1, lib: {} } as any;
 }
-beforeEach(() => { Object.assign(dailyState, { generation: 1, revision: 1, scope: 'scope', review: 155, pending: false }); mocks.read.mockReset().mockResolvedValue(result()); mocks.host.mockClear(); mocks.keep.mockReset(); mocks.recover.mockReset().mockResolvedValue({}); mocks.current.mockReset().mockResolvedValue(true); mocks.sync.mockReset(); });
-afterEach(() => { apps.splice(0).forEach(app => app.unmount()); vi.restoreAllMocks(); });
+beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); Object.assign(dailyState, { generation: 1, revision: 1, scope: 'scope', review: 155, pending: false }); mocks.read.mockReset().mockResolvedValue(result()); mocks.host.mockClear(); mocks.keep.mockReset(); mocks.recover.mockReset().mockResolvedValue({}); mocks.current.mockReset().mockResolvedValue(true); mocks.sync.mockReset(); });
+afterEach(() => { apps.splice(0).forEach(app => app.unmount()); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 test('155 review summaries mount no collapsed rows; pagination stays at ten and does not reread the host', async () => {
   const root = mount(); await flush();
   expect(nodes(root).filter(n => n.type === 'article')).toHaveLength(0);
@@ -71,7 +71,9 @@ test('archive pending defers review reads until completion and a chat switch dro
   expect(nodes(root).some(n => n.props.role === 'dialog')).toBe(false);
   expect(content(root)).not.toContain('155 条摘要待确认');
 });
-async function settleAction() { await new Promise(resolve => setTimeout(resolve, 5)); await flush(); }
+// Let Vue schedule the deliberate paint yield, then finish it deterministically.
+// A real 5 ms sleep can expire before this timer is even queued under suite load.
+async function settleAction() { await flush(); await vi.runAllTimersAsync(); await flush(); }
 test('bulk recovery is explicit, count-bounded and double confirmation writes only once', async () => {
   const fixture = result(); fixture.view.memories.push({ id: 'high', content: '高层', level: 1, sourceRecovery: {} }); fixture.validity.set('high', 'needs_review');
   mocks.read.mockResolvedValue(fixture);
@@ -81,7 +83,9 @@ test('bulk recovery is explicit, count-bounded and double confirmation writes on
   button(root, '核对并保留 155').props.onClick(); await flush();
   expect(mocks.recover).not.toHaveBeenCalled(); expect(content(root)).toContain('不调用模型');
   expect(content(root)).toContain('旧生成时引用的摘要和来源保留在旧版本中');
-  const confirm = button(root, '已核对，保留这些摘要'); confirm.props.onClick(); confirm.props.onClick(); await settleAction();
+  const confirm = button(root, '已核对，保留这些摘要'); confirm.props.onClick(); confirm.props.onClick(); await flush();
+  expect(mocks.recover).not.toHaveBeenCalled(); expect(content(root)).toContain('正在处理');
+  await settleAction();
   expect(mocks.recover).toHaveBeenCalledOnce();
   expect(mocks.recover.mock.calls[0][1]).toHaveLength(155); expect(mocks.recover.mock.calls[0][1]).not.toContain('high');
   expect(mocks.keep).not.toHaveBeenCalled(); expect(content(root)).toContain('已人工确认并保留 155');

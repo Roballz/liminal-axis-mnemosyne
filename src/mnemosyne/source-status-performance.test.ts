@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { fixture } from './fixtures';
 import { statuses } from './canonical';
 import { Transaction } from './db';
@@ -9,11 +9,15 @@ import { sourceRefMatches } from './source-equivalence';
 
 afterEach(() => vi.restoreAllMocks());
 
-test.each([100, 500, 1000])('%i growing legacy bases share block reads, comparisons and positions', async count => {
-    const { lib, view } = await fixture(count);
-    try {
+describe.each([100, 500, 1000])('%i growing legacy bases', count => {
+    let data: Awaited<ReturnType<typeof fixture>>;
+    const used = new Map<string, number>();
+    // Fixture construction writes thousands of synthetic records. It is not the
+    // status-read performance under test; retain the normal timeout for that read.
+    beforeAll(async () => {
+        data = await fixture(count);
+        const { lib, view } = data;
         const memories = view.memories.slice().sort((a, b) => Number(a.hostId.slice(5)) - Number(b.hostId.slice(5)));
-        const used = new Map<string, number>();
         await lib.transaction(['history_snapshots', 'manifest_blocks', 'memory_revisions'], 'readwrite', async tx => {
             for (let i = 0; i < count; i++) {
                 const length = (i + 1) * 2;
@@ -31,6 +35,10 @@ test.each([100, 500, 1000])('%i growing legacy bases share block reads, comparis
                 await tx.put('memory_revisions', memories[i]);
             }
         });
+    }, 15_000);
+    afterAll(() => data?.lib.close());
+    test('shares block reads, comparisons and positions', async () => {
+        const { lib, view } = data;
         let visited = 0;
         const original = Transaction.prototype.get;
         vi.spyOn(Transaction.prototype, 'get').mockImplementation(async function (this: Transaction, store, key) {
@@ -45,7 +53,7 @@ test.each([100, 500, 1000])('%i growing legacy bases share block reads, comparis
         expect(visited).toBe([...used.values()].reduce((a, b) => a + b, 0));
         expect(visited).toBeLessThan(count * (count + 1));
         expect(visited).toBeLessThan(count * 128);
-    } finally { lib.close(); }
+    });
 });
 
 test('200 historical review receipts resolve a selected equivalent once, without array searches', async () => {

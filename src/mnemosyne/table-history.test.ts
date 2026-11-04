@@ -461,14 +461,24 @@ test('new table after a real gap starts clean now but does not fabricate an earl
     } finally { f.lib.close(); }
 });
 
-test('ordinary writes do not reload table projections to clear an already false gap', async () => {
+test('ordinary writes scan keys once, non-key updates skip the scan, neither reloads history', async () => {
     const f = await setup();
     const all = vi.spyOn(Transaction.prototype, 'all');
     try {
+        const def = (await f.lib.get<TableDef>('custom_table_defs', f.def.id))!;
+        let view = await capture(f.lib, f.branch.id);
         all.mockClear();
-        await f.write('正常写入');
+        await applyRows(f.lib, view, def, [{ row_id: null, values: { v: '唯一主键' } }], false);
         expect(all.mock.calls.filter(([store]) => store === 'table_history')).toHaveLength(0);
-        expect(all.mock.calls.filter(([store]) => store === 'custom_table_defs')).toHaveLength(1);
-        expect(all.mock.calls.filter(([store]) => store === 'custom_table_rows')).toHaveLength(2);
+        expect(all.mock.calls.filter(([store]) => store === 'custom_table_defs')).toHaveLength(0);
+        expect(all.mock.calls.filter(([store]) => store === 'custom_table_rows')).toEqual([
+            ['custom_table_rows', 'owner', f.def.id],
+        ]); // The transaction's uniqueness check, excluding test-helper reads.
+        const record = (await f.lib.all<TableRow>('custom_table_rows', 'owner', f.def.id))[0];
+        view = await capture(f.lib, f.branch.id);
+        all.mockClear();
+        await applyRows(f.lib, view, def, [{ row_id: record.id, values: { a: '只改普通列' } }], false);
+        expect(all.mock.calls.filter(([store]) => ['table_history', 'custom_table_defs', 'custom_table_rows'].includes(store))).toEqual([]);
+        expect((await f.lib.get<TableRow>('custom_table_rows', record.id))?.values).toEqual({ v: '唯一主键', a: '只改普通列' });
     } finally { all.mockRestore(); f.lib.close(); }
 });
