@@ -6,6 +6,8 @@ import ts from 'typescript';
 import { createNodeFloorIndex, selectViewNodes } from '@/memory/select';
 import { compactTimeLabel, formatRange } from '@/memory/timeTag';
 import { eventPending } from '@/mnemosyne/manual-events';
+import { sortTableRows } from '@/mnemosyne/table-order';
+import type { TableDef, TableRow } from '@/mnemosyne/model';
 
 const source = (name: string) => parse(readFileSync(new URL(name, import.meta.url), 'utf8')).descriptor.scriptSetup!.content;
 function slice(code: string, start: string, end: string) {
@@ -31,6 +33,65 @@ test('table search skips serialization when empty and reuses normalized data acr
   rows.value = rows.value.map(row => row.id === '19' ? { ...row, values: { value: 'updated' } } : row);
   expect(page.filtered.value).toHaveLength(10); expect(serialized).toHaveBeenCalledTimes(200);
   search.value = ''; expect(page.filtered.value).toHaveLength(200);
+});
+
+test('table refresh sorts before pagination and search or visibility changes reuse the ordered rows', async () => {
+  const def: TableDef = { id: 'table', schema: 1, story: 'story', branch: 'branch', name: '合成排序表',
+    description: '', columns: [{ id: 'key', name: '名称', type: 'text', mode: 'lock', description: '' }],
+    ai: true, version: 1, created: 0, updated: 0, deleted: false };
+  const expected = Array.from({ length: 25 }, (_, i) => `S-${String(i + 1).padStart(3, '0')}`);
+  const record = (id: string, key: string, hidden = false, deleted = false): TableRow => ({
+    id, schema: 1, owner: def.id, story: def.story, branch: def.branch,
+    values: { key }, sources: [], version: 1, hidden, deleted,
+  });
+  // Database IDs and read order deliberately disagree with the displayed names.
+  const records = expected.map((_, i) => record(`row-${i}`, expected[24 - i]));
+  records.splice(7, 0, record('hidden', 'S-000', true), record('deleted', 'S-026', false, true));
+  const originalOrder = records.map(row => row.id);
+  const tables = Vue.shallowRef<TableDef[]>([]), rows = Vue.shallowRef<TableRow[]>([]);
+  const branch = Vue.shallowRef(null), tableId = Vue.ref(def.id), loading = Vue.ref(false);
+  const search = Vue.ref(''), showHidden = Vue.ref(false), pagination = Vue.ref(0), selected = Vue.ref<string[]>([]);
+  const all = vi.fn(async (store: string) => store === 'custom_table_defs' ? [def] : records);
+  const dailyBranch = vi.fn().mockResolvedValue({ id: def.branch });
+  const activeLibrary = vi.fn().mockResolvedValue({ all });
+  const ordered = vi.fn(sortTableRows), back = vi.fn();
+  const code = source('./tables/index.vue');
+  const program = slice(code, 'const searchRows =', 'const selectionItems =') + '\n' +
+    slice(code, 'let request = 0;', 'async function run(') + '\n' +
+    slice(code, 'watch([search, showHidden]', 'onMounted(');
+  const scope = Vue.effectScope();
+  try {
+    const page = scope.run(() => execute(program, { computed: Vue.computed, watch: Vue.watch,
+      tables, rows, branch, tableId, loading, search, showHidden, page: pagination, selected,
+      dailyBranch, activeLibrary, hostScope: () => 'scope', back, sortTableRows: ordered },
+      'refresh,filtered,shown'))!;
+    const shownNames = () => page.shown.value.map((row: TableRow) => row.values.key);
+    await page.refresh();
+    expect(loading.value).toBe(false);
+    expect(page.filtered.value.map((row: TableRow) => row.values.key)).toEqual(expected);
+    expect(shownNames()).toEqual(expected.slice(0, 20));
+    pagination.value = 1;
+    expect(shownNames()).toEqual(expected.slice(20));
+
+    selected.value = ['row-0'];
+    search.value = 'S-00'; await Vue.nextTick();
+    expect(pagination.value).toBe(0); expect(selected.value).toEqual([]);
+    expect(shownNames()).toEqual(expected.slice(0, 9));
+    showHidden.value = true; await Vue.nextTick();
+    expect(shownNames()).toEqual(['S-000', ...expected.slice(0, 9)]);
+    search.value = 'S-02'; await Vue.nextTick();
+    expect(shownNames()).toEqual(expected.slice(19)); // Deleted S-026 stays excluded.
+    search.value = ''; showHidden.value = false; await Vue.nextTick();
+    expect(shownNames()).toEqual(expected.slice(0, 20));
+
+    expect(ordered).toHaveBeenCalledOnce();
+    expect(ordered).toHaveBeenCalledWith(def, records);
+    expect(all.mock.calls).toEqual([
+      ['custom_table_defs', 'branch', def.branch], ['custom_table_rows', 'owner', def.id],
+    ]);
+    expect(dailyBranch).toHaveBeenCalledOnce(); expect(activeLibrary).toHaveBeenCalledOnce();
+    expect(back).not.toHaveBeenCalled(); expect(records.map(row => row.id)).toEqual(originalOrder);
+  } finally { scope.stop(); }
 });
 
 test('summary search caches whole-forest range/text work and observes in-place child-list edits', () => {

@@ -7,6 +7,7 @@ import TableTextField from '@/components/TableTextField.vue';
 import { activeLibrary } from '@/mnemosyne/db';
 import { dailyBranch, dailyState, hostScope, refreshDailyTables, tableConflicts, previewTableConflict, resolveTableConflict } from '@/mnemosyne/bridge';
 import { newTable, saveTable, applyRows, cellLocked } from '@/mnemosyne/tables';
+import { sortTableRows } from '@/mnemosyne/table-order';
 import { check, row, type Branch, type TableDef, type TableRow, type Column } from '@/mnemosyne/model';
 const tables = shallowRef<TableDef[]>([]),
   rows = shallowRef<TableRow[]>([]),
@@ -91,7 +92,9 @@ async function refresh() {
     if (ticket !== request || scope !== hostScope()) return;
     branch.value = current;
     tables.value = defs;
-    rows.value = records;
+    const selectedTable = defs.find(t => t.id === tableId.value);
+    // Sort once per refreshed row set; search, hidden toggles and paging reuse it.
+    rows.value = selectedTable ? sortTableRows(selectedTable, records) : [];
     if (tableId.value && !defs.some((t) => t.id === tableId.value)) back();
   } finally {
     if (ticket === request) loading.value = false;

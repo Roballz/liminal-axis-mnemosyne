@@ -1,7 +1,8 @@
 import { TABLE_STORES, ensureTableHistory, recordTableWrite, tablePlanHeadMatches, selectTableHistory } from './table-history';
 import { parseStrictJson } from './json';
 import { Library, type Transaction } from './db';
-import { current, statuses, snapshotRefs } from './canonical';
+import { current, statuses, snapshotRefs, sameNarrativeRevision, type MemoryStatus } from './canonical';
+import { sortTableRows } from './table-order';
 import {
     row,
     check,
@@ -13,6 +14,7 @@ import {
     type Branch,
     type SourceRef,
     type Snapshot,
+    type MemoryRevision,
 } from './model';
 export function validateColumns(columns: Column[]) {
     check(
@@ -371,6 +373,27 @@ export async function readTables(lib: Library, branch: Branch): Promise<TableInp
         return inputs;
     });
 }
+/** Table provenance retains original revision IDs. Resolve only tag-equivalent
+ * versions against this verified view; real edits and excluded sources stay blocked. */
+export async function allowedTableSources(lib: Library, view: CapturedView, inputs: TableInput[], validity: Map<string, MemoryStatus>): Promise<Set<string>> {
+    const selected = new Map(view.memories.map(memory => [memory.owner, memory]));
+    const currentIds = new Set(view.memories.map(memory => memory.id));
+    const allowed = new Set(view.memories.filter(memory => validity.get(memory.id) === 'valid').map(memory => memory.id));
+    const previousIds = new Set<string>();
+    for (const { def, rows } of inputs) {
+        if (def.deleted) continue;
+        for (const record of rows) if (!record.deleted && !record.hidden)
+            for (const id of record.sources) if (!currentIds.has(id)) previousIds.add(id);
+    }
+    if (previousIds.size) await lib.transaction(['memory_revisions'], 'readonly', async tx => {
+        const previous = await Promise.all([...previousIds].map(id => tx.get<MemoryRevision>('memory_revisions', id)));
+        for (const prior of previous) {
+            const next = prior && selected.get(prior.owner);
+            if (prior && next && allowed.has(next.id) && sameNarrativeRevision(prior, next)) allowed.add(prior.id);
+        }
+    });
+    return allowed;
+}
 export function visibleCells(def: TableDef, record: TableRow) {
     return Object.fromEntries(def.columns.filter((c) => c.id in record.values).map((c) => [c.id, record.values[c.id]]));
 }
@@ -402,7 +425,7 @@ replace（覆写）输出新值；append（追加）只输出新增片段；lock
                     description: c.description,
                     prompt: c.prompt ?? '',
                 })),
-                rows: rows.map((r) => ({ row_id: r.id, values: namedVisibleCells(def, r) })),
+                rows: sortTableRows(def, rows).map((r) => ({ row_id: r.id, values: namedVisibleCells(def, r) })),
             })),
         );
     if (maxChars !== null) check(system.length + user.length <= maxChars, `自定义表超过 ${maxChars} 字符，请隐藏无需发送的行后再摘要；未截断表格`);
@@ -601,8 +624,8 @@ export function renderTableState(inputs: TableInput[], allowed?: Set<string>): s
     const tables = inputs
         .map(({ def, rows }) => ({
             name: def.name,
-            rows: rows
-                .filter((r) => !r.deleted && !r.hidden && (!allowed || r.sources.every((id) => allowed.has(id))))
+            rows: sortTableRows(def, rows
+                .filter((r) => !r.deleted && !r.hidden && (!allowed || r.sources.every((id) => allowed.has(id)))))
                 .map((r) =>
                     '- ' + def.columns
                         .filter((c) => c.id in r.values)

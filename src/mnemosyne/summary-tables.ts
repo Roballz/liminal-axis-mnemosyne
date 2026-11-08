@@ -4,6 +4,7 @@ import { statuses } from './canonical';
 import { activeLibrary } from './db';
 import {
     readTables,
+    allowedTableSources,
     summaryTablesPrompt,
     parseSummaryTables,
     assertTablePlan,
@@ -30,9 +31,11 @@ export async function prepareSummaryTables(
     if (!floors.includes(last)) return null;
     const lib = await activeLibrary();
     const validity = await statuses(lib, view);
-    const inputs = (await readTables(lib, view.branch)).map((input) => ({
+    const tables = await readTables(lib, view.branch);
+    const allowed = await allowedTableSources(lib, view, tables, validity);
+    const inputs = tables.map((input) => ({
         ...input,
-        rows: input.rows.filter((r) => r.sources.every((id) => validity.get(id) === 'valid')),
+        rows: input.rows.filter((r) => r.sources.every((id) => allowed.has(id))),
     }));
     const prompt = summaryTablesPrompt(inputs);
     return prompt.system ? { inputs, tableHead: view.branch.tableHead, branch: view.branch.id, ...prompt } : null;

@@ -10,7 +10,7 @@ import { archiveWasDeleted, allowArchiveCreation, commitArchiveDeletion, type Ar
 import { normalizeTags, type SummaryTags, type EventHint } from '@/memory/contextTags';
 import { eventView, renderPersistentEvents, type EventView } from './events';
 import { previewReconnect, commitReconnect } from './binding-recovery';
-import { readTables, renderTableState, commitSummaryTables, previewTablePlan, type SummaryTablePlan } from './tables';
+import { readTables, allowedTableSources, renderTableState, commitSummaryTables, previewTablePlan, type SummaryTablePlan } from './tables';
 import { tableStateAt } from './table-history';
 import { TABLE_OUTPUT_KEY } from './summary-tables';
 /** The only daily-library module that observes the ST host. */
@@ -433,8 +433,11 @@ async function refreshCachedProjection(lib: Awaited<ReturnType<typeof activeLibr
     // Always check the small chain records: organization flags intentionally do not advance epoch.
     const events = await projectEvents(lib, view, validity, previous);
     const tablesChanged = !changes || changes.tables;
-    const tableText = tablesChanged ? renderTableState(await readTables(lib, branch),
-        new Set(view.memories.filter(memory => validity.get(memory.id) === 'valid').map(memory => memory.id))) : previous.tableText;
+    let tableText = previous.tableText;
+    if (tablesChanged) {
+        const inputs = await readTables(lib, branch);
+        tableText = renderTableState(inputs, await allowedTableSources(lib, view, inputs, validity));
+    }
     check(await current(lib, view) && selectedLibrary === activeLibrary() && version === lib.changes.version,
         '档案在刷新期间改变，请重试');
     const changed = view !== previous.view || events.eventProjection !== previous.eventProjection ||
@@ -765,6 +768,8 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 view = { ...view, branch: updated };
             }
             const projectionVersion = lib.changes.version;
+            const tableText = renderTableState(inputs, await allowedTableSources(lib, view, inputs, validity));
+            // Keep the live branch check after resolving historical table sources.
             const events = await projectEvents(lib, view, validity);
             check(projectionVersion === lib.changes.version, '档案在刷新期间改变，请重试');
             cache = {
@@ -775,10 +780,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 library: lib.db.name,
                 changeVersion: projectionVersion,
                 activation: libraryActivationGeneration(),
-                tableText: renderTableState(
-                    inputs,
-                    new Set(view.memories.filter((m) => validity.get(m.id) === 'valid').map((m) => m.id)),
-                ),
+                tableText,
             };
             check(host === hostVersion() && isActive() && selectedLibrary === activeLibrary() && generation === dailyState.generation, '聊天已改变');
             recordSummaryBaseline(cache);

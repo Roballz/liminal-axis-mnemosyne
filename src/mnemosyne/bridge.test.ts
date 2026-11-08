@@ -612,6 +612,67 @@ test.each([false,true])('one native summary call also fills tables and enters cu
     } finally {api.apiSettings.summaryOnlyMode=oldMode;api.apiSettings.prompts.summary=oldPrompt;flushLeavesNow();}
 });
 
+test('table injection and summary input retain rows after source tags change, including cached table refresh', async () => {
+    const { newTable, saveTable, applyRows } = await import('./tables');
+    const { prepareSummaryTables } = await import('./summary-tables');
+    const { buildStateInjectionText } = await import('@/memory/inject');
+    const view = await syncDaily(), def = newTable(view, '来源标签测试');
+    def.columns = [{ id: 'key', name: '名称', type: 'text', mode: 'replace', description: '' }];
+    await saveTable(lib, view, def);
+    let current = await capture(lib, view.branch.id);
+    let stored = (await lib.get<typeof def>('custom_table_defs', def.id))!;
+    await applyRows(lib, current, stored, [{ row_id: null, values: { key: 'S-002' } }], true, [view.memories[0].id]);
+    await bridge.refreshDailyTables();
+    expect(bridge.dailyTableText()).toContain('S-002');
+    const oldMode = api.apiSettings.summaryOnlyMode;
+    api.apiSettings.summaryOnlyMode = false;
+    try {
+        ctx.chat[1].extra!.bbs_leaf!.tags = { version: 1, planIds: [], eventIds: [], participants: ['合成角色'] };
+        current = await syncDaily();
+        expect(current.memories[0].id).not.toBe(view.memories[0].id);
+        expect(current.memories[0].content).toBe(view.memories[0].content);
+        expect(bridge.dailyTableText()).toContain('S-002');
+        expect(buildStateInjectionText()).toContain('S-002');
+        expect((await prepareSummaryTables(current, ctx.chat, [1]))?.user).toContain('S-002');
+
+        stored = (await lib.get<typeof def>('custom_table_defs', def.id))!;
+        await applyRows(lib, current, stored, [{ row_id: null, values: { key: 'S-001' } }], false);
+        await bridge.refreshDailyTables();
+        const text = bridge.dailyTableText();
+        expect(text).toContain('S-002');
+        expect(text.indexOf('S-001')).toBeLessThan(text.indexOf('S-002'));
+        const reads = vi.spyOn(lib, 'transaction');
+        for (let i = 0; i < 20; i++) expect(buildStateInjectionText()).toContain('S-002');
+        expect(reads).not.toHaveBeenCalled();
+    } finally { api.apiSettings.summaryOnlyMode = oldMode; }
+});
+
+test.each(['full', 'cached'] as const)('table source resolution cannot publish across a foreign branch advance (%s)', async mode => {
+    const tables = await import('./tables');
+    const view = await syncDaily(), def = tables.newTable(view, '并发来源测试');
+    def.columns = [{ id: 'key', name: '名称', type: 'text', mode: 'replace', description: '' }];
+    await tables.saveTable(lib, view, def);
+    const current = await capture(lib, view.branch.id);
+    const stored = (await lib.get<typeof def>('custom_table_defs', def.id))!;
+    await tables.applyRows(lib, current, stored, [{ row_id: null, values: { key: '待发布行' } }], true, [view.memories[0].id]);
+    if (mode === 'full') ctx.chat[1].extra!.bbs_leaf!.tags = { version: 1, planIds: [], eventIds: [], participants: ['角色'] };
+    const other = await Library.open(lib.db.name), resolve = tables.allowedTableSources;
+    const spy = vi.spyOn(tables, 'allowedTableSources').mockImplementationOnce(async (...args) => {
+        const allowed = await resolve(...args);
+        await other.transaction(['branches'], 'readwrite', async tx => {
+            const branch = (await tx.get<typeof current.branch>('branches', current.branch.id))!;
+            const advanced = { ...branch, epoch: branch.epoch + 1 };
+            await tx.put('branches', advanced);
+        });
+        return allowed;
+    });
+    try {
+        await expect(mode === 'full' ? syncDaily() : bridge.refreshDailyTables()).rejects.toThrow('改变');
+        expect(spy).toHaveBeenCalledOnce();
+        expect(bridge.dailyTableText()).not.toContain('待发布行');
+    } finally { spy.mockRestore(); other.close(); }
+});
+
 test('host save failure retains a table operation, retry commits once without another model call',async()=>{
     const { newTable, saveTable, readTables, parseSummaryTables }=await import('./tables');
     const { attachTableResult }=await import('./summary-tables');
