@@ -718,8 +718,8 @@ test.each(['full', 'cached'] as const)('table source resolution cannot publish a
     const stored = (await lib.get<typeof def>('custom_table_defs', def.id))!;
     await tables.applyRows(lib, current, stored, [{ row_id: null, values: { key: '待发布行' } }], true, [view.memories[0].id]);
     if (mode === 'full') ctx.chat[1].extra!.bbs_leaf!.tags = { version: 1, planIds: [], eventIds: [], participants: ['角色'] };
-    const other = await Library.open(lib.db.name), resolve = tables.allowedTableSources;
-    const spy = vi.spyOn(tables, 'allowedTableSources').mockImplementationOnce(async (...args) => {
+    const other = await Library.open(lib.db.name), resolve = tables.tableInjectionProjection;
+    const spy = vi.spyOn(tables, 'tableInjectionProjection').mockImplementationOnce(async (...args) => {
         const allowed = await resolve(...args);
         await other.transaction(['branches'], 'readwrite', async tx => {
             const branch = (await tx.get<typeof current.branch>('branches', current.branch.id))!;

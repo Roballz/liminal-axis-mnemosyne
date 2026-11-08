@@ -361,7 +361,8 @@ export interface SummaryTablePlan {
     branch: string;
     tables: { id: string; version: number; dataVersion: number; operations: TableOperation[] }[];
 }
-export async function readTables(lib: Library, branch: Branch): Promise<TableInput[]> {
+export type TableInjectionIssues = Map<string, { version: number; reason: string }>;
+export async function readTables(lib: Library, branch: Branch, issues?: TableInjectionIssues): Promise<TableInput[]> {
     return lib.transaction(['custom_table_defs', 'custom_table_rows', 'history_snapshots', 'manifest_blocks'], 'readonly', async tx => {
         const defs = (await tx.all<TableDef>('custom_table_defs', 'branch', branch.id)).filter(d => !d.deleted);
         const inputs = await Promise.all(defs.map(async def => ({def, rows: (await tx.all<TableRow>('custom_table_rows', 'owner', def.id)).filter(r => !r.deleted && !r.hidden)})));
@@ -369,7 +370,11 @@ export async function readTables(lib: Library, branch: Branch): Promise<TableInp
             const snapshot = await tx.get<Snapshot>('history_snapshots', branch.head);
             check(snapshot, '表格来源快照不存在');
             const refs = new Map((await snapshotRefs(tx, snapshot)).map(r => [r.message, r.revision]));
-            for (const input of inputs) input.rows = input.rows.filter(r => !r.bodySources?.some(ref => refs.get(ref.message) !== ref.revision));
+            for (const input of inputs) input.rows = input.rows.filter(r => {
+                const blocked = r.bodySources?.some(ref => refs.get(ref.message) !== ref.revision);
+                if (blocked) issues?.set(r.id, { version: r.version, reason: '正文来源已变化或不在当前聊天中。' });
+                return !blocked;
+            });
         }
         return inputs;
     });
@@ -394,6 +399,19 @@ export async function allowedTableSources(lib: Library, view: CapturedView, inpu
     });
     return allowed;
 }
+/** Reuse the exact injection pass; no second source scan for UI diagnostics. */
+export async function tableInjectionProjection(lib: Library, view: CapturedView, validity: Map<string, MemoryStatus>) {
+    const issues: TableInjectionIssues = new Map();
+    const inputs = await readTables(lib, view.branch, issues);
+    const allowed = await allowedTableSources(lib, view, inputs, validity);
+    for (const { rows } of inputs) for (const record of rows) {
+        if (record.sources.some(id => !allowed.has(id))) issues.set(record.id, {
+            version: record.version, reason: '摘要来源已失效、缺失或无法确认与当前正文一致。',
+        });
+    }
+    return { tableText: renderTableState(inputs, allowed), tableIssues: issues };
+}
+
 export function visibleCells(def: TableDef, record: TableRow) {
     return Object.fromEntries(def.columns.filter((c) => c.id in record.values).map((c) => [c.id, record.values[c.id]]));
 }

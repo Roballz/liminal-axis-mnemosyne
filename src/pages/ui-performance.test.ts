@@ -63,7 +63,7 @@ test('table refresh sorts before pagination and search or visibility changes reu
   try {
     const page = scope.run(() => execute(program, { computed: Vue.computed, watch: Vue.watch,
       tables, rows, branch, tableId, loading, search, showHidden, page: pagination, selected,
-      dailyBranch, activeLibrary, hostScope: () => 'scope', back, sortTableRows: ordered },
+      dailyBranch, activeLibrary, injectionIssues: Vue.shallowRef(new Map()), dailyTableInjectionIssues: () => new Map(), hostScope: () => 'scope', back, sortTableRows: ordered },
       'refresh,filtered,shown'))!;
     const shownNames = () => page.shown.value.map((row: TableRow) => row.values.key);
     await page.refresh();

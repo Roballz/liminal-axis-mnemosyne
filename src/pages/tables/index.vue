@@ -5,8 +5,9 @@ import ModalMask from '@/components/ModalMask.vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import TableTextField from '@/components/TableTextField.vue';
 import { activeLibrary } from '@/mnemosyne/db';
-import { dailyBranch, dailyState, hostScope, refreshDailyTables, tableConflicts, previewTableConflict, resolveTableConflict } from '@/mnemosyne/bridge';
+import { dailyTableInjectionIssues, dailyBranch, dailyState, hostScope, refreshDailyTables, tableConflicts, previewTableConflict, resolveTableConflict } from '@/mnemosyne/bridge';
 import { newTable, saveTable, applyRows, cellLocked } from '@/mnemosyne/tables';
+import type { TableInjectionIssues } from '@/mnemosyne/tables';
 import { sortTableRows } from '@/mnemosyne/table-order';
 import { check, row, type Branch, type TableDef, type TableRow, type Column } from '@/mnemosyne/model';
 const tables = shallowRef<TableDef[]>([]),
@@ -17,6 +18,9 @@ const tableId = ref(''),
   busy = ref(false),
   loading = ref(false),
   error = ref('');
+const injectionIssues = shallowRef<TableInjectionIssues>(new Map());
+const repairRow = shallowRef<TableRow | null>(null);
+const repairReason = ref('');
 const search = ref(''),
   page = ref(0),
   showHidden = ref(false),
@@ -90,6 +94,7 @@ async function refresh() {
         ? await lib.all<TableRow>('custom_table_rows', 'owner', tableId.value)
         : [];
     if (ticket !== request || scope !== hostScope()) return;
+    injectionIssues.value = current ? dailyTableInjectionIssues(current.id) : new Map();
     branch.value = current;
     tables.value = defs;
     const selectedTable = defs.find(t => t.id === tableId.value);
@@ -253,6 +258,32 @@ async function saveRecord() {
   await refreshDailyTables();
   await refresh();
 }
+function injectionReason(record: TableRow) {
+  const issue = injectionIssues.value.get(record.id);
+  return !record.hidden && issue?.version === record.version ? issue.reason : '';
+}
+function openRepair(record: TableRow) {
+  repairReason.value = injectionReason(record);
+  repairRow.value = record;
+}
+async function forceInject() {
+  const record = repairRow.value, def = table.value;
+  if (!record || !def) return;
+  // Same persistent manual-confirmation path as saving a row in the editor.
+  // The history retains old provenance; future AI writes attach new sources.
+  const values = Object.fromEntries(def.columns.filter(c => c.id in record.values).map(c => [c.id, record.values[c.id]]));
+  check(Object.keys(values).length, '此行没有可注入字段，请编辑重填');
+  await applyRows(await activeLibrary(), await scopeForWrite(), plain(def),
+    [{ row_id: record.id, values, expectedVersion: record.version }], false);
+  repairRow.value = null;
+  await refreshDailyTables();
+  await refresh();
+}
+function refillRecord() {
+  const record = repairRow.value;
+  repairRow.value = null;
+  if (record) editRecord(record);
+}
 async function hideRows(hidden: boolean) {
   if (!selected.value.length) return;
   await applyRows(
@@ -315,6 +346,7 @@ function selectByPress(id: string) {
 }
 function closeDialogs() {
   conflict.value = null;
+  repairRow.value = null;
   menu.value = null;
   definitionDialog.value = false;
   fieldDialog.value = false;
@@ -558,6 +590,8 @@ onBeforeUnmount(() => {
             <span v-if="table.columns.length" class="mn-record-primary"
               ><span>{{ display(record.values[table.columns[0].id]) }}</span></span
             ><small v-if="record.hidden" class="mn-badge">已隐藏 · 不注入</small></button
+          ><button v-if="injectionReason(record)" class="mn-injection-warning"
+            @pointerdown.stop @click.stop="openRepair(record)">未注入待确认</button
           ><span class="mn-muted">›</span>
         </article>
         <div v-if="!shown.length && !loading" class="mn-empty">
@@ -587,6 +621,17 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </template>
+    <ModalMask :open="!!repairRow" @close="!busy && (repairRow = null)">
+      <section v-if="repairRow" class="mn-dialog">
+        <p>{{ repairReason }}</p>
+        <div class="mn-actions">
+          <button :disabled="busy" @click="run(forceInject)">强制注入</button>
+          <button :disabled="busy" @click="refillRecord">编辑重填</button>
+        </div>
+        <p class="mn-muted">强制注入表示人工确认当前整行内容；编辑重填在保存成功前保留原行。</p>
+        <p v-if="error" class="mn-warning">{{ error }}</p>
+      </section>
+    </ModalMask>
     <ModalMask :open="!!conflict" @close="!busy && (conflict = null)">
       <section v-if="conflict" class="mn-dialog">
         <h3>#{{ conflict.floor }} 楼填表冲突</h3>
@@ -714,4 +759,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mn-conflict-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28vh; overflow: auto; font: inherit; }
+</style>
+
+<style scoped>
+.mn-injection-warning { flex: 0 0 auto; max-width: 7em; font-size: .75em; color: #94631b; border: 1px solid #d5b477; border-radius: 6px; padding: 4px 6px; background: transparent; }
 </style>

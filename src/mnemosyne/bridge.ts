@@ -10,7 +10,7 @@ import { archiveWasDeleted, allowArchiveCreation, commitArchiveDeletion, type Ar
 import { normalizeTags, type SummaryTags, type EventHint } from '@/memory/contextTags';
 import { eventView, renderPersistentEvents, type EventView } from './events';
 import { previewReconnect, commitReconnect } from './binding-recovery';
-import { readTables, allowedTableSources, renderTableState, commitSummaryTables, previewTablePlan, type SummaryTablePlan } from './tables';
+import { tableInjectionProjection, type TableInjectionIssues, commitSummaryTables, previewTablePlan, type SummaryTablePlan } from './tables';
 import { tableStateAt } from './table-history';
 import { TABLE_OUTPUT_KEY } from './summary-tables';
 /** The only daily-library module that observes the ST host. */
@@ -61,6 +61,7 @@ interface DailyCache {
     leaves: CanonicalLeaf[];
     host: string;
     tableText: string;
+    tableIssues: TableInjectionIssues;
     eventText: string;
     eventHints: EventHint[];
     eventDirectory: EventHint[];
@@ -433,10 +434,9 @@ async function refreshCachedProjection(lib: Awaited<ReturnType<typeof activeLibr
     // Always check the small chain records: organization flags intentionally do not advance epoch.
     const events = await projectEvents(lib, view, validity, previous);
     const tablesChanged = !changes || changes.tables;
-    let tableText = previous.tableText;
+    let tableText = previous.tableText, tableIssues = previous.tableIssues;
     if (tablesChanged) {
-        const inputs = await readTables(lib, branch);
-        tableText = renderTableState(inputs, await allowedTableSources(lib, view, inputs, validity));
+        ({ tableText, tableIssues } = await tableInjectionProjection(lib, view, validity));
     }
     check(await current(lib, view) && selectedLibrary === activeLibrary() && version === lib.changes.version,
         '档案在刷新期间改变，请重试');
@@ -444,7 +444,7 @@ async function refreshCachedProjection(lib: Awaited<ReturnType<typeof activeLibr
         validity !== previous.validity || tablesChanged;
     const value: DailyCache = changed ? { ...previous, view, ...events,
         ...(validity === previous.validity ? {} : projectView(view, validity)),
-        tableText, changeVersion: version, activation } : previous;
+        tableText, tableIssues, changeVersion: version, activation } : previous;
     value.changeVersion = version;
     const baseline = summaryBaselines.get(previous);
     if (baseline) summaryBaselines.set(value, baseline);
@@ -753,7 +753,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 view = { ...view, branch: latestBranch };
                 if (!neutral) validity = await statuses(lib, view);
             }
-            const inputs = await readTables(lib, view.branch);
+
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
             // Generated tags become memberships only after canonical source verification.
             // Reproject the new epoch before publishing; never cache a stale event view.
@@ -768,7 +768,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 view = { ...view, branch: updated };
             }
             const projectionVersion = lib.changes.version;
-            const tableText = renderTableState(inputs, await allowedTableSources(lib, view, inputs, validity));
+            const { tableText, tableIssues } = await tableInjectionProjection(lib, view, validity);
             // Keep the live branch check after resolving historical table sources.
             const events = await projectEvents(lib, view, validity);
             check(projectionVersion === lib.changes.version, '档案在刷新期间改变，请重试');
@@ -780,7 +780,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                 library: lib.db.name,
                 changeVersion: projectionVersion,
                 activation: libraryActivationGeneration(),
-                tableText,
+                tableText, tableIssues,
             };
             check(host === hostVersion() && isActive() && selectedLibrary === activeLibrary() && generation === dailyState.generation, '聊天已改变');
             recordSummaryBaseline(cache);
@@ -812,6 +812,10 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
         if (error instanceof ReplyFinalityError) injectionCache.value = null;
         throw error;
     });
+}
+export function dailyTableInjectionIssues(branchId: string): TableInjectionIssues {
+    const projection = readableProjection();
+    return projection?.view.branch.id === branchId ? projection.tableIssues : new Map();
 }
 export function dailyTableText(): string {
     return readableProjection()?.tableText ?? '';
