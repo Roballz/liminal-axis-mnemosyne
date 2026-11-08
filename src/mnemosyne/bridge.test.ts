@@ -647,6 +647,68 @@ test('table injection and summary input retain rows after source tags change, in
     } finally { api.apiSettings.summaryOnlyMode = oldMode; }
 });
 
+test.each(['legacy', 'generated-sidecar'] as const)('manual wording corrections retain committed table rows and untouched body annotations (%s)', async kind => {
+    const { newTable, saveTable, applyRows, readTables, allowedTableSources, renderTableState } = await import('./tables');
+    const { prepareSummaryTables } = await import('./summary-tables');
+    const { editLeafAt } = await import('@/memory/apply');
+    const { flushLeavesNow } = await import('@/memory/store');
+    const { buildStateInjectionText } = await import('@/memory/inject');
+    const oldMode = api.apiSettings.summaryOnlyMode;
+    api.apiSettings.summaryOnlyMode = false;
+    try {
+        if (kind === 'legacy') ctx.chat[1].mes += '\n<bbs_vars>旧格式附注，保存摘要时不能改写</bbs_vars>';
+        let view = await syncDaily();
+        if (kind === 'generated-sidecar') {
+            const evidence = await captureSummaryEvidence([0, 1]);
+            ctx.chat[1].mes += '\n<bbs_vars>设定：合成值=1</bbs_vars>';
+            attachSummaryEvidence(ctx.chat, 1, evidence, [1]);
+            view = await syncDaily();
+            expect((await lib.all<any>('reviews')).some(review => review.origin === 'generated_sidecar')).toBe(true);
+        }
+        const source = view.memories[0], def = newTable(view, '手改摘要来源表');
+        def.columns = [{ id: 'key', name: '名称', type: 'text', mode: 'replace', description: '' },
+            { id: 'detail', name: '内容', type: 'text', mode: 'replace', description: '' }];
+        await saveTable(lib, view, def);
+        view = await capture(lib, view.branch.id);
+        let stored = (await lib.get<typeof def>('custom_table_defs', def.id))!;
+        await applyRows(lib, view, stored, [{ row_id: null, values: { key: 'S-002', detail: '全部单元格仍应注入' } }], true, [source.id]);
+        view = await capture(lib, view.branch.id);
+        stored = (await lib.get<typeof def>('custom_table_defs', def.id))!;
+        await applyRows(lib, view, stored, ['S-003', 'S-001'].map(key => ({ row_id: null, values: { key } })), false);
+        await bridge.refreshDailyTables();
+        const beforeRows = await lib.all('custom_table_rows'), beforeTables = await lib.all('custom_table_defs');
+        const history = await lib.all('table_history'), body = ctx.chat[1].mes;
+        const readCounts = vi.spyOn(Transaction.prototype, 'all');
+        for (const text of ['把错别字改正确', '再次调整措辞，剧情未改']) {
+            expect(editLeafAt(1, text, '', '')).toBe(true);
+            expect(ctx.chat[1].mes).toBe(body);
+            view = await syncDaily();
+            const current = view.memories.find(memory => memory.owner === source.owner)!;
+            expect(current.id).not.toBe(source.id);
+            expect((await statuses(lib, view)).get(current.id)).toBe('valid');
+            const injected = buildStateInjectionText();
+            for (const name of ['S-001', 'S-002', 'S-003', '全部单元格仍应注入']) expect(injected).toContain(name);
+            expect(injected.indexOf('S-001')).toBeLessThan(injected.indexOf('S-002'));
+            expect(injected.indexOf('S-002')).toBeLessThan(injected.indexOf('S-003'));
+            expect((await prepareSummaryTables(view, ctx.chat, [1]))?.user).toContain('全部单元格仍应注入');
+        }
+        expect(await lib.all('custom_table_rows')).toEqual(beforeRows);
+        expect(await lib.all('custom_table_defs')).toEqual(beforeTables);
+        expect(await lib.all('table_history')).toEqual(history);
+        readCounts.mockClear();
+        await syncDaily();
+        for (let i = 0; i < 20; i++) expect(buildStateInjectionText()).toContain('S-002');
+        expect(readCounts.mock.calls.filter(([store]) => ['custom_table_defs', 'custom_table_rows', 'table_history', 'memory_revisions'].includes(store))).toEqual([]);
+        const restored = await restoreLibrary(await exportLibrary(lib), false);
+        try {
+            const savedView = await capture(restored, view.branch.id), inputs = await readTables(restored, savedView.branch);
+            const allowed = await allowedTableSources(restored, savedView, inputs, await statuses(restored, savedView));
+            expect(renderTableState(inputs, allowed)).toContain('全部单元格仍应注入');
+            expect(await restored.all('custom_table_rows')).toEqual(beforeRows);
+        } finally { restored.close(); }
+    } finally { api.apiSettings.summaryOnlyMode = oldMode; flushLeavesNow(); }
+});
+
 test.each(['full', 'cached'] as const)('table source resolution cannot publish across a foreign branch advance (%s)', async mode => {
     const tables = await import('./tables');
     const view = await syncDaily(), def = tables.newTable(view, '并发来源测试');

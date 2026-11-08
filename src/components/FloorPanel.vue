@@ -9,7 +9,7 @@
  *
  * 编辑:**逐条就地编辑**。点摘要正文 / 时间 / 地点 / 某条变动标签,就地展开该单元的输入框,
  *   保存即写、取消即收,其余保持只读。同一时刻只有一个单元在编辑(editKey)。
- *   写走 apply.ts 的 editLeafFull(整体重放),targeted 修改由 commitDelta 克隆-改-回写完成。
+ *   摘要文字走 editLeafAt；结构化修改由 commitDelta 克隆-改-回写到 editLeafFull。
  *
  * 数据:chat 非 reactive。leaf 返回浅拷贝(新引用)+ 追踪 sig.tick / derivedMeta.rev,
  *   任何来源(ST 事件、主界面摘要、楼内编辑)的变化都能刷新。
@@ -22,7 +22,7 @@ import { NPC_AFFINITY_FIELDS, affinityLevelFromInput, fmtNpcAffinity } from '@/m
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { getContext, type STMessage } from '@/st/context';
 import { toast } from '@/st/toast';
-import { getLeaf, leafValid, deleteLeafAt, editLeafFull, planContentById, describeVarOp } from '@/memory/apply';
+import { getLeaf, leafValid, deleteLeafAt, editLeafAt, editLeafFull, planContentById, describeVarOp } from '@/memory/apply';
 import { engineState, floorBackfillState, regenerateFloor, setFloorOmit, summarizeFloor } from '@/memory/engine';
 import { derivedMeta } from '@/memory/store';
 import { ui } from '@/state/ui';
@@ -379,7 +379,7 @@ function editText() {
 function saveText() {
   const l = leaf.value;
   if (!l) return;
-  editLeafFull(props.floor, { text: edit.text, timeStart: l.timeStart ?? '', timeEnd: l.timeEnd ?? '', delta: l.delta ?? {} });
+  editLeafAt(props.floor, edit.text, l.timeStart ?? '', l.timeEnd ?? '');
   editKey.value = null;
 }
 

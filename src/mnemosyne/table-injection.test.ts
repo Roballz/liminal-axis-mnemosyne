@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { fixture } from './fixtures';
-import { capture, statuses, synchronize } from './canonical';
+import { capture, statuses, synchronize, keepSummary } from './canonical';
 import { Transaction } from './db';
 import { newTable, allowedTableSources, renderTableState, summaryTablesPrompt, type TableInput } from './tables';
 import { sortTableRows } from './table-order';
@@ -109,5 +109,64 @@ test.each(['summary-edit', 'body-edit', 'disabled', 'private', 'removed', 'other
         const text = renderTableState(inputs, allowed);
         expect(text).not.toContain('应排除的整行'); expect(text).toContain('手动无来源行');
         if (kind === 'other-invalid-source') expect(allowed.has(old.id)).toBe(true);
+    } finally { f.lib.close(); }
+});
+
+test('manual corrections of dependent summaries preserve table provenance without approving stale higher summaries', async () => {
+    const f = await fixture(2);
+    try {
+        for (let i = 0; i < 2; i++) Object.assign(f.input.memories[i], {
+            inputRefs: f.view.refs.slice(i * 2, i * 2 + 2), coverage: [f.view.refs[i * 2 + 1]],
+            basisSnapshot: f.view.snapshot.id, children: i ? ['leaf-0'] : [],
+        });
+        f.input.memories.push({ hostId: 'higher', content: '旧上层总结', level: 1, anchorKey: null,
+            children: ['leaf-0', 'leaf-1'], storyTime: '', seed: false, enabled: true });
+        await synchronize(f.lib, f.input);
+        let view = await capture(f.lib, f.branch.id);
+        const [first, second] = ['leaf-0', 'leaf-1'].map(id => view.memories.find(memory => memory.hostId === id)!);
+        const def = definition(f.branch), inputs = [{ def, rows: [record(def, 'first', 'S-001', [first.id]),
+            record(def, 'second', 'S-002', [second.id])] }];
+        // Edit the dependent first, then its earlier source. The global summary
+        // dependency remains stale; the table must independently prove its body sources.
+        for (const i of [1, 0]) {
+            const { inputRefs, coverage, basisSnapshot, ...host } = f.input.memories[i];
+            f.input.memories[i] = { ...host, content: `第${i}条的措辞更正`, children: [], manualEdit: true, generationKey: 2 };
+            await synchronize(f.lib, f.input);
+        }
+        view = await capture(f.lib, f.branch.id);
+        const validity = await statuses(f.lib, view);
+        expect(validity.get(view.memories.find(memory => memory.hostId === 'leaf-1')!.id)).toBe('needs_rebuild');
+        expect(validity.get(view.memories.find(memory => memory.hostId === 'higher')!.id)).toBe('needs_rebuild');
+        const allowed = await allowedTableSources(f.lib, view, inputs, validity);
+        const text = renderTableState(inputs, allowed);
+        expect(text).toContain('S-001'); expect(text).toContain('S-002');
+        expect(await statuses(f.lib, view)).toEqual(validity);
+
+        f.input.messages[0].content += '真正改变剧情';
+        await synchronize(f.lib, f.input);
+        f.input.memories[0].content += '重新人工确认'; f.input.memories[0].generationKey = 3;
+        await synchronize(f.lib, f.input);
+        view = await capture(f.lib, f.branch.id);
+        expect(renderTableState(inputs, await allowedTableSources(f.lib, view, inputs, await statuses(f.lib, view)))).toBe('');
+    } finally { f.lib.close(); }
+});
+
+test('manual compatibility review cannot masquerade as proof that the original table body stayed unchanged', async () => {
+    const f = await fixture(1);
+    try {
+        const original = f.view.memories[0], def = definition(f.branch);
+        const inputs = [{ def, rows: [record(def, 'old', '不得复活的旧表值', [original.id])] }];
+        f.input.messages[0].content += '正文事实已改变';
+        await synchronize(f.lib, f.input);
+        let view = await capture(f.lib, f.branch.id);
+        await keepSummary(f.lib, view, original.id);
+        f.input.memories[0].manualEdit = true; f.input.memories[0].generationKey = 2;
+        f.input.memories[0].content = '基于改后正文修订的摘要';
+        await synchronize(f.lib, f.input);
+        view = await capture(f.lib, f.branch.id);
+        const validity = await statuses(f.lib, view);
+        expect(validity.get(view.memories[0].id)).toBe('valid');
+        expect((await f.lib.all<any>('reviews')).some(review => review.origin === 'manual')).toBe(true);
+        expect(renderTableState(inputs, await allowedTableSources(f.lib, view, inputs, validity))).toBe('');
     } finally { f.lib.close(); }
 });

@@ -4,9 +4,9 @@ import { createSSRApp, createRenderer, defineComponent, h, nextTick, ssrContextK
 import { renderToString } from 'vue/server-renderer';
 import { readFileSync } from 'node:fs';
 import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc';
-const mocks = vi.hoisted(() => ({ chat: [] as any[], writes: vi.fn() }));
+const mocks = vi.hoisted(() => ({ chat: [] as any[], writes: vi.fn(), fullWrites: vi.fn() }));
 vi.mock('@/st/context', () => ({ getContext: () => ({ chat: mocks.chat, getCurrentChatId: () => 'synthetic' }) }));
-vi.mock('@/memory/apply', () => ({ getLeaf: (m: any) => m?.extra?.bbs_leaf ?? null, leafValid: () => true, deleteLeafAt: vi.fn(), editLeafFull: mocks.writes, planContentById: vi.fn(), describeVarOp: vi.fn() }));
+vi.mock('@/memory/apply', () => ({ getLeaf: (m: any) => m?.extra?.bbs_leaf ?? null, leafValid: () => true, deleteLeafAt: vi.fn(), editLeafAt: mocks.writes, editLeafFull: mocks.fullWrites, planContentById: vi.fn(), describeVarOp: vi.fn() }));
 vi.mock('@/memory/engine', async () => ({ engineState: (await import('vue')).reactive({ running: false }), floorBackfillState: (await import('vue')).reactive({ running: false }), regenerateFloor: vi.fn(), setFloorOmit: vi.fn(), summarizeFloor: vi.fn() }));
 vi.mock('@/memory/store', async () => ({ derivedMeta: (await import('vue')).reactive({ rev: 0 }) }));
 vi.mock('@/state/ui', () => ({ ui: { theme: 'day' } }));
@@ -30,7 +30,7 @@ function mount() { const root = make('root'), app = renderer.createApp(Panel, { 
 async function flush() { await nextTick(); await nextTick(); await nextTick(); }
 let deltaReads = 0;
 beforeEach(() => {
-  deltaReads = 0; mocks.writes.mockReset();
+  deltaReads = 0; mocks.writes.mockReset(); mocks.fullWrites.mockReset();
   mocks.chat = Array.from({ length: 155 }, (_, i) => ({ mes: '合成正文', extra: { bbs_leaf: {
     id: `leaf-${i}`, text: '合成长摘要'.repeat(2_000), delta: { get items() { deltaReads++; return { add: [{ name: '保留草稿测试物品', qty: 1 }] }; } },
   } } }));
@@ -53,5 +53,6 @@ test('opening mounts details; closing removes details but preserves the edit dra
   const reads = deltaReads; derivedMeta.rev++; await flush(); expect(deltaReads).toBe(reads);
   toggle(); await flush(); expect(nodes(root).find(n => n.type === 'textarea')!.props['onUpdate:modelValue']).toBeTypeOf('function');
   button(root, '保存').props.onClick(); await flush();
-  expect(mocks.writes).toHaveBeenCalledWith(0, expect.objectContaining({ text: '未保存的人工草稿' }));
+  expect(mocks.writes).toHaveBeenCalledExactlyOnceWith(0, '未保存的人工草稿', '', '');
+  expect(mocks.fullWrites).not.toHaveBeenCalled();
 });
