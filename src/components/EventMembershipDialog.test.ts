@@ -118,3 +118,35 @@ test('picker normalizes captured summary and chain text once, and invalidates on
     expect(normalize.mock.contexts.filter(value => String(value).includes('合成摘要'))).toHaveLength(55);
   } finally { app.unmount(); }
 });
+
+test('status filters reset pagination, preserve hidden selections and reset on reopen', async () => {
+  const { root, app } = mount();
+  const data = session('single');
+  data.cards[0].meta.status = 'resolved';
+  data.cards[1].meta.status = 'dormant';
+  membershipSession.value = data; await flush();
+  const choices = () => nodes(root).filter(n => n.type === 'input' && n.props.type === 'checkbox');
+  expect(findButton(root, '未完结').props['aria-pressed']).toBe(true);
+  expect(choices()).toHaveLength(20);
+  choices()[0].props.onChange(); await flush(); // dormant event-1
+  findButton(root, '下一页事件链').props.onClick(); await flush();
+  expect(choices()).toHaveLength(4);
+  findButton(root, '已结束').props.onClick(); await flush();
+  expect(choices()).toHaveLength(1);
+  expect(choices()[0].props.checked).toBe(true);
+  field(root, '查找事件链').props['onUpdate:modelValue']('不存在'); await flush();
+  expect(choices()).toHaveLength(0);
+  field(root, '查找事件链').props['onUpdate:modelValue'](''); await flush();
+  await nodes(root).find(n => n.type === 'form')!.props.onSubmit({ preventDefault() {} });
+  expect(state.commit).toHaveBeenCalledWith(expect.objectContaining({ eventIds: ['event-0', 'event-1'] }));
+  choices()[0].props.onChange(); await flush();
+  findButton(root, '未完结').props.onClick(); await flush();
+  expect(choices()).toHaveLength(20);
+  await nodes(root).find(n => n.type === 'form')!.props.onSubmit({ preventDefault() {} });
+  expect(state.commit).toHaveBeenLastCalledWith(expect.objectContaining({ eventIds: ['event-1'] }));
+  findButton(root, '已结束').props.onClick(); await flush();
+  findButton(root, '取消').props.onClick(); await flush();
+  membershipSession.value = data; await flush();
+  expect(findButton(root, '未完结').props['aria-pressed']).toBe(true);
+  app.unmount();
+});

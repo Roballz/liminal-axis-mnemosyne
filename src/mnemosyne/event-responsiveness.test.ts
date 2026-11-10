@@ -19,7 +19,7 @@ expect(compiled.errors).toEqual([]);
 const render = new Function('Vue', compiled.code.replace(/import \{([^}]+)\} from "vue"/g,
   (_, names: string) => `const {${names.replace(/ as /g, ': ')}} = Vue`).replace('export function render', 'return function render'))(Vue);
 const script = page.scriptSetup!.content;
-const stateStart = script.indexOf('const visibleCards ='), stateEnd = script.indexOf('let pressTimer:', stateStart);
+const stateStart = script.indexOf('const eventNameOrder ='), stateEnd = script.indexOf('let pressTimer:', stateStart);
 expect(stateStart).toBeGreaterThan(-1); expect(stateEnd).toBeGreaterThan(stateStart);
 const cardState = new Function('Vue', 'cards', 'archiveMode', 'dailyState', 'eventPending',
   `const {computed,ref,watch}=Vue;\n${ts.transpile(script.slice(stateStart, stateEnd), { target: ts.ScriptTarget.ES2022 })}
@@ -129,4 +129,17 @@ test('single-chain projection reads only its own history and rejects a chain fro
     await lib.transaction(['event_chains'], 'readwrite', tx => tx.add('event_chains', { ...target.chain, id: 'foreign-event', branch: 'other-branch' }));
     expect((await eventView(lib, view, false, 'foreign-event')).cards).toEqual([]);
   } finally { lib.close(); }
+});
+
+
+test('event page sorts names naturally before limiting cards without mutating source order', () => {
+  const cards = Vue.shallowRef([10, 2, 1].map(n => ({ chain: { id: String(n) }, meta: { title: `S-${n}` } })));
+  const scope = Vue.effectScope();
+  try {
+    const state = scope.run(() => cardState(Vue, cards, Vue.ref(false), Vue.reactive({ scope: 'fixture' }), () => false));
+    expect(state.visibleCards.value.map((c: any) => c.meta.title)).toEqual(['S-1', 'S-2', 'S-10']);
+    expect(cards.value.map(c => c.chain.id)).toEqual(['10', '2', '1']);
+    state.cardLimit.value = 2;
+    expect(state.shownCards.value.map((c: any) => c.meta.title)).toEqual(['S-1', 'S-2']);
+  } finally { scope.stop(); }
 });

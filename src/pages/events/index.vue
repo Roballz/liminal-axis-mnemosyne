@@ -112,8 +112,10 @@ async function confirmResync() {
 }
 const archiveMode = ref(false),
   archiveMenu = shallowRef<EventCard | null>(null);
+const eventNameOrder = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
 const visibleCards = computed(() =>
-  cards.value.filter((card) => !!card.chain.archived === archiveMode.value),
+  cards.value.filter((card) => !!card.chain.archived === archiveMode.value)
+    .sort((a, b) => eventNameOrder.compare(a.meta.title, b.meta.title)),
 );
 const pendingById = computed(() => new Map(cards.value.map(card => [card.chain.id, eventPending(card)])));
 const cardLimit = ref(40);

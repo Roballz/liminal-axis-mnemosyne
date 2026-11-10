@@ -139,7 +139,7 @@ test('pending summary pagination retains the full action list and clamps after r
 });
 
 test('event card interaction reuses pending states and mounts an initially bounded chain list', async () => {
-  const code = slice(source('./events/index.vue'), 'const visibleCards =', 'let pressTimer:');
+  const code = slice(source('./events/index.vue'), 'const eventNameOrder =', 'let pressTimer:');
   const cards = Vue.shallowRef(Array.from({ length: 200 }, (_, i) => ({ chain: { id: `event-${i}`, archived: false },
     meta: { summarized: [] }, progress: [], members: Array.from({ length: 100 }, (_, j) => ({ memory: `memory-${j}` })) })));
   const archiveMode = Vue.ref(false), dailyState = Vue.reactive({ scope: 'first' }), pending = vi.fn(eventPending);

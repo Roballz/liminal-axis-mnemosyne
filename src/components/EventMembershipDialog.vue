@@ -7,6 +7,7 @@ import { parseFloorRanges } from '@/mnemosyne/event-memberships';
 const session = membershipSession;
 const form = ref<HTMLElement | null>(null);
 const range = ref(''), keyword = ref(''), chainQuery = ref(''), newTitle = ref('');
+const chainStatus = ref<'unfinished' | 'resolved'>('unfinished');
 const creating = ref(false), rowPage = ref(0), chainPage = ref(0);
 const selected = membershipSelected, selectedChains = ref(new Set<string>());
 const pageSize = 20;
@@ -15,7 +16,7 @@ watch(session, async value => {
   if (!value) { returnFocus?.isConnected && returnFocus.focus({ preventScroll: true }); return; }
   returnFocus = typeof document === 'undefined' ? null : (document.activeElement?.shadowRoot?.activeElement ?? document.activeElement) as HTMLElement;
   range.value = keyword.value = chainQuery.value = newTitle.value = '';
-  creating.value = false; rowPage.value = chainPage.value = 0;
+  creating.value = false; chainStatus.value = 'unfinished'; rowPage.value = chainPage.value = 0;
   selected.value = new Set(value.mode === 'single' ? value.rows.map(row => row.id) : []);
   selectedChains.value = new Set(value.mode === 'single'
     ? value.cards.filter(card => card.members.some(member => member.memory === value.rows[0].id)).map(card => card.chain.id)
@@ -26,7 +27,7 @@ watch(membershipPicking, async picking => {
   if (!picking && session.value) { await nextTick(); form.value?.focus({ preventScroll: true }); }
 });
 watch([range, keyword], () => { rowPage.value = 0; });
-watch(chainQuery, () => { chainPage.value = 0; });
+watch([chainQuery, chainStatus], () => { chainPage.value = 0; });
 const rowSearch = computed(() => (session.value?.rows ?? []).map(row => ({ row,
   text: row.text.toLocaleLowerCase(), time: row.time.toLocaleLowerCase() })));
 const chainSearch = computed(() => (session.value?.cards ?? []).map(card => ({ card,
@@ -44,7 +45,8 @@ const filter = computed(() => {
 const pageRows = computed(() => filter.value.rows.slice(rowPage.value * pageSize, (rowPage.value + 1) * pageSize));
 const chainRows = computed(() => {
   const query = chainQuery.value.trim().toLocaleLowerCase();
-  return query ? chainSearch.value.filter(item => item.text.includes(query)).map(item => item.card) : session.value?.cards ?? [];
+  const matches = query ? chainSearch.value.filter(item => item.text.includes(query)).map(item => item.card) : session.value?.cards ?? [];
+  return matches.filter(card => (card.meta.status === 'resolved') === (chainStatus.value === 'resolved'));
 });
 const pageChains = computed(() => chainRows.value.slice(chainPage.value * pageSize, (chainPage.value + 1) * pageSize));
 const pickedRows = computed(() => session.value?.rows.filter(row => selected.value.has(row.id)) ?? []);
@@ -131,7 +133,13 @@ function keyboard(event: KeyboardEvent) {
           <p v-if="!allowed" class="mn-warning">本楼摘要待审核或不参与记忆；可以解除已有关联，新增前请先处理摘要。</p>
           <p class="mn-muted">勾选加入，取消勾选移除。新建链会和本楼关联一起保存；概要可在事件页更新。</p>
         </template>
-        <label>查找事件链<input v-model="chainQuery" :disabled="membershipUi.saving" placeholder="输入链名" aria-label="查找事件链" /></label>
+        <div class="mn-chain-filter">
+          <input v-model="chainQuery" :disabled="membershipUi.saving" placeholder="输入链名查找" aria-label="查找事件链" />
+          <div class="mn-chain-status" role="group" aria-label="事件链状态">
+            <button type="button" :disabled="membershipUi.saving" :aria-pressed="chainStatus === 'unfinished'" @click="chainStatus = 'unfinished'">未完结</button>
+            <button type="button" :disabled="membershipUi.saving" :aria-pressed="chainStatus === 'resolved'" @click="chainStatus = 'resolved'">已结束</button>
+          </div>
+        </div>
         <div class="mn-membership-chains">
           <label v-for="card in pageChains" :key="card.chain.id" class="mn-member-choice">
             <input :type="session.mode === 'single' ? 'checkbox' : 'radio'" name="event-membership-target"
@@ -169,6 +177,12 @@ function keyboard(event: KeyboardEvent) {
 .mn-membership-dialog .mn-dialog-body > * { flex-shrink: 0; }
 .mn-membership-dialog label { display: flex; flex-direction: column; gap: 6px; margin: 0; }
 .mn-membership-dialog input:not([type=checkbox]):not([type=radio]) { width: 100%; min-width: 0; box-sizing: border-box; }
+.mn-chain-filter { display: flex; flex-direction: column; gap: 10px; }
+.mn-membership-dialog .mn-chain-filter input { min-height: 36px; padding: 7px 10px; border-radius: 8px; }
+.mn-chain-status { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--bbs-line); border-radius: 10px; }
+.mn-chain-status button { flex: 1; min-width: 0; min-height: 34px; padding: 6px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--bbs-ink); }
+.mn-chain-status button[aria-pressed="true"] { background: var(--bbs-accent); color: var(--bbs-on-accent, #fff); }
+.mn-membership-dialog .mn-dialog-body > .mn-muted { margin: 0; }
 .mn-membership-dialog .mn-member-choice { flex-direction: row; align-items: flex-start; gap: 9px; margin: 0; padding: 8px 0; border-bottom: 1px solid var(--bbs-line); }
 .mn-membership-dialog .mn-member-choice input { flex: 0 0 16px; width: 16px; height: 16px; padding: 0; margin: 4px 0 0; accent-color: var(--bbs-accent); }
 .mn-member-choice span { min-width: 0; overflow-wrap: anywhere; }
