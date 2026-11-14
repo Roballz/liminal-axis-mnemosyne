@@ -5,7 +5,7 @@ import { BACKUP_LOCATION } from '@/st/native-backups';
 import { fingerprint } from '@/mnemosyne/model';
 import { activeLibrary, ACTIVE_KEY, DB_PREFIX } from '@/mnemosyne/db';
 import { dailyState, invalidateDaily, syncDaily, serializeDailyActivation } from '@/mnemosyne/bridge';
-import { AUTO_BACKUP_KEEP, backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
+import { AUTO_BACKUP_KEEP, BACKUP_MAX_MIB, backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
 import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups, readCoreBackupPreview,
     prepareCoreBackup, saveCoreBackup, pinCoreBackup, restoreCoreBackup, retryCoreBackups } from '@/mnemosyne/core-backup-runtime';
 import { backupTimeLabel } from '@/mnemosyne/backup-health';
@@ -153,6 +153,7 @@ async function restore() {
                     <button v-if="coreBackupState.available" type="button" :disabled="coreBackupState.busy" @click="run(configure)">{{ coreBackupState.enabled ? '关闭自动备份' : '启用自动备份' }}</button>
                 </div>
                 <p>每库固定保留最近 {{ AUTO_BACKUP_KEEP }} 份 · 间隔至少 30 分钟</p>
+                <p class="mn-muted">单份备份上限 {{ BACKUP_MAX_MIB }} MiB。</p>
                 <p class="mn-muted">仅在酒馆前台稳定时检查；无变化不重复保存。</p>
                 <p class="mn-backup-status" role="status">{{ status }}</p>
                 <button v-if="coreBackupState.available && coreBackupState.enabled && coreBackupState.error" class="mn-backup-retry" type="button" :disabled="coreBackupState.busy" @click="retryCoreBackups(); notice = '已安排重试，前台稳定后检查；成功前保留故障提示。'">重试备份</button>

@@ -1,7 +1,31 @@
 /** Strict JSON boundary: duplicate keys, non-finite values and excessive nesting are rejected. */
 import { check } from './model';
+
+function countUtf8Bytes(text: string, maxBytes: number): number {
+    let bytes = text.length;
+    for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        if (code < 0x80) continue;
+        if (code < 0x800) bytes++;
+        else {
+            bytes += 2;
+            if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+                const next = text.charCodeAt(i + 1);
+                if (next >= 0xdc00 && next <= 0xdfff) i++;
+            }
+        }
+        // Unpaired surrogates count as the 3-byte replacement used by TextEncoder.
+        if (bytes > maxBytes) return bytes;
+    }
+    return bytes;
+}
+
+/** Exact UTF-8 size without allocating an encoded copy. */
+export const utf8ByteLength = (text: string): number => countUtf8Bytes(text, Infinity);
+
 export function parseStrictJson(text: string, maxBytes = 64 * 1024 * 1024): unknown {
-    check(new TextEncoder().encode(text).length <= maxBytes, 'JSON 超过导入/请求大小上限');
+    // Each UTF-16 unit needs 1..3 UTF-8 bytes; the bounds avoid unnecessary scans.
+    check(text.length <= maxBytes && (text.length * 3 <= maxBytes || countUtf8Bytes(text, maxBytes) <= maxBytes), 'JSON 超过导入/请求大小上限');
     let i = 0;
     const ws = () => { while (/\s/.test(text[i] ?? '') && i < text.length)
         i++; };

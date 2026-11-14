@@ -5,6 +5,7 @@ import { exportLibrary } from './migration';
 import { Library, ACTIVE_KEY, freshLibraryName } from './db';
 import type { BackupDisk } from '@/st/native-backups';
 import type { BackupJob, BackupResult, HostMessage, WorkerMessage, DiskRequest } from './backup-worker-protocol';
+import { BACKUP_MAX_BYTES } from './core-backups';
 
 class Disk implements BackupDisk {
     files = new Map<string, Blob>();
@@ -86,6 +87,19 @@ test('empty current library permits protection skip without publishing or rotati
     } finally { lib.close(); }
 });
 
+test('size diagnosis executes read-only in the Worker and returns only aggregate counts and bytes', async () => {
+    const { lib } = await fixture(2), disk = new Disk();
+    try {
+        const result = await workerJob({ kind: 'size', library: lib.db.name }, disk);
+        if (result.state !== 'size') throw new Error('missing size report');
+        expect(result.report.bytes).toBeGreaterThan(0);
+        expect(result.report.stores.find(store => store.store === 'source_bodies')?.records).toBe(4);
+        expect(disk.read).not.toHaveBeenCalled(); expect(disk.write).not.toHaveBeenCalled();
+        expect(disk.remove).not.toHaveBeenCalled(); expect(disk.list).not.toHaveBeenCalled();
+        expect(JSON.stringify(result)).not.toContain(lib.db.name);
+    } finally { lib.close(); }
+});
+
 test('raw export/import jobs work without a native disk and return only Blob or verified library identity', async () => {
     const { lib } = await fixture(2);
     const setItem = vi.fn(); vi.stubGlobal('localStorage', { getItem: () => lib.db.name, setItem });
@@ -101,6 +115,21 @@ test('raw export/import jobs work without a native disk and return only Blob or 
         try { expect((await exportLibrary(copy)).data).toEqual((await exportLibrary(lib)).data); }
         finally { copy.close(); }
         expect(setItem).not.toHaveBeenCalled();
+    } finally { lib.close(); }
+});
+
+test('file import accepts the expanded limit and rejects excess bytes before reading or creating a database', async () => {
+    const { lib } = await fixture(1);
+    try {
+        const blob = new Blob([JSON.stringify(await exportLibrary(lib))]);
+        const size = vi.spyOn(blob, 'size', 'get').mockReturnValue(BACKUP_MAX_BYTES);
+        const restored = await workerJob({ kind: 'import', blob });
+        expect(restored.state).toBe('restored');
+        const before = await indexedDB.databases(), text = vi.spyOn(blob, 'text');
+        size.mockReturnValue(BACKUP_MAX_BYTES + 1);
+        await expect(workerJob({ kind: 'import', blob })).rejects.toThrow(`${BACKUP_MAX_BYTES + 1} 字节`);
+        expect(text).not.toHaveBeenCalled();
+        expect(await indexedDB.databases()).toEqual(before);
     } finally { lib.close(); }
 });
 

@@ -6,7 +6,11 @@ import { parseStrictJson } from './json';
 
 export const AUTO_BACKUP_KEEP = 20;
 export const AUTO_BACKUP_INTERVAL = 30 * 60 * 1000;
-export const BACKUP_MAX_BYTES = 64 * 1024 * 1024;
+export const BACKUP_MAX_MIB = 512;
+export const BACKUP_MAX_BYTES = BACKUP_MAX_MIB * 1024 * 1024;
+export function corePackageSizeError(bytes: number): string {
+    return `核心包大小 ${(bytes / 1024 / 1024).toFixed(2)} MiB（${bytes} 字节），超过 ${BACKUP_MAX_MIB} MiB 上限`;
+}
 const OWNER = 'mnemosyne-core-backup-v1';
 const KEY = /^(auto|manual|pinned|before-restore|before-deletion|before-archive-deletion|after-archive-deletion)-v1-(\d{13})-([a-f0-9]{16})-([a-f0-9-]{36})\.json$/;
 export type BackupGuard = () => boolean | Promise<boolean>;
@@ -101,9 +105,15 @@ function assertNonempty(pack: Package) {
 // Evidence lives for one save only. Re-read the named file before using it: neither
 // a filename nor preview metadata proves that another writer left its bytes intact.
 type FileWitness = { bytes: number; digest: string };
+type PreparedBackup = { key: string; blob: Blob; checksum: string };
 async function blobDigest(blob: Blob): Promise<string> {
     return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())),
         byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function parseBackupBlob(blob: Blob): Promise<BackupFile> {
+    // End the text/decoder frame before validation allocates checksum buffers.
+    return parseStrictJson(await blob.text(), BACKUP_MAX_BYTES) as BackupFile;
 }
 
 export class CoreBackups {
@@ -140,8 +150,9 @@ export class CoreBackups {
     private async decode(key: string, blob: Blob): Promise<{ file: BackupFile; entry: BackupPreview }> {
         const match = KEY.exec(key);
         check(match, '不是本功能管理的备份文件');
-        check(blob instanceof Blob && blob.size > 0 && blob.size <= BACKUP_MAX_BYTES, '备份文件为空或超过 64 MiB 安全读取上限');
-        const value = parseStrictJson(await blob.text(), BACKUP_MAX_BYTES) as BackupFile;
+        check(blob instanceof Blob && blob.size > 0, '备份文件为空或无效');
+        check(blob.size <= BACKUP_MAX_BYTES, `${corePackageSizeError(blob.size)}；未恢复或更改当前库`);
+        const value = await parseBackupBlob(blob);
         check(value && Object.keys(value).sort().join() === ['format', 'kind', 'savedAt', 'sourceLibrary', 'dataDigest', 'pack', 'checksum'].sort().join(), '备份封装字段不完整');
         check(value.format === OWNER && value.kind === match[1] && value.savedAt === Number(match[2]) &&
             typeof value.sourceLibrary === 'string' && value.sourceLibrary.startsWith(DB_PREFIX), '备份归属或日期不匹配');
@@ -204,14 +215,11 @@ export class CoreBackups {
             const baseline = kind === 'auto' ? latestBaseline(bankKeys) : undefined;
             const witnesses = new Map<string, FileWitness>();
             const previousDigest = baseline ? (await this.read(baseline, witnesses)).file.dataDigest : undefined;
-            const pack = await exportLibrary(lib); // one consistent readonly transaction
-            if (kind === 'before-restore' && pack.counts.stories === 0 && pack.counts.branches === 0)
-                return { state: 'empty' };
-            assertNonempty(pack);
-            check((await isCurrent()), '档案仍在变化，本次备份已取消');
-            const digest = await fingerprint(pack.data);
-            if (previousDigest === digest) return { state: 'unchanged' };
-            const entry = await this.publish(pack, lib.db.name, kind, digest, keys, isCurrent, kind === 'auto' ? witnesses : undefined);
+            // The preparation frame owns the full snapshot. Only a Blob and small
+            // metadata survive into publication, which parses a separate readback.
+            const prepared = await this.prepareLibrary(lib, kind, previousDigest, keys, isCurrent);
+            if ('state' in prepared) return prepared;
+            const entry = await this.publish(prepared, isCurrent, kind === 'auto' ? witnesses : undefined);
             if (kind !== 'auto') return { state: 'saved', entry };
             // Re-list after publication. No delete happens before full persisted readback.
             try {
@@ -242,10 +250,27 @@ export class CoreBackups {
 
     pin(key: string, checksum: string, isCurrent: BackupGuard = () => true): Promise<BackupPreview> {
         return this.serial(async () => {
-            const source = await this.read(key);
-            check(source.entry.checksum === checksum && await isCurrent(), '所选备份已改变，请重新预览');
-            return this.publish(source.file.pack, source.file.sourceLibrary, 'pinned', source.file.dataDigest, await this.keys(), isCurrent);
+            const prepared = await this.preparePinned(key, checksum, isCurrent);
+            return this.publish(prepared, isCurrent);
         });
+    }
+
+    private async prepareLibrary(lib: Library, kind: BackupSaveKind, previousDigest: string | undefined,
+        keys: string[], isCurrent: BackupGuard): Promise<PreparedBackup | { state: 'empty' | 'unchanged' }> {
+        const pack = await exportLibrary(lib); // one consistent readonly transaction
+        if (kind === 'before-restore' && pack.counts.stories === 0 && pack.counts.branches === 0)
+            return { state: 'empty' };
+        assertNonempty(pack);
+        check(await isCurrent(), '档案仍在变化，本次备份已取消');
+        const digest = await fingerprint(pack.data);
+        if (previousDigest === digest) return { state: 'unchanged' };
+        return this.prepareFile(pack, lib.db.name, kind, digest, keys);
+    }
+
+    private async preparePinned(key: string, checksum: string, isCurrent: BackupGuard): Promise<PreparedBackup> {
+        const source = await this.read(key);
+        check(source.entry.checksum === checksum && await isCurrent(), '所选备份已改变，请重新预览');
+        return this.prepareFile(source.file.pack, source.file.sourceLibrary, 'pinned', source.file.dataDigest, await this.keys());
     }
 
     /** Worker restore prepares and verifies a fresh database; only the UI may activate it. */
@@ -275,7 +300,8 @@ export class CoreBackups {
         });
     }
 
-    private async publish(pack: Package, sourceLibrary: string, kind: BackupSaveKind | 'pinned', dataDigest: string, keys: string[], isCurrent: BackupGuard = () => true, witnesses?: Map<string, FileWitness>): Promise<BackupPreview> {
+    private async prepareFile(pack: Package, sourceLibrary: string, kind: BackupSaveKind | 'pinned', dataDigest: string,
+        keys: string[]): Promise<PreparedBackup> {
         const savedAt = this.now();
         const bank = (await fingerprint(sourceLibrary)).slice(0, 16);
         const suffix = `${this.uuid()}.json`;
@@ -284,12 +310,17 @@ export class CoreBackups {
         const base = { format: OWNER as typeof OWNER, kind, savedAt, sourceLibrary, dataDigest, pack };
         const file: BackupFile = { ...base, checksum: await fingerprint(base) };
         const blob = new Blob([JSON.stringify(file)], { type: 'application/json' });
-        check(blob.size <= BACKUP_MAX_BYTES, '核心包超过 64 MiB 安全读取上限；未写入或轮换备份，请手动导出');
+        check(blob.size <= BACKUP_MAX_BYTES, `${corePackageSizeError(blob.size)}；未写入或轮换备份。可手动导出保留副本，但超限文件不能在本版本导入`);
+        return { key, blob, checksum: file.checksum };
+    }
+
+    private async publish({ key, blob, checksum }: PreparedBackup, isCurrent: BackupGuard,
+        witnesses?: Map<string, FileWitness>): Promise<BackupPreview> {
         check((await isCurrent()), '档案仍在变化，本次备份已取消');
         await this.disk.write(key, blob); // TT stages and atomically publishes this unique file.
-        const persisted = await this.read(key, witnesses);
-        check(persisted.entry.checksum === file.checksum && persisted.entry.bytes === blob.size, '新备份读回不一致，旧备份保留');
-        await this.rememberPreview(persisted.entry);
-        return persisted.entry;
+        const { entry } = await this.read(key, witnesses);
+        check(entry.checksum === checksum && entry.bytes === blob.size, '新备份读回不一致，旧备份保留');
+        await this.rememberPreview(entry);
+        return entry;
     }
 }

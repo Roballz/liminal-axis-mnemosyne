@@ -1,11 +1,13 @@
 import type { BackupOutcome, BackupPreview, BackupSaveKind } from './core-backups';
 import type { Package } from './migration';
+import type { CorePackageSize } from './core-package-size';
 
 export type BackupJob = { library: string; kind: BackupSaveKind; keep: 20 } | { kind: 'preview'; key: string } |
     { kind: 'pin'; key: string; checksum: string } | { kind: 'restore'; key: string; checksum: string } |
-    { kind: 'export'; library: string } | { kind: 'import'; blob: Blob };
+    { kind: 'export'; library: string } | { kind: 'size'; library: string } | { kind: 'import'; blob: Blob };
 export type BackupResult = BackupOutcome | { state: 'preview' | 'pinned'; entry: BackupPreview } |
-    { state: 'exported'; blob: Blob; version: Package['version'] } | { state: 'restored'; library: string };
+    { state: 'exported'; blob: Blob; version: Package['version'] } | { state: 'restored'; library: string } |
+    { state: 'size'; report: CorePackageSize };
 export type DiskCall = (
     { method: 'guard' | 'list' | 'readPreviews' } | { method: 'read' | 'remove'; key: string } |
     { method: 'write'; key: string; blob: Blob } | { method: 'writePreviews'; value: unknown }

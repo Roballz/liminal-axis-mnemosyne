@@ -1,0 +1,149 @@
+{
+  "version": "1.4.38",
+  "status": "implemented_unverified",
+  "scope": "Synthetic Node worker_threads, fake IndexedDB and in-memory Blob disk; no real user library or native TT/Android run.",
+  "first_attempt": {
+    "status": "failed",
+    "targetBodyMiB": 288,
+    "elapsedMs": 105969.2,
+    "phase": "restore-fresh-library:started",
+    "hostHeartbeat": {
+      "intervalMs": 10,
+      "count": 10422,
+      "maxGapMs": 65.9,
+      "gapsOver50Ms": 2
+    },
+    "processMemory": {
+      "samplingIntervalMs": 100,
+      "initialRssBytes": 40427520,
+      "peakSampledRssBytes": 4519895040
+    },
+    "hostResources": {
+      "reportedTotalMemoryBytes": 10451423232,
+      "reportedFreeMemoryBytes": 9448759296
+    },
+    "workerResources": {
+      "workerHeapLimitBytes": 2348810240,
+      "customHeapLimit": false
+    },
+    "budgetMs": 290000,
+    "error": "Error [ERR_WORKER_OUT_OF_MEMORY]: Worker terminated due to reaching memory limit: JS heap out of memory\n    at [kOnExit] (node:internal/worker:398:26)\n    at Worker.<computed>.onexit (node:internal/worker:295:20)"
+  },
+  "probe_correction": "After closing and deleting its own source fake IndexedDB, the harness clears strong references to the closed Library and completed CoreBackups manager. No fake database internals changed, no forced GC, no custom heap limit.",
+  "final_attempt": {
+    "status": "passed",
+    "scope": "Node worker_threads; fake-indexeddb; in-memory Blob disk; synthetic data only",
+    "targetBodyMiB": 288,
+    "rawPackageBytes": 302071625,
+    "backupFileBytes": 302071943,
+    "limitBytes": 536870912,
+    "rawImportedBytes": 302071625,
+    "rawImportEntrypoint": "core-backup.worker.ts; guard messages simulated inside the Node worker",
+    "packageVersion": 16,
+    "io": {
+      "reads": 2,
+      "writes": 1,
+      "removes": 0
+    },
+    "stages": [
+      {
+        "name": "create-synthetic-library",
+        "elapsedMs": 8986,
+        "heapUsedBytes": 1226633672,
+        "externalBytes": 584141245,
+        "rssBytes": 2517086208
+      },
+      {
+        "name": "export-original",
+        "elapsedMs": 14529.7,
+        "heapUsedBytes": 1826097424,
+        "externalBytes": 307389677,
+        "rssBytes": 2558550016
+      },
+      {
+        "name": "save-and-verify-persisted-file",
+        "elapsedMs": 31056.1,
+        "heapUsedBytes": 1826372832,
+        "externalBytes": 307389677,
+        "rssBytes": 2860711936
+      },
+      {
+        "name": "release-synthetic-source-before-restore",
+        "elapsedMs": 45.5,
+        "heapUsedBytes": 1826407648,
+        "externalBytes": 307389677,
+        "rssBytes": 2558758912
+      },
+      {
+        "name": "restore-fresh-library",
+        "elapsedMs": 28335.5,
+        "heapUsedBytes": 1483382328,
+        "externalBytes": 5318769,
+        "rssBytes": 1925787648
+      },
+      {
+        "name": "verify-restored-roundtrip-and-export-raw",
+        "elapsedMs": 12972.5,
+        "heapUsedBytes": 1826596344,
+        "externalBytes": 609492774,
+        "rssBytes": 3478728704
+      },
+      {
+        "name": "release-verified-synthetic-copies",
+        "elapsedMs": 104.9,
+        "heapUsedBytes": 618271464,
+        "externalBytes": 609492774,
+        "rssBytes": 1364160512
+      },
+      {
+        "name": "import-raw-through-production-worker",
+        "elapsedMs": 16141.6,
+        "heapUsedBytes": 1483454720,
+        "externalBytes": 5350241,
+        "rssBytes": 1944829952
+      },
+      {
+        "name": "verify-raw-import-roundtrip",
+        "elapsedMs": 9889.7,
+        "heapUsedBytes": 1222371984,
+        "externalBytes": 307421149,
+        "rssBytes": 2274349056
+      }
+    ],
+    "peakWorkerHeapAtStageBoundariesBytes": 1826596344,
+    "workerHeapLimitBytes": 2348810240,
+    "probeMemoryPolicy": {
+      "forcedGc": false,
+      "customHeapLimit": false,
+      "sourceFakeDatabaseReleasedBeforeRestore": true,
+      "closedDatabaseHandlesCleared": true,
+      "additionalStandaloneRead": false,
+      "persistedReadbackAndRestoreRead": true
+    },
+    "roundtrip": "passed",
+    "rawImportRoundtrip": "passed",
+    "elapsedMs": 122276.4,
+    "phase": "verify-raw-import-roundtrip:finished",
+    "hostHeartbeat": {
+      "intervalMs": 10,
+      "count": 12040,
+      "maxGapMs": 55.6,
+      "gapsOver50Ms": 1
+    },
+    "processMemory": {
+      "samplingIntervalMs": 100,
+      "initialRssBytes": 40558592,
+      "peakSampledRssBytes": 4522352640
+    },
+    "hostResources": {
+      "reportedTotalMemoryBytes": 10451423232,
+      "reportedFreeMemoryBytes": 9447809024
+    },
+    "workerResources": {
+      "workerHeapLimitBytes": 2348810240,
+      "customHeapLimit": false
+    },
+    "budgetMs": 290000,
+    "limitations": "RSS includes the complete Node process and fake IndexedDB stores, not just backup working memory; samples may miss short peaks. Large mode releases the synthetic source before restore but does not force GC or raise the default heap limit. Heartbeat measures this Node host only, not browser rendering, TT native IO, phone memory pressure, or 20-file rotation."
+  }
+}

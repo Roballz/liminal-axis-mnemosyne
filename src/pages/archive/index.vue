@@ -27,7 +27,9 @@ import { activeLibrary, ACTIVE_KEY } from '@/mnemosyne/db';
 import { keepSummary } from '@/mnemosyne/canonical';
 import { reviewDifference, type ReviewDifference } from '@/mnemosyne/review-diagnostics';
 import { previewRoleRepairs, confirmRoleRepairs, type RoleRepairCandidate } from '@/mnemosyne/source-role-repair';
-import { exportCoreLibrary, prepareCoreBackup, restoreCorePackage } from '@/mnemosyne/core-backup-runtime';
+import { exportCoreLibrary, prepareCoreBackup, restoreCorePackage, readCorePackageSize } from '@/mnemosyne/core-backup-runtime';
+import { BACKUP_MAX_BYTES, BACKUP_MAX_MIB, corePackageSizeError } from '@/mnemosyne/core-backups';
+import type { CorePackageSize } from '@/mnemosyne/core-package-size';
 import { regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
 import { copyLegacyKnowledge } from '@/memory/vector/knowledge';
 import { currentVectorDb } from '@/memory/vector/scope';
@@ -38,6 +40,18 @@ const prefix = ref(0),
   notice = ref(''),
   busy = ref(false);
 const choices = shallowRef<Awaited<ReturnType<typeof dailyBranchChoices>>>([]);
+const packageSize = shallowRef<CorePackageSize>();
+const sizeLabels: Record<string, string> = {
+  stories: '故事', branches: '分支', source_messages: '消息身份', source_revisions: '正文版本与旧版全文',
+  source_bodies: '当前保留正文', history_snapshots: '正文历史索引', manifest_blocks: '正文引用块',
+  host_bindings: '聊天绑定', message_mappings: '消息映射', memories: '摘要身份', memory_revisions: '摘要内容与依赖',
+  memory_views: '摘要历史视图', memory_selection_nodes: '摘要索引节点', reviews: '审核与来源凭据',
+  event_chains: '事件', event_revisions: '事件版本', event_memberships: '事件关联', event_progress: '事件进展',
+  event_processing_receipts: '事件处理记录', custom_table_defs: '自定义表定义', custom_table_rows: '自定义表内容',
+  table_receipts: '填表记录', table_history: '表格历史', library_meta: '库设置与维护记录',
+};
+const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(2);
+watch(() => [dailyState.scope, dailyState.generation], () => { packageSize.value = undefined; });
 const loadingChoices = ref(false);
 const reconnectChoices = shallowRef<Awaited<ReturnType<typeof dailyBranchChoices>>>([]);
 const reconnectChoice = ref('');
@@ -234,7 +248,21 @@ async function download() {
   a.download = `mnemosyne-daily-v${result.version}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  notice.value = '核心包已生成，请确认浏览器已保存下载文件。';
+  notice.value = `核心包已生成（${(result.blob.size / 1024 / 1024).toFixed(2)} MiB），请确认浏览器已保存下载文件。`;
+  if (result.blob.size > BACKUP_MAX_BYTES)
+    error.value = `${corePackageSizeError(result.blob.size)}；已生成导出副本，但本版本暂不能直接导入此文件。`;
+}
+async function inspectPackageSize() {
+  packageSize.value = undefined;
+  const lib = await activeLibrary(), selector = localStorage.getItem(ACTIVE_KEY);
+  const stamp = `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
+  packageSize.value = await readCorePackageSize(lib, () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) &&
+    stamp === `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`);
+}
+async function copyPackageSize() {
+  check(packageSize.value, '请先分析核心包体积');
+  await navigator.clipboard.writeText(JSON.stringify(packageSize.value, null, 2));
+  notice.value = '已复制体积统计，仅含记录数量和大小，不含聊天正文、摘要内容或档案名称。';
 }
 async function restore(event: Event) {
   const input = event.target as HTMLInputElement,
@@ -387,6 +415,22 @@ async function copyKnowledge() {
       <p>核心包：正文/摘要及历史版本、事件与回执、自定义表、宿主映射、非秘密设置。</p>
       <p>不含：宿主聊天文件、人物/物品/地点等聊天内状态、知识库文件/向量、API 密钥。它不是整套柏宝书备份。</p>
       <div class="mn-action-help">
+        <button :disabled="busy" @click="run(inspectPackageSize)">分析核心包体积</button>
+        <small>只读统计各类记录的大小，帮助定位历史索引或重复记录；不上传聊天内容。</small>
+      </div>
+      <div v-if="packageSize" class="mn-card">
+        <p>数据记录合计 {{ mib(packageSize.bytes) }} MiB · {{ new Date(packageSize.measuredAt).toLocaleString() }}</p>
+        <table>
+          <thead><tr><th>占用最多的内容</th><th>记录数</th><th>MiB</th></tr></thead>
+          <tbody><tr v-for="entry in packageSize.stores.slice(0, 8)" :key="entry.store">
+            <td>{{ sizeLabels[entry.store] }}</td><td>{{ entry.records }}</td><td>{{ mib(entry.bytes) }}</td>
+          </tr></tbody>
+        </table>
+        <p class="mn-muted">旧版完整摘要视图 {{ packageSize.details.legacyViews }} 份；历史索引条目 {{ packageSize.details.selectionEntries }} 条。</p>
+        <button :disabled="busy" @click="run(copyPackageSize)">复制体积统计</button>
+        <small>统计不改动历史记录；复制内容仅含数量与字节数，可用于排查膨胀原因。</small>
+      </div>
+      <div class="mn-action-help">
         <button :disabled="busy" @click="run(copyKnowledge)">从旧柏宝书复制本角色知识库</button
         ><small>可选。复制当前角色的旧知识库及可复用向量，不调用模型、不删除旧库；无旧知识库可跳过。</small>
       </div>
@@ -402,7 +446,7 @@ async function copyKnowledge() {
           @change="(e) => run(() => restore(e))"
       /></label>
       <small
-        >选择此前导出的核心包。先验证再切换活动库，失败不替换原库；不合并两个设备的修改。向量需按原设置重建，可能产生
+        >选择此前导出的核心包，单文件上限 {{ BACKUP_MAX_MIB }} MiB。先验证再切换活动库，失败不替换原库；不合并两个设备的修改。向量需按原设置重建，可能产生
         API 费用。</small
       >
     </details>

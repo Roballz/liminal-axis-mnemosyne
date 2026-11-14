@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { expect, test } from 'vitest';
-import { capture, confirmRecoveredSummaries, forkBranch, synchronize } from './canonical';
+import { capture, confirmRecoveredSummaries, forkBranch, synchronize, type HostMemory, type HostObservation } from './canonical';
 import { fixture, observation } from './fixtures';
 import { exportLibrary, restoreLibrary, validateData, type Package } from './migration';
 import { publishMemoryView } from './memory-selections';
@@ -39,6 +39,37 @@ test('1000 incremental views store shared nodes instead of 500500 complete selec
         } finally { imported.close(); }
     } finally { lib.close(); }
 }, 15000);
+
+test('a real L0 append before L1/L2 rewrites one leaf path and keeps historical nodes unchanged', async () => {
+    const { Library, freshLibraryName } = await import('./db');
+    const lib = await Library.open(freshLibraryName());
+    const input: HostObservation = observation(160, 'mixed-selection-order');
+    const higher = (level: number, hostId: string, children: string[]): HostMemory => ({
+        hostId, content: `合成高层摘要 ${hostId}`, level, children, anchorKey: null,
+        storyTime: '', seed: false, enabled: true,
+    });
+    const first = Array.from({ length: 20 }, (_, i) => higher(1, `first-${i}`,
+        input.memories.slice(i * 8, i * 8 + 8).map(memory => memory.hostId)));
+    const second = Array.from({ length: 4 }, (_, i) => higher(2, `second-${i}`,
+        first.slice(i * 5, i * 5 + 5).map(memory => memory.hostId)));
+    input.memories.push(...first, ...second);
+    try {
+        const branch = await synchronize(lib, input), before = await exportLibrary(lib);
+        const oldNodes = new Map(before.data.memory_selection_nodes.map(node => [node.id, node]));
+        const next: HostObservation = observation(161, input.scope);
+        next.memories.push(...first, ...second);
+        await synchronize(lib, next);
+        const current = await capture(lib, branch.id), after = await exportLibrary(lib);
+        const newNodes = (after.data.memory_selection_nodes as MemorySelectionNode[]).filter(node => !oldNodes.has(node.id));
+        expect(current.memories.map(memory => memory.hostId)).toEqual(next.memories.map(memory => memory.hostId));
+        expect(newNodes.length).toBeLessThanOrEqual(32);
+        expect(newNodes.reduce((count, node) => count + node.entries.length, 0)).toBeLessThanOrEqual(65);
+        const nodes = new Map(after.data.memory_selection_nodes.map(node => [node.id, node]));
+        for (const [id, node] of oldNodes) expect(nodes.get(id)).toEqual(node);
+        for (const view of before.data.memory_views)
+            expect(after.data.memory_views.find(row => row.id === view.id)).toEqual(view);
+    } finally { lib.close(); }
+});
 
 test('edit, removal, reordering, recovery confirmation and fork preserve exact selections and old identities', async () => {
     const { lib, input, branch, view } = await fixture(70);

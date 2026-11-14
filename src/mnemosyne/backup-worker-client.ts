@@ -9,7 +9,9 @@ import type { BackupJob, BackupResult, HostMessage, WorkerMessage, DiskRequest }
 export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, isCurrent: () => boolean,
     createWorker: () => Worker = () => new BackupWorker(),
     onPendingNative?: (message: string) => void): Promise<BackupResult> {
-    const unavailable = job.kind === 'preview'
+    const unavailable = job.kind === 'size'
+        ? '后台体积分析线程不可用；请重新加载插件后重试'
+        : job.kind === 'preview'
         ? '后台校验线程不可用；所选文件仍未验证，未恢复或删除。请重新加载插件后重试（需要宿主允许 Web Worker）'
         : job.kind === 'export' || job.kind === 'import' || job.kind === 'restore'
         ? '后台迁移线程不可用；本次导出或恢复未完成，原库保留。请重新加载插件后重试（需要宿主允许 Web Worker）'
@@ -47,7 +49,7 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
             if (job.kind === 'preview' && (request.method !== 'read' || request.key !== job.key || !isCurrent()))
                 throw new Error('备份选择已改变或校验请求越界');
             if (request.method === 'guard') return isCurrent();
-            if (!disk || job.kind === 'export' || job.kind === 'import') throw new Error('迁移任务不允许访问原生备份文件');
+            if (!disk || job.kind === 'export' || job.kind === 'import' || job.kind === 'size') throw new Error('迁移或体积分析任务不允许访问原生备份文件');
             const writer = job.kind === 'auto' || job.kind === 'manual' || job.kind === 'before-restore' || job.kind === 'pin';
             if (request.method === 'read') {
                 if ((job.kind === 'restore' || job.kind === 'pin') &&

@@ -1,8 +1,9 @@
-import { BACKUP_MAX_BYTES, CoreBackups } from './core-backups';
+import { BACKUP_MAX_BYTES, CoreBackups, corePackageSizeError } from './core-backups';
 import { Library } from './db';
 import { exportLibrary, restoreLibrary } from './migration';
 import { parseStrictJson } from './json';
 import { check } from './model';
+import { measureCorePackageSize } from './core-package-size';
 import type { BackupDisk } from '@/st/native-backups';
 import type { DiskCall, DiskRequest, HostMessage, WorkerMessage } from './backup-worker-protocol';
 
@@ -57,7 +58,8 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
             if (message.job.kind === 'restore') lib = await backups.prepareRestore(message.job.key, message.job.checksum, guard);
             else {
                 const blob = message.job.blob;
-                check(blob instanceof Blob && blob.size > 0 && blob.size <= BACKUP_MAX_BYTES, '核心包为空或超过 64 MiB 导入上限');
+                check(blob instanceof Blob && blob.size > 0, '核心包为空或无效');
+                check(blob.size <= BACKUP_MAX_BYTES, `${corePackageSizeError(blob.size)}；未创建恢复库，原库保留`);
                 const pack = parseStrictJson(await blob.text(), BACKUP_MAX_BYTES);
                 check(await guard(), '恢复页面已改变，原库保留');
                 lib = await restoreLibrary(pack, false);
@@ -67,6 +69,11 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
             return;
         }
         lib = await Library.open(message.job.library, true);
+        if (message.job.kind === 'size') {
+            const report = await measureCorePackageSize(lib, guard);
+            send({ type: 'done', result: { state: 'size', report } });
+            return;
+        }
         if (message.job.kind === 'export') {
             const pack = await exportLibrary(lib);
             const blob = new Blob([JSON.stringify(pack)], { type: 'application/json' });

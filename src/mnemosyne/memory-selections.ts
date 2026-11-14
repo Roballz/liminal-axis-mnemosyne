@@ -1,5 +1,6 @@
 import type { Transaction } from './db';
 import { check, row, type CompactMemoryView, type MemorySelectionNode, type MemoryView, type MemoryRevision } from './model';
+import { selectionRanks } from './selection-order';
 
 type StoredView = MemoryView | CompactMemoryView;
 type Entry = MemorySelectionNode['entries'][number];
@@ -138,8 +139,10 @@ export async function publishMemoryView(tx: Transaction, view: MemoryView, previ
     // Read actual stored ranks instead of assuming imported ranks equal Object.entries
     // positions. Transaction-local node reads reuse capture's work, never another snapshot.
     const before = new Map((reusable ? await selectionEntries(reusable, load) : []).map(entry => [entry[0], entry]));
-    const after = new Map(Object.entries(view.selections)
-        .map(([family, revision], order): [string, Entry] => [family, [family, revision, order]]));
+    const selected = Object.entries(view.selections);
+    const ranks = selectionRanks(selected.map(([family]) => family), family => before.get(family)?.[2]);
+    const after = new Map(selected
+        .map(([family, revision], order): [string, Entry] => [family, [family, revision, ranks[order]]]));
     const changes = new Map<string, Entry | undefined>();
     for (const [family, value] of after) {
         const prior = before.get(family);

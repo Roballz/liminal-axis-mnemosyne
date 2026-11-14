@@ -7,6 +7,7 @@ import { validateColumns } from './tables';
 import { validateMemorySelections } from './memory-selections';
 import { sameSourceMessages } from './review-source-integrity';
 import { isEmptyGeneratedReview, REVIEW_SOURCE_REPAIR_ID, validReviewRepairReceipt } from './review-source-repair';
+import { verifyRestoredRows } from './restore-verification';
 export interface Package {
     format: 'mnemosyne-daily';
     version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
@@ -555,16 +556,21 @@ export async function restoreLibrary(value: unknown, activate = true): Promise<L
     await validateCurrentData(pack);
     const { checksum, ...base } = pack;
     check(typeof checksum === 'string' && await fingerprint(base) === checksum, '迁移包校验和错误');
+    // Recheck the exact current-format view that exportLibrary would produce.
+    // These arrays share the original records, including untouched legacy text.
+    const data = Object.fromEntries(STORES.map(store => [store, pack.data[store] ?? []])) as Package['data'];
+    const counts = Object.fromEntries(STORES.map(store => [store, data[store].length])) as Package['counts'];
+    await validateCurrentData({ ...pack, version: 16, data, counts });
     const lib = await Library.open(freshLibraryName());
     try {
         await lib.transaction(STORES, 'readwrite', async (tx) => {
             for (const store of STORES)
-                for (const record of pack.data[store] ?? [])
+                for (const record of data[store])
                     await tx.add(store, record);
         });
-        // Verify the persisted round-trip before changing the active selector.
-        const restored = await exportLibrary(lib);
-        check(await fingerprint(restored.data) === await fingerprint(Object.fromEntries(STORES.map(store => [store, pack.data[store] ?? []]))), '恢复后对象不一致');
+        // Exact row/count/order equality proves the persisted data is the same
+        // validated current-format view, without another complete in-memory copy.
+        await verifyRestoredRows(lib, data);
         if (activate)
             await activateLibrary(lib);
         return lib;

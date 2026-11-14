@@ -195,6 +195,16 @@ export async function restoreCorePackage(blob: Blob, isCurrent: () => boolean): 
     return activatePrepared(await runBackupWorker(undefined, { kind: 'import', blob }, isCurrent), isCurrent);
 }
 
+export async function readCorePackageSize(lib: Library, isCurrent: () => boolean) {
+    check(!coreBackupState.busy, '备份正在处理，请完成后再分析体积');
+    coreBackupState.busy = true;
+    try {
+        const result = await runBackupWorker(undefined, { kind: 'size', library: lib.db.name }, isCurrent);
+        check(result.state === 'size' && isCurrent(), '档案或页面已改变，请重新分析体积');
+        return result.report;
+    } finally { coreBackupState.busy = false; }
+}
+
 export async function configureCoreBackups(enabled: boolean, keep: typeof AUTO_BACKUP_KEEP) {
     const backups = await getCoreBackups();
     // Stop scheduling locally before an uncertain settings write/read. Enabling only

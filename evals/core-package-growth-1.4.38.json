@@ -1,0 +1,132 @@
+{
+  "date": "2026-11-15",
+  "baseline": "f8e535296f377c15fac7e5c582ae5f468ff092a2",
+  "model": {
+    "floorsPerL0": 2,
+    "L0PerL1": 8,
+    "L1PerL2": 5,
+    "floorCheckpoints": [
+      1000,
+      1980,
+      5000,
+      10000
+    ]
+  },
+  "scope": "Real publishMemoryView with synthetic in-memory Transaction; cumulative UTF-8 storage bytes for views and selection nodes only; not user data or full backup size.",
+  "before": [
+    {
+      "floors": 1000,
+      "L0": 500,
+      "L1": 62,
+      "L2": 12,
+      "changedEntries": 75,
+      "lastNodesWritten": 17,
+      "lastLeafEntriesWritten": 574,
+      "cumulativeLeafEntriesWritten": 138086,
+      "legacyViewBytes": 12267302,
+      "currentViewNodeBytes": 14058404,
+      "totalNodes": 6846,
+      "liveNodes": 17
+    },
+    {
+      "floors": 1980,
+      "L0": 990,
+      "L1": 123,
+      "L2": 24,
+      "changedEntries": 148,
+      "lastNodesWritten": 105,
+      "lastLeafEntriesWritten": 711,
+      "cumulativeLeafEntriesWritten": 507764,
+      "legacyViewBytes": 47997932,
+      "currentViewNodeBytes": 52222212,
+      "totalNodes": 25413,
+      "liveNodes": 207
+    },
+    {
+      "floors": 5000,
+      "L0": 2500,
+      "L1": 312,
+      "L2": 62,
+      "changedEntries": 375,
+      "lastNodesWritten": 218,
+      "lastLeafEntriesWritten": 2332,
+      "cumulativeLeafEntriesWritten": 2642923,
+      "legacyViewBytes": 305709802,
+      "currentViewNodeBytes": 311110442,
+      "totalNodes": 296672,
+      "liveNodes": 273
+    },
+    {
+      "floors": 10000,
+      "L0": 5000,
+      "L1": 625,
+      "L2": 125,
+      "changedEntries": 751,
+      "lastNodesWritten": 262,
+      "lastLeafEntriesWritten": 5523,
+      "cumulativeLeafEntriesWritten": 12552033,
+      "legacyViewBytes": 1222356252,
+      "currentViewNodeBytes": 1353428163,
+      "totalNodes": 914809,
+      "liveNodes": 273
+    }
+  ],
+  "after": [
+    {
+      "floors": 1000,
+      "L0": 500,
+      "L1": 62,
+      "L2": 12,
+      "lastNodesWritten": 2,
+      "lastLeafEntriesWritten": 36,
+      "cumulativeLeafEntriesWritten": 12328,
+      "legacyViewBytes": 12267302,
+      "currentViewNodeBytes": 1815977,
+      "totalNodes": 1022,
+      "liveNodes": 17,
+      "expectedDenseRankChanges": 75
+    },
+    {
+      "floors": 1980,
+      "L0": 990,
+      "L1": 123,
+      "L2": 24,
+      "lastNodesWritten": 3,
+      "lastLeafEntriesWritten": 4,
+      "cumulativeLeafEntriesWritten": 35417,
+      "legacyViewBytes": 47997932,
+      "currentViewNodeBytes": 4875602,
+      "totalNodes": 2372,
+      "liveNodes": 207,
+      "expectedDenseRankChanges": 148
+    },
+    {
+      "floors": 5000,
+      "L0": 2500,
+      "L1": 312,
+      "L2": 62,
+      "lastNodesWritten": 3,
+      "lastLeafEntriesWritten": 11,
+      "cumulativeLeafEntriesWritten": 51510,
+      "legacyViewBytes": 305709802,
+      "currentViewNodeBytes": 9994810,
+      "totalNodes": 7383,
+      "liveNodes": 273,
+      "expectedDenseRankChanges": 375
+    },
+    {
+      "floors": 10000,
+      "L0": 5000,
+      "L1": 625,
+      "L2": 125,
+      "lastNodesWritten": 6,
+      "lastLeafEntriesWritten": 66,
+      "cumulativeLeafEntriesWritten": 102624,
+      "legacyViewBytes": 1222356252,
+      "currentViewNodeBytes": 20911058,
+      "totalNodes": 15614,
+      "liveNodes": 273,
+      "expectedDenseRankChanges": 751
+    }
+  ]
+}

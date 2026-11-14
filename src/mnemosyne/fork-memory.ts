@@ -47,19 +47,26 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         return result as string[];
     };
     const historical = new Map<string, string>();
+    const historicalDependencies = new Map<string, string[]>();
     const copyDependency = async (id: string): Promise<string> => {
         const selected = await equivalent(id);
         if (selected) return selected;
         if (historical.has(id)) return historical.get(id)!;
         const prior = await readRevision(id);
+        // Shared DAG paths may all pass the first check before this read settles.
+        // Reserve an identity before walking children, rather than memoizing a
+        // recursively awaited Promise (which would self-wait on a malformed cycle).
+        if (historical.has(id)) return historical.get(id)!;
         const family = prior && families.get(prior.owner);
         if (!prior || !family) return id;
         const key = row('mr').id;
         historical.set(id, key);
         // Keep the old narrative unselected, in the same child family as the approved
         // replacement. A copied review must not compare parent and child family IDs.
+        const dependencies = await Promise.all(prior.dependencies.map(copyDependency));
+        historicalDependencies.set(id, dependencies);
         await tx.add('memory_revisions', { ...prior, id: key, branch: branch.id, owner: family.id,
-            dependencies: await Promise.all(prior.dependencies.map(copyDependency)) } as MemoryRevision);
+            dependencies } as MemoryRevision);
         return key;
     };
     for (const memory of events.valid) {
@@ -127,20 +134,36 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         if (selected) return selected;
         if (tableEvidence.has(id)) return tableEvidence.get(id)!;
         const prior = await readRevision(id);
+        if (tableEvidence.has(id)) return tableEvidence.get(id)!;
         if (!prior) return undefined;
         let family = families.get(prior.owner);
         if (!family) {
             const original = await tx.get<Memory>('memories', prior.owner);
             if (!original) return undefined;
-            family = { ...original, ...row('mem'), owner: binding.id };
-            families.set(prior.owner, family);
-            await tx.add('memories', family);
+            family = families.get(prior.owner);
+            if (!family) {
+                family = { ...original, ...row('mem'), owner: binding.id };
+                families.set(prior.owner, family);
+                await tx.add('memories', family);
+            }
         }
-        const key = row('mr').id; tableEvidence.set(id, key);
+        if (tableEvidence.has(id)) return tableEvidence.get(id)!;
+        const existing = historical.get(id), key = existing ?? row('mr').id;
+        historical.set(id, key); tableEvidence.set(id, key);
         const dependencies = await Promise.all(prior.dependencies.map(copyTableEvidence));
         if (dependencies.some(id => !id)) throw new Error('继承表格历史来源依赖缺失');
-        await tx.add('memory_revisions', { ...prior, id: key, branch: branch.id, owner: family.id,
-            dependencies: dependencies as string[] } as MemoryRevision);
+        const copiedDependencies = dependencies as string[], previous = historicalDependencies.get(id);
+        // Table evidence may need to localize an old dependency whose family was
+        // not selected. Upgrade only the new child row, reusing its reserved ID;
+        // fully local copies need no extra read or write.
+        if (!existing || !previous || previous.length !== copiedDependencies.length ||
+            previous.some((dependency, index) => dependency !== copiedDependencies[index])) {
+            const copied = { ...prior, id: key, branch: branch.id, owner: family.id,
+                dependencies: copiedDependencies } as MemoryRevision;
+            if (existing) await tx.put('memory_revisions', copied);
+            else await tx.add('memory_revisions', copied);
+        }
+        historicalDependencies.set(id, copiedDependencies);
         return key;
     };
     return copyTableEvidence;

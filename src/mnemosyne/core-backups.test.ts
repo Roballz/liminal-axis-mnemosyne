@@ -7,7 +7,7 @@ import { synchronize, capture, forkBranch } from './canonical';
 import { Library, freshLibraryName, ACTIVE_KEY } from './db';
 import { exportLibrary } from './migration';
 import { STORES, fingerprint } from './model';
-import { AUTO_BACKUP_INTERVAL, CoreBackups, backupSettings } from './core-backups';
+import { AUTO_BACKUP_INTERVAL, BACKUP_MAX_BYTES, CoreBackups, backupSettings } from './core-backups';
 import * as json from './json';
 
 class Disk implements BackupDisk {
@@ -78,6 +78,40 @@ test('disk-full or incomplete readback cannot rotate older good copies', async (
     disk.write.mockImplementationOnce(async (key) => { disk.files.set(key, new Blob(['{"partial":true}'])); });
     await expect(backups.save(lib, 'auto')).rejects.toThrow('字段');
     expect(disk.files.has(good[0])).toBe(true); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
+});
+
+test('oversized publication reports actual bytes before writing or rotating an existing backup', async () => {
+    const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
+    try {
+        await backups.save(lib, 'auto');
+        const previous = new Map(disk.files), retained = new Set(previous.values());
+        time.advance(); input.messages[1].content += ' next snapshot'; await synchronize(lib, input);
+        const size = Object.getOwnPropertyDescriptor(Blob.prototype, 'size')!.get!;
+        // Exercise the size boundary without allocating a >512 MiB Blob in every test run.
+        vi.spyOn(Blob.prototype, 'size', 'get').mockImplementation(function (this: Blob) {
+            return retained.has(this) ? size.call(this) : BACKUP_MAX_BYTES + 1;
+        });
+        await expect(backups.save(lib, 'auto')).rejects.toThrow(`${BACKUP_MAX_BYTES + 1} 字节`);
+        expect(disk.write).toHaveBeenCalledTimes(1);
+        expect(disk.remove).not.toHaveBeenCalled();
+        expect(disk.files).toEqual(previous);
+    } finally { lib.close(); }
+});
+
+test('read accepts the expanded boundary and rejects larger files before decoding', async () => {
+    const { lib } = await fixture(1), disk = new Disk(), backups = new CoreBackups(disk);
+    try {
+        const saved = await backups.save(lib, 'manual');
+        if (saved.state !== 'saved') throw new Error('missing backup');
+        const original = disk.files.get(saved.entry.key)!;
+        const size = vi.spyOn(original, 'size', 'get').mockReturnValue(BACKUP_MAX_BYTES);
+        expect((await backups.read(saved.entry.key)).entry.bytes).toBe(BACKUP_MAX_BYTES);
+        const text = vi.spyOn(original, 'text'); text.mockClear();
+        size.mockReturnValue(BACKUP_MAX_BYTES + 1);
+        await expect(backups.read(saved.entry.key)).rejects.toThrow('超过 512 MiB 上限');
+        expect(text).not.toHaveBeenCalled();
+        expect(disk.write).toHaveBeenCalledTimes(1); expect(disk.remove).not.toHaveBeenCalled();
+    } finally { lib.close(); }
 });
 
 test('enumeration/read errors are not treated as no backups', async () => {
