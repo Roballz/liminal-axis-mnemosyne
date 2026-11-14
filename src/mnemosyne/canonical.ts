@@ -6,6 +6,7 @@ import { inheritForkMemory } from './fork-memory';
 import type { SummaryTags } from '@/memory/contextTags';
 import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { sourcePrefixes } from './source-prefixes';
+import { reviewMatchesMemory, sameSourceMessages } from './review-source-integrity';
 import { observationHashes } from './observation-hashes';
 import { publishMemoryView } from './memory-selections';
 import { Library, Transaction } from './db';
@@ -297,6 +298,8 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
             host: HostMemory;
         }[] = [];
         const sidecars: { revision: MemoryRevision; host: HostMemory }[] = [];
+        let currentRefIndex: Map<string, SourceRef> | undefined;
+        const currentRef = (message: string) => (currentRefIndex ??= new Map(refs.map(ref => [ref.message, ref]))).get(message);
         let recovered = false;
         const bases = new Map<string, Snapshot | undefined>();
         const readBasis = async (id: string) => {
@@ -388,8 +391,12 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 if (pending) pending.revision = revision;
                 else { await tx.put('memory_revisions', revision); recovered = true; }
             }
-            if (!revision.sourceRecovery && host.generatedSidecar && host.inputRefs?.some(ref => !refs.some(r => equal(r, ref))) &&
-                host.inputRefs.every(ref => ref.message === revision!.anchor || refs.some(r => equal(r, ref))))
+            if (!revision.sourceRecovery && revision.inputRefs.length && host.generatedSidecar &&
+                equal(revision.inputRefs, host.inputRefs) && equal(revision.coverage, host.coverage ?? []) &&
+                host.inputRefs?.some(ref => !equal(currentRef(ref.message), ref)) &&
+                host.inputRefs.every(ref => !!currentRef(ref.message) &&
+                    (ref.message === revision!.anchor || equal(currentRef(ref.message), ref))) &&
+                revision.coverage.every(ref => !!currentRef(ref.message)))
                 sidecars.push({ revision, host });
             selections[family.id] = revision.id;
             selectionRevisions.set(revision.id, revision);
@@ -403,10 +410,11 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
             await tx.add('memory_revisions', revision);
         }
         for (const { revision } of sidecars) {
-            const sourceRefs = revision.inputRefs.map(ref => refs.find(r => r.message === ref.message)!);
-            const coverage = revision.coverage.map(ref => refs.find(r => r.message === ref.message)!);
+            const sourceRefs = revision.inputRefs.map(ref => currentRef(ref.message)!);
+            const coverage = revision.coverage.map(ref => currentRef(ref.message)!);
             const reviews = await tx.all<Review>('reviews', 'owner', revision.id);
-            if (!reviews.some(r => r.reviewSchema === 2 && equal(r.sourceRefs, sourceRefs) && equal(r.dependencies, revision.dependencies)))
+            if (!reviews.some(r => !('disabled' in r) && r.reviewSchema === 2 &&
+                equal(r.sourceRefs, sourceRefs) && equal(r.coverage, coverage) && equal(r.dependencies, revision.dependencies)))
                 await tx.add('reviews', { ...row('review'), story: branch.story, branch: branch.id, owner: revision.id,
                     snapshot: branch.head, decision: 'compatible', origin: 'generated_sidecar', created: Date.now(),
                     reviewSchema: 2, sourceRefs, coverage, dependencies: revision.dependencies } as Review);
@@ -559,46 +567,71 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
         const positions = new Map(view.refs.map((r, i) => [r.message, i]));
         const refByMessage = new Map(view.refs.map((r) => [r.message, r]));
         const bases = sourcePrefixes(view.branch, view.refs, legacySnapshots as Snapshot[], blocks as Block[]);
-        const reviews = await tx.all<Review>('reviews', 'branch', view.branch.id);
+        const requiredLengths = new Map(view.memories.filter(m => !m.sourceRecovery && !m.inputRefs.length && !dependencyOnly(m))
+            .map(m => [m.id, m.anchor ? bases.get(m.basis)!.through(m.anchor) : bases.get(m.basis)!.length]));
+        const reviews = (await tx.all<Review>('reviews', 'branch', view.branch.id)).filter(r => !('disabled' in r));
         const compatible = new Map<string, Review>();
         const selectedById = new Map(view.memories.map(m => [m.id, m]));
         const selectedByOwner = new Map(view.memories.map(m => [m.owner, m]));
+        // Read each historical owner/dependency at most once for this status pass.
+        // Reviews for unselected history never cause reads of their dependency trees.
+        const revisions = new Map<string, MemoryRevision | undefined>(selectedById);
+        const readRevisions = async (ids: Iterable<string>) => {
+            const missing = [...new Set(ids)].filter(id => typeof id === 'string' && id && !revisions.has(id));
+            await Promise.all(missing.map(async id => revisions.set(id, await tx.get<MemoryRevision>('memory_revisions', id))));
+        };
+        await readRevisions(reviews.map(r => r.owner));
         const equivalent = new Map<string, MemoryRevision | undefined>();
-        const resolveSelected = async (id: string) => {
+        const resolveSelected = (id: string) => {
             if (equivalent.has(id)) return equivalent.get(id);
             let memory = selectedById.get(id);
             if (!memory) {
-                const prior = await tx.get<MemoryRevision>('memory_revisions', id);
+                const prior = revisions.get(id);
                 const selected = prior && selectedByOwner.get(prior.owner);
                 if (prior && selected && sameNarrativeRevision(prior, selected)) memory = selected;
             }
             equivalent.set(id, memory);
             return memory;
         };
+        const candidates = reviews.filter(review => !!resolveSelected(review.owner));
+        await readRevisions([...view.memories.flatMap(m => m.dependencies),
+            ...candidates.flatMap(r => Array.isArray(r.dependencies) ? r.dependencies : [])]);
+        // A review owner looked up above may also be a dependency; retain its cached result.
         for (const review of reviews.sort((a,b) => a.created - b.created)) {
-            const memory = await resolveSelected(review.owner);
-            if (!memory) continue;
+            const memory = resolveSelected(review.owner);
+            if (!memory || memory.sourceRecovery || review.story !== memory.story || review.branch !== memory.branch ||
+                review.decision !== 'compatible' || !['manual', 'generated_sidecar'].includes(review.origin) ||
+                !Number.isSafeInteger(review.created)) continue;
             if (review.reviewSchema !== 2) {
-                if (view.cutoff === view.snapshot.length && review.snapshot === view.snapshot.id) compatible.set(memory.id, review);
+                if (!['reviewSchema', 'sourceRefs', 'coverage', 'dependencies'].some(key => key in review) &&
+                    view.cutoff === view.snapshot.length && review.snapshot === view.snapshot.id) compatible.set(memory.id, review);
                 continue;
             }
+            const required = requiredLengths.get(memory.id);
+            const matchesSources = (approved: readonly SourceRef[]) => required === undefined
+                ? sameSourceMessages(approved, memory.inputRefs)
+                : bases.get(memory.basis)!.matchesMessages(approved, required);
+            if (!reviewMatchesMemory(review, memory, matchesSources, revisions)) continue;
             const approved = review.sourceRefs!;
-            const order = approved.map(r => positions.get(r.message) ?? -1);
-            if (approved.some(r => !sourceRefMatches(view.branch, r, refByMessage.get(r.message))) ||
-                order.some((n, i) => n < 0 || (i > 0 && n <= order[i - 1]))) continue;
-            // Legacy applicability remains an entire prefix; never turn it into a sparse guess.
-            if (!memory.inputRefs.length && !dependencyOnly(memory) &&
-                !sourceRefsMatch(view.branch, approved, view.refs.slice(0, approved.length))) continue;
+            let last = -1, current = true;
+            for (const [i, ref] of approved.entries()) {
+                const position = positions.get(ref.message) ?? -1;
+                if (position <= last || (required !== undefined && position !== i) ||
+                    !sourceRefMatches(view.branch, ref, refByMessage.get(ref.message))) { current = false; break; }
+                last = position;
+            }
+            if (!current) continue;
             const coverage = review.coverage!;
             const start = positions.get(coverage[0]?.message) ?? -1;
-            if (coverage.length && (start < 0 || !sourceRefsMatch(view.branch, coverage, view.refs.slice(start, start + coverage.length)))) continue;
+            if (coverage.length && (start < 0 || coverage.some((ref, i) =>
+                !sourceRefMatches(view.branch, ref, view.refs[start + i])))) continue;
             compatible.set(memory.id, review);
         }
         const byId = new Map(selectedById);
         const deps = new Set(view.memories.flatMap(m => compatible.get(m.id)?.dependencies ?? m.dependencies));
         for (const id of deps) {
             if (byId.has(id)) continue;
-            const selected = await resolveSelected(id);
+            const selected = resolveSelected(id);
             if (selected) byId.set(id, selected);
         }
         const result = new Map<string, MemoryStatus>(),
@@ -614,11 +647,7 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
             else if (memory.sourceRecovery) status = 'needs_review';
             else {
                 const basis = bases.get(memory.basis)!;
-                const requiredLength = memory.inputRefs.length || dependencyOnly(memory)
-                    ? 0
-                    : memory.anchor
-                      ? basis.through(memory.anchor)
-                      : basis.length;
+                const requiredLength = requiredLengths.get(memory.id) ?? 0;
                 if (
                     !compatible.has(memory.id) &&
                     (memory.inputRefs.length

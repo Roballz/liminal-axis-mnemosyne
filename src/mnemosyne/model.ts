@@ -151,6 +151,8 @@ export interface MemorySelectionNode extends Row {
     count: number;
 }
 export interface Review extends Row {
+    /** Original faulty automatic receipt is retained for audit, never used as approval. */
+    disabled?: { version: 1; reason: 'empty_generated_sources' };
     reviewSchema?: 2;
     sourceRefs?: SourceRef[];
     coverage?: SourceRef[];

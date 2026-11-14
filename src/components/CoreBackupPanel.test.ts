@@ -3,11 +3,11 @@ import * as Vue from 'vue';
 import { createRenderer, defineComponent, h, nextTick, ssrContextKey } from 'vue';
 import { readFileSync } from 'node:fs';
 import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc';
-const mocks = vi.hoisted(() => ({ inventory: vi.fn(), connect: vi.fn(), configure: vi.fn(), preview: vi.fn(), hints: vi.fn(), save: vi.fn(), pin: vi.fn(), restore: vi.fn(), active: vi.fn() }));
+const mocks = vi.hoisted(() => ({ inventory: vi.fn(), connect: vi.fn(), configure: vi.fn(), preview: vi.fn(), hints: vi.fn(), prepare: vi.fn(), save: vi.fn(), pin: vi.fn(), restore: vi.fn(), retry: vi.fn(), active: vi.fn() }));
 vi.mock('@/mnemosyne/core-backup-runtime', async importOriginal => ({
     ...await importOriginal<typeof import('@/mnemosyne/core-backup-runtime')>(),
     getCoreBackups: mocks.connect, configureCoreBackups: mocks.configure, readCoreBackupPreview: mocks.preview,
-    saveCoreBackup: mocks.save, pinCoreBackup: mocks.pin, restoreCoreBackup: mocks.restore,
+    prepareCoreBackup: mocks.prepare, saveCoreBackup: mocks.save, pinCoreBackup: mocks.pin, restoreCoreBackup: mocks.restore, retryCoreBackups: mocks.retry,
 }));
 vi.mock('@/mnemosyne/db', async importOriginal => ({ ...await importOriginal<typeof import('@/mnemosyne/db')>(), activeLibrary: mocks.active }));
 vi.mock('@/mnemosyne/bridge', async () => ({
@@ -44,9 +44,11 @@ beforeEach(() => {
     mocks.inventory.mockReset().mockResolvedValue({ entries: [], invalid: [] });
     mocks.connect.mockReset().mockResolvedValue({ inventory: mocks.inventory, previewHints: mocks.hints, save: mocks.save, pin: mocks.pin, restore: mocks.restore }); mocks.configure.mockReset();
     mocks.save.mockReset().mockResolvedValue({ state: 'saved' }); mocks.pin.mockReset(); mocks.restore.mockReset(); mocks.active.mockReset().mockResolvedValue({ id: 'synthetic' });
+    mocks.prepare.mockReset().mockResolvedValue({ disabled: 0, changed: false }); mocks.retry.mockReset();
     vi.mocked(syncDaily).mockClear(); vi.mocked(invalidateDaily).mockClear();
     mocks.preview.mockReset(); mocks.hints.mockReset().mockResolvedValue([]);
-    Object.assign(coreBackupState, { available: true, enabled: true, keep: 20, busy: false, status: BACKUP_WAITING_STATUS, error: '', lastSavedAt: 0 });
+    Object.assign(coreBackupState, { available: true, enabled: true, keep: 20, busy: false, status: BACKUP_WAITING_STATUS,
+        error: '', backupError: '', settingsError: '', persistenceError: '', lastSavedAt: 0, lastFileAt: 0, failureSince: 0, lastFailureAt: 0 });
     Object.assign(dailyState, { pending: false, error: '', conflict: false, tableError: '' });
     vi.stubGlobal('localStorage', { getItem: () => null });
 });
@@ -93,6 +95,27 @@ test('checking inventory preserves actual save errors and earlier successful-sav
     Object.assign(coreBackupState, { status: '自动磁盘备份已写入并读回验证', error: '', lastSavedAt: 1234 }); await nextTick();
     expect(text(root)).toContain('自动磁盘备份已写入并读回验证'); expect(text(root)).toContain('归档未完成：摘要基线缺失');
     expect(coreBackupState.lastSavedAt).toBe(1234);
+});
+test('the collapsed heading exposes failed backup time and the retry action preserves the warning until a verified success', async () => {
+    const savedAt = 1_800_000_000_000, failedAt = savedAt + 30 * 60_000, retriedAt = failedAt + 5 * 60_000;
+    Object.assign(coreBackupState, { error: '审核来源身份不匹配', backupError: '审核来源身份不匹配',
+        lastSavedAt: savedAt, failureSince: failedAt, lastFailureAt: retriedAt });
+    const { root } = mount();
+    const panel = nodes(root).find(node => node.type === 'details' && node.props.class === 'mn-card mn-backups')!;
+    const heading = panel.children.find(node => node.type === 'summary')!;
+    expect(panel.props.open).toBeUndefined();
+    expect(text(heading)).toContain('备份失败');
+    expect(text(heading)).toContain(`最近成功：${new Date(savedAt).toLocaleString()}`);
+    expect(text(root)).toContain(`失败始于 ${new Date(failedAt).toLocaleString()}；最近失败 ${new Date(retriedAt).toLocaleString()}`);
+    await button(root, '重试备份').props.onClick(); await nextTick();
+    expect(mocks.retry).toHaveBeenCalledOnce();
+    expect(coreBackupState.error).toBe('审核来源身份不匹配');
+    expect(text(root)).toContain('已安排重试');
+    expect(mocks.inventory).not.toHaveBeenCalled(); expect(mocks.preview).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
+    Object.assign(coreBackupState, { error: '', backupError: '', lastSavedAt: retriedAt, failureSince: 0, lastFailureAt: 0 });
+    await nextTick();
+    expect(text(heading)).not.toContain('备份失败'); expect(button(root, '重试备份')).toBeUndefined();
 });
 test('failed reads expose the error, release controls and never advertise an unread empty list', async () => {
     mocks.inventory.mockRejectedValue(new Error('原生目录读取失败'));
@@ -240,6 +263,8 @@ test('manual action still confirms, saves a protected new baseline and refreshes
     expect(mocks.save).not.toHaveBeenCalled(); expect(mocks.connect).not.toHaveBeenCalled();
     expect(confirm.mock.calls[0][0]).toContain('旧备份保留');
     confirm.mockReturnValue(true); await button(root, '手动保存').props.onClick(); await flush();
+    expect(mocks.prepare).toHaveBeenCalledWith({ id: 'synthetic' }, expect.any(Function));
+    expect(mocks.prepare.mock.invocationCallOrder[0]).toBeLessThan(mocks.save.mock.invocationCallOrder[0]);
     expect(mocks.save).toHaveBeenCalledWith({ id: 'synthetic' }, 'manual', 20, expect.any(Function));
     const valid = mocks.save.mock.calls[0][3]; expect(valid()).toBe(true);
     dailyState.pending = true; expect(valid()).toBe(false); await nextTick();
@@ -261,6 +286,8 @@ test('pin and restore retain their verified-file arguments and busy or pending g
     await button(root, '重试归档').props.onClick(); expect(syncDaily).toHaveBeenCalledOnce();
     dailyState.pending = false; dailyState.error = ''; await nextTick();
     await button(root, '从这份核心包恢复').props.onClick(); await flush();
+    expect(mocks.prepare).toHaveBeenCalledWith({ id: 'synthetic' }, expect.any(Function));
+    expect(mocks.prepare.mock.invocationCallOrder[0]).toBeLessThan(mocks.save.mock.invocationCallOrder[0]);
     expect(mocks.save).toHaveBeenCalledWith({ id: 'synthetic' }, 'before-restore', 20, expect.any(Function));
     expect(mocks.restore).toHaveBeenCalledWith('auto', 'a'.repeat(64), expect.any(Function));
     expect(invalidateDaily).toHaveBeenCalledOnce(); expect(syncDaily).toHaveBeenCalledTimes(2);

@@ -11,6 +11,8 @@ export interface SourcePrefix {
     prefix: number;
     /** Existing legacy applicability includes every ref through the last anchor. */
     through(anchor: string): number;
+    /** Compare an approved prefix's identities without materializing the basis. */
+    matchesMessages(refs: readonly SourceRef[], length: number): boolean;
 }
 
 /** A status read shares immutable block work across historical bases. Do not
@@ -49,6 +51,15 @@ export function sourcePrefixes(branch: Branch, current: SourceRef[], snapshots: 
                 if (found !== undefined) position = span.offset + found;
             }
             return position + 1;
+        }, matchesMessages(refs, required) {
+            if (refs.length !== required || required < 0 || required > length) return false;
+            for (const span of spans) {
+                const count = Math.min(span.block.entries.length, required - span.offset);
+                if (count <= 0) break;
+                for (let i = 0; i < count; i++)
+                    if (refs[span.offset + i]?.message !== span.block.entries[i].message) return false;
+            }
+            return true;
         } });
     }
     return result;

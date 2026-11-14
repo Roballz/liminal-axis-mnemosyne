@@ -1,12 +1,15 @@
 import { runBackupWorker } from './backup-worker-client';
 import { reactive, watch } from 'vue';
 import { nativeBackupDisk } from '@/st/native-backups';
-import { activeLibrary, activateLibrary, Library, ACTIVE_KEY } from './db';
-import { check } from './model';
+import { activeLibrary, activateLibrary, Library, ACTIVE_KEY, DB_PREFIX } from './db';
+import { check, fingerprint } from './model';
 import type { BackupResult } from './backup-worker-protocol';
-import { AUTO_BACKUP_INTERVAL, AUTO_BACKUP_KEEP, CoreBackups, backupFailure, backupSettings, type BackupOutcome, type BackupSettings } from './core-backups';
+import { AUTO_BACKUP_INTERVAL, AUTO_BACKUP_KEEP, CoreBackups, backupFailure, backupSettings, type BackupInventory, type BackupOutcome, type BackupSettings } from './core-backups';
+import { BACKUP_HEALTH_LIMIT, BackupHealthHistory, type BackupHealth } from './backup-health';
+import { ensureReviewSourceRepair } from './review-source-repair';
 
 export const BACKUP_WAITING_STATUS = '自动备份已启用，等待前台稳定状态';
+const BACKUP_FAILED_STATUS = '备份失败，旧备份保留；请查看原因后重试';
 /** Display the same archive gates used by startup without changing scheduler policy. */
 export function backupArchiveBlockReason(state: { pending: boolean; error: string; conflict: boolean; tableError: string }): string {
     if (state.error) return `归档未完成：${state.error}`;
@@ -18,8 +21,60 @@ export function backupArchiveBlockReason(state: { pending: boolean; error: strin
 export const coreBackupState = reactive({
     available: false, enabled: false, keep: AUTO_BACKUP_KEEP as typeof AUTO_BACKUP_KEEP, busy: false,
     status: '尚未检查原生磁盘备份接口', error: '', lastSavedAt: 0, settingsVerified: false,
+    library: '', backupError: '', settingsError: '', persistenceError: '', lastFileAt: 0, failureSince: 0, lastFailureAt: 0,
 });
-function reportPendingNative(message: string) {
+const healthHistory = new BackupHealthHistory();
+let historicalInventory: Promise<BackupInventory> | undefined;
+const hintRequests = new Set<string>();
+function selectedLibrary() {
+    try { return localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`; }
+    catch { return `${DB_PREFIX}default`; }
+}
+function applyHealth(library: string, health: BackupHealth, status?: string) {
+    if (library !== selectedLibrary()) return;
+    const changed = coreBackupState.library !== library;
+    Object.assign(coreBackupState, { library, backupError: health.error, lastSavedAt: health.lastSavedAt,
+        lastFileAt: health.lastFileAt, failureSince: health.failureSince, lastFailureAt: health.lastFailureAt,
+        error: health.error || coreBackupState.settingsError, persistenceError: healthHistory.persistenceError });
+    if (status) coreBackupState.status = status;
+    else if (health.error) coreBackupState.status = BACKUP_FAILED_STATUS;
+    else if (changed) coreBackupState.status = coreBackupState.enabled ? BACKUP_WAITING_STATUS : '自动备份未启用';
+}
+/** One directory-only inventory per session. Filename dates remain explicitly unverified hints. */
+async function restoreFileHint(library: string) {
+    if (!manager || hintRequests.has(library) || healthHistory.get(library).lastSavedAt) return;
+    hintRequests.add(library);
+    if (hintRequests.size > BACKUP_HEALTH_LIMIT) hintRequests.delete(hintRequests.values().next().value!);
+    try {
+        historicalInventory ??= manager.inventory();
+        const [inventory, bank] = await Promise.all([historicalInventory, fingerprint(library)]);
+        const latest = inventory.entries.find(entry => entry.bank === bank.slice(0, 16) &&
+            ['auto', 'manual', 'before-restore', 'after-archive-deletion'].includes(entry.kind));
+        if (latest) applyHealth(library, healthHistory.fileHint(library, latest.savedAt));
+    } catch { /* Hints never suppress the actual failure or start a full-package read. */ }
+}
+/** Called on the existing archive revision/activation signals; no extra polling or database reads. */
+export function syncCoreBackupHealth() {
+    const library = selectedLibrary();
+    if (coreBackupState.library !== library) applyHealth(library, healthHistory.get(library));
+    void restoreFileHint(library);
+}
+function recordFailure(library: string, error: unknown, status = BACKUP_FAILED_STATUS) {
+    applyHealth(library, healthHistory.failed(library, backupFailure(error)), status);
+}
+function recordOutcome(library: string, result: BackupOutcome) {
+    if (result.state === 'saved') {
+        check(result.entry.sourceLibrary === library, '后台备份来源库不匹配');
+        manager?.cachePreview(result.entry);
+        applyHealth(library, healthHistory.saved(library, result.entry.savedAt), result.warning ?? '核心包已写入并读回验证');
+    } else if (result.state === 'unchanged') {
+        applyHealth(library, healthHistory.validated(library), '核心数据未变化，已有备份已验证');
+    } else if (library === selectedLibrary() && !coreBackupState.error) {
+        coreBackupState.status = result.state === 'too-soon' ? '尚未到下一次自动备份时间' : '当前核心库为空，未生成备份';
+    }
+}
+function reportPendingNative(message: string, library: string) {
+    if (library !== selectedLibrary()) return;
     coreBackupState.error = message;
     coreBackupState.status = '后台处理已停止，等待原生磁盘操作确认';
 }
@@ -29,6 +84,7 @@ let manager: CoreBackups | undefined;
 let connecting: Promise<CoreBackups> | undefined;
 
 export async function getCoreBackups(): Promise<CoreBackups> {
+    syncCoreBackupHealth();
     if (manager) return manager;
     return connecting ??= (async () => {
         try {
@@ -37,12 +93,17 @@ export async function getCoreBackups(): Promise<CoreBackups> {
             try { settings = backupSettings(await disk.readSettings()); }
             catch (error) { settingsError = backupFailure(error); }
             manager = new CoreBackups(disk);
-            Object.assign(coreBackupState, { available: true, enabled: settings.enabled, keep: settings.keep, settingsVerified: !settingsError,
-                status: settingsError ? '备份设置无法读取，自动备份已关闭；仍可查看和恢复文件' :
-                    settings.enabled ? BACKUP_WAITING_STATUS : '自动备份未启用', error: settingsError });
+            Object.assign(coreBackupState, { available: true, enabled: settings.enabled, keep: settings.keep,
+                settingsVerified: !settingsError, settingsError });
+            const library = selectedLibrary(), health = healthHistory.get(library);
+            applyHealth(library, health, health.error ? BACKUP_FAILED_STATUS : settingsError
+                ? '备份设置无法读取，自动备份已关闭；仍可查看和恢复文件'
+                : settings.enabled ? BACKUP_WAITING_STATUS : '自动备份未启用');
+            void restoreFileHint(library);
             return manager;
         } catch (error) {
-            coreBackupState.error = backupFailure(error);
+            coreBackupState.settingsError = backupFailure(error);
+            coreBackupState.error = coreBackupState.backupError || coreBackupState.settingsError;
             coreBackupState.status = '磁盘备份不可用或设置读取失败';
             throw error;
         } finally { connecting = undefined; }
@@ -62,22 +123,38 @@ export async function readCoreBackupPreview(key: string, isCurrent: () => boolea
     });
 }
 
+/** Prepare known metadata repairs before callers capture their final write/export guard. */
+export async function prepareCoreBackup(lib: Library, isCurrent: () => boolean) {
+    try { return await ensureReviewSourceRepair(lib, isCurrent); }
+    catch (error) {
+        if (isCurrent()) recordFailure(lib.db.name, error);
+        throw error;
+    }
+}
+
 /** Large packages never cross the UI boundary. Keep each native job in the same
  * writer queue used by automatic backups, including draining uncertain native IO. */
 export async function saveCoreBackup(lib: Library, kind: 'manual' | 'before-restore', keep: typeof AUTO_BACKUP_KEEP,
     isCurrent: () => boolean): Promise<BackupOutcome> {
-    const backups = await getCoreBackups();
-    const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
-        { kind, library: lib.db.name, keep }, isCurrent, undefined, reportPendingNative));
-    check(['saved', 'unchanged', 'too-soon', 'empty'].includes(result.state), '后台备份结果不匹配');
-    if (result.state === 'saved') backups.cachePreview(result.entry);
-    return result as BackupOutcome;
+    const library = lib.db.name;
+    try {
+        const backups = await getCoreBackups();
+        const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
+            { kind, library, keep }, isCurrent, undefined, message => reportPendingNative(message, library)));
+        check(['saved', 'unchanged', 'too-soon', 'empty'].includes(result.state), '后台备份结果不匹配');
+        recordOutcome(library, result as BackupOutcome);
+        return result as BackupOutcome;
+    } catch (error) {
+        if (isCurrent()) recordFailure(library, error);
+        throw error;
+    }
 }
 
 export async function pinCoreBackup(key: string, checksum: string, isCurrent: () => boolean) {
+    const library = selectedLibrary();
     const backups = await getCoreBackups();
     const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
-        { kind: 'pin', key, checksum }, isCurrent, undefined, reportPendingNative));
+        { kind: 'pin', key, checksum }, isCurrent, undefined, message => reportPendingNative(message, library)));
     check(result.state === 'pinned', '后台固定备份结果不匹配');
     backups.cachePreview(result.entry);
     return result.entry;
@@ -89,22 +166,29 @@ async function activatePrepared(result: BackupResult, isCurrent: () => boolean):
     try {
         // readDailySettings and the final synchronous guard still precede selector publication.
         await activateLibrary(lib, isCurrent);
+        syncCoreBackupHealth();
         return lib;
     } catch (error) { lib.close(); throw error; }
 }
 
 /** Caller holds serializeDailyActivation through preparation and final activation. */
 export async function restoreCoreBackup(key: string, checksum: string, isCurrent: () => boolean): Promise<Library> {
+    const library = selectedLibrary();
     const backups = await getCoreBackups();
     return backups.runExclusive(async () => activatePrepared(await runBackupWorker(backups.disk,
-        { kind: 'restore', key, checksum }, isCurrent, undefined, reportPendingNative), isCurrent));
+        { kind: 'restore', key, checksum }, isCurrent, undefined, message => reportPendingNative(message, library)), isCurrent));
 }
 
 /** Browser file operations do not require TauriTavern's native backup interface. */
 export async function exportCoreLibrary(lib: Library, isCurrent: () => boolean) {
-    const result = await runBackupWorker(undefined, { kind: 'export', library: lib.db.name }, isCurrent);
-    check(result.state === 'exported' && result.blob instanceof Blob && isCurrent(), '导出页面或档案已改变，请重试');
-    return { blob: result.blob, version: result.version };
+    try {
+        const result = await runBackupWorker(undefined, { kind: 'export', library: lib.db.name }, isCurrent);
+        check(result.state === 'exported' && result.blob instanceof Blob && isCurrent(), '导出页面或档案已改变，请重试');
+        return { blob: result.blob, version: result.version };
+    } catch (error) {
+        if (isCurrent()) recordFailure(lib.db.name, error, '核心包导出失败；请展开备份区查看原因');
+        throw error;
+    }
 }
 
 export async function restoreCorePackage(blob: Blob, isCurrent: () => boolean): Promise<Library> {
@@ -125,10 +209,12 @@ export async function configureCoreBackups(enabled: boolean, keep: typeof AUTO_B
         if ((persisted as BackupSettings)?.keep !== keep || JSON.stringify(settings) !== JSON.stringify(saved)) throw new Error('备份设置读回不一致');
     } catch (error) {
         const message = `本次会话已暂停；${enabled ? '启用' : '关闭'}设置未确认保存，重启后可能按旧设置或已写入设置启用。${backupFailure(error)}`;
-        coreBackupState.status = '备份设置保存结果未确认'; coreBackupState.error = message;
+        coreBackupState.status = '备份设置保存结果未确认'; coreBackupState.settingsError = message;
+        coreBackupState.error = coreBackupState.backupError || message;
         throw new Error(message);
     }
-    Object.assign(coreBackupState, { enabled, keep, settingsVerified: true, error: '', status: enabled ? BACKUP_WAITING_STATUS : '自动备份已关闭，旧文件保留' });
+    Object.assign(coreBackupState, { enabled, keep, settingsVerified: true, settingsError: '', error: coreBackupState.backupError,
+        status: coreBackupState.backupError ? BACKUP_FAILED_STATUS : enabled ? BACKUP_WAITING_STATUS : '自动备份已关闭，旧文件保留' });
     requestCheck?.();
 }
 
@@ -184,6 +270,7 @@ let bound = false;
 export function bindCoreBackups(ready: () => boolean, revision: () => unknown = () => undefined) {
     if (bound) return;
     bound = true;
+    syncCoreBackupHealth();
     let alive = true;
     const scheduler = createBackupScheduler({
         visible: () => document.visibilityState === 'visible',
@@ -191,27 +278,32 @@ export function bindCoreBackups(ready: () => boolean, revision: () => unknown = 
         ready: () => ready() && !coreBackupState.busy,
         run: async () => {
             coreBackupState.busy = true;
+            let library = selectedLibrary();
+            let current = () => alive && ready() && document.visibilityState === 'visible' && coreBackupState.enabled && library === selectedLibrary();
             try {
                 const backups = await getCoreBackups(), lib = await activeLibrary();
+                library = lib.db.name;
+                await ensureReviewSourceRepair(lib, current);
                 const selected = localStorage.getItem(ACTIVE_KEY), stamp = revision();
+                current = () => alive && ready() && document.visibilityState === 'visible' && coreBackupState.enabled &&
+                    selected === localStorage.getItem(ACTIVE_KEY) && stamp === revision();
                 const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
-                    { kind: 'auto', library: lib.db.name, keep: coreBackupState.keep },
-                    () => alive && ready() && document.visibilityState === 'visible' && coreBackupState.enabled &&
-                        selected === localStorage.getItem(ACTIVE_KEY) && stamp === revision(), undefined, reportPendingNative)) as import('./core-backups').BackupOutcome;
-                coreBackupState.error = '';
-                if (result.state === 'saved') {
-                    backups.cachePreview(result.entry);
-                    coreBackupState.lastSavedAt = result.entry.savedAt;
-                    coreBackupState.status = result.warning ?? '自动磁盘备份已写入并读回验证，继续按当前档案运行';
-                } else coreBackupState.status = result.state === 'unchanged' ? '核心数据未变化，保留已有备份' : '尚未到下一次自动备份时间';
+                    { kind: 'auto', library, keep: coreBackupState.keep }, current, undefined,
+                    message => reportPendingNative(message, library))) as BackupOutcome;
+                recordOutcome(library, result);
+            } catch (error) {
+                if (current()) recordFailure(library, error);
+                throw error;
             } finally { coreBackupState.busy = false; }
         },
-        error: error => { coreBackupState.error = backupFailure(error); coreBackupState.status = '自动备份暂缓，旧备份保留；会延后重试，也可手动重试检查'; },
+        // run records the error against its captured library before the scheduler backs off.
+        error: () => {},
     });
     requestCheck = scheduler.request;
     retryCheck = scheduler.retry;
-    const unwatch = watch(revision, scheduler.request);
-    const visibility = () => scheduler.request();
+    const request = () => { syncCoreBackupHealth(); scheduler.request(); };
+    const unwatch = watch(revision, request);
+    const visibility = request;
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('pagehide', () => {
         alive = false;

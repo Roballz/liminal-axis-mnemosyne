@@ -158,7 +158,8 @@ test('large table previews are serialized once on first expansion, survive busy/
   const oldReads = vi.fn(() => oldValues), newReads = vi.fn(() => ({ detail: '新批预览' }));
   const draft = (read: () => { detail: string }): TableBackfillReview => ({
     raw: '{}', title: '本批', example: '{}', validate: () => '', confirm: () => mocks.save(),
-    tables: [{ def: tables[0], rows: [{ id: 'row-a', get values() { return read(); } }] }] as TableBackfillReview['tables'],
+    tables: [{ def: tables[0], rows: [{ id: 'row-a', schema: 1, story: tables[0].story, branch: tables[0].branch,
+      owner: tables[0].id, version: 1, deleted: false, sources: [], get values() { return read(); } }] }],
   });
   mocks.run.mockImplementation(async (...args: Parameters<typeof runTableBackfill>) => {
     backfillState.busy = true;

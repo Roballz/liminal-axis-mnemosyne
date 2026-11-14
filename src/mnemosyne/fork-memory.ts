@@ -1,9 +1,11 @@
-import { sameNarrativeRevision, summarySources } from './canonical';
+import { dependencyOnly, sameNarrativeRevision, summarySources } from './canonical';
 import { sourceRefResolver } from './source-equivalence';
+import { sourcePrefixes } from './source-prefixes';
+import { reviewMatchesMemory, sameSourceMessages } from './review-source-integrity';
 import type { Transaction } from './db';
 import type { EventView } from './events';
 import { inheritForkEvents } from './fork-events';
-import { row, type Binding, type Branch, type CapturedView, type Memory, type MemoryRevision, type MemoryView, type Review } from './model';
+import { row, type Binding, type Block, type Branch, type CapturedView, type Memory, type MemoryRevision, type MemoryView, type Review, type Snapshot, type SourceRef } from './model';
 
 /** Copy a validated fixed-prefix projection inside the fork transaction, with new branch-local IDs. */
 export async function inheritForkMemory(tx: Transaction, parent: CapturedView, branch: Branch,
@@ -12,9 +14,12 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
     const selectedByOwner = new Map<string, MemoryRevision>();
     for (const memory of events.valid) if (!selectedByOwner.has(memory.owner)) selectedByOwner.set(memory.owner, memory);
     const resolveRef = sourceRefResolver(parent.branch, parent.refs);
-    const revisions = new Map<string, Promise<MemoryRevision | undefined>>();
+    const revisionRows = new Map<string, MemoryRevision | undefined>(events.valid.map(m => [m.id, m]));
+    const revisions = new Map<string, Promise<MemoryRevision | undefined>>(events.valid.map(m => [m.id, Promise.resolve(m)]));
     const readRevision = (id: string) => {
-        if (!revisions.has(id)) revisions.set(id, tx.get<MemoryRevision>('memory_revisions', id));
+        if (!revisions.has(id)) revisions.set(id, tx.get<MemoryRevision>('memory_revisions', id).then(memory => {
+            revisionRows.set(id, memory); return memory;
+        }));
         return revisions.get(id)!;
     };
     const families = new Map<string, Memory>();
@@ -64,21 +69,46 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         await tx.add('memory_revisions', copied);
         selection.selections[family.id] = copied.id;
         // Parent-confirmed role-only repairs remain exact approvals on the copied summary.
-        const sources = await summarySources(tx, memory);
-        const resolved = sources.map(resolveRef);
-        if (resolved.every(Boolean) && sources.some((r, i) => r.revision !== resolved[i]!.revision)) {
-            const coverage = memory.coverage.map(resolveRef);
-            if (coverage.every(Boolean)) await tx.add('reviews', { ...row('review'), story: branch.story,
-                branch: branch.id, owner: copied.id, snapshot: branch.head, decision: 'compatible', origin: 'manual',
-                // An explicit copied dependency review below has precedence over role-only compatibility.
-                created: 0, reviewSchema: 2, sourceRefs: resolved, coverage, dependencies: copied.dependencies } as Review);
+        if (parent.branch.sourceRoleRepairSchema === 1 && parent.branch.sourceRoleRepairs?.length) {
+            const sources = await summarySources(tx, memory);
+            const resolved = sources.map(resolveRef);
+            if (resolved.every(Boolean) && sources.some((r, i) => r.revision !== resolved[i]!.revision)) {
+                const coverage = memory.coverage.map(resolveRef);
+                if (coverage.every(Boolean)) await tx.add('reviews', { ...row('review'), story: branch.story,
+                    branch: branch.id, owner: copied.id, snapshot: branch.head, decision: 'compatible', origin: 'manual',
+                    // An explicit copied dependency review below has precedence over role-only compatibility.
+                    created: 0, reviewSchema: 2, sourceRefs: resolved, coverage, dependencies: copied.dependencies } as Review);
+            }
         }
     }
     // Preserve existing explicit approvals; never manufacture an approval for an invalid source.
-    for (const review of await tx.all<Review>('reviews', 'branch', parent.branch.id)) {
-        const owner = await equivalent(review.owner);
-        if (!owner) continue;
-        if (review.reviewSchema !== 2 && review.snapshot !== parent.snapshot.id) continue;
+    const inherited = (await Promise.all((await tx.all<Review>('reviews', 'branch', parent.branch.id))
+        .filter(review => !('disabled' in review) && review.decision === 'compatible' &&
+            ['manual', 'generated_sidecar'].includes(review.origin) && Number.isSafeInteger(review.created))
+        .map(async review => ({ review, owner: await equivalent(review.owner), memory: await readRevision(review.owner) }))))
+        .filter((item): item is { review: Review; owner: string; memory: MemoryRevision } => !!item.owner && !!item.memory);
+    const modern = inherited.filter(({ review }) => review.reviewSchema === 2);
+    await Promise.all([...new Set(modern.flatMap(({ memory, review }) =>
+        [...memory.dependencies, ...(Array.isArray(review.dependencies) ? review.dependencies : [])]))]
+        .filter(id => typeof id === 'string' && id).map(readRevision));
+    const legacyBases = [...new Set(modern.filter(({ memory }) =>
+        !memory.sourceRecovery && !memory.inputRefs.length && !dependencyOnly(memory)).map(({ memory }) => memory.basis))];
+    const snapshots = (await Promise.all(legacyBases.map(id => tx.get<Snapshot>('history_snapshots', id))))
+        .filter((snapshot): snapshot is Snapshot => !!snapshot);
+    const blocks = (await Promise.all([...new Set(snapshots.flatMap(snapshot => snapshot.blocks))]
+        .map(id => tx.get<Block>('manifest_blocks', id)))).filter((block): block is Block => !!block);
+    const prefixes = sourcePrefixes(parent.branch, parent.refs, snapshots, blocks);
+    for (const { review, owner, memory } of inherited) {
+        if (review.reviewSchema === 2) {
+            const basis = prefixes.get(memory.basis);
+            const required = !memory.inputRefs.length && !dependencyOnly(memory)
+                ? basis && (memory.anchor ? basis.through(memory.anchor) : basis.length) : undefined;
+            const matchesSources = (approved: readonly SourceRef[]) => !memory.inputRefs.length && !dependencyOnly(memory)
+                ? !!basis && required !== undefined && basis.matchesMessages(approved, required)
+                : sameSourceMessages(approved, memory.inputRefs);
+            if (!reviewMatchesMemory(review, memory, matchesSources, revisionRows)) continue;
+        } else if (['reviewSchema', 'sourceRefs', 'coverage', 'dependencies'].some(key => key in review) ||
+            review.snapshot !== parent.snapshot.id || review.story !== memory.story || review.branch !== memory.branch) continue;
         const sourceRefs = review.sourceRefs?.map(resolveRef);
         const coverage = review.coverage?.map(resolveRef);
         if (sourceRefs?.some(r => !r) || coverage?.some(r => !r)) continue;

@@ -27,7 +27,7 @@ import { activeLibrary, ACTIVE_KEY } from '@/mnemosyne/db';
 import { keepSummary } from '@/mnemosyne/canonical';
 import { reviewDifference, type ReviewDifference } from '@/mnemosyne/review-diagnostics';
 import { previewRoleRepairs, confirmRoleRepairs, type RoleRepairCandidate } from '@/mnemosyne/source-role-repair';
-import { exportCoreLibrary, restoreCorePackage } from '@/mnemosyne/core-backup-runtime';
+import { exportCoreLibrary, prepareCoreBackup, restoreCorePackage } from '@/mnemosyne/core-backup-runtime';
 import { regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
 import { copyLegacyKnowledge } from '@/memory/vector/knowledge';
 import { currentVectorDb } from '@/memory/vector/scope';
@@ -223,8 +223,10 @@ async function review(id: string, action: 'keep' | 'rebuild') {
   await loadReviews();
 }
 async function download() {
+  const lib = await activeLibrary(), preparingSelector = localStorage.getItem(ACTIVE_KEY);
+  await prepareCoreBackup(lib, () => !disposed && preparingSelector === localStorage.getItem(ACTIVE_KEY));
   const selector = localStorage.getItem(ACTIVE_KEY), generation = dailyState.generation;
-  const result = await exportCoreLibrary(await activeLibrary(),
+  const result = await exportCoreLibrary(lib,
     () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) && generation === dailyState.generation);
   const url = URL.createObjectURL(result.blob);
   const a = document.createElement('a');

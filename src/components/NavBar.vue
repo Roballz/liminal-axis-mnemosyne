@@ -3,8 +3,13 @@ import Icon from '@/components/Icon.vue';
 import { PAGES } from '@/pages/registry';
 import { closeBook, ui } from '@/state/ui';
 import { updateState } from '@/memory/update';
+import { computed } from 'vue';
+import { coreBackupState } from '@/mnemosyne/core-backup-runtime';
+import { backupTimeLabel } from '@/mnemosyne/backup-health';
 
 const props = defineProps<{ placement: 'top' | 'bottom'; narrow?: boolean }>();
+const backupVisible = computed(() => coreBackupState.enabled || coreBackupState.failureSince > 0 || coreBackupState.lastSavedAt > 0 || coreBackupState.lastFileAt > 0);
+const backupLabel = computed(() => `${coreBackupState.error ? '备份失败 · ' : ''}${backupTimeLabel(coreBackupState, true)}`);
 
 // 设置页有可用更新时,在「设置」导航项上亮一个红点角标(提示用户进设置页更新)。
 function showUpdateDot(id: string): boolean {
@@ -23,6 +28,7 @@ function onNavClick(id: string) {
 </script>
 
 <template>
+  <div class="bbs-nav-section" :class="`is-${placement}`">
   <nav class="bbs-nav" :class="[`is-${placement}`, { 'is-narrow': narrow }]">
     <button
       v-for="p in PAGES"
@@ -30,8 +36,8 @@ function onNavClick(id: string) {
       class="bbs-nav-item"
       :class="{ 'is-active': ui.activePage === p.id }"
       type="button"
-      :title="p.label"
-      :aria-label="p.label"
+      :title="p.id === 'archive' && backupVisible ? `${p.label} · ${backupLabel}` : p.label"
+      :aria-label="p.id === 'archive' && backupVisible ? `${p.label} · ${backupLabel}` : p.label"
       :aria-current="ui.activePage === p.id ? 'page' : undefined"
       @click="onNavClick(p.id)"
     >
@@ -39,14 +45,26 @@ function onNavClick(id: string) {
         <Icon :name="p.id" class="bbs-nav-icon" />
         <!-- 有可用更新:设置项亮红点角标 -->
         <span v-if="showUpdateDot(p.id)" class="bbs-nav-dot" aria-label="有可用更新"></span>
+        <span v-if="p.id === 'archive' && backupVisible && coreBackupState.error" class="bbs-nav-backup-dot" aria-hidden="true">!</span>
       </span>
       <!-- 顶部带文字;但窄屏(移动端)顶部也只放图标,否则一排带字胶囊横向放不下,会把后面的项挤出屏幕 -->
       <span v-if="placement === 'top' && !narrow" class="bbs-nav-label">{{ p.label }}</span>
     </button>
   </nav>
+  <button v-if="backupVisible" type="button" class="bbs-backup-link" :class="{ 'is-error': !!coreBackupState.error }" :title="backupTimeLabel(coreBackupState)" @click="ui.activePage = 'archive'">
+    {{ backupLabel }}<span class="bbs-backup-link-hint">查看备份</span>
+  </button>
+  </div>
 </template>
 
 <style scoped>
+.bbs-nav-section { display: flex; flex-direction: column; flex: 0 0 auto; min-width: 0; }
+.bbs-nav-section.is-bottom .bbs-backup-link { order: -1; }
+.bbs-backup-link { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; min-height: 32px; padding: 6px 16px; border: 0; background: var(--bbs-surface-2); color: var(--bbs-ink-soft); text-align: left; font: inherit; font-size: 11px; line-height: 1.5; cursor: pointer; }
+.bbs-backup-link.is-error { color: var(--bbs-danger); }
+.bbs-backup-link-hint { margin-left: auto; white-space: nowrap; }
+.bbs-backup-link:focus-visible { outline: 2px solid var(--bbs-accent); outline-offset: -2px; }
+.bbs-nav-backup-dot { position: absolute; top: -7px; right: -7px; width: 14px; height: 14px; border-radius: 50%; background: var(--bbs-danger); color: var(--bbs-surface); font-size: 11px; line-height: 14px; font-weight: 700; text-align: center; box-shadow: 0 0 0 1.5px var(--bbs-surface); pointer-events: none; }
 .bbs-nav {
   display: flex;
   overflow-x: auto;

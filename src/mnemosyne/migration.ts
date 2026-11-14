@@ -5,9 +5,11 @@ import { Library, freshLibraryName, activateLibrary } from './db';
 import { STORES, check, fingerprint, type Store, type Row } from './model';
 import { validateColumns } from './tables';
 import { validateMemorySelections } from './memory-selections';
+import { sameSourceMessages } from './review-source-integrity';
+import { isEmptyGeneratedReview, REVIEW_SOURCE_REPAIR_ID, validReviewRepairReceipt } from './review-source-repair';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
     schema: 1;
     created: number;
     excluded: string[];
@@ -25,7 +27,7 @@ export async function snapshotLibraryForDeletion(lib: Library): Promise<Package>
         return result;
     });
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
-    const base = { format: 'mnemosyne-daily' as const, version: 15 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 16 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     return { ...base, checksum: await fingerprint(base) };
 }
@@ -58,7 +60,7 @@ export async function validateCurrentData(pack: Omit<Package, 'checksum'>): Prom
     validateStructure(pack, await validateBodyHashes(pack));
 }
 function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: ReadonlyMap<string, string> = new Map()) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     const stores: readonly Store[] = STORES.filter(s => !(s === 'table_history' && pack.version < 11) &&
         !(s === 'source_bodies' && pack.version < 12) && !(s === 'memory_selection_nodes' && pack.version < 15));
     check(pack.data && Object.keys(pack.data).length === stores.length && Object.keys(pack.data).every(s => stores.includes(s as Store)), '迁移模块不完整');
@@ -76,6 +78,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             if (pack.version >= 5 && store === 'host_bindings') optional.push('rebindSchema', 'detached');
             if (pack.version >= 5 && store === 'branches') optional.push('sourceRoleRepairSchema', 'sourceRoleRepairs');
             if (pack.version >= 6 && store === 'reviews') optional.push('reviewSchema', 'sourceRefs', 'coverage', 'dependencies');
+            if (pack.version >= 16 && store === 'reviews') optional.push('disabled');
             if (pack.version >= 7 && store === 'memory_revisions') optional.push('tags');
             if (pack.version >= 7 && store === 'event_revisions') optional.push('latestProgress');
             if (pack.version >= 10 && store === 'event_chains') optional.push('inheritance');
@@ -382,6 +385,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             memoryRefs(r, store === 'event_memberships' ? [r.memory] : store === 'event_progress' ? r.memories : r.refs);
         }
     for (const r of maps.reviews.values()) {
+      try {
         memoryRefs(r, [r.owner]);
         const snapshot = get('history_snapshots', r.snapshot);
         check(snapshot.branch === r.branch, '审核跨分支');
@@ -393,8 +397,11 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             const basis = memory.sourceRecovery || memory.inputRefs.length || dependencyOnly ? undefined : sourceIndex(get('history_snapshots', memory.basis));
             const original = memory.inputRefs.length ? memory.inputRefs : !basis ? [] : memory.anchor
                 ? basis.refs.slice(0, (basis.positions.get(memory.anchor) ?? -1) + 1) : basis.refs;
-            const validateSources = (approved: any[], expected: any[]) => {
-                check(JSON.stringify(approved.map(v => v.message)) === JSON.stringify(expected.map(v => v.message)), '审核来源身份不匹配');
+            const validateSources = (approved: any[], expected: any[], field: string) => {
+                if (!sameSourceMessages(approved, expected)) {
+                    const first = approved.findIndex((v, i) => v?.message !== expected[i]?.message);
+                    throw new Error(`审核来源身份不匹配：${field}应有 ${expected.length} 条，实际 ${approved.length} 条${first >= 0 ? `，第 ${first + 1} 项不同` : ''}`);
+                }
                 let last = -1;
                 for (const v of approved) {
                     ref(v, r.story);
@@ -404,8 +411,12 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             };
             // Pre-recovery receipts are retained as audit records, but statuses never lets
             // any receipt approve a sourceRecovery revision. Their current references stay strict.
-            validateSources(r.sourceRefs, memory.sourceRecovery && !memory.inputRefs.length ? r.sourceRefs : original);
-            validateSources(r.coverage, memory.coverage);
+            if ('disabled' in r) {
+                check(pack.version >= 16 && r.disabled?.version === 1 && r.disabled.reason === 'empty_generated_sources' &&
+                    Object.keys(r.disabled).length === 2 && isEmptyGeneratedReview(r, memory, original.length > 0),
+                '审核停用标记不符合已知的空来源缺陷');
+            } else validateSources(r.sourceRefs, memory.sourceRecovery && !memory.inputRefs.length ? r.sourceRefs : original, '来源列表');
+            validateSources(r.coverage, memory.coverage, '覆盖列表');
             if (!memory.inputRefs.length && !dependencyOnly) check(JSON.stringify(r.sourceRefs) === JSON.stringify(currentRefs.slice(0, r.sourceRefs.length)), '审核前缀不匹配');
             if (r.coverage.length) {
                 const first = current.positions.get(r.coverage[0].message) ?? -1;
@@ -414,7 +425,23 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             memoryRefs(r, r.dependencies);
             check(!r.dependencies.includes(r.owner) && r.dependencies.length === memory.dependencies.length && r.dependencies.every((id: string, i: number) =>
                 get('memory_revisions', id).owner === get('memory_revisions', memory.dependencies[i]).owner), '审核依赖身份不匹配');
-        }
+        } else check(!('disabled' in r), '旧版审核不能使用停用标记');
+      } catch (error) {
+        // Resolve a useful location only on failure. Successful checks do not
+        // scan bindings, expand extra history, or copy any story content.
+        const memory = maps.memory_revisions.get(r.owner);
+        const family = memory && maps.memories.get(memory.owner);
+        const binding = family && maps.host_bindings.get(family.owner);
+        let label = binding?.scope ?? r.branch, floor: number | undefined;
+        try {
+            const scope = JSON.parse(label);
+            if (Array.isArray(scope) && typeof scope[1] === 'string') label = scope[1];
+        } catch { /* Non-JSON legacy scopes remain useful archive labels. */ }
+        const snapshot = memory && maps.history_snapshots.get(memory.sourceRecovery?.snapshot ?? memory.basis);
+        try { if (snapshot && memory.anchor) floor = sourceIndex(snapshot).positions.get(memory.anchor); } catch { /* Preserve original failure. */ }
+        const location = floor === undefined ? `摘要 ${memory?.hostId ?? r.owner}` : `摘要楼层 #${floor}`;
+        throw new Error(`${error instanceof Error ? error.message : String(error)}（档案：${String(label).replace(/[\r\n]/g, ' ').slice(0, 120)}；${location}；审核：${r.id}）`);
+      }
     }
     for (const r of maps.event_processing_receipts.values()) {
         memoryRefs(r, r.memories);
@@ -500,6 +527,10 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         }
     }
     for (const r of maps.library_meta.values()) {
+        if (r.id === REVIEW_SOURCE_REPAIR_ID) {
+            check(pack.version >= 16 && validReviewRepairReceipt(r), '审核修复回执格式非法');
+            continue;
+        }
         if (r.id === 'retired-source-bindings' && pack.version >= 9) continue;
         if (pack.version >= 8 && r.id === 'archive-deletions') {
             check(r.value?.version === 1 && Object.keys(r.value).length === 2 && Array.isArray(r.value.scopes) &&

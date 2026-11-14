@@ -7,7 +7,8 @@ import { activeLibrary, ACTIVE_KEY, DB_PREFIX } from '@/mnemosyne/db';
 import { dailyState, invalidateDaily, syncDaily, serializeDailyActivation } from '@/mnemosyne/bridge';
 import { AUTO_BACKUP_KEEP, backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
 import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups, readCoreBackupPreview,
-    saveCoreBackup, pinCoreBackup, restoreCoreBackup } from '@/mnemosyne/core-backup-runtime';
+    prepareCoreBackup, saveCoreBackup, pinCoreBackup, restoreCoreBackup, retryCoreBackups } from '@/mnemosyne/core-backup-runtime';
+import { backupTimeLabel } from '@/mnemosyne/backup-health';
 
 const inventory = shallowRef<BackupInventory>({ entries: [] });
 const choice = ref(''), error = ref(''), notice = ref('');
@@ -17,6 +18,7 @@ const detail = shallowRef<BackupPreview>(), detailLoading = ref(false), detailEr
 const blocked = computed(() => coreBackupState.enabled ? backupArchiveBlockReason(dailyState) : '');
 const status = computed(() => blocked.value && coreBackupState.status === BACKUP_WAITING_STATUS
     ? '自动备份已启用，当前暂缓' : coreBackupState.status);
+const lastBackup = computed(() => backupTimeLabel(coreBackupState));
 const listed = computed(() => inventory.value.entries.find(entry => entry.key === choice.value));
 const selected = computed(() => detail.value?.key === choice.value ? detail.value : undefined);
 const restoreAvailable = computed(() => !dailyState.pending || !!dailyState.error);
@@ -79,6 +81,8 @@ async function configure() {
 async function saveManual() {
     if (!confirm('把当前完整核心库另存为不会自动删除的备份，并设为本库今后自动备份的新起点？旧备份保留。')) return;
     const lib = await activeLibrary();
+    const preparingSelector = localStorage.getItem(ACTIVE_KEY);
+    await prepareCoreBackup(lib, () => !disposed && !dailyState.pending && preparingSelector === localStorage.getItem(ACTIVE_KEY));
     const selector = localStorage.getItem(ACTIVE_KEY), stamp = revision();
     const result = await saveCoreBackup(lib, 'manual', coreBackupState.keep,
         () => !disposed && !dailyState.pending && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision());
@@ -98,14 +102,20 @@ async function restore() {
     const entry = selected.value;
     if (!entry) return;
     if (!confirm(`恢复 ${date(entry.snapshotAt)} 的核心包（${entry.counts.stories} 个故事、${entry.counts.memories} 条摘要）？会先保护当前非空核心库，再写入新空库，校验成功后切换。随后会按当前宿主聊天执行普通归档同步，可能更新恢复库中的当前正文，并将来源变化的旧摘要等标为待审核；不会改写宿主聊天。原库和这份磁盘备份保留。继续？`)) return;
-    const selector = localStorage.getItem(ACTIVE_KEY), stamp = revision(), archiveError = dailyState.error;
+    const selector = localStorage.getItem(ACTIVE_KEY), archiveError = dailyState.error;
+    const lib = await activeLibrary();
+    let stamp = revision();
     // pending also latches after a failure. The serial boundary below drains real
     // source writers; this stamp additionally revokes stale choices/derived edits.
     const valid = () => !disposed && (!dailyState.pending || !!archiveError && dailyState.error === archiveError) &&
         choice.value === entry.key && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision();
     const switched = await serializeDailyActivation(async () => {
         if (!valid()) throw new Error('聊天、档案或选择已改变，请重新预览恢复');
-        try { await saveCoreBackup(await activeLibrary(), 'before-restore', coreBackupState.keep, valid); }
+        try {
+            await prepareCoreBackup(lib, valid);
+            stamp = revision();
+            await saveCoreBackup(lib, 'before-restore', coreBackupState.keep, valid);
+        }
         catch (e) {
             if (!valid() || !confirm(`当前库的保护备份未成功：${backupFailure(e)}。仍要恢复所选备份吗？原 IndexedDB 库会保留，但本次未另存保护文件。`)) return false;
         }
@@ -124,10 +134,17 @@ async function restore() {
 
 <template>
     <details class="mn-card mn-backups">
-        <summary>本机磁盘核心包备份</summary>
+        <summary>
+            本机磁盘核心包备份
+            <span v-if="coreBackupState.error" class="mn-backup-badge">备份失败</span>
+            <small class="mn-backup-last">{{ lastBackup }}</small>
+        </summary>
         <div class="mn-backup-content">
             <p class="mn-muted">核心库独立保存在 TT 数据目录，本机明文存储，不上传。</p>
             <p v-if="coreBackupState.error || error" class="mn-warning mn-backup-feedback" role="alert">{{ error || coreBackupState.error }}</p>
+            <p v-if="coreBackupState.settingsError && coreBackupState.backupError" class="mn-warning mn-backup-feedback">{{ coreBackupState.settingsError }}</p>
+            <p v-if="coreBackupState.failureSince" class="mn-muted">失败始于 {{ date(coreBackupState.failureSince) }}；最近失败 {{ date(coreBackupState.lastFailureAt) }}。</p>
+            <p v-if="coreBackupState.persistenceError" class="mn-warning" role="status">{{ coreBackupState.persistenceError }}</p>
             <p v-if="notice" class="mn-backup-feedback" role="status">{{ notice }}</p>
 
             <section class="mn-backup-section" aria-label="自动备份设置">
@@ -138,6 +155,7 @@ async function restore() {
                 <p>每库固定保留最近 {{ AUTO_BACKUP_KEEP }} 份 · 间隔至少 30 分钟</p>
                 <p class="mn-muted">仅在酒馆前台稳定时检查；无变化不重复保存。</p>
                 <p class="mn-backup-status" role="status">{{ status }}</p>
+                <button v-if="coreBackupState.available && coreBackupState.enabled && coreBackupState.error" class="mn-backup-retry" type="button" :disabled="coreBackupState.busy" @click="retryCoreBackups(); notice = '已安排重试，前台稳定后检查；成功前保留故障提示。'">重试备份</button>
                 <p v-if="blocked" class="mn-warning" role="status">自动备份暂缓：{{ blocked }}。处理后继续检查，启用不代表已写入。</p>
                 <button v-if="coreBackupState.available && dailyState.error" class="mn-backup-retry" type="button" :disabled="coreBackupState.busy" @click="run(async () => { await syncDaily(); notice = '归档重试完成'; })">重试归档</button>
                 <div v-if="coreBackupState.available" class="mn-backup-manual">
@@ -200,6 +218,8 @@ async function restore() {
 <style scoped>
 .mn-backups { min-width: 0; }
 .mn-backups > summary { font-weight: 600; }
+.mn-backup-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border: 1px solid currentColor; border-radius: var(--bbs-radius-pill); color: var(--bbs-danger); font-size: 12px; font-weight: 500; }
+.mn-backup-last { display: block; margin: 6px 0 0 14px; color: var(--bbs-ink-soft); font-size: 12px; font-weight: 400; line-height: 1.5; }
 .mn-backup-content { display: grid; gap: 16px; min-width: 0; padding-top: 12px; }
 .mn-backups p, .mn-backups h4 { margin: 0; }
 .mn-backups h4 { font-size: 14px; font-weight: 600; }

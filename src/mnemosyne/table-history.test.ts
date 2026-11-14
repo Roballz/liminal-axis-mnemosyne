@@ -251,7 +251,7 @@ test('v10 backup enters baseline-only history and roundtrip never claims old val
             expect(view.branch.tableHistoryGap).toBe(true);
             expect(await readTables(restored, view.branch)).toEqual([]);
             const backup = await exportLibrary(restored);
-            expect(backup.version).toBe(15);
+            expect(backup.version).toBe(16);
             expect((backup.data.table_history as TableCommit[]).some(h => h.rows.some(r => r.values.v === '旧包最新值'))).toBe(true);
         } finally { restored.close(); }
     } finally { f.lib.close(); }
@@ -379,7 +379,8 @@ test.each(['fork', 'edit'] as const)('known-empty history never creates a gap on
         // Old empty checkpoints can be anchored after the requested fork/edit position.
         await f.lib.transaction(['table_history'], 'readwrite', async tx => {
             const head = (await tx.get<TableCommit>('table_history', f.branch.tableHead!))!;
-            await tx.put('table_history', { ...head, cutoff: f.view.snapshot.length });
+            const changed: TableCommit = { ...head, cutoff: f.view.snapshot.length };
+            await tx.put('table_history', changed);
         });
         const branch = action === 'fork'
             ? await forkBranch(f.lib, await capture(f.lib, f.branch.id, 2), 'empty-child')
@@ -404,8 +405,10 @@ test.each(['create', 'backfill', 'no-op backfill'] as const)('%s replaces a stic
         await f.lib.transaction(['branches', 'table_history'], 'readwrite', async tx => {
             const branch = (await tx.get<Branch>('branches', f.branch.id))!;
             const head = (await tx.get<TableCommit>('table_history', branch.tableHead!))!;
-            await tx.put('table_history', { ...head, gap: true });
-            await tx.put('branches', { ...branch, tableHistoryGap: true });
+            const changedHead: TableCommit = { ...head, gap: true };
+            const changedBranch: Branch = { ...branch, tableHistoryGap: true };
+            await tx.put('table_history', changedHead);
+            await tx.put('branches', changedBranch);
         });
         const old = await capture(f.lib, f.branch.id);
         await f.advance(2);
