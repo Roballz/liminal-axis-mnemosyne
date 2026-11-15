@@ -2,7 +2,7 @@ import type { SummaryTags } from '@/memory/contextTags';
 /** Daily-library v1 is independent of the older B provider's physical protocol. */
 export const SCHEMA = 1;
 export const STORES = [
-    'stories', 'branches', 'source_messages', 'source_revisions', 'source_bodies', 'history_snapshots',
+    'memory_payloads', 'stories', 'branches', 'source_messages', 'source_revisions', 'source_bodies', 'history_snapshots',
     'manifest_blocks', 'host_bindings', 'message_mappings', 'memories', 'memory_revisions',
     'memory_views', 'memory_selection_nodes', 'reviews', 'event_chains', 'event_revisions', 'event_memberships',
     'event_progress', 'event_processing_receipts', 'custom_table_defs', 'custom_table_rows',

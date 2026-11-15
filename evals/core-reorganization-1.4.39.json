@@ -1,0 +1,24 @@
+{
+  "synthetic": true,
+  "families": 400,
+  "versions": 20,
+  "summaryRevisions": 8000,
+  "dependencyEntries": 972800,
+  "sourceStamp": 1,
+  "beforeBytes": 72340934,
+  "afterBytes": 5375107,
+  "records": 8427,
+  "elapsedMs": 6692.152951,
+  "maxGapMs": 1235.7722159999994,
+  "gapsOver50": 6,
+  "heartbeats": 343,
+  "progressMessages": 543,
+  "exportBytes": 5376338,
+  "exportImportEqual": true,
+  "runtime": "Node/fake-indexeddb",
+  "limits": [
+    "Synthetic repeated-text/prefix-dependency dataset; not a forecast of a real 270 MiB archive.",
+    "Node/fake-indexeddb executes worker logic on the same Node thread; heartbeat gaps are not UI frame gaps.",
+    "Browser launch blocked by socket permission; Android TT latency, memory and disk capacity are unverified."
+  ]
+}

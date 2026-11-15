@@ -7,7 +7,7 @@ import { fingerprint, STORES } from './model';
 import { exportLibrary, restoreLibrary, validateData, type Package } from './migration';
 
 async function sample(version: Package['version'] = 12): Promise<Package> {
-    const data = Object.fromEntries(STORES.filter(s => s !== 'memory_selection_nodes' || version >= 15).map(s => [s, []])) as unknown as Package['data'];
+    const data = Object.fromEntries(STORES.filter(s => (s !== 'memory_selection_nodes' || version >= 15) && (s !== 'memory_payloads' || version >= 17)).map(s => [s, []])) as unknown as Package['data'];
     const content = '完整正文🙂';
     data.stories.push({ id: 's', schema: 1, created: 1 } as any);
     data.branches.push({ id: 'b', schema: 1, story: 's', head: 'h', view: 'v', epoch: 1, fork: null } as any);
@@ -31,7 +31,7 @@ test.each([12, 13, 14, 15] as const)('v%s round trip preserves complete current 
     pack.data.source_revisions.push({ ...pack.data.source_revisions[0], id: 'zold' });
     await resign(pack);
     const lib = await restoreLibrary(pack, false);
-    try { expect((await exportLibrary(lib)).data).toEqual({ ...pack.data, memory_selection_nodes: [] }); } finally { lib.close(); }
+    try { expect((await exportLibrary(lib)).data).toEqual({ ...pack.data, memory_selection_nodes: [], memory_payloads: [] }); } finally { lib.close(); }
 });
 test('missing current body and forged body identity are rejected', async () => {
     const pack = await sample();

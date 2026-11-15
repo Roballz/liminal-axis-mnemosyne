@@ -1,3 +1,4 @@
+import { SHARED_META, payloadReader, sharedRow } from './shared-payloads';
 import { EVENT_PROGRESS_MAX_CHARS } from '@/memory/limits';
 import { validTags } from '@/memory/contextTags';
 import { isRoleOnlyPair } from './source-equivalence';
@@ -10,7 +11,7 @@ import { isEmptyGeneratedReview, REVIEW_SOURCE_REPAIR_ID, validReviewRepairRecei
 import { verifyRestoredRows } from './restore-verification';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
     schema: 1;
     created: number;
     excluded: string[];
@@ -28,7 +29,7 @@ export async function snapshotLibraryForDeletion(lib: Library): Promise<Package>
         return result;
     });
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
-    const base = { format: 'mnemosyne-daily' as const, version: 16 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 17 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     return { ...base, checksum: await fingerprint(base) };
 }
@@ -52,7 +53,7 @@ const FIELDS: Record<Store, string[]> = {
     custom_table_defs: ['name', 'description', 'columns', 'ai', 'version', 'created', 'updated', 'deleted'],
     custom_table_rows: ['values', 'version', 'deleted', 'sources'], table_receipts: ['sources', 'snapshot', 'result', 'count', 'fingerprint'],
     table_history: ['previous', 'parent', 'snapshot', 'cutoff', 'sequence', 'depth', 'kind', 'operation', 'checkpoint', 'gap', 'defs', 'rows'],
-    library_meta: ['value'],
+    library_meta: ['value'], memory_payloads: ['kind', 'value', 'count'],
 };
 export function validateData(pack: Omit<Package, 'checksum'>) {
     validateStructure(pack);
@@ -61,17 +62,20 @@ export async function validateCurrentData(pack: Omit<Package, 'checksum'>): Prom
     validateStructure(pack, await validateBodyHashes(pack));
 }
 function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: ReadonlyMap<string, string> = new Map()) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     const stores: readonly Store[] = STORES.filter(s => !(s === 'table_history' && pack.version < 11) &&
-        !(s === 'source_bodies' && pack.version < 12) && !(s === 'memory_selection_nodes' && pack.version < 15));
+        !(s === 'source_bodies' && pack.version < 12) && !(s === 'memory_selection_nodes' && pack.version < 15) && !(s === 'memory_payloads' && pack.version < 17));
     check(pack.data && Object.keys(pack.data).length === stores.length && Object.keys(pack.data).every(s => stores.includes(s as Store)), '迁移模块不完整');
+    const expand = payloadReader(pack.version >= 17 ? pack.data.memory_payloads : []);
     const maps = {} as Record<Store, Map<string, any>>;
     for (const store of STORES) {
         const omitted = !stores.includes(store);
         const rows = omitted ? [] : pack.data[store];
         check(Array.isArray(rows) && (omitted || rows.length === pack.counts[store]), `计数错误 ${store}`);
         maps[store] = new Map();
-        for (const r of rows) {
+        for (const physical of rows) {
+            check(pack.version >= 17 || !sharedRow(physical), '旧版本不支持共享内容');
+            const r = expand(physical, store);
             check(r && r.schema === 1 && typeof r.id === 'string' && r.id && !maps[store].has(r.id), `非法或重复ID ${store}`);
             const optional = pack.version === 1 ? [] : store === 'custom_table_defs' ? ['tableSchema', 'dataVersion'] : store === 'custom_table_rows' ? ['hidden'] : [];
             if (pack.version >= 3) optional.push(...(store === 'event_revisions' ? ['eventSchema', 'overview', 'summarized'] : store === 'custom_table_rows' ? ['bodySources'] : store === 'table_receipts' ? ['backfillSchema', 'bodySources', 'start', 'end'] : []));
@@ -528,6 +532,10 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         }
     }
     for (const r of maps.library_meta.values()) {
+        if (r.id === SHARED_META) {
+            check(pack.version >= 17 && r.value?.version === 1 && Object.keys(r.value).length === 1, '共享存储标记非法');
+            continue;
+        }
         if (r.id === REVIEW_SOURCE_REPAIR_ID) {
             check(pack.version >= 16 && validReviewRepairReceipt(r), '审核修复回执格式非法');
             continue;
@@ -560,9 +568,10 @@ export async function restoreLibrary(value: unknown, activate = true): Promise<L
     // These arrays share the original records, including untouched legacy text.
     const data = Object.fromEntries(STORES.map(store => [store, pack.data[store] ?? []])) as Package['data'];
     const counts = Object.fromEntries(STORES.map(store => [store, data[store].length])) as Package['counts'];
-    await validateCurrentData({ ...pack, version: 16, data, counts });
+    await validateCurrentData({ ...pack, version: 17, data, counts });
     const lib = await Library.open(freshLibraryName());
     try {
+        // Import exact physical rows; normal write packing would transform legacy rows.
         await lib.transaction(STORES, 'readwrite', async (tx) => {
             for (const store of STORES)
                 for (const record of data[store])
@@ -571,6 +580,7 @@ export async function restoreLibrary(value: unknown, activate = true): Promise<L
         // Exact row/count/order equality proves the persisted data is the same
         // validated current-format view, without another complete in-memory copy.
         await verifyRestoredRows(lib, data);
+        lib.compactWrites = data.library_meta.some(row => row.id === SHARED_META);
         if (activate)
             await activateLibrary(lib);
         return lib;

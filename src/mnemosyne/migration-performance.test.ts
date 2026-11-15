@@ -8,7 +8,7 @@ import type { BackupDisk } from '@/st/native-backups';
 
 /** Actual legacy rows, not current-only descriptors relabelled as an old format. */
 async function legacyPackage(length: number, version: Package['version'] = 13): Promise<Package> {
-    const stores = STORES.filter(s => !(s === 'source_bodies' && version < 12) && !(s === 'table_history' && version < 11) && !(s === 'memory_selection_nodes' && version < 15));
+    const stores = STORES.filter(s => !(s === 'source_bodies' && version < 12) && !(s === 'table_history' && version < 11) && !(s === 'memory_selection_nodes' && version < 15) && !(s === 'memory_payloads' && version < 17));
     const data = Object.fromEntries(stores.map(s => [s, []])) as unknown as Package['data'];
     const content = 'Synthetic retained historical body';
     data.stories.push({ id: 'story', schema: 1, created: 1 } as any);

@@ -44,6 +44,9 @@ export function withoutCompactSelections(pack: import('./migration').Package) {
         entries.sort((a, b) => a[2] - b[2] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
         return { ...identity, selections: Object.fromEntries(entries.map(([family, revision]) => [family, revision])) };
     });
+    if (pack.data.memory_payloads?.length) throw new Error('Legacy fixture cannot contain shared payloads');
+    delete (pack.data as Partial<typeof pack.data>).memory_payloads;
+    delete (pack.counts as Partial<typeof pack.counts>).memory_payloads;
     delete (pack.data as Partial<typeof pack.data>).memory_selection_nodes;
     delete (pack.counts as Partial<typeof pack.counts>).memory_selection_nodes;
     return pack;

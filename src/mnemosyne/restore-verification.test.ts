@@ -20,7 +20,10 @@ test('restore verifies all persisted rows in one readonly snapshot without a sec
         restored = await restoreLibrary(pack, false);
         expect(rawAll).not.toHaveBeenCalled();
         expect(getAll).not.toHaveBeenCalled();
-        expect(transactions.mock.calls.filter(args => args[1] === 'readonly')).toHaveLength(1);
+        // One point lookup of the write-codec marker on open, then one full verification snapshot.
+        const reads = transactions.mock.calls.filter(args => args[1] === 'readonly');
+        expect(reads).toHaveLength(2);
+        expect(reads.filter(args => (args[0] as string[]).includes('memory_revisions'))).toHaveLength(1);
         expect(cursors).toHaveBeenCalledTimes(STORES.length);
         expect(await fingerprint(pack.data)).toBe(original);
     } finally { restored?.close(); lib.close(); }

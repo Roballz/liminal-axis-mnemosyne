@@ -1,0 +1,55 @@
+<!doctype html><title>Core reorganization synthetic benchmark</title><pre id="result">Running</pre>
+<script type="module">
+const result = document.querySelector('#result');
+(async () => {
+  const { restoreLibrary, exportLibrary } = await import('/src/mnemosyne/migration.ts');
+  const { runBackupWorker } = await import('/src/mnemosyne/backup-worker-client.ts');
+  const { Library } = await import('/src/mnemosyne/db.ts');
+  const { STORES, fingerprint } = await import('/src/mnemosyne/model.ts');
+  const families = 400, versions = 20, data = Object.fromEntries(STORES.map(s => [s, []]));
+  const id = (prefix, n) => prefix + '_' + n.toString(16).padStart(8,'0') + '-0000-4000-8000-000000000000';
+  const ref = { message: 'message', revision: 'source' };
+  data.stories = [{ id:'story', schema:1, created:1 }];
+  data.branches = [{ id:'branch', schema:1, story:'story', head:'snapshot', view:'view-19', epoch:1, fork:null }];
+  data.host_bindings = [{ id:'binding', schema:1, story:'story', branch:'branch', scope:'synthetic-reorganization', generation:1, intent:'new_story' }];
+  data.source_messages = [{ id:'message', schema:1, story:'story' }];
+  data.source_revisions = [{ id:'source', schema:1, story:'story', owner:'message', role:'assistant', content:'Synthetic source', fingerprint:await fingerprint(['assistant','Synthetic source']), provenance:{binding:'binding',hostKey:'host',index:0,swipe:0} }];
+  data.manifest_blocks = [{ id:'block',schema:1,story:'story',entries:[ref] }];
+  data.history_snapshots = [{ id:'snapshot',schema:1,story:'story',branch:'branch',previous:null,blocks:['block'],length:1,created:1 }];
+  const dependencies = Array.from({length:128},(_,i)=>id('mr',i));
+  const text = '合成存储测试：保留历史身份、顺序与引用；不包含用户资料。'.repeat(40);
+  for(let i=0;i<families;i++) data.memories.push({id:id('mem',i),schema:1,story:'story',owner:'binding',hostId:'summary-'+i});
+  for(let v=0;v<versions;v++) {
+    const selections = {};
+    for(let i=0;i<families;i++) {
+      const revision = id('mr',v*families+i); selections[id('mem',i)] = revision;
+      data.memory_revisions.push({id:revision,schema:1,story:'story',branch:'branch',owner:id('mem',i),hostId:'summary-'+i,
+        content:text+' variant '+i%20, fingerprint:'synthetic-summary',basis:'snapshot',inputRefs:[ref],coverage:[ref],
+        dependencies:v?[...dependencies]:[],declaration:null,level:0,anchor:'message',storyTime:'',recall:true,visibility:'public',seed:false});
+    }
+    data.memory_views.push({id:'view-'+v,schema:1,branch:'branch',selections});
+  }
+  for(const store of STORES) data[store].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
+  const base = {format:'mnemosyne-daily',version:17,schema:1,created:1,excluded:[],data,counts:Object.fromEntries(STORES.map(s=>[s,data[s].length]))};
+  const source = await restoreLibrary({...base,checksum:await fingerprint(base)},false);
+  const gaps=[]; let last=performance.now(), progress=0;
+  const timer=setInterval(()=>{const now=performance.now();gaps.push(now-last);last=now;},10);
+  const start=performance.now();
+  let report;
+  try {
+    const outcome=await runBackupWorker(undefined,{kind:'reorganize',library:source.db.name},()=>true,undefined,undefined,()=>{progress++;});
+    if(outcome.state!=='reorganized') throw new Error('unexpected result'); report=outcome.report;
+  } finally {clearInterval(timer);source.close();}
+  const elapsedMs=performance.now()-start;
+  const target=await Library.open(report.library,true);
+  // Actual worker export, followed by actual worker import and full row verification.
+  const exported=await runBackupWorker(undefined,{kind:'export',library:report.library},()=>true);
+  if(exported.state!=='exported') throw new Error('no export');
+  const restored=await runBackupWorker(undefined,{kind:'import',blob:exported.blob},()=>true);
+  if(restored.state!=='restored') throw new Error('no restore');
+  const restoredLib=await Library.open(restored.library,true);
+  const equal=JSON.stringify((await exportLibrary(target)).data)===JSON.stringify((await exportLibrary(restoredLib)).data);
+  target.close();restoredLib.close();
+  return {synthetic:true, families,versions,summaryRevisions:families*versions,dependencyEntries:128*families*(versions-1),...report,elapsedMs,maxGapMs:Math.max(...gaps),gapsOver50:gaps.filter(g=>g>50).length,heartbeats:gaps.length,progressMessages:progress,exportBytes:exported.blob.size,workerExportImportEqual:equal};
+})().then(value=>{result.textContent=JSON.stringify(value,null,2);window.benchmarkDone=true;}).catch(error=>{result.textContent=String(error)+'\n'+error.stack;window.benchmarkDone=true;});
+</script>

@@ -1,3 +1,4 @@
+import { payloadKey } from './shared-payloads';
 import type { Transaction } from './db';
 import { check, row, type CompactMemoryView, type MemorySelectionNode, type MemoryView, type MemoryRevision } from './model';
 import { selectionRanks } from './selection-order';
@@ -125,7 +126,8 @@ export async function materializeMemoryView(view: StoredView,
 
 /** New views use a persistent hash trie. Only changed leaf buckets and their
  * ancestors are written; old view IDs, old nodes and legacy full maps remain intact. */
-export async function publishMemoryView(tx: Transaction, view: MemoryView, previous?: MemoryView): Promise<void> {
+export async function publishMemoryView(tx: Transaction, view: MemoryView, previous?: MemoryView, intern = false): Promise<void> {
+    intern ||= tx.sharedWrites;
     const old = previous ? await tx.rawGet<StoredView>('memory_views', previous.id) : undefined;
     check(!old || old.branch === view.branch, '摘要选择前驱跨分支');
     const reusable = old && compactMemoryView(old) ? old : undefined;
@@ -150,7 +152,21 @@ export async function publishMemoryView(tx: Transaction, view: MemoryView, previ
     }
     for (const family of before.keys()) if (!after.has(family)) changes.set(family, undefined);
     const write = async (prefix: string, entries: Entry[], children: Record<string, string>, count: number) => {
+        // Canonical storage ordering does not change materialized rank ordering.
+        if (intern) {
+            entries.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+            children = Object.fromEntries(Object.entries(children).sort(([a], [b]) => a < b ? -1 : 1));
+        }
         const node: MemorySelectionNode = { ...row('msn'), branch: view.branch, prefix, children, entries, count };
+        if (intern) {
+            const value = JSON.stringify([view.branch, prefix, children, entries, count]), base = `msn_${payloadKey(value)}`;
+            for (let collision = 0; ; collision++) {
+                node.id = collision ? `${base}_${collision}` : base;
+                const old = await tx.get<MemorySelectionNode>('memory_selection_nodes', node.id);
+                if (!old) break;
+                if (JSON.stringify([old.branch, old.prefix, old.children, old.entries, old.count]) === value) return old.id;
+            }
+        }
         await tx.add('memory_selection_nodes', node); loaded.set(node.id, node); return node.id;
     };
     const build = async (prefix: string, entries: Entry[]): Promise<string | null> => {

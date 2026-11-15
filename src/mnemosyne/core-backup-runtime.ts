@@ -1,7 +1,7 @@
 import { runBackupWorker } from './backup-worker-client';
 import { reactive, watch } from 'vue';
 import { nativeBackupDisk } from '@/st/native-backups';
-import { activeLibrary, activateLibrary, Library, ACTIVE_KEY, DB_PREFIX } from './db';
+import { activeLibrary, activateLibrary, Library, publishUnchangedLibrary, ACTIVE_KEY, DB_PREFIX } from './db';
 import { check, fingerprint } from './model';
 import type { BackupResult } from './backup-worker-protocol';
 import { AUTO_BACKUP_INTERVAL, AUTO_BACKUP_KEEP, CoreBackups, backupFailure, backupSettings, type BackupInventory, type BackupOutcome, type BackupSettings } from './core-backups';
@@ -202,6 +202,24 @@ export async function readCorePackageSize(lib: Library, isCurrent: () => boolean
         const result = await runBackupWorker(undefined, { kind: 'size', library: lib.db.name }, isCurrent);
         check(result.state === 'size' && isCurrent(), '档案或页面已改变，请重新分析体积');
         return result.report;
+    } finally { coreBackupState.busy = false; }
+}
+
+/** The UI caller drains source synchronization with serializeDailyActivation. */
+export async function reorganizeCore(lib: Library, isCurrent: () => boolean,
+    progress: (value: import('./core-reorganization').ReorganizationProgress) => void = () => {}) {
+    check(!coreBackupState.busy, '备份正在处理，请完成后再整理');
+    coreBackupState.busy = true;
+    try {
+        const result = await runBackupWorker(undefined, { kind: 'reorganize', library: lib.db.name },
+            isCurrent, undefined, undefined, progress);
+        check(result.state === 'reorganized' && isCurrent(), '页面或资料已改变，新库未启用，原库保留');
+        const target = await Library.open(result.report.library, true);
+        try {
+            await activateLibrary(target, isCurrent, publish => publishUnchangedLibrary(lib, result.report.sourceStamp, publish));
+            syncCoreBackupHealth();
+            return result.report;
+        } catch (error) { target.close(); throw error; }
     } finally { coreBackupState.busy = false; }
 }
 

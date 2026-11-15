@@ -1,3 +1,4 @@
+import { reorganizeCoreLibrary } from './core-reorganization';
 import { BACKUP_MAX_BYTES, CoreBackups, corePackageSizeError } from './core-backups';
 import { Library } from './db';
 import { exportLibrary, restoreLibrary } from './migration';
@@ -69,6 +70,17 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
             return;
         }
         lib = await Library.open(message.job.library, true);
+        if (message.job.kind === 'reorganize') {
+            let lastProgress = 0, lastStage = '';
+            const report = await reorganizeCoreLibrary(lib, guard, progress => {
+                const now = performance.now(), stage = `${progress.phase}:${progress.store}`;
+                if (stage !== lastStage || now - lastProgress >= 200) {
+                    lastStage = stage; lastProgress = now; send({ type: 'progress', progress });
+                }
+            });
+            send({ type: 'done', result: { state: 'reorganized', report } });
+            return;
+        }
         if (message.job.kind === 'size') {
             const report = await measureCorePackageSize(lib, guard);
             send({ type: 'done', result: { state: 'size', report } });

@@ -93,3 +93,36 @@ test('manual and pinned Worker results retain small inventory previews when opti
         expect(d.read).not.toHaveBeenCalled(); expect(d.write).not.toHaveBeenCalled();
     } finally { lib.close(); }
 });
+
+test.each([false, true])('reorganization publication handles concurrent source change=%s before switching selector', async changed => {
+    vi.resetModules();
+    const db = await import('./db'), { fixture } = await import('./fixtures');
+    const { reorganizeCoreLibrary } = await import('./core-reorganization');
+    const { lib } = await fixture(2), selectors = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => selectors.get(key),
+        setItem: (key: string, value: string) => { selectors.set(key, value); } });
+    await db.activateLibrary(lib);
+    const report = await reorganizeCoreLibrary(lib, async () => true);
+    const worker = await import('./backup-worker-client');
+    const native = await import('@/st/native-backups');
+    const nativeOpen = vi.spyOn(native, 'nativeBackupDisk');
+    vi.spyOn(worker, 'runBackupWorker').mockImplementation(async () => {
+        if (changed) await lib.transaction(['library_meta'], 'readwrite', tx => tx.put('library_meta',
+            { id: 'daily-settings', schema: 1, value: {} } as any));
+        return { state: 'reorganized', report };
+    });
+    const runtime = await import('./core-backup-runtime');
+    try {
+        if (changed) {
+            await expect(runtime.reorganizeCore(lib, () => true)).rejects.toThrow('资料已改变');
+            expect(selectors.get(db.ACTIVE_KEY)).toBe(lib.db.name);
+            expect(await db.activeLibrary()).toBe(lib);
+        } else {
+            await expect(runtime.reorganizeCore(lib, () => true)).resolves.toEqual(report);
+            expect(selectors.get(db.ACTIVE_KEY)).toBe(report.library);
+            const target = await db.activeLibrary(); expect(target.compactWrites).toBe(true); target.close();
+        }
+        expect(runtime.coreBackupState.busy).toBe(false);
+        expect(nativeOpen).not.toHaveBeenCalled();
+    } finally { lib.close(); }
+});

@@ -26,7 +26,7 @@ test('known old empty approvals retain their evidence and become exportable/rest
         expect(await lib.get('reviews', review.id)).toEqual({ ...review,
             disabled: { version: 1, reason: 'empty_generated_sources' } });
         const pack = await exportLibrary(lib);
-        expect(pack.version).toBe(16);
+        expect(pack.version).toBe(17);
         const copy = await restoreLibrary(pack, false);
         try { expect((await exportLibrary(copy)).data).toEqual(pack.data); } finally { copy.close(); }
         input.messages[0].content += ' subsequent source change';

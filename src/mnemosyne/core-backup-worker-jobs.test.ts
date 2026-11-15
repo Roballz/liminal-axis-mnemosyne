@@ -163,3 +163,16 @@ test('a revoked import guard leaves the fully verified new library unactivated a
         finally { copy.close(); }
     } finally { lib.close(); }
 });
+
+test('actual reorganization worker preserves original and prepares compact independently verified library', async () => {
+    const { lib } = await fixture(8);
+    const before = await exportLibrary(lib), result = await workerJob({ kind: 'reorganize', library: lib.db.name });
+    if (result.state !== 'reorganized') throw new Error('missing reorganization');
+    const target = await Library.open(result.report.library, true);
+    try {
+        expect(target.compactWrites).toBe(true);
+        expect((await exportLibrary(lib)).data).toEqual(before.data);
+        expect(await target.all('memory_revisions')).toEqual(await lib.all('memory_revisions'));
+        expect(result.report.sourceStamp).toBeGreaterThan(0);
+    } finally { target.close(); lib.close(); }
+});

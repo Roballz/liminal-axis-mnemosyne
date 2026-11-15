@@ -1,3 +1,4 @@
+import { payloadReader } from './shared-payloads';
 import type { Library } from './db';
 import { snapshotLibraryForDeletion, validateCurrentData, type Package } from './migration';
 import { STORES, check, equal, type Binding, type Branch, type Row, type Store, type Revision, type Snapshot, type Mapping } from './model';
@@ -37,7 +38,9 @@ export interface ArchiveDeletionPlan {
 }
 /** Preview exact records; shared parent history is never silently removed. */
 export async function previewArchiveDeletion(lib: Library, branchId: string): Promise<ArchiveDeletionPlan> {
-    const before = await snapshotLibraryForDeletion(lib), data = before.data;
+    const before = await snapshotLibraryForDeletion(lib);
+    const expand = payloadReader(before.data.memory_payloads);
+    const data = Object.fromEntries(STORES.map(s => [s, before.data[s].map(row => expand(row, s))])) as Package['data'];
     const branch = data.branches.find(b => b.id === branchId) as Branch | undefined;
     check(branch, '档案已不存在，请刷新列表');
     const branches = new Set([branch.id]);

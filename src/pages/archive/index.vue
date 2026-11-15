@@ -27,7 +27,7 @@ import { activeLibrary, ACTIVE_KEY } from '@/mnemosyne/db';
 import { keepSummary } from '@/mnemosyne/canonical';
 import { reviewDifference, type ReviewDifference } from '@/mnemosyne/review-diagnostics';
 import { previewRoleRepairs, confirmRoleRepairs, type RoleRepairCandidate } from '@/mnemosyne/source-role-repair';
-import { exportCoreLibrary, prepareCoreBackup, restoreCorePackage, readCorePackageSize } from '@/mnemosyne/core-backup-runtime';
+import { exportCoreLibrary, prepareCoreBackup, restoreCorePackage, readCorePackageSize, reorganizeCore } from '@/mnemosyne/core-backup-runtime';
 import { BACKUP_MAX_BYTES, BACKUP_MAX_MIB, corePackageSizeError } from '@/mnemosyne/core-backups';
 import type { CorePackageSize } from '@/mnemosyne/core-package-size';
 import { regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
@@ -41,7 +41,9 @@ const prefix = ref(0),
   busy = ref(false);
 const choices = shallowRef<Awaited<ReturnType<typeof dailyBranchChoices>>>([]);
 const packageSize = shallowRef<CorePackageSize>();
+const reorganizeProgress = ref('');
 const sizeLabels: Record<string, string> = {
+  memory_payloads: '共享摘要内容与引用块',
   stories: '故事', branches: '分支', source_messages: '消息身份', source_revisions: '正文版本与旧版全文',
   source_bodies: '当前保留正文', history_snapshots: '正文历史索引', manifest_blocks: '正文引用块',
   host_bindings: '聊天绑定', message_mappings: '消息映射', memories: '摘要身份', memory_revisions: '摘要内容与依赖',
@@ -259,6 +261,23 @@ async function inspectPackageSize() {
   packageSize.value = await readCorePackageSize(lib, () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) &&
     stamp === `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`);
 }
+async function reorganize() {
+  const lib = await activeLibrary(), selector = localStorage.getItem(ACTIVE_KEY);
+  const stamp = `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
+  const valid = () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) &&
+    stamp === `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
+  reorganizeProgress.value = '正在准备独立新库…';
+  try {
+    const result = await serializeDailyActivation(() => reorganizeCore(lib, valid, value => {
+      const labels = { copy: '正在复制', views: '正在重建历史索引', verify: '正在逐条核对', validate: '正在完整校验' };
+      reorganizeProgress.value = `${labels[value.phase]}${value.store ? ' · ' + (sizeLabels[value.store] || value.store) : ''} · ${value.records} 条`;
+    }));
+    packageSize.value = undefined;
+    invalidateDaily();
+    await refresh();
+    notice.value = `已无损整理并切换到新库：整理前 ${mib(result.beforeBytes)} MiB，整理后 ${mib(result.afterBytes)} MiB。原库保留，今后写入继续共享存储。请导出新的核心包保存。`;
+  } finally { reorganizeProgress.value = ''; }
+}
 async function copyPackageSize() {
   check(packageSize.value, '请先分析核心包体积');
   await navigator.clipboard.writeText(JSON.stringify(packageSize.value, null, 2));
@@ -417,6 +436,11 @@ async function copyKnowledge() {
       <div class="mn-action-help">
         <button :disabled="busy" @click="run(inspectPackageSize)">分析核心包体积</button>
         <small>只读统计各类记录的大小，帮助定位历史索引或重复记录；不上传聊天内容。</small>
+      </div>
+      <div class="mn-action-help">
+        <button :disabled="busy" @click="run(reorganize)">无损整理到新库</button>
+        <small>保留全部分支、摘要版本和审核历史，复用重复内容与引用。完整核对后切换，原库保留。需要额外空间；整理期间请暂停编辑或生成。</small>
+        <small v-if="reorganizeProgress" role="status">{{ reorganizeProgress }}</small>
       </div>
       <div v-if="packageSize" class="mn-card">
         <p>数据记录合计 {{ mib(packageSize.bytes) }} MiB · {{ new Date(packageSize.measuredAt).toLocaleString() }}</p>
