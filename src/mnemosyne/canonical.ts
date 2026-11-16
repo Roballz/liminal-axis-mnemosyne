@@ -11,6 +11,8 @@ import { reviewMatchesMemory, sameSourceMessages } from './review-source-integri
 import { observationHashes } from './observation-hashes';
 import { publishMemoryView } from './memory-selections';
 import { retireSupersededSummaries, retireAbandonedTableHistory, retireEventDependencies } from './summary-retention';
+import { sameNarrativeRevision } from './memory-equivalence';
+export { sameNarrativeRevision } from './memory-equivalence';
 import { Library, Transaction } from './db';
 import {
     STORES,
@@ -59,11 +61,6 @@ export interface HostMemory {
     basisSnapshot?: string;
     generationKey?: number;
     manualEdit?: boolean;
-}
-/** Metadata edits do not change a narrative dependency. Source/version fields must all match. */
-export function sameNarrativeRevision(a: MemoryRevision, b: MemoryRevision): boolean {
-    const narrative = ({ id, fingerprint, tags, ...rest }: MemoryRevision) => rest;
-    return equal(narrative(a), narrative(b));
 }
 /** A high summary with recorded children depends on those children, not the entire chat tail. */
 export const dependencyOnly = (m: MemoryRevision) => m.level > 0 && !m.anchor && !m.inputRefs.length && !!m.dependencies.length;

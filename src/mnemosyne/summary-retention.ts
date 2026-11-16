@@ -1,7 +1,8 @@
 import type { Transaction } from './db';
 import { rowRetentionRoots } from './retention-roots';
+import { sameNarrativeRevision } from './memory-equivalence';
 import { row, type Branch, type EventReceipt, type MemoryRevision, type MemoryView, type Review, type EventRevision,
-    type Row, type TableCommit, type TableRow, type TableDef, type Membership } from './model';
+    type Row, type TableCommit, type TableRow, type TableDef, type Membership, type Progress } from './model';
 
 /** Only superseded selections are candidates. Current selections and real incoming
  * dependencies (including another branch) remain roots. Work is proportional to
@@ -82,6 +83,62 @@ export async function retireAbandonedTableHistory(tx: Transaction, branch: Branc
     }
 }
 
+/** Storage cleanup is not a new source edit. Keep event prose and its exact
+ * provenance, including text already awaiting review. Only demonstrably equivalent
+ * prose dependencies can move; associations follow the selected summary family.
+ * Runs in the cleanup Worker against its indexed, write-stamped in-memory plan. */
+export async function preserveEventReferences(tx: Transaction, branch: Branch,
+    selected: ReadonlyMap<string, MemoryRevision>) {
+    const known = new Map([...selected.values()].map(m => [m.id, Promise.resolve<MemoryRevision | undefined>(m)]));
+    const equivalents = new Map<string, Promise<string>>();
+    const memory = (id: string) => {
+        if (!known.has(id)) known.set(id, tx.get<MemoryRevision>('memory_revisions', id));
+        return known.get(id)!;
+    };
+    const replacement = async (id: string) => {
+        const prior = await memory(id);
+        return prior?.branch === branch.id && prior.story === branch.story ? selected.get(prior.owner) : undefined;
+    };
+    const equivalent = (id: string) => {
+        if (!equivalents.has(id)) equivalents.set(id, (async () => {
+            const next = await replacement(id);
+            return next && (next.id === id || sameNarrativeRevision((await memory(id))!, next)) ? next.id : id;
+        })());
+        return equivalents.get(id)!;
+    };
+    const references = async (ids: string[]) => {
+        const next = await Promise.all(ids.map(equivalent));
+        return next.some((id, i) => id !== ids[i]) ? next : ids;
+    };
+    let changed = false;
+    for (const member of await tx.all<Membership>('event_memberships', 'branch', branch.id)) {
+        const next = await replacement(member.memory);
+        if (!next || next.id === member.memory) continue;
+        // Preserve operation order: moving an old unlink to the current epoch
+        // could override a later relink. Cutoffs also govern historical forks.
+        await tx.put('event_memberships', { ...member, memory: next.id } as Membership);
+        changed = true;
+    }
+    for (const meta of await tx.all<EventRevision>('event_revisions', 'branch', branch.id)) {
+        const refs = await references(meta.refs);
+        const summarized = meta.summarized && await references(meta.summarized);
+        const latest = meta.latestProgress, id = latest && await equivalent(latest.memory);
+        const latestProgress = latest && id !== latest.memory ? { ...latest, memory: id! } : latest;
+        if (refs === meta.refs && summarized === meta.summarized && latestProgress === latest) continue;
+        await tx.put('event_revisions', { ...meta, refs,
+            ...(summarized === undefined ? {} : { summarized }),
+            ...(latestProgress === undefined ? {} : { latestProgress }) } as EventRevision);
+        changed = true;
+    }
+    for (const progress of await tx.all<Progress>('event_progress', 'branch', branch.id)) {
+        const memories = await references(progress.memories);
+        if (memories === progress.memories) continue;
+        await tx.put('event_progress', { ...progress, memories } as Progress);
+        changed = true;
+    }
+    return changed;
+}
+
 /** A replaced body invalidates its old derived prose, never the event's title,
  * keywords, archive organization or another branch's copy. */
 export async function retireEventDependencies(tx: Transaction, branch: Branch, retired: Set<string>, cutoff: number,
@@ -93,6 +150,16 @@ export async function retireEventDependencies(tx: Transaction, branch: Branch, r
         return known.get(id);
     };
     for (const id of retired) { const prior = await memory(id); if (prior?.branch === branch.id) families.add(prior.owner); }
+    const obsolete = new Map<string, boolean>();
+    const isObsolete = async (id: string) => {
+        if (obsolete.has(id)) return obsolete.get(id)!;
+        const source = await memory(id), next = source && replacements.get(source.owner);
+        // A historical family member never makes the currently selected version
+        // (or an equivalent tag-only revision) obsolete.
+        const current = source && next && (source.id === next.id || sameNarrativeRevision(source, next));
+        const affected = !current && (retired.has(id) || source?.branch === branch.id && families.has(source.owner));
+        obsolete.set(id, affected); return affected;
+    };
     const revisions = await tx.all<EventRevision>('event_revisions', 'branch', branch.id);
     const latest = new Map<string, EventRevision>();
     for (const r of revisions) if (!latest.has(r.owner) || latest.get(r.owner)!.epoch <= r.epoch) latest.set(r.owner, r);
@@ -102,8 +169,7 @@ export async function retireEventDependencies(tx: Transaction, branch: Branch, r
         for (const record of records) {
             let affected = false;
             for (const id of rowRetentionRoots(record)?.memoryRoots ?? []) {
-                const source = await memory(id);
-                if (retired.has(id) || source?.branch === branch.id && families.has(source.owner)) {
+                if (await isObsolete(id)) {
                     affected = true; retired.add(id);
                 }
             }
@@ -114,8 +180,7 @@ export async function retireEventDependencies(tx: Transaction, branch: Branch, r
                 // A manual unlink is a current user setting, not historical prose.
                 // Carry it onto the replacement without retaining the old summary.
                 if (!member.active && member.locked && replacement && !retired.has(replacement.id)) {
-                    await tx.put(store, { ...member, memory: replacement.id, snapshot: branch.head,
-                        cutoff, epoch: branch.epoch + 1 } as Membership);
+                    await tx.put(store, { ...member, memory: replacement.id } as Membership);
                     changed = true; continue;
                 }
             }

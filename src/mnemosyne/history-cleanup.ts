@@ -7,7 +7,7 @@ import { SharedPayloads, SHARED_META, sharedStore } from './shared-payloads';
 import { materializeMemoryView, publishMemoryView } from './memory-selections';
 import { EVIDENCE_STORES, isEvidenceStore, rowRetentionRoots } from './retention-roots';
 import { snapshotRefs, statusesInTransaction, sameNarrativeRevision } from './canonical';
-import { retireSupersededSummaries, retireAbandonedTableHistory, retireEventDependencies } from './summary-retention';
+import { retireSupersededSummaries, retireAbandonedTableHistory, preserveEventReferences } from './summary-retention';
 import { purgeTables } from './table-history';
 import { unreferencedStorage } from './shared-garbage';
 import { utf8ByteLength } from './json';
@@ -147,7 +147,10 @@ export async function cleanLibraryHistory(lib: Library, guard: () => Promise<boo
         const currentFamilies = new Map(selected.filter(m => active.has(m.id)).map(m => [m.owner, m]));
         const retired = new Set(history.filter(m => !active.has(m.id) &&
             !(currentFamilies.has(m.owner) && sameNarrativeRevision(m, currentFamilies.get(m.owner)!))).map(m => m.id));
-        const eventChanges = await retireEventDependencies(plan.tx, branch, retired, refs.length, currentFamilies);
+        // Reclaim storage without simulating a fresh source edit. Event links
+        // follow their current family; non-equivalent prose keeps its old proof
+        // as a real retention root and remains reviewable in the workbench.
+        const eventChanges = await preserveEventReferences(plan.tx, branch, currentFamilies);
         const deletedTables = new Set((await plan.all<TableDef>('custom_table_defs', 'branch', branch.id)).filter(t => t.deleted).map(t => t.id));
         await purgeTables(plan.tx, branch, deletedTables);
         await retireAbandonedTableHistory(plan.tx, branch);

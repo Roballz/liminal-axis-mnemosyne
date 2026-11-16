@@ -282,7 +282,7 @@ async function reorganize() {
   } finally { reorganizeProgress.value = ''; }
 }
 async function cleanHistory() {
-  if (!confirm('永久清理当前库各档案中已替换的旧正文、旧摘要、过期派生记录和无用索引，并彻底移除旧版已删除的表。保留当前内容及其他分支仍在使用的来源依赖；无法再查看被清理的历史版本。建议先保留一份整库核心包。继续？')) return;
+  if (!confirm('永久清理当前库各档案中已替换且无引用的旧正文、旧摘要、过期回执和无用索引，并彻底移除旧版已删除的表。保留事件关联、概要、进展及其必要来源，待审核内容仍需审核；保留其他分支仍在使用的来源依赖。无法再查看被清理的历史版本，建议先保留一份整库核心包。继续？')) return;
   const lib = await activeLibrary(), selector = localStorage.getItem(ACTIVE_KEY);
   await prepareCoreBackup(lib, () => !disposed && selector === localStorage.getItem(ACTIVE_KEY));
   const stamp = `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
