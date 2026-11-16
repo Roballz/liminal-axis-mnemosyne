@@ -12,7 +12,9 @@ import { reorganizeCoreLibrary } from './core-reorganization';
 async function inheritedFixture(compact: boolean) {
  const f=await fixture(1); let lib=f.lib;
   f.input.memories.push({...f.input.memories[0], hostId:'higher',level:1,anchorKey:null,children:['leaf-0']},
-      {...f.input.memories[0], hostId:'highest',level:2,anchorKey:null,children:['higher']});
+      {...f.input.memories[0], hostId:'highest',level:2,anchorKey:null,children:['higher']},
+      {...f.input.memories[0], hostId:'level3',level:3,anchorKey:null,children:['highest']},
+      {...f.input.memories[0], hostId:'level4',level:4,anchorKey:null,children:['level3']});
   await synchronize(lib,f.input);
   const original=await capture(lib,f.branch.id), leaf=original.memories.find(m=>m.hostId==='leaf-0')!;
   const family=(await lib.get<Memory>('memories',leaf.owner))!;
@@ -66,24 +68,36 @@ async function misselect(f: Awaited<ReturnType<typeof inheritedFixture>>) {
   await tx.put('branches',{...f.child,view:selection.id,epoch:f.child.epoch+1} as Branch);
  });
 }
-for (const compact of [false,true]) for (const mode of ['new','broken','confirmed'] as const)
+for (const compact of [false,true]) for (const mode of ['new','broken','confirmed','manual-marker'] as const)
  test(`fork keeps and recovers inherited identity (${mode}, compact=${compact})`, async()=>{
  const f=await inheritedFixture(compact);
  try {
   const tableHistory=await f.lib.all('table_history','branch',f.child.id);
   if(mode!=='new') await misselect(f);
-  if(mode==='confirmed') {
+  if(mode==='confirmed' || mode==='manual-marker') {
    const broken=await capture(f.lib,f.child.id);
    await confirmRecoveredSummaries(f.lib,broken,[f.stale.id]);
   }
+  if(mode==='manual-marker') f.input.memories[0]={...f.input.memories[0],manualEdit:true,generationKey:2};
   await synchronize(f.lib,f.input);
   const view=await capture(f.lib,f.child.id);
-  expect(view.memories.find(m=>m.hostId==='leaf-0')!.id).toBe(f.good.id);
+  const restored=view.memories.find(m=>m.hostId==='leaf-0')!;
+  expect(restored.owner).toBe(f.good.owner);
+  if(mode!=='manual-marker') expect(restored.id).toBe(f.good.id);
+  else expect(await f.lib.get('memory_revisions',f.good.id)).toEqual(f.good);
   expect([...await statuses(f.lib,view)].every(([,state])=>state==='valid')).toBe(true);
   expect((await eventView(f.lib,view)).cards[0]).toMatchObject({needsReview:false,blocked:false});
   expect(await capture(f.lib,f.parent.branch.id)).toEqual(f.parent);
   expect(await f.lib.all('table_history','branch',f.child.id)).toEqual(tableHistory);
   await exportLibrary(f.lib);
+  if(mode==='manual-marker') {
+   const child=await forkBranch(f.lib,view,'repaired-grandchild');
+   await synchronize(f.lib,{...f.input,scope:'repaired-grandchild'});
+   const next=await capture(f.lib,child.id);
+   expect(next.memories).toHaveLength(view.memories.length);
+   expect([...await statuses(f.lib,next)].every(([,s])=>s==='valid')).toBe(true);
+   expect((await eventView(f.lib,next)).cards[0]).toMatchObject({needsReview:false,blocked:false});
+  }
   // Warm the checked selection once; subsequent ordinary syncs do not rescan events/history.
   f.input.messages.push({key:'warm-retention',role:'user',content:'warm retention',swipe:0});
   await synchronize(f.lib,f.input);
@@ -99,11 +113,12 @@ for (const compact of [false,true]) for (const mode of ['new','broken','confirme
  } finally {f.lib.close();f.original.close();vi.restoreAllMocks();}
  });
 
-test.each(['edited','changed-source','ambiguous'] as const)('identity repair does not override %s',async mode=>{
+test.each(['edited','changed-source','ambiguous','story-time'] as const)('identity repair does not override %s',async mode=>{
  const f=await inheritedFixture(true);
  try {
   await misselect(f);
   if(mode==='edited') { f.input.memories[0].content+=' new manual edit'; (f.input.memories[0] as import('./canonical').HostMemory).manualEdit=true; }
+  if(mode==='story-time') f.input.memories[0].storyTime='different story time';
   if(mode==='changed-source') f.input.messages[0].content+=' new source';
   if(mode==='ambiguous') {
    await confirmRecoveredSummaries(f.lib,await capture(f.lib,f.child.id),[f.stale.id]);
@@ -129,4 +144,23 @@ test('an aborted identity repair rolls back and is retried, with no duplicate-fa
   await synchronize(f.lib,f.input);
   expect((await capture(f.lib,f.child.id)).memories.find(m=>m.hostId==='leaf-0')!.id).toBe(f.good.id);
  } finally {f.lib.close();f.original.close();vi.restoreAllMocks();}
+});
+
+test('an edited higher-summary child list is not restored merely because its wording matches',async()=>{
+ const f=await inheritedFixture(true);
+ try {
+  const high=f.inherited.memories.find(m=>m.level===1)!;
+  const original=(await f.lib.get<Memory>('memories',high.owner))!;
+  const family={...original,...row('mem')}, copy={...high,...row('mr'),owner:family.id};
+  await f.lib.transaction(STORES,'readwrite',async tx=>{
+   await tx.add('memories',family);await tx.add('memory_revisions',copy);
+   const selections={...f.inherited.selection.selections};delete selections[high.owner];selections[family.id]=copy.id;
+   const selection={...row('mv'),branch:f.child.id,selections};await publishMemoryView(tx,selection);
+   await tx.put('branches',{...f.child,view:selection.id,epoch:f.child.epoch+1} as Branch);
+  });
+  f.input.memories.find(m=>m.level===1)!.children=[];
+  await synchronize(f.lib,f.input);
+  const highNow=(await capture(f.lib,f.child.id)).memories.find(m=>m.level===1)!;
+  expect(highNow.owner).toBe(family.id);expect(highNow.dependencies).toEqual([]);
+ }finally{f.lib.close();f.original.close();vi.restoreAllMocks();}
 });
