@@ -3,11 +3,11 @@ import { prepareGeneration } from './generation';
 
 const mocks = vi.hoisted(() => ({
   scope: 'chat-a', chat: [] as unknown[], active: true, installed: true,
-  backlog: vi.fn(), sync: vi.fn(), refresh: vi.fn(), recall: vi.fn(),
+  backlog: vi.fn(), sync: vi.fn(), history: vi.fn(), refresh: vi.fn(), recall: vi.fn(),
 }));
 vi.mock('@/api/settings', () => ({ engineActiveHere: () => mocks.active }));
 vi.mock('@/mnemosyne/bridge', () => ({ hostScope: () => mocks.scope,
-  dailyInstalled: () => mocks.installed, syncDaily: mocks.sync, preparePromptHistory: vi.fn().mockResolvedValue(false) }));
+  dailyInstalled: () => mocks.installed, syncDaily: mocks.sync, preparePromptHistory: mocks.history }));
 vi.mock('@/st/context', () => ({ getContext: () => ({ chat: mocks.chat }) }));
 vi.mock('./engine', () => ({ handleGenerationIntercept: mocks.backlog }));
 vi.mock('./inject', () => ({ refreshInjection: mocks.refresh }));
@@ -16,6 +16,7 @@ vi.mock('./vector/recall', () => ({ runVectorRecall: mocks.recall,
 beforeEach(() => {
   vi.resetAllMocks(); mocks.scope = 'chat-a'; mocks.chat = []; mocks.active = mocks.installed = true;
   mocks.backlog.mockResolvedValue(false); mocks.sync.mockResolvedValue(undefined);
+  mocks.history.mockResolvedValue(false);
   mocks.recall.mockResolvedValue(undefined);
 });
 function deferred() {
@@ -35,7 +36,7 @@ test('等待基础归档完成再刷新及召回，不使用防抖时长猜测',
   expect(abort).not.toHaveBeenCalled();
 });
 
-test.each(['backlog', 'sync', 'recall'] as const)('在 %s 等待期间切聊天只中止旧生成，不触碰新聊天槽', async stage => {
+test.each(['backlog', 'sync', 'history', 'recall'] as const)('在 %s 等待期间切聊天只中止旧生成，不触碰新聊天槽', async stage => {
   const pending = deferred(), abort = vi.fn(); mocks[stage].mockReturnValueOnce(pending.promise);
   const generation = prepareGeneration(abort, 'regenerate');
   await vi.waitFor(() => expect(mocks[stage]).toHaveBeenCalledOnce());

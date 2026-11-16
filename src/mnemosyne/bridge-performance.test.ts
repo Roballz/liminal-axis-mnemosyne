@@ -73,9 +73,15 @@ test('300-floor warm sync and unlink avoid body serialization/hashing, unrelated
 
 test('externally published projection and epoch-free archive flags survive cache reuse', async () => {
     let view = await setup();
+    const publication = vi.fn((next: number) => expect(bridge.dailyState.revision).toBe(next - 1));
+    await bridge.refreshDailyTables(publication);
+    expect(publication).not.toHaveBeenCalled();
     const created = await saveMemberships(lib, view, { mode: 'add', memories: [view.memories[0].id], eventIds: [], newTitle: '归档测试' });
-    await bridge.refreshDailyTables();
+    await bridge.refreshDailyTables(publication);
     const published = bridge.dailyState.revision;
+    expect(publication).toHaveBeenCalledExactlyOnceWith(published);
+    await bridge.refreshDailyTables(publication);
+    expect(publication).toHaveBeenCalledTimes(1);
     view = await bridge.syncDaily();
     expect(bridge.dailyState.revision).toBe(published);
     expect(bridge.syncedEventProjection(lib, view)?.cards[0].chain.id).toBe(created.created);

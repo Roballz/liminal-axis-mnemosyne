@@ -3,8 +3,8 @@ import { requestCompletion, requestViaMainApi, type ChatMsg } from '@/api/client
 import { getChannelForTask, engineActiveHere } from '@/api/settings';
 import { engineState } from '@/memory/engine';
 import { getContext } from '@/st/context';
-import { activeLibrary, libraryActivationGeneration } from './db';
-import { syncDaily, dailyState, hostScope, hostVersion } from './bridge';
+import { activeLibrary, libraryActivationGeneration, type Library } from './db';
+import { syncDaily, refreshDailyTables, dailyState, hostScope, hostVersion } from './bridge';
 import { eventView } from './events';
 import { manualEventState, eventPending, eventCoverageUpgradeNeeded, updateEventOverview } from './manual-events';
 import { check, type Branch } from './model';
@@ -12,6 +12,12 @@ import { settings, readDailySettings, eventOverviewMaxChars, eventBatchTokens, e
 export { settings } from './event-settings';
 export const jobState = reactive({ busy: false, status: '未运行', chars: 0, completed: 0, stopped: false });
 let stop = false;
+interface EventTrigger { scope: string; generation: number; activation: number; revision: number }
+let ownedPublication: EventTrigger | undefined;
+const eventTrigger = (): EventTrigger => ({ scope: hostScope(), generation: dailyState.generation,
+    activation: libraryActivationGeneration(), revision: dailyState.revision });
+const sameTriggerScope = (a: EventTrigger, b: EventTrigger) => a.scope === b.scope &&
+    a.generation === b.generation && a.activation === b.activation;
 export async function loadDailySettings() {
     const generation = libraryActivationGeneration();
     const lib = await activeLibrary(), next = await readDailySettings(lib);
@@ -34,22 +40,29 @@ export const sendDaily: Sender = async (messages) => {
 };
 export function stopDailyJob() { stop = true; jobState.stopped = true; jobState.status = '正在停止：等待当前请求返回，不再提交或发起下一批'; }
 export async function runEvents(manual = true, sender: Sender = sendDaily) {
+    await runEventJob(manual, sender);
+}
+async function runEventJob(manual: boolean, sender: Sender, isActive: () => boolean = () => true) {
     if (jobState.busy || manualEventState.busy)
         return;
     jobState.busy = true;
     stop = false;
     jobState.stopped = false;
     jobState.completed = 0;
+    let captured: EventTrigger | undefined, publishedLibrary: Library | undefined, capturedHost = '';
     try {
         const initial = await syncDaily();
         const lib = await activeLibrary();
+        check(isActive(), '事件任务已取消');
         const branchId = initial.branch.id;
         const target = initial.cutoff;
         const host = hostVersion(), scope = hostScope(), generation = dailyState.generation;
-        const guard = () => !stop && host === hostVersion() && generation === dailyState.generation;
+        captured = eventTrigger(); publishedLibrary = lib; capturedHost = host;
+        const guard = () => isActive() && !stop && host === hostVersion() && generation === dailyState.generation &&
+            captured!.activation === libraryActivationGeneration();
         const cards = (await eventView(lib, initial)).cards;
         const last = Math.max(0, ...cards.flatMap(c => c.progress.map(p => p.cutoff)));
-        if (!manual && target - last < settings.interval) return;
+        if (!manual && target - last < settings.interval) return captured;
         const pending = cards.filter(c => !c.blocked && (manual || !c.needsReview) && (eventPending(c) || manual && eventCoverageUpgradeNeeded(c))).map(c => c.chain.id);
         const blocked = cards.filter(c => c.blocked && eventPending(c));
         for (const id of pending) {
@@ -68,7 +81,8 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
                     jobState.chars = messages.reduce((n, m) => n + m.content.length, 0);
                     jobState.status = `更新概要 ${jobState.completed + 1} / ${pending.length} · 第 ${++batch} 批`;
                     return sender(messages);
-                }, guard, manual, () => !stop && scope === hostScope() && generation === dailyState.generation);
+                }, guard, manual, () => isActive() && !stop && scope === hostScope() && generation === dailyState.generation &&
+                    captured!.activation === libraryActivationGeneration());
             if (updated) jobState.completed++;
         }
         if (!stop) jobState.status = `批量整理完成：更新 ${jobState.completed} 条事件链` +
@@ -80,23 +94,80 @@ export async function runEvents(manual = true, sender: Sender = sendDaily) {
         jobState.status = String((error as Error).message);
     }
     finally {
-        jobState.busy = false;
+        // Event commits only change derived rows. Publish them once after the job,
+        // including saved chains before a stop/error, without a host rearchive.
+        try {
+            if (jobState.completed && captured && isActive() && capturedHost === hostVersion() &&
+                sameTriggerScope(captured, eventTrigger()) && publishedLibrary === await activeLibrary() && isActive()) {
+                // The bridge invokes this only at its synchronous publication
+                // boundary. Do not suppress independent revisions during its reads.
+                await refreshDailyTables(revision => { ownedPublication = { ...eventTrigger(), revision }; });
+            }
+        } catch (error) {
+            jobState.status += `；概要已保存，刷新未完成：${String((error as Error).message)}`;
+        } finally {
+            ownedPublication = undefined;
+            jobState.busy = false;
+        }
     }
+    return captured;
 }
+let disposeDailyJobs: (() => void) | undefined;
 export function bindDailyJobs() {
-    void loadDailySettings().catch(error => { jobState.status = String(error); });
-    watch(() => dailyState.revision, () => {
-        if (settings.eventsEnabled && engineActiveHere() && !jobState.busy && !engineState.running)
-            void runEvents(false);
-    });
-    const ctx = getContext();
-    if (!ctx)
-        return;
-    const event = ctx.eventTypes.GENERATION_ENDED;
-    if (event)
-        ctx.eventSource.on(event, () => {
-            // Disabled by default: enabling explicitly authorizes subsequent live model requests.
-            if (settings.eventsEnabled && engineActiveHere() && !jobState.busy && !engineState.running)
-                void runEvents(false);
+    disposeDailyJobs?.();
+    let active = true, loaded = false, pending: EventTrigger | undefined;
+    let automatic: Promise<EventTrigger | undefined> | undefined;
+    const drain = () => {
+        if (!active || !loaded || !pending || automatic) return;
+        if (!settings.eventsEnabled || !engineActiveHere() || !sameTriggerScope(pending, eventTrigger())) {
+            pending = undefined; return;
+        }
+        if (jobState.busy || manualEventState.busy || engineState.running || dailyState.pending) return;
+        const requested = pending; pending = undefined;
+        const task = runEventJob(false, sendDaily, () => active && sameTriggerScope(requested, eventTrigger()));
+        automatic = task;
+        void task.then(captured => {
+            // A revision emitted by the job's own initial sync is already part
+            // of its captured input; do not archive/check the same input twice.
+            if (jobState.stopped || pending && captured && sameTriggerScope(pending, captured) && pending.revision <= captured.revision)
+                pending = undefined;
+        }, error => {
+            if (active) jobState.status = String(error);
+        }).finally(() => {
+            if (automatic === task) automatic = undefined;
+            drain();
         });
+    };
+    const request = () => {
+        if (!active) return;
+        const next = eventTrigger();
+        if (ownedPublication && sameTriggerScope(next, ownedPublication) && next.revision === ownedPublication.revision) {
+            ownedPublication = undefined;
+            return;
+        }
+        if (loaded && (!settings.eventsEnabled || !engineActiveHere())) { pending = undefined; return; }
+        if (!next.scope) return;
+        pending = next; drain();
+    };
+    // Remember one latest notification while summary generation or manual review
+    // is busy. Idle transitions resume it without opening any plugin page.
+    const watches = [watch(() => dailyState.revision, request, { flush: 'sync' }),
+        watch(() => [engineState.running, manualEventState.busy, jobState.busy, dailyState.pending,
+            settings.eventsEnabled, engineActiveHere()], drain)];
+    const ctx = getContext();
+    const event = ctx?.eventTypes.GENERATION_ENDED;
+    if (event) ctx!.eventSource.on(event, request);
+    const dispose = () => {
+        if (!active) return;
+        active = false; pending = undefined;
+        for (const unwatch of watches) unwatch();
+        if (event) ctx!.eventSource.off?.(event, request);
+        if (typeof window !== 'undefined') window.removeEventListener?.('pagehide', dispose);
+    };
+    disposeDailyJobs = dispose;
+    if (typeof window !== 'undefined') window.addEventListener?.('pagehide', dispose, { once: true });
+    void loadDailySettings().then(() => { loaded = true; drain(); }).catch(error => {
+        if (active) jobState.status = String(error);
+    });
+    return dispose;
 }

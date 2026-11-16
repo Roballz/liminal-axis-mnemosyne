@@ -111,7 +111,9 @@ test('single-chain projection reads only its own history and rejects a chain fro
     out.events = Array.from({ length: 20 }, (_, i) => ({ ...structuredClone(out.events[0]), title: `事件${i}` }));
     await commitEventBatch(lib, batch, out);
     const view = await capture(lib, branch.id), all = await eventView(lib, view), target = all.cards[9];
-    const reads = vi.spyOn(Transaction.prototype, 'all');
+    // Count native indexed reads, including the small current-revision metadata
+    // scan; old overview payloads no longer need to be materialized here.
+    const reads = vi.spyOn(Transaction.prototype, 'rawAll');
     try {
       const single = await eventView(lib, view, false, target.chain.id);
       expect(single.cards).toEqual([target]);

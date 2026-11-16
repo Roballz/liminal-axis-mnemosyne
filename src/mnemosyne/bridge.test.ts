@@ -67,6 +67,60 @@ test('real bridge archives once, persists independent host IDs, and exposes cano
     expect(dailyState.pending).toBe(false);
 });
 
+test('reopening an unchanged saved chat reads its current archive without saving the host or replaying writes', async () => {
+    const original = await syncDaily();
+    const name = lib.db.name;
+    dispose?.(); lib.close();
+    lib = await Library.open(name);
+    await activateLibrary(lib);
+    ctx.chat = JSON.parse(JSON.stringify(ctx.chat));
+    ctx.chatMetadata = JSON.parse(JSON.stringify(ctx.chatMetadata));
+    dispose = bindDaily();
+    vi.mocked(ctx.saveChat).mockClear(); vi.mocked(ctx.saveMetadata).mockClear();
+    const synchronize = vi.spyOn(canonical, 'synchronize'), transactions = vi.spyOn(lib, 'transaction');
+    const reads = vi.spyOn(Transaction.prototype, 'rawGet');
+    const reopened = await syncDaily();
+    expect(reopened).toEqual(original);
+    expect(ctx.saveChat).not.toHaveBeenCalled();
+    expect(ctx.saveMetadata).not.toHaveBeenCalled();
+    expect(synchronize).not.toHaveBeenCalled();
+    expect(transactions.mock.calls.every(([, mode]) => mode === 'readonly')).toBe(true);
+    expect(reads.mock.calls.filter(([store]) => store === 'source_bodies')).toHaveLength(original.refs.length);
+    expect(reads.mock.calls.filter(([store]) => store === 'memory_revisions')).toHaveLength(original.memories.length);
+    expect(dailyState.pending).toBe(false);
+    expect(canonicalLeaves().map(m => m.leafId)).toEqual(original.memories.map(m => m.id));
+});
+
+test('switching back to an unchanged saved chat reuses its archive without resaving either chat', async () => {
+    const original = await syncDaily();
+    const saved = { chat: ctx.chat, metadata: ctx.chatMetadata };
+    ctx.chat = [message(true, '另一个聊天'), message(false, '独立答复')];
+    ctx.chatMetadata = {}; ctx.getCurrentChatId = () => 'second-saved-chat';
+    invalidateDaily(); await syncDaily();
+    ctx.chat = saved.chat; ctx.chatMetadata = saved.metadata; ctx.getCurrentChatId = () => 'synthetic';
+    invalidateDaily();
+    vi.mocked(ctx.saveChat).mockClear(); vi.mocked(ctx.saveMetadata).mockClear();
+    const synchronize = vi.spyOn(canonical, 'synchronize');
+    expect(await syncDaily()).toEqual(original);
+    expect(synchronize).not.toHaveBeenCalled();
+    expect(ctx.saveChat).not.toHaveBeenCalled(); expect(ctx.saveMetadata).not.toHaveBeenCalled();
+});
+
+test('cold reopen still reconciles an offline body edit even when the saved archive marker and text length match', async () => {
+    const original = await syncDaily();
+    dispose?.();
+    ctx.chat[1].mes = '另一答复'; // Same length as 合成答复, with the old saved marker unchanged.
+    dispose = bindDaily();
+    vi.mocked(ctx.saveChat).mockClear();
+    const synchronize = vi.spyOn(canonical, 'synchronize');
+    const edited = await syncDaily();
+    expect(synchronize).toHaveBeenCalledTimes(1);
+    expect(ctx.saveChat).toHaveBeenCalledTimes(1);
+    expect(edited.refs[1].revision).not.toBe(original.refs[1].revision);
+    expect(edited.sources.get(edited.refs[1].revision)?.content).toBe('另一答复');
+    expect(edited.memories).toEqual([]);
+});
+
 test('opening summary review reuses the checked archive without rereading bodies or saving the host', async () => {
     const view = await syncDaily();
     const captureSpy = vi.spyOn(canonical, 'capture'), statusSpy = vi.spyOn(canonical, 'statuses');

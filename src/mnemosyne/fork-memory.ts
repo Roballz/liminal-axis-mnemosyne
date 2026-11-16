@@ -82,9 +82,14 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         if (parent.branch.sourceRoleRepairSchema === 1 && parent.branch.sourceRoleRepairs?.length) {
             const sources = await summarySources(tx, memory);
             const resolved = sources.map(resolveRef);
-            if (resolved.every(Boolean) && sources.some((r, i) => r.revision !== resolved[i]!.revision)) {
-                const coverage = memory.coverage.map(resolveRef);
-                if (coverage.every(Boolean)) await tx.add('reviews', { ...row('review'), story: branch.story,
+            const coverage = memory.coverage.map(resolveRef);
+            // Coverage is independent provenance: a role repair may affect a
+            // covered message without appearing in the explicit inputs (or in
+            // a dependency-only summary's empty source list).
+            if (resolved.every(Boolean) && coverage.every(Boolean) &&
+                (sources.some((r, i) => r.revision !== resolved[i]!.revision) ||
+                    memory.coverage.some((r, i) => r.revision !== coverage[i]!.revision))) {
+                await tx.add('reviews', { ...row('review'), story: branch.story,
                     branch: branch.id, owner: copied.id, snapshot: branch.head, decision: 'compatible', origin: 'manual',
                     // An explicit copied dependency review below has precedence over role-only compatibility.
                     created: 0, reviewSchema: 2, sourceRefs: resolved, coverage, dependencies: copied.dependencies } as Review);
@@ -101,14 +106,23 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
     await Promise.all([...new Set(modern.flatMap(({ memory, review }) =>
         [...memory.dependencies, ...(Array.isArray(review.dependencies) ? review.dependencies : [])]))]
         .filter(id => typeof id === 'string' && id).map(readRevision));
-    const legacyBases = [...new Set(modern.filter(({ memory }) =>
+    const legacyBases = [...new Set(inherited.filter(({ memory }) =>
         !memory.sourceRecovery && !memory.inputRefs.length && !dependencyOnly(memory)).map(({ memory }) => memory.basis))];
     const snapshots = (await Promise.all(legacyBases.map(id => tx.get<Snapshot>('history_snapshots', id))))
         .filter((snapshot): snapshot is Snapshot => !!snapshot);
     const blocks = (await Promise.all([...new Set(snapshots.flatMap(snapshot => snapshot.blocks))]
         .map(id => tx.get<Block>('manifest_blocks', id)))).filter((block): block is Block => !!block);
     const prefixes = sourcePrefixes(parent.branch, parent.refs, snapshots, blocks);
-    for (const { review, owner, memory } of inherited) {
+    const positions = new Map(parent.refs.map((ref, i) => [ref.message, i]));
+    const approvedRefs = (refs: SourceRef[], contiguous = false) => {
+        const indexes = refs.map(ref => positions.get(ref.message) ?? -1);
+        if (indexes.some((position, i) => position < 0 || i > 0 &&
+            (contiguous ? position !== indexes[i - 1] + 1 : position <= indexes[i - 1]))) return;
+        return indexes.map(position => parent.refs[position]);
+    };
+    for (const item of inherited) {
+        const { owner, memory } = item;
+        let { review } = item;
         if (review.reviewSchema === 2) {
             const basis = prefixes.get(memory.basis);
             const required = !memory.inputRefs.length && !dependencyOnly(memory)
@@ -119,6 +133,22 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
             if (!reviewMatchesMemory(review, memory, matchesSources, revisionRows)) continue;
         } else if (['reviewSchema', 'sourceRefs', 'coverage', 'dependencies'].some(key => key in review) ||
             review.snapshot !== parent.snapshot.id || review.story !== memory.story || review.branch !== memory.branch) continue;
+        else if (review.origin === 'manual' && !memory.sourceRecovery && parent.cutoff === parent.snapshot.length) {
+            // A copied old full-snapshot human approval should not disappear just
+            // because the host normalizes swipe indexes on first child sync. Pin
+            // its exact approved source revisions before leaving the parent; no
+            // floor/text matching and no approval of a different source identity.
+            const basis = prefixes.get(memory.basis);
+            const required = basis && (memory.anchor ? basis.through(memory.anchor) : basis.length);
+            const prefix = required !== undefined && (!memory.anchor || required > 0)
+                ? parent.refs.slice(0, required) : undefined;
+            const sourceRefs = !memory.inputRefs.length && !dependencyOnly(memory)
+                ? prefix && basis!.matchesMessages(prefix, required!) ? prefix : undefined
+                : approvedRefs(memory.inputRefs);
+            const coverage = approvedRefs(memory.coverage, true);
+            if (sourceRefs && coverage) review = { ...review, reviewSchema: 2,
+                sourceRefs, coverage, dependencies: memory.dependencies };
+        }
         const sourceRefs = review.sourceRefs?.map(resolveRef);
         const coverage = review.coverage?.map(resolveRef);
         if (sourceRefs?.some(r => !r) || coverage?.some(r => !r)) continue;

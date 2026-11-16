@@ -16,6 +16,9 @@ import * as canonical from './canonical';
 import { exportLibrary } from './migration';
 import { row, type MemoryRevision, type Review, type Branch } from './model';
 import { REPLY_FINALITY_KEY } from './reply-finality';
+import * as engine from '@/memory/engine';
+import * as embedding from '@/memory/vector/embed';
+import * as knowledge from '@/memory/vector/knowledge';
 
 let lib: Library, ctx: STContext, dispose: (() => void) | undefined;
 let emit: (key: string, ...args: any[]) => Promise<void>;
@@ -51,10 +54,74 @@ beforeEach(async () => {
 afterEach(() => { dispose?.(); lib.close(); Object.assign(apiSettings, JSON.parse(JSON.stringify(settings))); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function start(type = 'swipe') {
     // TT 007abf7: swipe slot advances before MESSAGE_SWIPED, then GENERATION_STARTED.
-    if (type === 'swipe') { ctx.chat[3].swipe_id = 1; await emit('MESSAGE_SWIPED', 3); }
+    if (type === 'swipe') { const tail = ctx.chat.length - 1; ctx.chat[tail].swipe_id = 1; await emit('MESSAGE_SWIPED', tail); }
     if (type === 'regenerate') ctx.chat.pop();
     await emit('GENERATION_STARTED', type);
 }
+
+/** Keep the real Query prompt builder/transport boundary; replace only external
+ * model/index IO so an archival failure can still exercise the knowledge route. */
+function queryRequest(windowStart: number) {
+    apiSettings.vector.enabled = true;
+    Object.assign(apiSettings.vector.knowledge, { enabled: true, count: 1, threshold: 0, maxChars: 1000 });
+    Object.assign(apiSettings.vector.queryRewrite, { url: 'https://synthetic.invalid/v1', model: 'synthetic', retries: 0 });
+    ctx.getRequestHeaders = () => ({ 'Content-Type': 'application/json' });
+    vi.spyOn(engine, 'resolveKeepStart').mockReturnValue(windowStart);
+    vi.spyOn(embedding, 'embedTexts').mockResolvedValue([new Float32Array([1, 0])]);
+    vi.spyOn(knowledge, 'listKnowledgeMetadata').mockResolvedValue([{ id: 'synthetic-file', database: currentVectorDb()!,
+        name: '合成设定', delimiter: '===', chunkCount: 1, enabled: true, embedding: knowledge.embeddingIdentity(), revision: '1' }]);
+    vi.spyOn(knowledge, 'searchKnowledge').mockResolvedValue({ text: '', status: '未命中', hits: [] });
+    return vi.spyOn(embedding, 'fetchWithTimeoutRetry').mockImplementation(async () =>
+        Response.json({ choices: [{ message: { content: 'INTENT: 查找当前剧情线索\nQ: 合成线索' } }] }));
+}
+
+test.each(['normal', 'regenerate', 'swipe'])('%s Query request includes verified leaf/higher history before transport and excludes the replaced tail', async type => {
+    ctx.chat[3].extra!.bbs_leaf = leaf('second-history', '第二条历史摘要');
+    ctx.chat[3].is_system = true; ctx.chat[3].extra!.bbs_hidden = true;
+    ctx.chat.push(message(true, '最新用户输入'), message(false, '本轮将被替换的末楼正文'));
+    ctx.chat[5].swipe_id = 0; ctx.chat[5].swipes = [ctx.chat[5].mes];
+    ctx.chat[5].extra!.bbs_leaf = leaf('tail', '本轮旧页摘要');
+    memory.summaries.push({ id: 'historical-high', text: '独立且完整的历史总结', level: 1, auto: true,
+        childIds: ['second-history'], createdAt: 1 },
+        { id: 'tail-parent', text: '包含旧末楼的总结', level: 1, auto: true, childIds: ['history', 'tail'], createdAt: 1 });
+    await syncDaily();
+    const request = queryRequest(4);
+    await start(type); await prepareGeneration(vi.fn(), type);
+    expect(request).toHaveBeenCalledOnce();
+    const sent = JSON.parse(request.mock.calls[0][1].body as string).messages as { role: string; content: string }[];
+    expect(sent[0].content).toContain('[历史剧情摘要]');
+    expect(sent[0].content).toContain('未受影响的历史摘要');
+    expect(sent[0].content).toContain('独立且完整的历史总结');
+    const all = sent.map(m => m.content).join('\n');
+    expect(all).toContain('最新用户输入');
+    expect(all).not.toContain('本轮将被替换的末楼正文');
+    expect(all).not.toContain('本轮旧页摘要');
+    expect(all).not.toContain('包含旧末楼的总结');
+    expect(fetch).not.toHaveBeenCalled();
+});
+
+test.each(['private', 'excluded', 'review', 'changed-prefix', 'cold'] as const)('swipe Query cannot use %s history through the prefix fallback', async mode => {
+    memory.summaries.push({ id: 'sensitive-high', text: '对应的历史总结', level: 1, auto: true, childIds: ['history'], createdAt: 1 });
+    const view = await syncDaily();
+    if (['private', 'excluded', 'review'].includes(mode)) {
+        const prior = view.memories.find(m => m.hostId === 'history')!;
+        await lib.transaction(['memory_revisions'], 'readwrite', tx => tx.put('memory_revisions', { ...prior,
+            ...(mode === 'private' ? { visibility: 'private' } : mode === 'excluded' ? { recall: false }
+                : { sourceRecovery: { version: 1, reason: 'missing_basis', snapshot: 'missing-proof' } }),
+        } as MemoryRevision));
+    }
+    if (mode === 'cold') { dispose?.(); dispose = bindDaily(); }
+    const request = queryRequest(2);
+    await start();
+    if (mode === 'changed-prefix') ctx.chat[0].mes += ' changed';
+    await prepareGeneration(vi.fn(), 'swipe');
+    expect(request).toHaveBeenCalledOnce();
+    const sent = JSON.parse(request.mock.calls[0][1].body as string).messages;
+    expect(sent[0].content).not.toContain('未受影响的历史摘要');
+    expect(sent[0].content).not.toContain('对应的历史总结');
+    expect(summaryAllowed('history')).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+});
 
 test.each([false, true])('real generation/bridge/recall: vector=%s normal, swipe and regenerate retain history', async enabled => {
     apiSettings.vector.enabled = enabled;

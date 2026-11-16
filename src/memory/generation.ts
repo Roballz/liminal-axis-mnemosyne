@@ -14,6 +14,7 @@ export async function prepareGeneration(abort: (immediately: boolean) => void, t
     abort(true);
     return false;
   };
+  let prefixPrepared = false;
   try {
     if (await handleGenerationIntercept(type, abort) || !sameChat()) return;
     if (!shouldRecallForType(type)) return;
@@ -26,16 +27,21 @@ export async function prepareGeneration(abort: (immediately: boolean) => void, t
         console.warn('[柏宝书] 生成前记忆同步失败(仅使用仍有效的注入)', error);
       }
       if (!sameChat()) return;
+      // Query Rewrite builds its own history before the main reply prompt. A
+      // not-yet-created swipe can use only the checked read-only prefix, so make
+      // that permission available before optional recall starts as well.
+      try { prefixPrepared = await preparePromptHistory(type); }
+      catch (error) { console.warn('[柏宝书] 生成前历史核对失败(不使用未核实摘要)', error); }
+      if (!sameChat()) return;
       refreshInjection();
     }
     await runVectorRecall();
     if (!sameChat()) return;
-    // Optional recall may attempt another full sync. Recover the read-only prefix
-    // afterwards, without ever accepting the not-yet-created swipe as an archive.
-    if (engineActiveHere() && dailyInstalled()) {
-      const prepared = await preparePromptHistory(type);
-      if (!sameChat()) return;
-      if (prepared) refreshInjection();
+    // Optional recall may clear the full projection on a failed sync. Reuse only
+    // the permission already pinned to this swipe; re-preparing here could grant
+    // a later same-chat generation after the original run changed mid-request.
+    if (prefixPrepared && engineActiveHere() && dailyInstalled()) {
+      refreshInjection();
     }
   } catch (error) {
     if (!sameChat()) return;

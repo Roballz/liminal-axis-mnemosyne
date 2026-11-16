@@ -172,10 +172,22 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
         };
         for (const chain of chains) {
             const compact = working?.rows.get(chain.id);
+            const readRevisions = async () => {
+                if (!live || includeHistory) return tx.all<EventRevision>('event_revisions', 'owner', chain.id);
+                // Cold startup needs one current overview, not every historical
+                // shared text/reference payload. Metadata keeps epoch inline.
+                const rows = await tx.rawAll<EventRevision>('event_revisions', 'owner', chain.id);
+                let latest: EventRevision | undefined;
+                for (const row of rows) if (!latest || row.epoch > latest.epoch) latest = row;
+                // rawAll is in primary-key order; retain its first equal-epoch
+                // row, matching the previous stable descending epoch sort.
+                const revision = latest && await tx.get<EventRevision>('event_revisions', latest.id);
+                return revision ? [revision] : [];
+            };
             const [revisions, memberships, allProgress] = compact
                 ? [compact.revision ? [compact.revision] : [], [...compact.members.values()], [...compact.progress.values()]]
                 : await Promise.all([
-                tx.all<EventRevision>('event_revisions', 'owner', chain.id),
+                readRevisions(),
                 tx.all<Membership>('event_memberships', 'owner', chain.id),
                 tx.all<Progress>('event_progress', 'owner', chain.id),
             ]);
