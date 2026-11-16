@@ -102,7 +102,7 @@ test('size diagnosis executes read-only in the Worker and returns only aggregate
 
 test('raw export/import jobs work without a native disk and return only Blob or verified library identity', async () => {
     const { lib } = await fixture(2);
-    const setItem = vi.fn(); vi.stubGlobal('localStorage', { getItem: () => lib.db.name, setItem });
+    const setItem = vi.fn(); vi.stubGlobal('localStorage', { getItem: (key: string) => key === ACTIVE_KEY ? lib.db.name : null, setItem });
     try {
         const result = await workerJob({ kind: 'export', library: lib.db.name });
         if (result.state !== 'exported') throw new Error('missing export');
@@ -148,7 +148,7 @@ test.each(['duplicate-json', 'checksum', 'body'] as const)('invalid %s import is
 
 test('a revoked import guard leaves the fully verified new library unactivated and the original intact', async () => {
     const { lib } = await fixture(1), setItem = vi.fn();
-    vi.stubGlobal('localStorage', { getItem: () => lib.db.name, setItem });
+    vi.stubGlobal('localStorage', { getItem: (key: string) => key === ACTIVE_KEY ? lib.db.name : null, setItem });
     try {
         const original = await exportLibrary(lib), before = new Set((await indexedDB.databases()).map(db => db.name));
         let checks = 0;

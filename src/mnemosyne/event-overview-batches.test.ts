@@ -171,7 +171,9 @@ test('settings default/migration, Unicode limit and backup roundtrip preserve ol
   const { lib } = await fixture(1);
   let restored: typeof lib | undefined;
   try {
-    vi.stubGlobal('localStorage', { setItem: vi.fn(), getItem: vi.fn(), removeItem: vi.fn() });
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', { setItem: (key: string, value: string) => storage.set(key, value),
+      getItem: (key: string) => storage.get(key) ?? null, removeItem: (key: string) => storage.delete(key) });
     await activateLibrary(lib);
     Object.assign(settings, dailySettingsDefaults);
     expect(settings.overviewMaxChars).toBe(1000); expect(settings.overviewBatchTokens).toBe(80000);

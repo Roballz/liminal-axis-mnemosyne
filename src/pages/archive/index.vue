@@ -2,6 +2,7 @@
 import ReplyBlockerPanel from "@/components/ReplyBlockerPanel.vue";
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import CoreBackupPanel from '@/components/CoreBackupPanel.vue';
+import CoreLibraryPanel from '@/components/CoreLibraryPanel.vue';
 import { shallowRef, ref, watch, computed, onBeforeUnmount } from 'vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import {
@@ -429,6 +430,7 @@ async function copyKnowledge() {
       </div>
     </details>
     <CoreBackupPanel />
+    <CoreLibraryPanel />
     <details class="mn-card">
       <summary>数据包边界与恢复</summary>
       <p>核心包：正文/摘要及历史版本、事件与回执、自定义表、宿主映射、非秘密设置。</p>

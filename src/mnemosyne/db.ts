@@ -1,3 +1,5 @@
+import { DB_PREFIX, ACTIVE_KEY, assertLibraryEnabled, selectedLibraryName } from './library-policy';
+export { DB_PREFIX, ACTIVE_KEY } from './library-policy';
 import { SharedPayloads, SHARED_META, SHARED_STORE, sharedStore, sharedRow } from './shared-payloads';
 import { STORES, type Store, type Row, check, id } from './model';
 import { readDailySettings, settings } from './event-settings';
@@ -5,8 +7,6 @@ import { LibraryChanges, TransactionChanges } from './change-journal';
 import { materializeMemoryView } from './memory-selections';
 import type { CompactMemoryView, MemoryView, MemorySelectionNode } from './model';
 import { isEvidenceStore, rowRetentionRoots, RetentionRootsCache, RetentionTransaction, RETENTION_CONTROL_STORE } from './retention-roots';
-export const DB_PREFIX = 'mnemosyne_daily_';
-export const ACTIVE_KEY = 'mnemosyne_daily_active_v1';
 export const DB_VERSION = 6;
 export type StoreIndex = 'story' | 'branch' | 'owner' | 'branch_host';
 export function request<T>(r: IDBRequest<T>): Promise<T> {
@@ -173,6 +173,11 @@ export class Library {
         });
     }
     async transaction<T>(stores: readonly Store[], mode: IDBTransactionMode, fn: (tx: Transaction) => Promise<T>): Promise<T> {
+        if (mode === 'readwrite') {
+            assertLibraryEnabled(this.db.name);
+            if (typeof localStorage !== 'undefined' && activeName === this.db.name)
+                check(selectedLibraryName() === this.db.name, '活动库已在其他页面切换，已停止向旧库写入');
+        }
         const evidence = stores.some(isEvidenceStore);
         const included = [...new Set([...stores, ...(stores.includes('memory_views') ? ['memory_selection_nodes'] : []),
             ...(stores.some(sharedStore) ? [SHARED_STORE] : []), RETENTION_CONTROL_STORE])];
@@ -220,20 +225,28 @@ export class Library {
     close() { this.db.close(); }
 }
 let active: Promise<Library> | undefined;
+let activeName: string | undefined;
 let activationGeneration = 0;
 /** Synchronous token: checking it must not yield to another activation. */
 export const libraryActivationGeneration = () => activationGeneration;
 export function activeLibrary(): Promise<Library> {
-    return active ??= Library.open(localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`);
+    const selected = selectedLibraryName();
+    assertLibraryEnabled(selected);
+    check(!active || activeName === selected, '活动库已在其他页面切换，请重新加载插件；已停止使用旧连接');
+    if (!active) { activeName = selected; active = Library.open(selected); }
+    return active;
 }
 export async function activateLibrary(lib: Library, isCurrent = () => true, barrier?: (publish: () => void) => Promise<void>) {
+    assertLibraryEnabled(lib.db.name);
     const restoredSettings = await readDailySettings(lib);
     check(isCurrent(), '恢复页面已改变，已验证的新库未启用，原库保留');
     // Durable selector changes only after validation and import transaction completion.
     const previous = active;
     const publish = () => {
         check(isCurrent(), '档案已改变，新库未启用，原库保留');
+        assertLibraryEnabled(lib.db.name);
         localStorage.setItem(ACTIVE_KEY, lib.db.name);
+        activeName = lib.db.name;
         active = Promise.resolve(lib);
         activationGeneration++;
         Object.assign(settings, restoredSettings);
