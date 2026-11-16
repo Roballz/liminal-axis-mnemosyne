@@ -3,8 +3,9 @@ import { exportLibrary, restoreLibrary, validateCurrentData, type Package } from
 import { type Library, DB_PREFIX, activateLibrary } from './db';
 import { check, fingerprint } from './model';
 import { parseStrictJson } from './json';
+import { archivePackage, backupBankKey, exportArchive, packageData, validateArchive, type ArchivePackage, type CorePackage } from './archive-package';
 
-export const AUTO_BACKUP_KEEP = 20;
+export const AUTO_BACKUP_KEEP = 10;
 export const AUTO_BACKUP_INTERVAL = 30 * 60 * 1000;
 export const BACKUP_MAX_MIB = 512;
 export const BACKUP_MAX_BYTES = BACKUP_MAX_MIB * 1024 * 1024;
@@ -23,10 +24,11 @@ export interface BackupFile {
     savedAt: number;
     sourceLibrary: string;
     dataDigest: string;
-    pack: Package;
+    pack: CorePackage;
     checksum: string;
 }
 export interface BackupPreview {
+    archive?: ArchivePackage['archive'];
     key: string;
     kind: Kind;
     savedAt: number;
@@ -61,8 +63,11 @@ function previewHints(value: unknown): BackupPreview[] {
             entry.counts && typeof entry.counts === 'object' && Object.keys(entry.counts).length <= 64 &&
             Object.values(entry.counts).every(n => Number.isSafeInteger(n) && n >= 0) &&
             ['stories', 'branches', 'source_messages', 'memories', 'event_chains', 'custom_table_rows'].every(k => Number.isSafeInteger((entry.counts as any)[k]));
-    }).map(({ key, kind, savedAt, snapshotAt, sourceLibrary, bytes, counts, checksum }) =>
-        ({ key, kind, savedAt, snapshotAt, sourceLibrary, bytes, counts, checksum }));
+    }).map(({ key, kind, savedAt, snapshotAt, sourceLibrary, bytes, counts, checksum, archive }) =>
+        ({ key, kind, savedAt, snapshotAt, sourceLibrary, bytes, counts, checksum,
+            ...(archive && typeof archive.branch === 'string' && typeof archive.label === 'string' &&
+                typeof archive.story === 'string' && Array.isArray(archive.scopes) && archive.scopes.every(s => typeof s === 'string')
+                ? { archive } : {}) }));
 }
 export type BackupOutcome = { state: 'saved'; entry: BackupPreview; warning?: string } | { state: 'unchanged'; entry?: BackupPreview; warning?: string } | { state: 'too-soon' | 'empty' };
 function latestBaseline(keys: string[]): string | undefined {
@@ -82,12 +87,13 @@ export function backupFailure(e: unknown): string {
 export function backupSettings(value: unknown): BackupSettings {
     if (value === undefined) return { schema: 1, enabled: false, keep: AUTO_BACKUP_KEEP };
     const v = value as BackupSettings;
-    check(v && v.schema === 1 && typeof v.enabled === 'boolean' && [5, 10, AUTO_BACKUP_KEEP].includes(v.keep), '磁盘备份设置损坏，已停止自动备份');
-    // Upgrade old 5/10-copy settings in memory without changing the enabled flag.
+    check(v && v.schema === 1 && typeof v.enabled === 'boolean' && [5, 10, 20].includes(v.keep), '磁盘备份设置损坏，已停止自动备份');
+    // Keep the enabled flag, migrate every old setting to ten automatic copies per archive.
     return { schema: 1, enabled: v.enabled, keep: AUTO_BACKUP_KEEP };
 }
 
-async function validatePackage(value: unknown): Promise<Package> {
+async function validatePackage(value: unknown): Promise<CorePackage> {
+    if (archivePackage(value)) return validateArchive(value);
     const pack = value as Package;
     await validateCurrentData(pack);
     const { checksum, ...base } = pack;
@@ -96,7 +102,8 @@ async function validatePackage(value: unknown): Promise<Package> {
     return pack;
 }
 
-function assertNonempty(pack: Package) {
+function assertNonempty(value: CorePackage) {
+    const pack = packageData(value);
     check(pack.counts.stories > 0 && pack.counts.branches > 0 &&
         pack.counts.source_messages + pack.counts.memories + pack.counts.event_chains + pack.counts.custom_table_rows > 0,
     '当前核心库为空，停止备份和轮换；请先从已有备份恢复');
@@ -156,14 +163,16 @@ export class CoreBackups {
         check(value && Object.keys(value).sort().join() === ['format', 'kind', 'savedAt', 'sourceLibrary', 'dataDigest', 'pack', 'checksum'].sort().join(), '备份封装字段不完整');
         check(value.format === OWNER && value.kind === match[1] && value.savedAt === Number(match[2]) &&
             typeof value.sourceLibrary === 'string' && value.sourceLibrary.startsWith(DB_PREFIX), '备份归属或日期不匹配');
-        check((await fingerprint(value.sourceLibrary)).slice(0, 16) === match[3], '备份库分组不匹配');
+        check((await fingerprint(backupBankKey(value.sourceLibrary, archivePackage(value.pack) ? value.pack.archive.branch : undefined))).slice(0, 16) === match[3], '备份档案分组不匹配');
         const { checksum, ...base } = value;
         check(typeof checksum === 'string' && await fingerprint(base) === checksum, '磁盘备份校验和不匹配');
         await validatePackage(value.pack);
-        check(value.dataDigest === await fingerprint(value.pack.data), '备份数据摘要不匹配');
+        const pack = packageData(value.pack);
+        check(value.dataDigest === await fingerprint(pack.data), '备份数据摘要不匹配');
         assertNonempty(value.pack);
-        const entry = { key, kind: value.kind, savedAt: value.savedAt, snapshotAt: value.pack.created,
-            sourceLibrary: value.sourceLibrary, bytes: blob.size, counts: value.pack.counts, checksum };
+        const entry = { key, kind: value.kind, savedAt: value.savedAt, snapshotAt: pack.created,
+            sourceLibrary: value.sourceLibrary, bytes: blob.size, counts: pack.counts, checksum,
+            ...(archivePackage(value.pack) ? { archive: value.pack.archive } : {}) };
         this.previews.set(key, entry);
         return { file: value, entry };
     }
@@ -202,11 +211,12 @@ export class CoreBackups {
         try { await this.disk.writePreviews({ schema: 1, entries }); } catch { /* Filename-only fallback remains available. */ }
     }
 
-    save(lib: Library, kind: BackupSaveKind, keep: typeof AUTO_BACKUP_KEEP = AUTO_BACKUP_KEEP, isCurrent: BackupGuard = () => true, onVerified?: (entry: BackupPreview, unchanged?: true) => void): Promise<BackupOutcome> {
+    save(lib: Library, kind: BackupSaveKind, keep: typeof AUTO_BACKUP_KEEP = AUTO_BACKUP_KEEP, isCurrent: BackupGuard = () => true,
+        onVerified?: (entry: BackupPreview, unchanged?: true) => void, branch?: string): Promise<BackupOutcome> {
         return this.serial(async () => {
-            check(keep === AUTO_BACKUP_KEEP, '自动备份固定保留最近 20 份');
+            check(keep === AUTO_BACKUP_KEEP, '每个档案固定保留最近 10 份自动备份');
             const keys = await this.keys();
-            const bank = (await fingerprint(lib.db.name)).slice(0, 16);
+            const bank = (await fingerprint(backupBankKey(lib.db.name, branch))).slice(0, 16);
             const bankKeys = keys.filter(k => KEY.exec(k)![3] === bank);
             const autos = bankKeys.filter(k => k.startsWith('auto-'));
             if (kind === 'auto' && autos.length && this.now() - Number(KEY.exec(autos[0])![2]) < AUTO_BACKUP_INTERVAL)
@@ -220,24 +230,24 @@ export class CoreBackups {
             const previousDigest = previous?.digest;
             // The preparation frame owns the full snapshot. Only a Blob and small
             // metadata survive into publication, which parses a separate readback.
-            const prepared = await this.prepareLibrary(lib, kind, previousDigest, keys, isCurrent);
+            const prepared = await this.prepareLibrary(lib, kind, previousDigest, keys, isCurrent, branch);
             if ('state' in prepared) {
                 if (prepared.state === 'empty' || !previous) return prepared;
                 // A prior publication may have succeeded before rotation was interrupted.
                 // Unchanged data still validates that baseline and resumes its pending cleanup.
                 onVerified?.(previous.entry, true);
-                const warning = await this.rotate(lib, bank, keep, previous.entry.key, witnesses, isCurrent);
+                const warning = await this.rotate(lib, bank, keep, previous.entry.key, witnesses, isCurrent, branch);
                 return { state: 'unchanged', entry: previous.entry, ...(warning ? { warning } : {}) };
             }
             const entry = await this.publish(prepared, isCurrent, kind === 'auto' ? witnesses : undefined, onVerified);
             if (kind !== 'auto') return { state: 'saved', entry };
-            const warning = await this.rotate(lib, bank, keep, entry.key, witnesses, isCurrent);
+            const warning = await this.rotate(lib, bank, keep, entry.key, witnesses, isCurrent, branch);
             return { state: 'saved', entry, ...(warning ? { warning } : {}) };
         });
     }
 
     private async rotate(lib: Library, bank: string, keep: number, published: string,
-        witnesses: Map<string, FileWitness>, isCurrent: BackupGuard): Promise<string | undefined> {
+        witnesses: Map<string, FileWitness>, isCurrent: BackupGuard, branch?: string): Promise<string | undefined> {
         try {
             const automatic = (await this.keys()).filter(k => k.startsWith('auto-') && KEY.exec(k)![3] === bank);
             if (automatic.length > keep) {
@@ -250,7 +260,7 @@ export class CoreBackups {
                 if (key === published) continue;
                 check(await isCurrent(), '档案状态改变，保留新备份并暂停轮换');
                 const old = await this.read(key);
-                check(old.file.kind === 'auto' && old.file.sourceLibrary === lib.db.name, '轮换文件归属不匹配');
+                check(old.file.kind === 'auto' && old.file.sourceLibrary === lib.db.name && old.entry.archive?.branch === branch, '轮换文件归属不匹配');
                 check(await isCurrent(), '档案状态改变，保留新备份并暂停轮换');
                 await this.disk.remove(key);
                 this.previews.delete(key);
@@ -268,13 +278,14 @@ export class CoreBackups {
     }
 
     private async prepareLibrary(lib: Library, kind: BackupSaveKind, previousDigest: string | undefined,
-        keys: string[], isCurrent: BackupGuard): Promise<PreparedBackup | { state: 'empty' | 'unchanged' }> {
-        const pack = await exportLibrary(lib); // one consistent readonly transaction
-        if (kind === 'before-restore' && pack.counts.stories === 0 && pack.counts.branches === 0)
+        keys: string[], isCurrent: BackupGuard, branch?: string): Promise<PreparedBackup | { state: 'empty' | 'unchanged' }> {
+        const pack = branch ? await exportArchive(lib, branch) : await exportLibrary(lib);
+        const data = packageData(pack);
+        if (kind === 'before-restore' && data.counts.stories === 0 && data.counts.branches === 0)
             return { state: 'empty' };
         assertNonempty(pack);
         check(await isCurrent(), '档案仍在变化，本次备份已取消');
-        const digest = await fingerprint(pack.data);
+        const digest = await fingerprint(data.data);
         if (previousDigest === digest) return { state: 'unchanged' };
         return this.prepareFile(pack, lib.db.name, kind, digest, keys);
     }
@@ -293,6 +304,7 @@ export class CoreBackups {
     private async restoreCopy(key: string, checksum: string, isCurrent: BackupGuard): Promise<Library> {
         const selected = await this.read(key);
         check(selected.entry.checksum === checksum && await isCurrent(), '所选备份或页面已改变，请重新预览');
+        check(!archivePackage(selected.file.pack), '单档案备份必须恢复到对应档案，不能切换整个数据库');
         const lib = await restoreLibrary(selected.file.pack, false);
         try {
             check(await isCurrent(), '恢复页面已改变，已验证的新库未启用，原库保留');
@@ -312,10 +324,10 @@ export class CoreBackups {
         });
     }
 
-    private async prepareFile(pack: Package, sourceLibrary: string, kind: BackupSaveKind | 'pinned', dataDigest: string,
+    private async prepareFile(pack: CorePackage, sourceLibrary: string, kind: BackupSaveKind | 'pinned', dataDigest: string,
         keys: string[]): Promise<PreparedBackup> {
         const savedAt = this.now();
-        const bank = (await fingerprint(sourceLibrary)).slice(0, 16);
+        const bank = (await fingerprint(backupBankKey(sourceLibrary, archivePackage(pack) ? pack.archive.branch : undefined))).slice(0, 16);
         const suffix = `${this.uuid()}.json`;
         const key = `${kind}-v1-${savedAt}-${bank}-${suffix}`;
         check(KEY.test(key) && !keys.includes(key), '备份文件名冲突，已停止以免覆盖旧文件');

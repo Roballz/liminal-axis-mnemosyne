@@ -7,6 +7,7 @@ import { LibraryChanges, TransactionChanges } from './change-journal';
 import { materializeMemoryView } from './memory-selections';
 import type { CompactMemoryView, MemoryView, MemorySelectionNode } from './model';
 import { isEvidenceStore, rowRetentionRoots, RetentionRootsCache, RetentionTransaction, RETENTION_CONTROL_STORE } from './retention-roots';
+import { hasStorageReferences, StorageReferences, STORAGE_REFS_READY } from './storage-references';
 export const DB_VERSION = 6;
 export type StoreIndex = 'story' | 'branch' | 'owner' | 'branch_host';
 export function request<T>(r: IDBRequest<T>): Promise<T> {
@@ -23,13 +24,25 @@ export class Transaction {
         return cache;
     }
     constructor(readonly native: IDBTransaction, private readonly changes?: TransactionChanges,
-        private readonly retention?: RetentionTransaction, private readonly compactWrites = false) { }
+        private readonly retention?: RetentionTransaction, private readonly compactWrites = false,
+        private readonly initialWriteStamp?: Promise<number>, private readonly storageRefs?: StorageReferences,
+        private readonly preservePhysicalWrites = false) { }
+    collectStorageGarbage() { this.storageRefs?.collect(); }
+    rebuildStorageReferences(data: Record<Store, Row[]>) { this.storageRefs?.rebuild(data); }
+    async assertWriteStamp(expected: number) {
+        check(this.initialWriteStamp && await this.initialWriteStamp === expected, '资料已改变，本次操作已撤销，请重试');
+    }
     private payloads = new SharedPayloads(key => this.rawGet(SHARED_STORE, key), row => this.addStored(SHARED_STORE, row));
     private packedWrites: Promise<unknown> = Promise.resolve();
-    private packWrite(store: Store, row: Row, put: boolean): Promise<IDBValidKey> {
+    private packWrite(store: Store, value: Row, put: boolean): Promise<IDBValidKey> {
+        // Preserve native structured-clone semantics while all shared-store
+        // operations (including uncompressed legacy rows) use one ordered queue.
+        const row = structuredClone(value);
+        const compact = this.compactWrites || !this.preservePhysicalWrites &&
+            (store === 'event_revisions' || store === 'event_progress');
         const operation = this.packedWrites.then(async () => {
             const logical = sharedRow(row) ? await this.payloads.unpack(store, row) : row;
-            const packed = sharedRow(row) ? row : await this.payloads.pack(store, row);
+            const packed = compact && !sharedRow(row) ? await this.payloads.pack(store, row) : row;
             return put ? this.putStored(store, packed, logical) : this.addStored(store, packed, logical);
         });
         this.packedWrites = operation;
@@ -39,14 +52,21 @@ export class Transaction {
     flushWrites() { return this.packedWrites; }
     async flushEvidenceReads() { await this.packedWrites; await this.retention?.flush(); }
     get sharedWrites() { return this.compactWrites; }
-    retentionRoots(story: string, refresh = false) {
+    async retentionRoots(story: string, refresh = false) {
         check(this.retention, '当前事务未包含历史证据存储');
-        return this.retention.roots(story, refresh, store => this.all<Row>(store, 'story', story));
+        await this.packedWrites;
+        return this.retention.roots(story, refresh, async (store, mark) => {
+            if (sharedStore(store)) await this.packedWrites;
+            // Mark the actual native read boundary, after any queued packing.
+            mark();
+            const rows = await this.rawAll<Row>(store, 'story', story);
+            return sharedStore(store) ? Promise.all(rows.map(row => this.payloads.unpack(store, row))) : rows;
+        });
     }
     get<T extends Row>(store: Store, key: string): Promise<T | undefined> {
         if (store === 'memory_views') return this.rawGet<MemoryView | CompactMemoryView>(store, key).then(value =>
             value ? materializeMemoryView(value, id => this.rawGet<MemorySelectionNode>('memory_selection_nodes', id)) as Promise<unknown> as Promise<T> : undefined);
-        if (!this.compactWrites || !sharedStore(store)) return this.rawGet<T>(store, key);
+        if (!sharedStore(store)) return this.rawGet<T>(store, key);
         const read = () => this.rawGet<T>(store, key).then(row => row && sharedStore(store) ? this.payloads.unpack(store, row) as Promise<T> : row);
         return sharedStore(store) ? this.packedWrites.then(read) : read();
     }
@@ -64,7 +84,7 @@ export class Transaction {
         if (store === 'memory_views') return this.rawAll<MemoryView | CompactMemoryView>(store, index, key).then(values =>
             Promise.all(values.map(value => materializeMemoryView(value,
                 id => this.rawGet<MemorySelectionNode>('memory_selection_nodes', id)))) as Promise<unknown> as Promise<T[]>);
-        if (!this.compactWrites || !sharedStore(store)) return this.rawAll<T>(store, index, key);
+        if (!sharedStore(store)) return this.rawAll<T>(store, index, key);
         const read = () => this.rawAll<T>(store, index, key).then(async rows => {
             if (!sharedStore(store)) return rows;
             const result: T[] = [];
@@ -81,14 +101,16 @@ export class Transaction {
         });
     }
     put(store: Store, value: Row): Promise<IDBValidKey> {
-        return (this.compactWrites || sharedRow(value)) && sharedStore(store) ? this.packWrite(store, value, true) : this.putStored(store, value);
+        return sharedStore(store) ? this.packWrite(store, value, true) : this.putStored(store, value);
     }
     private putStored(store: Store, value: Row, logical = value): Promise<IDBValidKey> {
         this.immutableRows.get(store)?.delete(value.id);
         const objectStore = this.native.objectStore(store), evidence = isEvidenceStore(store);
         if (evidence) { check(this.retention, '证据写入缺少事务标记'); this.retention.assertWritable(); }
         const after = evidence ? rowRetentionRoots(logical) : undefined;
-        const before = evidence ? request<Row | undefined>(objectStore.get(value.id)).then(row => row && sharedRow(row) ? this.payloads.unpack(store, row).then(rowRetentionRoots) : rowRetentionRoots(row)) : undefined;
+        const physicalBefore = evidence || hasStorageReferences(store) ? request<Row | undefined>(objectStore.get(value.id)) : undefined;
+        void physicalBefore?.catch(() => {});
+        const before = evidence ? physicalBefore!.then(row => row && sharedRow(row) ? this.payloads.unpack(store, row).then(rowRetentionRoots) : rowRetentionRoots(row)) : undefined;
         // A synchronous DataCloneError below can abort this already-enqueued read
         // before record() is reached. Observe it without hiding ledger failures.
         void before?.catch(() => {});
@@ -98,10 +120,11 @@ export class Transaction {
         this.changes?.write(store, value.id, logical);
         const pending = request(write);
         if (evidence) this.retention!.record(store, before, after, pending);
+        if (hasStorageReferences(store)) this.storageRefs?.record(store, physicalBefore, value, pending);
         return pending;
     }
     delete(store: Store, key: string): Promise<undefined> {
-        if (this.compactWrites && sharedStore(store)) {
+        if (sharedStore(store)) {
             const operation = this.packedWrites.then(() => this.deleteStored(store, key));
             this.packedWrites = operation; void operation.catch(() => {}); return operation;
         }
@@ -111,16 +134,19 @@ export class Transaction {
         this.immutableRows.get(store)?.delete(key);
         const objectStore = this.native.objectStore(store), evidence = isEvidenceStore(store);
         if (evidence) { check(this.retention, '证据写入缺少事务标记'); this.retention.assertWritable(); }
-        const before = evidence ? request<Row | undefined>(objectStore.get(key)).then(row => row && sharedRow(row) ? this.payloads.unpack(store, row).then(rowRetentionRoots) : rowRetentionRoots(row)) : undefined;
+        const physicalBefore = evidence || hasStorageReferences(store) ? request<Row | undefined>(objectStore.get(key)) : undefined;
+        void physicalBefore?.catch(() => {});
+        const before = evidence ? physicalBefore!.then(row => row && sharedRow(row) ? this.payloads.unpack(store, row).then(rowRetentionRoots) : rowRetentionRoots(row)) : undefined;
         void before?.catch(() => {});
         const write = objectStore.delete(key);
         this.changes?.write(store, key);
         const pending = request(write);
         if (evidence) this.retention!.record(store, before, undefined, pending);
+        if (hasStorageReferences(store)) this.storageRefs?.record(store, physicalBefore, undefined, pending);
         return pending;
     }
     add(store: Store, value: Row): Promise<IDBValidKey> {
-        return (this.compactWrites || sharedRow(value)) && sharedStore(store) ? this.packWrite(store, value, false) : this.addStored(store, value);
+        return sharedStore(store) ? this.packWrite(store, value, false) : this.addStored(store, value);
     }
     private addStored(store: Store, value: Row, logical = value): Promise<IDBValidKey> {
         this.immutableRows.get(store)?.delete(value.id);
@@ -131,6 +157,7 @@ export class Transaction {
         this.changes?.write(store, value.id, logical);
         const pending = request(write);
         if (evidence) this.retention!.record(store, undefined, after, pending);
+        if (hasStorageReferences(store)) this.storageRefs?.record(store, undefined, value, pending);
         return pending;
     }
 }
@@ -138,17 +165,19 @@ export class Library {
     readonly changes = new LibraryChanges();
     private readonly retentionRoots = new RetentionRootsCache();
     compactWrites = false;
+    preservePhysicalWrites = false;
     private constructor(readonly db: IDBDatabase) { }
     static open(name = `${DB_PREFIX}default`, existingOnly = false): Promise<Library> {
         check(name.startsWith(DB_PREFIX), '不是 Mnemosyne 库');
         return new Promise((resolve, reject) => {
             const r = indexedDB.open(name, DB_VERSION);
             let cancelled = false;
-            r.onupgradeneeded = () => {
+            r.onupgradeneeded = (event) => {
                 // Backup workers must never create an empty database or migrate a live one.
                 if (existingOnly || cancelled) { r.transaction!.abort(); return; }
                 if (!r.result.objectStoreNames.contains(RETENTION_CONTROL_STORE))
                     r.result.createObjectStore(RETENTION_CONTROL_STORE, { keyPath: 'id' });
+                if (event.oldVersion === 0) r.transaction!.objectStore(RETENTION_CONTROL_STORE).put({ id: STORAGE_REFS_READY, version: 1 });
                 for (const name of STORES) {
                     if (r.result.objectStoreNames.contains(name)) continue;
                     const s = r.result.createObjectStore(name, { keyPath: 'id' });
@@ -187,10 +216,12 @@ export class Library {
         const stamped = mode === 'readwrite' ? request<any>(native.objectStore(RETENTION_CONTROL_STORE).get('library-writes')).then(row => {
             const stamp = row?.stamp ?? 0;
             check(Number.isSafeInteger(stamp) && stamp < Number.MAX_SAFE_INTEGER, '库写入标记非法');
-            return request(native.objectStore(RETENTION_CONTROL_STORE).put({ id: 'library-writes', stamp: stamp + 1 }));
+            return request(native.objectStore(RETENTION_CONTROL_STORE).put({ id: 'library-writes', stamp: stamp + 1 })).then(() => stamp);
         }) : undefined;
         void stamped?.catch(() => {});
         const changes = mode === 'readwrite' ? new TransactionChanges() : undefined;
+        const storageRefs = mode === 'readwrite' && stores.some(hasStorageReferences)
+            ? new StorageReferences(native, request, (store, id) => changes?.write(store, id)) : undefined;
         const retention = evidence ? new RetentionTransaction(native, this.retentionRoots, request) : undefined;
         const done = new Promise<void>((resolve, reject) => {
             native.oncomplete = () => resolve();
@@ -199,10 +230,11 @@ export class Library {
         });
         // Network, hashing and timers must never run inside fn.
         try {
-            const tx = new Transaction(native, changes, retention, this.compactWrites);
+            const tx = new Transaction(native, changes, retention, this.compactWrites, stamped, storageRefs, this.preservePhysicalWrites);
             const result = await fn(tx);
             await tx.flushWrites();
             await retention?.prepare();
+            await storageRefs?.finish();
             await stamped;
             await done;
             retention?.publish();

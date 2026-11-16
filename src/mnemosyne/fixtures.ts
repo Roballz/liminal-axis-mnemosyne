@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import { Library, freshLibraryName } from './db';
 import { capture, synchronize, type HostObservation } from './canonical';
 import { prepareEventBatch, type EventOutput, type EventBatch } from './events';
+import { payloadReader, SHARED_FIELDS, SHARED_META } from './shared-payloads';
 export function observation(count = 5, scope = 'synthetic-chat'): HostObservation {
     return { scope, messages: Array.from({ length: count * 2 }, (_, i) => ({ key: `host-${i}`, role: i % 2 ? 'assistant' : 'user',
             content: i % 2 ? `合成剧情 ${i} 借出玉佩，约定归还。` : `合成问题 ${i}`, swipe: 0 })),
@@ -44,7 +45,13 @@ export function withoutCompactSelections(pack: import('./migration').Package) {
         entries.sort((a, b) => a[2] - b[2] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
         return { ...identity, selections: Object.fromEntries(entries.map(([family, revision]) => [family, revision])) };
     });
-    if (pack.data.memory_payloads?.length) throw new Error('Legacy fixture cannot contain shared payloads');
+    if (pack.data.memory_payloads?.length) {
+        const expand = payloadReader(pack.data.memory_payloads);
+        for (const store of Object.keys(SHARED_FIELDS) as (keyof typeof SHARED_FIELDS)[])
+            pack.data[store] = pack.data[store].map(row => expand(row, store));
+        pack.data.library_meta = pack.data.library_meta.filter(row => row.id !== SHARED_META);
+        pack.counts.library_meta = pack.data.library_meta.length;
+    }
     delete (pack.data as Partial<typeof pack.data>).memory_payloads;
     delete (pack.counts as Partial<typeof pack.counts>).memory_payloads;
     delete (pack.data as Partial<typeof pack.data>).memory_selection_nodes;

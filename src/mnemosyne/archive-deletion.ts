@@ -22,7 +22,7 @@ export function archiveLabel(scope: string) {
 }
 export async function archiveDeletionChoices(lib: Library) {
     const [branches, bindings] = await Promise.all([lib.all<Branch>('branches'), lib.all<Binding>('host_bindings')]);
-    return branches.map(branch => ({ value: branch.id, label: bindings.filter(b => b.branch === branch.id).map(b => archiveLabel(b.scope)).join(' / ') || branch.id }));
+    return branches.filter(branch => !branch.archiveSupport).map(branch => ({ value: branch.id, label: bindings.filter(b => b.branch === branch.id).map(b => archiveLabel(b.scope)).join(' / ') || branch.id }));
 }
 export interface ArchiveDeletionPlan {
     before: Package;

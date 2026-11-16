@@ -10,6 +10,7 @@ import { sourcePrefixes } from './source-prefixes';
 import { reviewMatchesMemory, sameSourceMessages } from './review-source-integrity';
 import { observationHashes } from './observation-hashes';
 import { publishMemoryView } from './memory-selections';
+import { retireSupersededSummaries, retireAbandonedTableHistory, retireEventDependencies } from './summary-retention';
 import { Library, Transaction } from './db';
 import {
     STORES,
@@ -151,13 +152,14 @@ async function publishSnapshot(tx: Transaction, branch: Branch, refs: SourceRef[
     await tx.add('history_snapshots', snapshot);
     return snapshot;
 }
-export async function synchronize(lib: Library, observation: HostObservation, baseline?: { branch?: Branch; binding?: Binding; isCurrent(): boolean },
+export async function synchronize(lib: Library, observation: HostObservation, baseline?: { branch?: Branch; binding?: Binding; retireHistory?: boolean; isCurrent(): boolean },
     onCaptured?: (view: CapturedView) => void): Promise<Branch> {
     check(
         observation.scope && new Set(observation.messages.map((m) => m.key)).size === observation.messages.length,
         '消息映射身份重复，需要人工核对',
     );
-    const { hashes, bodyHashes, memoryHashes } = await observationHashes(lib, observation);
+    const { hashes, bodyHashes, memoryHashes, generationHashes } = await observationHashes(lib, observation);
+    const generationByHost = new Map(observation.memories.map((memory, i) => [memory.hostId, generationHashes[i]]));
     const tagUpdates = await tagOnlyRevisions(lib, observation);
     let removedEventSources = new Set<string>();
     let captured: CapturedView | undefined;
@@ -202,6 +204,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 .map((r) => [r.owner, r]),
         );
         const refs: SourceRef[] = [];
+        const replacedBodies = new Set<string>();
         const byHost = new Map<string, SourceRef>();
         const captureRevisions = onCaptured ? new Map<string, Revision>() : undefined;
         const writtenBodies = onCaptured ? new Map<string, string>() : undefined;
@@ -215,6 +218,9 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 await tx.add('message_mappings', mapping);
             }
             let revision = priorSources.get(mapping.message);
+            if (revision && (revision.bodySchema === 1
+                ? revision.bodyHash !== bodyHashes[i] || revision.bodyLength !== host.content.length
+                : revision.content !== host.content)) replacedBodies.add(mapping.message);
             if (
                 !revision ||
                 revision.fingerprint !== hashes[i] ||
@@ -254,6 +260,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         }
         const oldHead = branch.head;
         if (oldHead) await ensureTableHistory(tx, branch);
+        const oldTableHead = branch.tableHead;
         const variants = observation.messages.map(m => m.swipe);
         const snapshot = await publishSnapshot(tx, branch, refs, variants,
             { snapshot: priorSnapshot, refs: priorRefs, variants: priorVariants });
@@ -298,6 +305,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         const selections: Record<string, string> = {};
         const selectionRevisions = new Map<string, MemoryRevision>();
         const hostRevisions = new Map<string, string>();
+        const retiredMemories = new Set<string>();
         const newRevisions: {
             revision: MemoryRevision;
             host: HostMemory;
@@ -319,6 +327,13 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 await tx.add('memories', family);
                 families.push(family);
                 familyByHost.set(host.hostId, family);
+            }
+            if (family.retiredFingerprint === memoryHashes[i] || family.retiredGenerationFingerprint === generationHashes[i]) {
+                // A cleanup of an older package knows only its old full digest.
+                // Upgrade that marker on the first matching host observation.
+                if (family.retiredGenerationFingerprint !== generationHashes[i])
+                    await tx.put('memories', { ...family, retiredGenerationFingerprint: generationHashes[i] } as Memory);
+                continue;
             }
             let revision = selectedMemories.get(family.id);
             if (revision && revision.fingerprint !== memoryHashes[i] && tagUpdates.get(host.hostId)?.id === revision.id) {
@@ -450,8 +465,79 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
             visiting.delete(id); affected.set(id, removed); return removed;
         };
         for (const [family, id] of Object.entries(selections)) if (await hasMissingSource(id)) delete selections[family];
+        for (const ref of priorRefs) if (!currentRef(ref.message)) replacedBodies.add(ref.message);
+        const sourceReplaced = replacedBodies.size > 0;
+        const summaryReplaced = previous && Object.entries(previous.selections).some(([family, id]) => {
+            const prior = selectedMemories.get(family), next = selectionRevisions.get(selections[family]);
+            return selections[family] !== id && (!next || prior?.content !== next.content);
+        });
+        if (baseline?.retireHistory && previous && (sourceReplaced || summaryReplaced)) {
+            const replacedSummaries = new Set(Object.entries(previous.selections).filter(([family, id]) =>
+                selections[family] !== id && selectedMemories.get(family)?.content !== selectionRevisions.get(selections[family])?.content
+            ).map(([, id]) => id));
+            const superseded = new Map<string, boolean>();
+            const affectedBases = new Map<string, { first: number; positions: Map<string, number> }>();
+            const replacedPrefix = async (memory: MemoryRevision) => {
+                let basis = affectedBases.get(memory.basis);
+                if (!basis) {
+                    const saved = await readBasis(memory.basis); check(saved, '摘要基线缺失');
+                    const entries = memory.basis === priorSnapshot?.id ? priorRefs
+                        : memory.basis === snapshot.id ? refs : await snapshotRefs(tx, saved);
+                    basis = { first: entries.findIndex(ref => replacedBodies.has(ref.message)),
+                        positions: new Map(entries.map((ref, i) => [ref.message, i])) };
+                    affectedBases.set(memory.basis, basis);
+                }
+                return basis.first >= 0 && (!memory.anchor || basis.first <= (basis.positions.get(memory.anchor) ?? -1));
+            };
+            const dependsOnReplacement = async (id: string): Promise<boolean> => {
+                if (replacedSummaries.has(id)) return true;
+                if (superseded.has(id)) return superseded.get(id)!;
+                superseded.set(id, false);
+                const memory = selectionRevisions.get(id) ?? await tx.get<MemoryRevision>('memory_revisions', id);
+                check(memory, '摘要依赖缺失');
+                // A newly imported unresolved generation is current evidence to
+                // repair, not the superseded version of this body's summary.
+                if (memory.sourceRecovery && selectedMemories.get(memory.owner)?.id !== id) return false;
+                let affected = !!memory.anchor && replacedBodies.has(memory.anchor) ||
+                    memory.inputRefs.some(ref => replacedBodies.has(ref.message)) || memory.coverage.some(ref => replacedBodies.has(ref.message));
+                // Hundreds of prefix summaries can share one basis. Build its
+                // changed-floor index once instead of copying its refs per leaf.
+                if (!affected && !memory.sourceRecovery && !memory.inputRefs.length && !dependencyOnly(memory))
+                    affected = await replacedPrefix(memory);
+                if (!affected) for (const dependency of memory.dependencies)
+                    if (await dependsOnReplacement(dependency)) { affected = true; break; }
+                superseded.set(id, affected); return affected;
+            };
+            const states = await statusesInTransaction(tx, { branch, snapshot, refs, cutoff: refs.length,
+                memories: Object.values(selections).map(id => ({ ...selectionRevisions.get(id)!, recall: true, visibility: 'public' as const })) });
+            for (const [familyId, id] of Object.entries(selections)) {
+                const memory = selectionRevisions.get(id)!;
+                // Retire only proven replacements. Role-only repairs and unrelated
+                // unresolved imported evidence are not body edits.
+                if (!['needs_review', 'needs_rebuild', 'out_of_scope'].includes(states.get(id)!) || !await dependsOnReplacement(id)) continue;
+                delete selections[familyId]; retiredMemories.add(id);
+                const family = families.find(f => f.id === familyId);
+                if (family) await tx.put('memories', { ...family, retiredFingerprint: memory.fingerprint,
+                    retiredGenerationFingerprint: generationByHost.get(memory.hostId) } as Memory);
+            }
+            // A replacement may already have a fresh valid summary in this same
+            // observation. Its old event evidence must retire just as on body-only edits.
+            for (const [familyId, oldId] of Object.entries(previous.selections)) {
+                if (selections[familyId] === oldId) continue;
+                const prior = await tx.get<MemoryRevision>('memory_revisions', oldId);
+                const replacement = selectionRevisions.get(selections[familyId]);
+                if (prior && (!replacement || !sameNarrativeRevision(prior, replacement))) retiredMemories.add(oldId);
+                if (prior && !replacement) {
+                    const family = families.find(f => f.id === familyId);
+                    if (family) await tx.put('memories', { ...family, retiredFingerprint: prior.fingerprint,
+                        retiredGenerationFingerprint: generationByHost.get(prior.hostId) } as Memory);
+                }
+            }
+        }
         removedEventSources = new Set([...observedMessages].filter(removedMessage));
-        const eventsChanged = await unlinkDeletedEventSources(lib, tx, branch, removedEventSources, refs.length);
+        let eventsChanged = await unlinkDeletedEventSources(lib, tx, branch, removedEventSources, refs.length);
+        if (baseline?.retireHistory) eventsChanged = await retireEventDependencies(tx, branch, retiredMemories, refs.length,
+            new Map(Object.entries(selections).map(([family, id]) => [family, selectionRevisions.get(id)!]))) || eventsChanged;
         let selection = previous;
         if (!previous || !equal(previous.selections, selections)) {
             const view: MemoryView = { ...row('mv'), branch: branch.id, selections };
@@ -485,8 +571,14 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         }
         if (oldHead !== branch.head || previous?.id !== branch.view || recovered || eventsChanged) branch.epoch++;
         await tx.put('branches', branch);
-        if (oldHead !== branch.head) await retireCurrentBodies(tx, branch, priorRefs, {
-            refs, memories: [...selectionRevisions.values()],
+        if (baseline?.retireHistory && (oldHead !== branch.head || previous?.id !== branch.view)) {
+            if (sourceReplaced || oldTableHead !== branch.tableHead) await retireAbandonedTableHistory(tx, branch);
+            if (previous?.id !== branch.view || retiredMemories.size)
+                await retireSupersededSummaries(tx, branch, previous, selection!,
+                    new Set([...Object.values(previous?.selections ?? {}), ...retiredMemories]));
+        }
+        if (oldHead !== branch.head || baseline?.retireHistory && previous?.id !== branch.view) await retireCurrentBodies(tx, branch, priorRefs, {
+            refs, memories: Object.values(selection!.selections).map(id => selectionRevisions.get(id)!),
         });
         if (onCaptured) {
             // Reuse descriptors and selected revisions already read in this transaction.

@@ -2,13 +2,14 @@ import { previewArchiveDeletion, commitArchiveDeletion } from './archive-deletio
 import 'fake-indexeddb/auto';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { BackupDisk } from '@/st/native-backups';
-import { fixture } from './fixtures';
+import { fixture, observation } from './fixtures';
 import { synchronize, capture, forkBranch } from './canonical';
 import { Library, freshLibraryName, ACTIVE_KEY } from './db';
 import { exportLibrary } from './migration';
 import { STORES, fingerprint } from './model';
 import { AUTO_BACKUP_INTERVAL, BACKUP_MAX_BYTES, CoreBackups, backupSettings } from './core-backups';
 import * as json from './json';
+import { packageData, archivePackage } from './archive-package';
 
 class Disk implements BackupDisk {
     files = new Map<string, Blob>();
@@ -25,8 +26,34 @@ const clock = () => {
 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+test('archive banks rotate ten independently and never copy or delete inactive chats or legacy whole-library backups', async () => {
+    const { lib, input, branch } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
+    const inactive = await synchronize(lib, observation(12, 'inactive-chat'));
+    const legacy = await backups.save(lib, 'auto');
+    const other = await backups.save(lib, 'auto', 10, () => true, undefined, inactive.id);
+    if (other.state !== 'saved' || legacy.state !== 'saved') throw new Error('missing baseline');
+    const otherBytes = disk.files.get(other.entry.key), legacyBytes = disk.files.get(legacy.entry.key);
+    for (let i = 0; i < 12; i++) {
+        time.advance(); input.messages[1].content = `current edit ${i}`; await synchronize(lib, input);
+        const saved = await backups.save(lib, 'auto', 10, () => true, undefined, branch.id);
+        if (saved.state !== 'saved') throw new Error('missing archive');
+        expect(saved.entry.archive?.branch).toBe(branch.id);
+        const file = (await backups.read(saved.entry.key)).file;
+        expect(archivePackage(file.pack)).toBe(true);
+        expect(packageData(file.pack).data.branches.some(b => b.id === inactive.id)).toBe(false);
+    }
+    const entries = (await backups.inventory()).entries;
+    expect(entries.filter(e => e.preview?.archive?.branch === branch.id)).toHaveLength(10);
+    expect(disk.files.get(other.entry.key)).toBe(otherBytes);
+    expect(disk.files.get(legacy.entry.key)).toBe(legacyBytes);
+    expect(disk.remove).toHaveBeenCalledTimes(2);
+    const savedKeys = [...disk.files.keys()]; time.advance();
+    expect((await backups.save(lib, 'auto', 10, () => true, undefined, branch.id)).state).toBe('unchanged');
+    expect([...disk.files.keys()]).toEqual(savedKeys); lib.close();
+});
+
 test('new installations stay disabled and invalid settings do not silently become defaults', () => {
-    expect(backupSettings(undefined)).toEqual({ schema: 1, enabled: false, keep: 20 });
+    expect(backupSettings(undefined)).toEqual({ schema: 1, enabled: false, keep: 10 });
     expect(() => backupSettings({ enabled: true })).toThrow('设置损坏');
 });
 
@@ -48,20 +75,20 @@ test('distinct snapshots are verified, unchanged data ignores export time, and r
     expect(disk.write).toHaveBeenCalledTimes(2); expect((await backups.inventory()).entries).toHaveLength(2); lib.close();
 });
 
-test('rotation keeps 20 per library and never touches manual, pinned, foreign-name, or other-library files', async () => {
+test('rotation keeps 10 per library and never touches manual, pinned, foreign-name, or other-library files', async () => {
     const { lib, input } = await fixture(1), other = await fixture(1);
     const disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
     disk.files.set('user-backup.json', new Blob(['never touched']));
     const otherCopy = await backups.save(other.lib, 'auto'); expect(otherCopy.state).toBe('saved');
     const manual = await backups.save(lib, 'manual'); expect(manual.state).toBe('saved');
     let pinned = '';
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < 12; i++) {
         time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input);
-        const saved = await backups.save(lib, 'auto', 20);
+        const saved = await backups.save(lib, 'auto', 10);
         if (i === 0 && saved.state === 'saved') pinned = (await backups.pin(saved.entry.key, saved.entry.checksum)).key;
     }
     const inventory = await backups.inventory();
-    expect(inventory.entries.filter(e => e.kind === 'auto' && e.preview?.sourceLibrary === lib.db.name)).toHaveLength(20);
+    expect(inventory.entries.filter(e => e.kind === 'auto' && e.preview?.sourceLibrary === lib.db.name)).toHaveLength(10);
     expect(inventory.entries.filter(e => e.preview?.sourceLibrary === other.lib.db.name)).toHaveLength(1);
     expect(disk.files.has(pinned)).toBe(true); expect(disk.files.has('user-backup.json')).toBe(true);
     if (manual.state === 'saved') expect(disk.files.has(manual.entry.key)).toBe(true);
@@ -166,27 +193,27 @@ test('restore revalidates selected file, preserves source file, and guards activ
 
 test('obsolete generation after publication keeps the new copy but does not rotate', async () => {
     const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
-    for (let i = 0; i < 20; i++) {
-        time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input); await backups.save(lib, 'auto', 20);
+    for (let i = 0; i < 10; i++) {
+        time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input); await backups.save(lib, 'auto', 10);
     }
     time.advance(); input.messages[1].content += ' final'; await synchronize(lib, input);
     let current = true;
     disk.write.mockImplementationOnce(async (key, data) => { disk.files.set(key, data); current = false; });
-    const result = await backups.save(lib, 'auto', 20, () => current);
+    const result = await backups.save(lib, 'auto', 10, () => current);
     expect(result.state).toBe('saved'); if (result.state === 'saved') expect(result.warning).toContain('暂停轮换');
-    expect(disk.files.size).toBe(21); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
+    expect(disk.files.size).toBe(11); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
 });
 
 test('a corrupt retained file cannot displace a valid older backup', async () => {
     const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
     const saved: string[] = [];
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 10; i++) {
         time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input);
-        const result = await backups.save(lib, 'auto', 20); if (result.state === 'saved') saved.push(result.entry.key);
+        const result = await backups.save(lib, 'auto', 10); if (result.state === 'saved') saved.push(result.entry.key);
     }
     disk.files.set(saved[2], new Blob(['corrupt'])); // latest baseline is intact
     time.advance(); input.messages[1].content += ' newest'; await synchronize(lib, input);
-    const result = await backups.save(lib, 'auto', 20);
+    const result = await backups.save(lib, 'auto', 10);
     expect(result.state).toBe('saved'); if (result.state === 'saved') expect(result.warning).toContain('清理未完成');
     expect(disk.files.has(saved[0])).toBe(true); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
 });
@@ -194,7 +221,7 @@ test('a corrupt retained file cannot displace a valid older backup', async () =>
 test('rotation re-reads every file but validates exact baseline/new bytes only once per save', async () => {
     const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
     try {
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 10; i++) {
             time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input); await backups.save(lib, 'auto');
         }
         // Native reads may return a different Blob object for the same exact bytes.
@@ -206,12 +233,12 @@ test('rotation re-reads every file but validates exact baseline/new bytes only o
             const result = await backups.save(lib, 'auto');
             expect(result.state).toBe('saved');
             if (result.state === 'saved') expect(result.warning).toBeUndefined();
-            // Baseline + persisted new file + 20 retained files + one deletion target.
-            expect(disk.read).toHaveBeenCalledTimes(23);
+            // Baseline + persisted new file + 10 retained files + one deletion target.
+            expect(disk.read).toHaveBeenCalledTimes(13);
             // Only this round's two exact-content witnesses are reused. The other
             // retained files are fully revalidated again on the next round.
-            expect(parse).toHaveBeenCalledTimes(21);
-            expect(disk.files.size).toBe(20);
+            expect(parse).toHaveBeenCalledTimes(11);
+            expect(disk.files.size).toBe(10);
         }
     } finally { lib.close(); }
 });
@@ -220,7 +247,7 @@ test.each(['baseline', 'new'])('same-size replacement of the %s file during rota
     const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
     try {
         let baseline = '';
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 10; i++) {
             time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input);
             const result = await backups.save(lib, 'auto'); if (result.state === 'saved') baseline = result.entry.key;
         }
@@ -242,16 +269,16 @@ test.each(['baseline', 'new'])('same-size replacement of the %s file during rota
         if (result.state === 'saved') expect(result.warning).toContain('清理未完成');
         expect(disk.remove).not.toHaveBeenCalled();
         for (const key of prior) expect(disk.files.has(key)).toBe(true);
-        expect(disk.files.size).toBe(21);
+        expect(disk.files.size).toBe(11);
     } finally { lib.close(); }
 });
 
 test('losing the lifecycle guard during awaited deletion-target verification cannot delete it', async () => {
     const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
     let oldest = '';
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 10; i++) {
         time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input);
-        const result = await backups.save(lib, 'auto', 20); if (i === 0 && result.state === 'saved') oldest = result.entry.key;
+        const result = await backups.save(lib, 'auto', 10); if (i === 0 && result.state === 'saved') oldest = result.entry.key;
     }
     let current = true;
     disk.read.mockImplementation(async key => {
@@ -259,7 +286,7 @@ test('losing the lifecycle guard during awaited deletion-target verification can
         return disk.files.get(key)!;
     });
     time.advance(); input.messages[1].content += ' last'; await synchronize(lib, input);
-    const result = await backups.save(lib, 'auto', 20, () => current);
+    const result = await backups.save(lib, 'auto', 10, () => current);
     expect(result.state).toBe('saved'); if (result.state === 'saved') expect(result.warning).toContain('暂停轮换');
     expect(disk.files.has(oldest)).toBe(true); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
 });
@@ -303,14 +330,14 @@ test('deletion excludes related higher summaries from current selection without 
 test('asynchronous worker guards are awaited, never accepted as a truthy Promise', async () => {
     const { lib, branch } = await fixture(1), disk = new Disk(), backups = new CoreBackups(disk);
     const guard = vi.fn(async () => false);
-    await expect(backups.save(lib, 'auto', 20, guard)).rejects.toThrow('已取消');
+    await expect(backups.save(lib, 'auto', 10, guard)).rejects.toThrow('已取消');
     expect(guard).toHaveBeenCalledTimes(1);
     expect(disk.write).not.toHaveBeenCalled(); expect(disk.remove).not.toHaveBeenCalled(); lib.close();
 });
 
 
-test.each([5, 10, 20])('settings keep=%s migrates to 20 without changing the enabled flag', keep => {
-    for (const enabled of [false, true]) expect(backupSettings({ schema: 1, enabled, keep })).toEqual({ schema: 1, enabled, keep: 20 });
+test.each([5, 10, 20])('settings keep=%s migrates to 10 without changing the enabled flag', keep => {
+    for (const enabled of [false, true]) expect(backupSettings({ schema: 1, enabled, keep })).toEqual({ schema: 1, enabled, keep: 10 });
 });
 test.each([0, 19, 21, '20', null])('invalid retention %s still fails closed', keep => {
     expect(() => backupSettings({ schema: 1, enabled: true, keep })).toThrow('设置损坏');
@@ -320,7 +347,7 @@ test('repeated deletions and shortened edits only publish the latest ordinary ti
     const { lib, input, branch } = await fixture(3), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
     const first = await backups.save(lib, 'auto');
     if (first.state !== 'saved') throw new Error('missing first backup');
-    const old = (await backups.read(first.entry.key)).file.pack.data;
+    const old = packageData((await backups.read(first.entry.key)).file.pack).data;
     for (let i = 0; i < 2; i++) {
         input.messages.pop(); input.memories.pop(); await synchronize(lib, input);
         expect(await backups.save(lib, 'auto')).toEqual({ state: 'too-soon' });
@@ -331,8 +358,8 @@ test('repeated deletions and shortened edits only publish the latest ordinary ti
     time.advance(); const current = await backups.save(lib, 'auto');
     expect(current.state).toBe('saved'); expect(disk.write).toHaveBeenCalledTimes(2);
     expect((await backups.inventory()).entries.every(e => e.kind === 'auto')).toBe(true);
-    expect((await backups.read(first.entry.key)).file.pack.data).toEqual(old);
-    if (current.state === 'saved') expect((await backups.read(current.entry.key)).file.pack.data).toEqual((await exportLibrary(lib)).data);
+    expect(packageData((await backups.read(first.entry.key)).file.pack).data).toEqual(old);
+    if (current.state === 'saved') expect(packageData((await backups.read(current.entry.key)).file.pack).data).toEqual((await exportLibrary(lib)).data);
     expect((await capture(lib, branch.id)).refs).toHaveLength(4); lib.close();
 });
 
@@ -370,23 +397,23 @@ async function legacyCopy(disk: Disk, source: string, kind: 'before-deletion' | 
     disk.files.set(key, new Blob([JSON.stringify({ ...base, checksum: await fingerprint(base) })]));
     return key;
 }
-test('legacy deletion packages stay readable/restorable and untouched by 20-copy rotation', async () => {
+test('legacy deletion packages stay readable/restorable and untouched by 10-copy rotation', async () => {
     const { lib, input } = await fixture(1), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
     const first = await backups.save(lib, 'auto'); if (first.state !== 'saved') throw new Error('missing first backup');
     const originals = new Map<string, Blob>();
     for (const kind of ['before-deletion', 'before-archive-deletion', 'after-archive-deletion'] as const) {
         const key = await legacyCopy(disk, first.entry.key, kind); originals.set(key, disk.files.get(key)!);
     }
-    for (let i = 0; i < 21; i++) {
+    for (let i = 0; i < 11; i++) {
         time.advance(); input.messages[1].content += ` ${i}`; await synchronize(lib, input); await backups.save(lib, 'auto');
     }
-    expect((await backups.inventory()).entries.filter(e => e.kind === 'auto')).toHaveLength(20);
+    expect((await backups.inventory()).entries.filter(e => e.kind === 'auto')).toHaveLength(10);
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
     for (const [key, blob] of originals) {
         expect(disk.files.get(key)).toBe(blob);
         const saved = await backups.read(key), restored = await backups.restore(key, saved.entry.checksum);
-        expect((await exportLibrary(restored)).data).toEqual(saved.file.pack.data); restored.close();
+        expect((await exportLibrary(restored)).data).toEqual(packageData(saved.file.pack).data); restored.close();
     }
     expect(disk.remove.mock.calls.every(([key]) => key.startsWith('auto-'))).toBe(true); lib.close();
 });
@@ -466,18 +493,18 @@ test('missing, malformed, and failed preview hints never hide filename inventory
 test('verified publication is reported before cleanup; unchanged retry resumes failed rotation without another file', async () => {
     const {lib,input}=await fixture(1), disk=new Disk(), time=clock(), backups=new CoreBackups(disk,time.now);
     try {
-        for(let i=0;i<20;i++) {time.advance();input.messages[1].content+=i;await synchronize(lib,input);await backups.save(lib,'auto');}
+        for(let i=0;i<10;i++) {time.advance();input.messages[1].content+=i;await synchronize(lib,input);await backups.save(lib,'auto');}
         time.advance(); input.messages[1].content+='last';await synchronize(lib,input);
         const verified=vi.fn(); disk.remove.mockImplementationOnce(async()=>{
             expect(verified).toHaveBeenCalledOnce();throw new Error('temporary delete IO');
         });
-        const saved=await backups.save(lib,'auto',20,()=>true,verified);
+        const saved=await backups.save(lib,'auto',10,()=>true,verified);
         expect(saved.state).toBe('saved');expect(saved).toHaveProperty('warning',expect.stringContaining('清理未完成'));
-        expect(disk.files.size).toBe(21);expect(disk.write).toHaveBeenCalledTimes(21);
+        expect(disk.files.size).toBe(11);expect(disk.write).toHaveBeenCalledTimes(11);
         time.advance();const retried=await backups.save(lib,'auto');
         expect(retried).toMatchObject({state:'unchanged',entry:verified.mock.calls[0][0]});
-        expect(retried).not.toHaveProperty('warning');expect(disk.files.size).toBe(20);
-        expect(disk.write).toHaveBeenCalledTimes(21);
+        expect(retried).not.toHaveProperty('warning');expect(disk.files.size).toBe(10);
+        expect(disk.write).toHaveBeenCalledTimes(11);
     } finally {lib.close();}
 });
 
@@ -485,7 +512,7 @@ test('failed readback never emits a verified publication',async()=>{
  const {lib}=await fixture(1),disk=new Disk(),backups=new CoreBackups(disk),verified=vi.fn();
  try {
   disk.write.mockImplementationOnce(async key=>{disk.files.set(key,new Blob(['bad']));});
-  await expect(backups.save(lib,'auto',20,()=>true,verified)).rejects.toThrow();
+  await expect(backups.save(lib,'auto',10,()=>true,verified)).rejects.toThrow();
   expect(verified).not.toHaveBeenCalled();expect(disk.remove).not.toHaveBeenCalled();
  }finally{lib.close();}
 });

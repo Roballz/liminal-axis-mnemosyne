@@ -85,7 +85,7 @@ test('manual and pinned Worker results retain small inventory previews when opti
         vi.spyOn(worker, 'runBackupWorker').mockResolvedValueOnce(saved).mockResolvedValueOnce({ state: 'pinned', entry: pinned });
         vi.mocked(d.read).mockClear(); vi.mocked(d.write).mockClear();
         const runtime = await import('./core-backup-runtime');
-        await runtime.saveCoreBackup(lib, 'manual', 20, () => true);
+        await runtime.saveCoreBackup(lib, 'manual', 10, () => true);
         await runtime.pinCoreBackup(saved.entry.key, saved.entry.checksum, () => true);
         const entries = (await (await runtime.getCoreBackups()).inventory()).entries;
         expect(entries.find(entry => entry.key === saved.entry.key)?.preview).toEqual(saved.entry);

@@ -48,7 +48,7 @@ test.each([11,12])('v%s ancestor backup preserves newer host summary as unresolv
  expect((await statuses(lib,view)).get(missing[0].id)).toBe('needs_review');
  expect(dailyState).toMatchObject({pending:false,error:'',archived:4,summaries:2,review:1});
  expect((await eventView(lib,view)).valid.map(m=>m.id)).not.toContain(missing[0].id);
- const saved=await exportLibrary(lib);expect(saved.version).toBe(17);
+ const saved=await exportLibrary(lib);expect(saved.version).toBe(18);
  const restored=await restoreLibrary(saved,false);
  try {expect(await exportLibrary(restored)).toMatchObject({data:saved.data});expect((await statuses(restored,await capture(restored,view.branch.id))).get(missing[0].id)).toBe('needs_review');}finally{restored.close();}
  const files=new Map<string,Blob>();
@@ -94,7 +94,7 @@ test('already committed poison and matching historical revisions repair idempote
  expect((await statuses(lib,repaired)).get(repaired.memories.find(m=>m.hostId==='high')!.id)).toBe('needs_review');
 });
 
-test('manual confirmation is explicit, free of model calls, preserves original proof and later source edits still invalidate',async()=>{
+test('manual confirmation is explicit, free of model calls, and later body edits retire superseded summaries',async()=>{
  const {view,summary}=await recoveredChild();
  await expect(keepSummary(lib,view,summary.id)).rejects.toThrow('不可直接保留');
  expect((await reviewDifference(lib,view,summary.id)).explanation).toContain('旧核心包');
@@ -106,7 +106,8 @@ test('manual confirmation is explicit, free of model calls, preserves original p
  expect(await lib.get('memory_revisions',summary.id)).toEqual(summary);
  await exportLibrary(lib);
  ctx.chat[0].mes+=' changed';invalidateDaily();current=await syncDaily();
- expect((await statuses(lib,current)).get(approved.id)).toBe('needs_review');await exportLibrary(lib);
+ expect(current.memories.some(m=>m.id===approved.id)).toBe(false);
+ expect(await lib.get('memory_revisions',approved.id)).toBeUndefined();await exportLibrary(lib);
 });
 
 test('unrelated corrupted history is never automatically accepted as recovered host evidence',async()=>{

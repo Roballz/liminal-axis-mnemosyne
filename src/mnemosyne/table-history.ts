@@ -177,17 +177,18 @@ export async function reconcileTableHistory(tx: Transaction, branch: Branch, ref
 }
 
 /** A missing compatible source is not a gap when the adopted history is known empty. */
-async function missingTableBaseline(tx: Transaction, prior: TableCommit) {
+async function missingTableBaseline(tx: Transaction, prior: TableCommit, deletedTables = new Set<string>()) {
     if (prior.gap) return true;
     const state = await tableStateAt(tx, prior.id);
     // Deleted records are still evidence that table history existed.
-    return !!(state.defs.length || state.rows.length);
+    return state.defs.some(def => !deletedTables.has(def.id)) || state.rows.some(record => !deletedTables.has(record.owner));
 }
 
 /** Copy eligible state ancestry once. No mutable parent table/row is shared with the child. */
 export async function inheritTableHistory(tx: Transaction, parent: Branch, branch: Branch, refs: SourceRef[],
     variants: number[] | undefined, mapMemory: (id: string) => Promise<string | undefined>) {
     await ensureTableHistory(tx, parent);
+    const deletedTables = new Set((await tx.all<TableDef>('custom_table_defs', 'branch', parent.id)).filter(d => d.deleted).map(d => d.id));
     const target = await compatibleTableHead(tx, parent.tableHead, refs, variants);
     const ancestry: TableCommit[] = [];
     let cursor = target;
@@ -195,15 +196,20 @@ export async function inheritTableHistory(tx: Transaction, parent: Branch, branc
         ancestry.push(cursor);
         cursor = cursor.parent ? (await tx.get<TableCommit>('table_history', cursor.parent))! : null;
     }
+    // When every historical value belonged to a deleted table, inherit one empty
+    // baseline instead of copying a chain of empty historical commits.
+    if (deletedTables.size && ancestry.every(c => c.defs.every(d => deletedTables.has(d.id)) && c.rows.every(r => deletedTables.has(r.owner))))
+        ancestry.length = 0;
     const tables = new Map<string, string>(), rows = new Map<string, string>(), commits = new Map<string, string>();
     const mapped = (map: Map<string, string>, key: string, prefix: string) => {
         if (!map.has(key)) map.set(key, row(prefix).id);
         return map.get(key)!;
     };
     for (const source of ancestry.reverse()) {
-        const defs = source.defs.map(def => ({ ...def, id: mapped(tables, def.id, 'table'), branch: branch.id }));
+        const defs = source.defs.filter(def => !deletedTables.has(def.id)).map(def => ({ ...def, id: mapped(tables, def.id, 'table'), branch: branch.id }));
         const records: TableRow[] = [];
         for (const record of source.rows) {
+            if (deletedTables.has(record.owner)) continue;
             const sources: string[] = [];
             for (const id of record.sources) {
                 const copied = await mapMemory(id);
@@ -220,8 +226,8 @@ export async function inheritTableHistory(tx: Transaction, parent: Branch, branc
         branch.tableHead = copied.id;
     }
     branch.tableHistoryGap = target ? target.gap
-        : await missingTableBaseline(tx, (await tx.get<TableCommit>('table_history', parent.tableHead!))!);
-    if (!target) {
+        : await missingTableBaseline(tx, (await tx.get<TableCommit>('table_history', parent.tableHead!))!, deletedTables);
+    if (!target || !ancestry.length) {
         const baseline: TableCommit = { ...row('th'), story: branch.story, branch: branch.id, previous: null, parent: null,
             snapshot: branch.head, cutoff: branch.tableHistoryGap ? refs.length : 0, sequence: 1, depth: 0, kind: 'inherit', operation: '',
             checkpoint: true, gap: branch.tableHistoryGap, defs: [], rows: [] };
@@ -229,6 +235,33 @@ export async function inheritTableHistory(tx: Transaction, parent: Branch, branc
     }
     await adoptProjection(tx, branch, await tableStateAt(tx, branch.tableHead!));
     await tx.put('branches', parent);
+}
+
+/** User-requested permanent table removal, including every historical after-image.
+ * Other tables retain their values, ancestry and concurrency counters. */
+export async function purgeTables(tx: Transaction, branch: Branch, ids: ReadonlySet<string>) {
+    if (!ids.size) return;
+    for (const id of ids) {
+        const definition = await tx.get<TableDef>('custom_table_defs', id);
+        check(definition && definition.branch === branch.id, '要删除的表不属于当前档案');
+        for (const record of await tx.all<TableRow>('custom_table_rows', 'owner', id)) {
+            check(record.branch === branch.id, '表行跨档案，已停止删除');
+            await tx.delete('custom_table_rows', record.id);
+        }
+        for (const receipt of await tx.all('table_receipts', 'owner', id)) await tx.delete('table_receipts', receipt.id);
+        await tx.delete('custom_table_defs', id);
+    }
+    const history = await tx.all<TableCommit>('table_history', 'branch', branch.id);
+    const remaining = history.map(c => ({ ...c, defs: c.defs.filter(d => !ids.has(d.id)), rows: c.rows.filter(r => !ids.has(r.owner)) }));
+    if (remaining.every(c => !c.defs.length && !c.rows.length)) {
+        for (const c of history) await tx.delete('table_history', c.id);
+        const baseline: TableCommit = { ...row('th'), story: branch.story, branch: branch.id, previous: null, parent: null,
+            snapshot: branch.head, cutoff: 0, sequence: history.reduce((max, c) => Math.max(max, c.sequence), 0) + 1, depth: 0, kind: 'baseline',
+            operation: '', checkpoint: true, gap: false, defs: [], rows: [] };
+        await tx.add('table_history', baseline); branch.tableHead = baseline.id; branch.tableHistoryGap = false;
+    } else for (let i = 0; i < history.length; i++)
+        if (remaining[i].defs.length !== history[i].defs.length || remaining[i].rows.length !== history[i].rows.length)
+            await tx.put('table_history', remaining[i]);
 }
 
 /** Move unchanged values across a proven plugin-annotation-only source update.

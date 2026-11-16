@@ -116,15 +116,16 @@ async function chain() {
     () => true,
   );
 }
-test('blocked batch explains skips and explicit update identifies the offending floor', async () => {
+test('body replacement retires obsolete event evidence and never sends it in a later batch', async () => {
   const id = await chain();
   ctx.chat[1].mes += '来源被编辑';
   const sender = vi.fn(async () => answer);
   await runEvents(true, sender);
   expect(sender).not.toHaveBeenCalled();
-  expect(jobState.status).toContain('1 条来源异常已跳过');
-  expect(jobState.status).toContain('一天约会');
-  await expect(updateEventOverview(lib, await syncDaily(), id, 80000, sender)).rejects.toThrow('#1楼');
+  expect(jobState.status).toContain('更新 0 条事件链');
+  const view = await syncDaily();
+  expect((await eventView(lib, view)).cards.find(c => c.chain.id === id)?.members).toEqual([]);
+  expect(await updateEventOverview(lib, view, id, 80000, sender)).toBe(false);
   expect(sender).not.toHaveBeenCalled();
 });
 async function table() {
@@ -689,7 +690,7 @@ test("manual backfill runs while automatic filling is disabled, sends original d
     false,
   );
   const pack = await exportLibrary(lib);
-  expect(pack.version).toBe(17);
+  expect(pack.version).toBe(18);
   const restored = await restoreLibrary(pack, false);
   expect(
     (await restored.all<TableRow>("custom_table_rows"))[0].bodySources,

@@ -11,11 +11,11 @@ import type { BackupJob, BackupResult, HostMessage, WorkerMessage, DiskRequest }
 export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, isCurrent: () => boolean,
     createWorker: () => Worker = () => new BackupWorker(),
     onPendingNative?: (message: string) => void, onProgress?: (progress: ReorganizationProgress) => void, onVerified?: (entry: BackupPreview, unchanged?: true) => void, canRotate?: () => boolean): Promise<BackupResult> {
-    const unavailable = job.kind === 'reorganize' ? '后台整理线程不可用；原库保留，请重新加载插件后重试' : job.kind === 'size'
+    const unavailable = job.kind === 'reorganize' || job.kind === 'clean-history' ? '后台整理线程不可用；原库保留，请重新加载插件后重试' : job.kind === 'size'
         ? '后台体积分析线程不可用；请重新加载插件后重试'
         : job.kind === 'preview'
         ? '后台校验线程不可用；所选文件仍未验证，未恢复或删除。请重新加载插件后重试（需要宿主允许 Web Worker）'
-        : job.kind === 'export' || job.kind === 'import' || job.kind === 'restore'
+        : job.kind === 'export' || job.kind === 'import' || job.kind === 'restore' || job.kind === 'archive-import' || job.kind === 'archive-restore'
         ? '后台迁移线程不可用；本次导出或恢复未完成，原库保留。请重新加载插件后重试（需要宿主允许 Web Worker）'
         : '后台备份线程不可用；已暂停本次备份，旧备份保留。请重新加载插件后重试（需要宿主允许 Web Worker）';
     return new Promise((resolve, reject) => {
@@ -63,10 +63,10 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
             if (job.kind === 'preview' && (request.method !== 'read' || request.key !== job.key || !isCurrent()))
                 throw new Error('备份选择已改变或校验请求越界');
             if (request.method === 'guard') return rotationCurrent();
-            if (!disk || job.kind === 'export' || job.kind === 'import' || job.kind === 'size' || job.kind === 'reorganize') throw new Error('迁移或体积分析任务不允许访问原生备份文件');
+            if (!disk || job.kind === 'export' || job.kind === 'import' || job.kind === 'archive-import' || job.kind === 'size' || job.kind === 'reorganize' || job.kind === 'clean-history') throw new Error('迁移或体积分析任务不允许访问原生备份文件');
             const writer = job.kind === 'auto' || job.kind === 'manual' || job.kind === 'before-restore' || job.kind === 'pin';
             if (request.method === 'read') {
-                if ((job.kind === 'restore' || job.kind === 'pin') &&
+                if ((job.kind === 'restore' || job.kind === 'archive-restore' || job.kind === 'pin') &&
                     (request.key !== job.key && !(job.kind === 'pin' && written.has(request.key)) || !isCurrent()) ||
                     (job.kind === 'manual' || job.kind === 'before-restore') && !written.has(request.key))
                     throw new Error('所选备份已改变或文件读取越界');
@@ -111,13 +111,14 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
                     error => send({ type: 'reply', id: message.id, error: error instanceof Error ? error.message : String(error) }));
                 inFlight.add(task);
                 void task.finally(() => inFlight.delete(task));
-            } else if (message.type === 'progress' && job.kind === 'reorganize') {
+            } else if (message.type === 'progress' && (job.kind === 'reorganize' || job.kind === 'clean-history')) {
                 clearTimeout(timer);
                 timer = setTimeout(() => finish(new Error('后台整理长时间未响应，原库保留')), 5 * 60_000);
                 onProgress?.(message.progress);
             } else if (message.type === 'verified' && started) {
                 if (!['auto', 'manual', 'before-restore'].includes(job.kind) || !('library' in job) ||
                     message.entry.sourceLibrary !== job.library || !readFiles.has(message.entry.key) ||
+                    ('branch' in job && message.entry.archive?.branch !== job.branch) ||
                     (message.unchanged ? job.kind !== 'auto' : !written.has(message.entry.key))) {
                     finish(new Error('后台备份验证回执不匹配')); return;
                 }

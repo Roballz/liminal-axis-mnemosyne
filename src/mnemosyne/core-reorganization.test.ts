@@ -58,7 +58,7 @@ test('real reorganization preserves all history, branch, review, event/table evi
     if (batch) await commitEventBatch(lib, batch, output(batch));
     await saveTable(lib, await capture(lib, f.branch.id), { ...row('table'), story: f.branch.story, branch: f.branch.id,
         name: '合成表', description: '', columns: [{ id: 'name', name: '名称', type: 'text', description: '', mode: 'replace' }],
-        ai: false, version: 1, created: 1, updated: 1, deleted: false } as any);
+        ai: false, version: 0, created: 1, updated: 1, deleted: false } as any);
     const before = await exportLibrary(lib), stamp = await libraryWriteStamp(lib);
     const progress = vi.fn();
     const report = await reorganizeCoreLibrary(lib, async () => true, progress);
@@ -80,7 +80,7 @@ test('real reorganization preserves all history, branch, review, event/table evi
         input.memories[1].content = long + '整理后新增';
         await synchronize(target, input);
         const pack = await exportLibrary(target);
-        expect(pack.version).toBe(17); expect(pack.data.memory_payloads.length).toBeGreaterThan(0);
+        expect(pack.version).toBe(18); expect(pack.data.memory_payloads.length).toBeGreaterThan(0);
         expect(pack.data.memory_revisions.some(r => 'sharedSchema' in r)).toBe(true);
         const restored = await restoreLibrary(pack, false);
         try {

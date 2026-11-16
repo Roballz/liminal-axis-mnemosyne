@@ -1,3 +1,4 @@
+import { packageData } from './archive-package';
 import 'fake-indexeddb/auto';
 import { expect, test } from 'vitest';
 import { CoreBackups } from './core-backups';
@@ -117,7 +118,7 @@ test('a retained 5k legacy chain survives export and automatic backup persisted 
         expect(saved.state).toBe('saved');
         if (saved.state !== 'saved') throw new Error('missing saved backup');
         const readback = await backups.read(saved.entry.key);
-        expect(readback.file.pack.data).toEqual(exported.data);
+        expect(packageData(readback.file.pack).data).toEqual(exported.data);
         expect(files.size).toBe(1);
         const restored = await restoreLibrary(readback.file.pack, false);
         try { expect((await exportLibrary(restored)).data).toEqual(exported.data); }

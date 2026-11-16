@@ -101,7 +101,12 @@ test('tail summary and its compressed ancestor are excluded; independent histori
 
 test.each([false, true])('manually confirmed L0 (recovered=%s) remains usable with its complete basis before the swipe', async recovered => {
     await syncDaily(); ctx.chat[0].mes = '人工确认过的新问题'; invalidateDaily();
-    let changed = await syncDaily(); const id = changed.memories[0].id;
+    // Restore the review state of an old database before testing the unchanged
+    // read-only swipe prefix. New edits normally retire this old summary.
+    const original = canonical.synchronize;
+    const seed = vi.spyOn(canonical, 'synchronize').mockImplementationOnce((library, observation, baseline, captured) =>
+        original(library, observation, baseline && { ...baseline, retireHistory: false }, captured));
+    let changed = await syncDaily(); seed.mockRestore(); const id = changed.memories[0].id;
     if (recovered) {
         await lib.transaction(['memory_revisions'], 'readwrite', tx => tx.put('memory_revisions', { ...changed.memories[0], sourceRecovery: { version: 1, reason: 'missing_basis', snapshot: 'missing' } } as MemoryRevision));
         changed = await capture(lib, changed.branch.id);

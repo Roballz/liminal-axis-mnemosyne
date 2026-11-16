@@ -16,7 +16,7 @@ const disk = (): BackupDisk => ({
     write: vi.fn(async () => {}), remove: vi.fn(async () => {}),
     readSettings: vi.fn(), writeSettings: vi.fn(),
 });
-const job = { kind: 'auto' as const, library: 'mnemosyne_daily_test', keep: 20 as const };
+const job = { kind: 'auto' as const, library: 'mnemosyne_daily_test', keep: 10 as const };
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 function start(d = disk(), guard = () => true) {
     const worker = new FakeWorker();
@@ -154,7 +154,7 @@ test('unavailable detail worker does not parse the selected file on the UI threa
 test.each(['manual', 'before-restore', 'pin'] as const)('%s jobs publish only their copy type and cannot rotate or read unrelated files', async kind => {
     const d = disk(), worker = new FakeWorker();
     const selected = 'selected', published = `${kind === 'pin' ? 'pinned' : kind}-v1-copy`;
-    const task: BackupJob = kind === 'pin' ? { kind, key: selected, checksum: 'checksum' } : { kind, library: job.library, keep: 20 };
+    const task: BackupJob = kind === 'pin' ? { kind, key: selected, checksum: 'checksum' } : { kind, library: job.library, keep: 10 };
     let current = true;
     const result = runBackupWorker(d, task, () => current, () => worker as unknown as Worker);
     worker.emit({ type: 'ready' });

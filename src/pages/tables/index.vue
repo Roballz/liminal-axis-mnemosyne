@@ -184,7 +184,7 @@ async function saveDefinition() {
 }
 async function deleteTable(def: TableDef) {
   menu.value = null;
-  if (!confirm(`删除「${def.name}」？表与行会隐藏，核心包仍保留历史数据。`)) return;
+  if (!confirm(`永久删除当前档案中的「${def.name}」及其全部表行、填表记录和表格历史？以后新分支不会再继承这张表；其他分支已有的表不受影响。此操作不能在表格历史中撤销。`)) return;
   await save({ ...plain(def), deleted: true });
 }
 function editColumn(column?: Column) {

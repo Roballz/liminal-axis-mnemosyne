@@ -1,4 +1,4 @@
-import { TABLE_STORES, ensureTableHistory, recordTableWrite, tablePlanHeadMatches, selectTableHistory } from './table-history';
+import { TABLE_STORES, ensureTableHistory, recordTableWrite, tablePlanHeadMatches, selectTableHistory, purgeTables } from './table-history';
 import { parseStrictJson } from './json';
 import { Library, type Transaction } from './db';
 import { current, statuses, snapshotRefs, type MemoryStatus } from './canonical';
@@ -42,6 +42,16 @@ export function validateColumns(columns: Column[]) {
     }
 }
 export async function saveTable(lib: Library, view: Pick<CapturedView, 'branch'>, input: TableDef) {
+    if (input.deleted) {
+        await lib.transaction(TABLE_STORES, 'readwrite', async tx => {
+            const branch = await tx.get<Branch>('branches', view.branch.id), old = await tx.get<TableDef>('custom_table_defs', input.id);
+            check(branch && branch.epoch === view.branch.epoch && old && old.version === input.version &&
+                old.branch === branch.id && old.story === branch.story, '表或档案已改变，请重新打开后删除');
+            await purgeTables(tx, branch, new Set([old.id]));
+            branch.epoch++; await tx.put('branches', branch);
+        });
+        return;
+    }
     validateColumns(input.columns);
     check(input.name.trim() && input.branch === view.branch.id && input.story === view.branch.story, '表名/范围无效');
     await lib.transaction(TABLE_STORES, 'readwrite', async (tx) => {
@@ -49,6 +59,7 @@ export async function saveTable(lib: Library, view: Pick<CapturedView, 'branch'>
         check(branch && branch.epoch === view.branch.epoch, '视图已改变');
         await ensureTableHistory(tx, branch);
         const old = await tx.get<TableDef>('custom_table_defs', input.id);
+        check(old || input.version === 0, '此表已删除，请关闭旧编辑器；需要时新建一张表');
         check(!old || old.version === input.version && old.branch === view.branch.id && old.story === view.branch.story, '表定义已改变或跨分支');
         if (old && old.columns[0]?.id !== input.columns[0]?.id) {
             const existingRows = await tx.all<TableRow>('custom_table_rows', 'owner', input.id);

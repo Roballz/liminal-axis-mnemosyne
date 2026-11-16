@@ -678,7 +678,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             const baseline = await sourceSyncBaseline(lib, observation);
             check(deletionGuard(), '聊天在归档校验期间改变，待重试');
             const synchronized: { view?: CapturedView } = {};
-            const branch = await synchronize(lib, observation, { ...baseline, isCurrent: deletionGuard },
+            const branch = await synchronize(lib, observation, { ...baseline, retireHistory: true, isCurrent: deletionGuard },
                 view => { synchronized.view = view; });
             const synchronizedVersion = lib.changes.version;
             savedHost = host;
@@ -929,7 +929,7 @@ export async function dailyBranchChoices(includeCurrent = false) {
             const [owner, name] = parseScope(binding.scope);
             if (owner !== character || !name || (!includeCurrent && !binding.detached && binding.scope === scope) || seen.has(binding.branch)) continue;
             const branch = await tx.get<Branch>('branches', binding.branch);
-            if (!branch) continue;
+            if (!branch || branch.archiveSupport) continue;
             const snapshot = await tx.get<import('./model').Snapshot>('history_snapshots', branch.head);
             if (!snapshot) continue;
             seen.add(branch.id);

@@ -5,6 +5,8 @@ import { exportLibrary, restoreLibrary } from './migration';
 import { parseStrictJson } from './json';
 import { check } from './model';
 import { measureCorePackageSize } from './core-package-size';
+import { archivePackage, exportArchive, packageData, restoreArchive } from './archive-package';
+import { cleanLibraryHistory } from './history-cleanup';
 import type { BackupDisk } from '@/st/native-backups';
 import type { DiskCall, DiskRequest, HostMessage, WorkerMessage } from './backup-worker-protocol';
 
@@ -18,8 +20,8 @@ function rpc(request: DiskCall): Promise<any> {
         send({ ...request, type: 'rpc', id } as DiskRequest);
     });
 }
-// Native disk calls stay on the host. Explicit restore jobs may write only a new
-// independent database; activation and host settings remain on the UI thread.
+// Native disk calls stay on the host. Full restores use a new database; archive
+// restores and explicit cleanup commit a validated, write-stamped plan in place.
 const disk: BackupDisk = {
     list: () => rpc({ method: 'list' }),
     read: key => rpc({ method: 'read', key }),
@@ -70,15 +72,37 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
             return;
         }
         lib = await Library.open(message.job.library, true);
-        if (message.job.kind === 'reorganize') {
+        if (message.job.kind === 'archive-import' || message.job.kind === 'archive-restore') {
+            let value: unknown;
+            if (message.job.kind === 'archive-restore') {
+                const selected = await backups.read(message.job.key);
+                check(selected.entry.checksum === message.job.checksum, '所选备份已改变，请重新预览');
+                value = selected.file.pack;
+            } else {
+                const blob = message.job.blob;
+                check(blob instanceof Blob && blob.size > 0 && blob.size <= BACKUP_MAX_BYTES, '核心包为空或超过导入大小上限');
+                value = parseStrictJson(await blob.text(), BACKUP_MAX_BYTES);
+            }
+            check(archivePackage(value), '请选择单档案包；旧整库备份请使用整库恢复');
+            const report = await restoreArchive(lib, value, guard, { branch: message.job.branch, scope: message.job.scope });
+            send({ type: 'done', result: { state: 'archive-restored', report } });
+            return;
+        }
+        if (message.job.kind === 'reorganize' || message.job.kind === 'clean-history') {
             let lastProgress = 0, lastStage = '';
-            const report = await reorganizeCoreLibrary(lib, guard, progress => {
+            const progress = (progress: import('./core-reorganization').ReorganizationProgress) => {
                 const now = performance.now(), stage = `${progress.phase}:${progress.store}`;
                 if (stage !== lastStage || now - lastProgress >= 200) {
                     lastStage = stage; lastProgress = now; send({ type: 'progress', progress });
                 }
-            });
-            send({ type: 'done', result: { state: 'reorganized', report } });
+            };
+            if (message.job.kind === 'clean-history') {
+                const report = await cleanLibraryHistory(lib, guard, progress);
+                send({ type: 'done', result: { state: 'history-cleaned', report } });
+            } else {
+                const report = await reorganizeCoreLibrary(lib, guard, progress);
+                send({ type: 'done', result: { state: 'reorganized', report } });
+            }
             return;
         }
         if (message.job.kind === 'size') {
@@ -87,13 +111,14 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
             return;
         }
         if (message.job.kind === 'export') {
-            const pack = await exportLibrary(lib);
+            const pack = message.job.branch ? await exportArchive(lib, message.job.branch) : await exportLibrary(lib);
             const blob = new Blob([JSON.stringify(pack)], { type: 'application/json' });
             check(await guard(), '导出页面或档案已改变，请重试');
-            send({ type: 'done', result: { state: 'exported', blob, version: pack.version } });
+            send({ type: 'done', result: { state: 'exported', blob, version: packageData(pack).version } });
             return;
         }
-        const result = await backups.save(lib, message.job.kind, message.job.keep, guard, (entry, unchanged) => send({ type: 'verified', entry, ...(unchanged ? { unchanged } : {}) }));
+        const result = await backups.save(lib, message.job.kind, message.job.keep, guard,
+            (entry, unchanged) => send({ type: 'verified', entry, ...(unchanged ? { unchanged } : {}) }), message.job.branch);
         send({ type: 'done', result });
     } catch (error) {
         send({ type: 'failed', error: error instanceof Error ? error.message : String(error) });

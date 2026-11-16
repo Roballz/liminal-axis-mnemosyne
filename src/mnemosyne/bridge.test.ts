@@ -44,6 +44,15 @@ beforeEach(async () => {
     dispose = bindDaily();
 });
 afterEach(() => { dispose?.(); lib.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+// Seed the retained-review state of an older installed database. Production
+// reconciliation still uses latest-only retention after this one fixture write.
+async function legacyReviewFixture() {
+    const original = canonical.synchronize;
+    const seed = vi.spyOn(canonical, 'synchronize').mockImplementationOnce((library, observation, baseline, captured) =>
+        original(library, observation, baseline && { ...baseline, retireHistory: false }, captured));
+    try { return await syncDaily(); } finally { seed.mockRestore(); }
+}
+
 test('real bridge archives once, persists independent host IDs, and exposes canonical IDs/payloads', async () => {
     const first = await syncDaily();
     const second = await syncDaily();
@@ -73,7 +82,7 @@ test('summary review rejects stale cached epochs and reads fresh review decision
     await syncDaily();
     ctx.chat[0].mes = '改变摘要来源';
     invalidateDaily();
-    const view = await syncDaily(), id = view.memories[0].id;
+    const view = await legacyReviewFixture(), id = view.memories[0].id;
     expect((await readDailyReview())?.validity.get(id)).toBe('needs_review');
     await canonical.keepSummary(lib, view, id);
     const captureSpy = vi.spyOn(canonical, 'capture');
@@ -370,8 +379,8 @@ test('legacy hidden-role misclassification recovers child events and highest sum
     ctx.chat[1].mes += '真正改写剧情';
     invalidateDaily();
     const edited = await syncDaily();
-    expect(dailyState.review).toBe(4);
-    expect(await eventView(lib, edited)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
+    expect(dailyState.review).toBe(0); expect(edited.memories).toEqual([]);
+    expect(await eventView(lib, edited)).toMatchObject({ storedCount: 1, cards: [{ meta: { overview: '' }, members: [] }] });
     expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
 });
 
@@ -424,7 +433,7 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect((await syncDaily()).branch.sourceRoleRepairs).toHaveLength(1);
     expect(dailyState.review).toBe(0);
     const pack = await exportLibrary(lib);
-    expect(pack.version).toBe(17);
+    expect(pack.version).toBe(18);
     const restored = await restoreLibrary(pack);
     lib = restored;
     dispose?.(); dispose = bindDaily();
@@ -434,8 +443,8 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect(selectInjectionNodes(memory.summaries, ctx.chat).map(n => n.id)).toEqual(['level-2']);
     ctx.chat[1].mes += '真正改写';
     invalidateDaily(); view = await syncDaily();
-    expect(dailyState.review).toBe(4);
-    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, blocked: true }] });
+    expect(dailyState.review).toBe(0); expect(view.memories).toEqual([]);
+    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [{ meta: { overview: '' }, members: [] }] });
     expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
 });
 
@@ -497,7 +506,8 @@ test('an old-floor edit invalidates recalled material before synchronization', a
     expect(await dailyCurrent(view, host, generation)).toBe(false);
     await syncDaily();
     expect(canonicalLeaves()).toHaveLength(0);
-    expect(dailyState.review).toBe(1);
+    expect(dailyState.review).toBe(0);
+    expect(await lib.get('memory_revisions', view.memories[0].id)).toBeUndefined();
 });
 test('copied binding requires explicit intent and a proven fixed-prefix fork retains source identities', async () => {
     const parent = await syncDaily();
@@ -525,7 +535,8 @@ test('summary evidence is actual source refs; extension-authored sidecars do not
     ctx.chat[0].mes = '用户编辑了实际输入';
     invalidateDaily();
     const changed = await syncDaily();
-    expect((await statuses(lib, changed)).get(changed.memories[0].id)).toBe('needs_review');
+    expect(changed.memories).toEqual([]);
+    expect(await lib.get('memory_revisions', summary.id)).toBeUndefined();
 });
 test('late summary evidence rejects a changed host before overwriting its leaf', async () => {
     await syncDaily();
@@ -544,7 +555,7 @@ test('nonstandard message groups are archived without fabricated User/Assistant 
     expect(view.memories[0].coverage).toHaveLength(0);
 });
 
-test('retained higher summaries require an explicit one-level rebuild after a child changes', async () => {
+test('retired higher summaries can be rebuilt once from the changed current children', async () => {
   ctx.chat.push(message(true,'第二问'),message(false,'第二段正文'));
   ctx.chat[3].extra!.bbs_leaf={id:'second-leaf',text:'第二条摘要',delta:{},createdAt:2,v:1,swipe:0};
   memory.summaries.push({id:'high',text:'旧高层摘要',level:1,createdAt:1,auto:true,childIds:['legacy-leaf','second-leaf']});
@@ -552,7 +563,7 @@ test('retained higher summaries require an explicit one-level rebuild after a ch
   ctx.chat[1].extra!.bbs_leaf!.text='修改后的下级';
   expect(invalidateSummaryAncestors('legacy-leaf')).toBe(0);
   invalidateDaily();let view=await syncDaily();
-  expect((await statuses(lib,view)).get(view.memories.find(m=>m.hostId==='high')!.id)).toBe('needs_rebuild');
+  expect(view.memories.find(m=>m.hostId==='high')).toBeUndefined();
   vi.spyOn(api,'engineActiveHere').mockReturnValue(true);vi.spyOn(api,'getChannelForTask').mockReturnValue(null);
   vi.spyOn(client,'mainApiAvailable').mockReturnValue(true);vi.spyOn(client,'requestViaMainApi').mockResolvedValue('{"summary":"重建后的高层摘要"}');
   api.apiSettings.summarySuccessPreviewEnabled = true;
@@ -565,6 +576,35 @@ test('retained higher summaries require an explicit one-level rebuild after a ch
   const high=view.memories.find(m=>m.hostId==='high')!;
   expect(high.content).toBe('重建后的高层摘要');expect((await statuses(lib,view)).get(high.id)).toBe('valid');
   expect(client.requestViaMainApi).toHaveBeenCalledTimes(1);expect(memory.summaries).toHaveLength(1);
+});
+
+test('manual summary saves retire old text, higher dependencies and event evidence without changing current bodies', async () => {
+    const { editLeafAt } = await import('@/memory/apply');
+    memory.summaries.push({ id: 'manual-parent', text: '旧上层摘要', level: 1, createdAt: 1, auto: true, childIds: ['legacy-leaf'] });
+    let view = await syncDaily();
+    const refs = view.refs, body = ctx.chat[1].mes, oldIds = new Set(view.memories.map(m => m.id));
+    const source = view.memories.find(m => m.hostId === 'legacy-leaf')!;
+    const event = await editEvent(lib, view, null, { title: '人工修改前的事件', status: 'open', keywords: [],
+        overview: '依据旧摘要生成的概要', summarized: [source.id] }, { memory: source.id, active: true, kind: 'progress' });
+    for (const text of ['手动改正摘要错别字', '再次手动调整摘要内容']) {
+        expect(editLeafAt(1, text, '', '')).toBe(true);
+        view = await syncDaily();
+        expect(view.refs).toEqual(refs); expect(ctx.chat[1].mes).toBe(body);
+        expect(view.memories).toHaveLength(1); expect(view.memories[0].content).toBe(text);
+        expect((await statuses(lib, view)).get(view.memories[0].id)).toBe('valid');
+        for (const id of oldIds) expect(await lib.get('memory_revisions', id)).toBeUndefined();
+        expect(await lib.all('memory_revisions', 'branch', view.branch.id)).toHaveLength(1);
+        expect(await lib.all('memory_views', 'branch', view.branch.id)).toHaveLength(1);
+        expect(await lib.all('memory_selection_nodes')).toHaveLength(1);
+        const card = (await eventView(lib, view)).cards.find(c => c.chain.id === event)!;
+        expect(card.meta.overview).toBe(''); expect(card.members).toEqual([]);
+        expect(await lib.all('event_processing_receipts', 'branch', view.branch.id)).toEqual([]);
+        expect((await syncDaily()).memories[0].id).toBe(view.memories[0].id);
+        oldIds.add(view.memories[0].id);
+    }
+    const restored = await restoreLibrary(await exportLibrary(lib), false);
+    try { expect((await capture(restored, view.branch.id)).memories).toEqual(view.memories); }
+    finally { restored.close(); }
 });
 
 test('unchanged refresh and lightweight page scope do not resave or scan sources/summaries', async () => {
@@ -1069,10 +1109,10 @@ test('automatic inheritance from an earlier floor uses the complete matching sho
 });
 
 
-test('edit popup defaults off, later leaves reviews unchanged, and keep uses the original approval path', async () => {
+test('legacy review popup defaults off, later leaves reviews unchanged, and keep uses the original approval path', async () => {
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
     const original = await syncDaily();
-    ctx.chat[0].mes += '人工修订'; invalidateDaily();
+    ctx.chat[0].mes += '人工修订'; invalidateDaily(); await legacyReviewFixture();
     api.apiSettings.summaryEditPromptEnabled = false;
     await prepareSummaryEditPrompt(); expect(summaryEditPrompt.open).toBe(false);
     api.apiSettings.summaryEditPromptEnabled = true;
@@ -1090,7 +1130,7 @@ test('edit popup defaults off, later leaves reviews unchanged, and keep uses the
 test('stale edit popup cannot approve a newer edit or a different chat', async () => {
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
     await syncDaily(); api.apiSettings.summaryEditPromptEnabled = true;
-    ctx.chat[0].mes += '一次修改'; invalidateDaily(); await prepareSummaryEditPrompt();
+    ctx.chat[0].mes += '一次修改'; invalidateDaily(); await legacyReviewFixture(); await prepareSummaryEditPrompt();
     ctx.chat[0].mes += '又一次修改'; invalidateDaily();
     await resolveSummaryEdit('keep');
     expect(summaryEditPrompt.error).toContain('已改变'); expect(await lib.all('reviews')).toEqual([]);
@@ -1102,7 +1142,7 @@ test('stale edit popup cannot approve a newer edit or a different chat', async (
 test('edit popup update delegates to the existing floor regeneration and preserves completed summary', async () => {
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
     await syncDaily(); api.apiSettings.summaryEditPromptEnabled = true;
-    ctx.chat[1].mes += '编辑正文'; invalidateDaily(); await prepareSummaryEditPrompt();
+    ctx.chat[1].mes += '编辑正文'; invalidateDaily(); await legacyReviewFixture(); await prepareSummaryEditPrompt();
     const engine = await import('@/memory/engine');
     const regenerate = vi.spyOn(engine, 'regenerateFloor').mockImplementationOnce(async floor => {
         const evidence = await captureSummaryEvidence([0, 1]);
@@ -1118,14 +1158,15 @@ test('edit popup update delegates to the existing floor regeneration and preserv
 });
 
 
-test('edit event opens the external prompt with setting enabled, and chat switching cancels a queued prompt', async () => {
+test('edit event retires old summaries without a review popup, and chat switching cancels a queued prompt', async () => {
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
     const emit = bindFinalityEvents();
     await syncDaily(); api.apiSettings.summaryEditPromptEnabled = true;
     const stopPrompt = bindSummaryEditPrompt()!;
     ctx.chat[0].mes += '正文编辑'; await emit('MESSAGE_EDITED', 0); await emit('MESSAGE_UPDATED', 0);
     await new Promise(resolve => setTimeout(resolve, 450));
-    expect(summaryEditPrompt.open).toBe(true);
+    expect(summaryEditPrompt.open).toBe(false);
+    expect((await syncDaily()).memories).toEqual([]);
     await resolveSummaryEdit('later');
     await emit('MESSAGE_EDITED', 0); ctx.getCurrentChatId = () => 'switched-away'; invalidateDaily(); await emit('MESSAGE_UPDATED', 0);
     await new Promise(resolve => setTimeout(resolve, 450));
@@ -1462,7 +1503,7 @@ async function nativeEditFixture() {
     return { emit, original, click, close };
 }
 
-test.each(['keep', 'update'] as const)('native error-suffix deletion waits for UPDATED then allows manual %s despite missing UI END', async action => {
+test.each(['keep', 'update'] as const)('native error-suffix deletion waits for UPDATED then retires old summary; %s cannot revive it', async action => {
     const { emit, original, click, close } = await nativeEditFixture();
     try {
         const fullBody = '已经完整输出并由用户核对的正文';
@@ -1487,24 +1528,15 @@ test.each(['keep', 'update'] as const)('native error-suffix deletion waits for U
         await emit('MESSAGE_UPDATED', 1);
         await new Promise(resolve => setTimeout(resolve, 250));
         expect((ctx.chat[1].extra![key] as any).state).toBe('edited');
-        await vi.waitFor(() => expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' }), { timeout: 2000 });
-        expect(await lib.all('reviews')).toEqual([]);
-        expect((await readDailyReview())!.view.memories[0].content).toBe('合成旧摘要');
-        const engine = await import('@/memory/engine');
-        const regenerate = vi.spyOn(engine, 'regenerateFloor').mockImplementation(async floor => {
-            const evidence = await captureSummaryEvidence([0, 1]);
-            ctx.chat[floor].extra!.bbs_leaf!.text = '用户选择更新后的摘要';
-            attachSummaryEvidence(ctx.chat, floor, evidence, [0, 1]); invalidateDaily(); return true;
-        });
-        await resolveSummaryEdit(action);
         expect(summaryEditPrompt.open).toBe(false);
-        if (action === 'keep') {
-            expect(regenerate).not.toHaveBeenCalled();
-            expect((await statuses(lib, await syncDaily())).get(original.memories[0].id)).toBe('valid');
-        } else {
-            expect(regenerate).toHaveBeenCalledExactlyOnceWith(1);
-            expect((await syncDaily()).memories[0].content).toBe('用户选择更新后的摘要');
-        }
+        expect(await lib.all('reviews')).toEqual([]);
+        expect((await readDailyReview())!.view.memories).toEqual([]);
+        expect(await lib.get('memory_revisions', original.memories[0].id)).toBeUndefined();
+        const engine = await import('@/memory/engine');
+        const regenerate = vi.spyOn(engine, 'regenerateFloor');
+        await resolveSummaryEdit(action);
+        expect(regenerate).not.toHaveBeenCalled();
+        expect((await syncDaily()).memories).toEqual([]);
     } finally { close(); }
 });
 
@@ -1523,13 +1555,14 @@ test.each(['defer', 'disabled', 'chat', 'swipe', 'generation'])('late UPDATED do
     } finally { close(); }
 });
 
-test('ordinary user edits still prompt once; duplicate UPDATED cannot reopen a dismissed prompt', async () => {
+test('ordinary user edits retire old summaries once; duplicate UPDATED cannot resurrect a review prompt', async () => {
     const { emit, click, close } = await nativeEditFixture();
     try {
         click(0, '用户明确修订的问题'); ctx.chat[0].mes = '用户明确修订的问题';
         await emit('MESSAGE_EDITED', 0); await emit('MESSAGE_UPDATED', 0);
         await new Promise(resolve => setTimeout(resolve, 250));
-        expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' });
+        expect(summaryEditPrompt.open).toBe(false);
+        expect((await syncDaily()).memories).toEqual([]);
         deferSummaryEdit(); await emit('MESSAGE_UPDATED', 0);
         await new Promise(resolve => setTimeout(resolve, 250));
         expect(summaryEditPrompt.open).toBe(false);
@@ -1572,7 +1605,7 @@ test.each(['generation', 'swipe', 'defer'])('in-flight prompt preparation cannot
 });
 
 // Diagnosis only: an ignored earlier error, not the newest edited floor, owns the quarantine.
-test('historical API-error floor keeps native latest save gray; native save on exact old floor restores review', async () => {
+test('historical API-error floor keeps native latest save gray; exact old-floor save retires superseded summary', async () => {
     const { emit, click, close } = await nativeEditFixture();
     try {
         const key = 'mnemosyne_reply_finality_v1', fullBody = '旧楼已完整输出的正文';
@@ -1609,7 +1642,8 @@ test('historical API-error floor keeps native latest save gray; native save on e
         await emit('MESSAGE_EDITED', 1); await emit('MESSAGE_UPDATED', 1);
         await new Promise(resolve => setTimeout(resolve, 250));
         expect((ctx.chat[1].extra![key] as any).state).toBe('edited');
-        await vi.waitFor(() => expect(summaryEditPrompt).toMatchObject({ open: true, count: 1, error: '' }), { timeout: 2000 });
+        expect(summaryEditPrompt.open).toBe(false);
+        expect((await syncDaily()).memories).toEqual([]);
         expect(dailyState.pending).toBe(false);
         expect(await lib.all('reviews')).toEqual([]); // Explicit body acceptance is not summary acceptance.
     } finally { close(); }

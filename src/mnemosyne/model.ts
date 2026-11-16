@@ -24,6 +24,8 @@ export interface Story extends Row {
     created: number;
 }
 export interface Branch extends Row {
+    /** Portable archive dependency only; never an active/chat-selectable archive. */
+    archiveSupport?: 1;
     /** Immutable pre-current-only chain; retained until separately authorized migration. */
     legacyHead?: string;
     tableHead?: string;
@@ -104,6 +106,9 @@ export interface Mapping extends Row {
     hostKey: string;
 }
 export interface Memory extends Row {
+    /** Digests prevent stale host text or tag edits from reimporting deleted summaries. */
+    retiredFingerprint?: string;
+    retiredGenerationFingerprint?: string;
     story: string;
     owner: string;
     hostId: string;

@@ -20,7 +20,7 @@ export function deferSummaryEdit() {
 export async function prepareSummaryEditPrompt() {
     if (!apiSettings.summaryEditPromptEnabled || !engineActiveHere()) return;
     const run = ++ticket, scope = hostScope();
-    summaryEditPrompt.open = false; summaryEditPrompt.blocker = null; pending = null;
+    Object.assign(summaryEditPrompt, { open: false, blocker: null, count: 0, error: '', progress: '' }); pending = null;
     try {
         await syncDaily();
         const result = await readDailyReview();

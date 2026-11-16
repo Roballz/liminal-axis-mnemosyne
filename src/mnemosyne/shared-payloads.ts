@@ -5,6 +5,8 @@ export const SHARED_STORE = 'memory_payloads' as const;
 export const SHARED_FIELDS = {
     memory_revisions: ['content', 'inputRefs', 'coverage', 'dependencies'],
     reviews: ['sourceRefs', 'coverage', 'dependencies'],
+    event_revisions: ['title', 'overview', 'keywords', 'refs', 'summarized'],
+    event_progress: ['text', 'memories'],
 } as const;
 export interface Payload extends Row { kind: 'text' | 'list' | 'node'; value: any; count: number }
 type Ref = { shared: string };
@@ -41,7 +43,7 @@ function expandRow(row: Row, store: Store, read: (key: string) => any): Row {
     let refs = 0;
     for (const field of fields(store)) if (isRef(result[field])) {
         refs++; result[field] = read(result[field].shared);
-        check(field === 'content' ? typeof result[field] === 'string' : Array.isArray(result[field]), '共享字段类型非法');
+        check(['content', 'title', 'overview', 'text'].includes(field) ? typeof result[field] === 'string' : Array.isArray(result[field]), '共享字段类型非法');
     }
     check(refs > 0, '共享内容引用缺失');
     return result;

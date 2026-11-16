@@ -14,7 +14,7 @@ function environment() {
     const local = { getItem: vi.fn((key: string) => values.get(key) ?? null),
         setItem: vi.fn((key: string, value: string) => { values.set(key, value); }) };
     vi.stubGlobal('localStorage', local);
-    let settings = { schema: 1, enabled: true, keep: 20 };
+    let settings = { schema: 1, enabled: true, keep: 10 };
     const disk: BackupDisk = { list: vi.fn(async () => []), read: vi.fn(), write: vi.fn(), remove: vi.fn(),
         readSettings: vi.fn(async () => settings), writeSettings: vi.fn(async value => { settings = value as typeof settings; }) };
     return { values, local, disk };
@@ -46,8 +46,8 @@ test('manual success and failure persist across restart; toggling the switch can
     const run = vi.spyOn(worker, 'runBackupWorker').mockResolvedValueOnce(saved(libraryA, 100)).mockRejectedValueOnce(new Error('审核来源身份不匹配'));
     let runtime = await import('./core-backup-runtime');
     const lib = { db: { name: libraryA } } as any;
-    await runtime.saveCoreBackup(lib, 'manual', 20, () => true);
-    await expect(runtime.saveCoreBackup(lib, 'manual', 20, () => true)).rejects.toThrow('审核来源身份');
+    await runtime.saveCoreBackup(lib, 'manual', 10, () => true);
+    await expect(runtime.saveCoreBackup(lib, 'manual', 10, () => true)).rejects.toThrow('审核来源身份');
     expect(run).toHaveBeenCalledTimes(2);
     const failureSince = runtime.coreBackupState.failureSince;
     expect(JSON.parse(env.values.get(BACKUP_HEALTH_KEY)!).entries[0].error).toBe('审核来源身份不匹配');
@@ -57,11 +57,11 @@ test('manual success and failure persist across restart; toggling the switch can
     runtime = await import('./core-backup-runtime');
     await runtime.getCoreBackups();
     expect(runtime.coreBackupState).toMatchObject({ lastSavedAt: 100, error: '审核来源身份不匹配', failureSince });
-    await runtime.configureCoreBackups(false, 20);
-    await runtime.configureCoreBackups(true, 20);
+    await runtime.configureCoreBackups(false, 10);
+    await runtime.configureCoreBackups(true, 10);
     expect(runtime.coreBackupState.error).toBe('审核来源身份不匹配');
     vi.spyOn(worker, 'runBackupWorker').mockResolvedValue(saved(libraryA, 500));
-    await runtime.saveCoreBackup(lib, 'manual', 20, () => true);
+    await runtime.saveCoreBackup(lib, 'manual', 10, () => true);
     expect(runtime.coreBackupState).toMatchObject({ lastSavedAt: 500, error: '', failureSince: 0 });
     expect(env.disk.read).not.toHaveBeenCalled();
 });
@@ -96,7 +96,7 @@ test('a delayed result stays attached to its original library and cannot replace
     let finish!: (value: BackupOutcome) => void;
     vi.spyOn(worker, 'runBackupWorker').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     const runtime = await import('./core-backup-runtime');
-    const pending = runtime.saveCoreBackup({ db: { name: libraryA } } as any, 'manual', 20, () => true);
+    const pending = runtime.saveCoreBackup({ db: { name: libraryA } } as any, 'manual', 10, () => true);
     await vi.waitFor(() => expect(finish).toBeDefined());
     env.values.set(activeKey, libraryB); runtime.syncCoreBackupHealth();
     expect(runtime.coreBackupState).toMatchObject({ library: libraryB, error: 'B库故障' });
@@ -140,7 +140,7 @@ test('runtime persists a verified save before worker cleanup finishes and refres
   return new Promise(resolve=>{finish=resolve;});
  });
  const runtime=await import('./core-backup-runtime');
- const pending=runtime.saveCoreBackup({db:{name:libraryA}} as any,'manual',20,()=>true);
+ const pending=runtime.saveCoreBackup({db:{name:libraryA}} as any,'manual',10,()=>true);
  await vi.waitFor(()=>expect(finish).toBeDefined());
  expect(runtime.coreBackupState.lastSavedAt).toBe(1_700_000_000_000);
  expect(new BackupHealthHistory(()=>env.local).get(libraryA).lastSavedAt).toBe(1_700_000_000_000);

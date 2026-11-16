@@ -33,7 +33,7 @@ test('80-message append hashes only the two new bodies and skips a provably empt
             } as MemoryRevision);
         });
         append(input);
-        const digest = vi.spyOn(crypto.subtle, 'digest'), all = vi.spyOn(Transaction.prototype, 'all');
+        const digest = vi.spyOn(crypto.subtle, 'digest'), all = vi.spyOn(Transaction.prototype, 'rawAll');
         const get = vi.spyOn(Transaction.prototype, 'get');
         let captured: CapturedView | undefined;
         await synchronize(lib, input, undefined, view => { captured = view; });
@@ -126,7 +126,7 @@ test('unrooted heads, foreign history evidence, deletions and forks keep the ful
             } as MemoryRevision);
         });
         append(input);
-        const all = vi.spyOn(Transaction.prototype, 'all');
+        const all = vi.spyOn(Transaction.prototype, 'rawAll');
         await synchronize(lib, input);
         expect(all.mock.calls.some(([store, index]) => store === 'memory_revisions' && index === 'story')).toBe(true);
         expect(await lib.get('history_snapshots', old.snapshot.id)).toBeDefined();
@@ -151,11 +151,11 @@ test('a new connection and scope use the cold hash path', async () => {
         other = await Library.open(lib.db.name);
         const digest = vi.spyOn(crypto.subtle, 'digest');
         await synchronize(other, input);
-        expect(digest).toHaveBeenCalledTimes(10);
+        expect(digest).toHaveBeenCalledTimes(12); // Body/role plus full and generation-only summary digests.
         digest.mockClear();
         input.scope = 'another-story';
         await synchronize(lib, input);
-        expect(digest).toHaveBeenCalledTimes(10);
+        expect(digest).toHaveBeenCalledTimes(12);
     } finally { other?.close(); lib.close(); }
 });
 
@@ -169,8 +169,8 @@ test.each([0, 500, 2000])('ordinary turn sequence with %i historical summaries r
             } as MemoryRevision);
         });
         let scanned = 0;
-        const original = Transaction.prototype.all;
-        vi.spyOn(Transaction.prototype, 'all').mockImplementation(async function (this: Transaction, store, index, key) {
+        const original = Transaction.prototype.rawAll;
+        vi.spyOn(Transaction.prototype, 'rawAll').mockImplementation(async function (this: Transaction, store, index, key) {
             const result = await original.call(this, store, index, key);
             if (store === 'memory_revisions' && index === 'story') scanned += result.length;
             return result as any;
@@ -187,7 +187,7 @@ test.each([0, 500, 2000])('ordinary turn sequence with %i historical summaries r
             counts.push({ step, hashes: digest.mock.calls.length, historicalRows: scanned });
             await collectorIsAlreadySettled(lib, branch.id, prior.refs);
         }
-        expect(counts.map(c => c.hashes)).toEqual([2, 2, 1, 2]);
+        expect(counts.map(c => c.hashes)).toEqual([2, 2, 2, 2]); // One additional digest for the new summary only.
         // The independent full collector after the first append establishes a
         // committed reference baseline; subsequent ordinary turns must reuse it.
         expect(counts.map(c => c.historicalRows)).toEqual([0, 0, 0, 0]);

@@ -31,6 +31,36 @@ test('failed disk writes back off; no unbounded queue or rapid quota retry loop'
     expect(error).toHaveBeenCalledTimes(3); expect(vi.getTimerCount()).toBe(1); scheduler.stop();
 });
 
+test('changing the active chat revokes the running archive job and schedules only the newly active archive', async () => {
+    vi.resetModules(); vi.useFakeTimers();
+    const { reactive, nextTick } = await import('vue');
+    const state = reactive({ branch: 'archive-a', revision: 1 });
+    const store = Object.fromEntries(['listBlobKeys', 'getBlob', 'setBlob', 'deleteBlob', 'tryGetJson', 'setJson'].map(name => [name, vi.fn()]));
+    store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep: 20 } });
+    store.listBlobKeys.mockResolvedValue([]);
+    const win = new EventTarget(), doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', win); vi.stubGlobal('document', doc); vi.stubGlobal('localStorage', { getItem: () => null });
+    vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
+    const db = await import('./db'), worker = await import('./backup-worker-client'), repair = await import('./review-source-repair');
+    vi.spyOn(repair, 'ensureReviewSourceRepair').mockResolvedValue({ disabled: 0, changed: false });
+    vi.spyOn(db, 'activeLibrary').mockResolvedValue({ db: { name: 'mnemosyne_daily_default' } } as any);
+    let finish!: () => void, current!: () => boolean;
+    const save = vi.spyOn(worker, 'runBackupWorker').mockImplementation(async (_disk, _job, guard) => {
+        if (save.mock.calls.length === 1) { current = guard; await new Promise<void>(resolve => { finish = resolve; }); }
+        return { state: 'unchanged' };
+    });
+    const runtime = await import('./core-backup-runtime');
+    runtime.bindCoreBackups(() => true, () => state.revision, () => state.branch);
+    await runtime.getCoreBackups(); await vi.advanceTimersByTimeAsync(30_000);
+    expect(save.mock.calls[0][1]).toMatchObject({ branch: 'archive-a', keep: 10 });
+    state.branch = 'archive-b'; state.revision++; await nextTick();
+    expect(current()).toBe(false); expect(save.mock.calls[0][7]?.()).toBe(false);
+    finish(); await vi.advanceTimersByTimeAsync(30_000);
+    expect(save).toHaveBeenCalledTimes(2); expect(save.mock.calls[1][1]).toMatchObject({ branch: 'archive-b' });
+    expect(vi.getTimerCount()).toBe(1);
+    win.dispatchEvent(new Event('pagehide')); expect(vi.getTimerCount()).toBe(0);
+});
+
 test('damaged settings keep automatic work disabled but do not hide independently valid backup files', async () => {
     vi.resetModules();
     const store = Object.fromEntries(['listBlobKeys', 'getBlob', 'setBlob', 'deleteBlob', 'tryGetJson', 'setJson'].map(name => [name, vi.fn()]));
@@ -54,7 +84,7 @@ test('uncertain disable is locally stopped and explicitly warns that restart can
     vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
     const runtime = await import('./core-backup-runtime');
     await runtime.getCoreBackups(); expect(runtime.coreBackupState.enabled).toBe(true);
-    await expect(runtime.configureCoreBackups(false, 20)).rejects.toThrow('重启后可能');
+    await expect(runtime.configureCoreBackups(false, 10)).rejects.toThrow('重启后可能');
     expect(runtime.coreBackupState.enabled).toBe(false);
     expect(runtime.coreBackupState.status).toContain('未确认');
     expect(backupFailure(new Error(runtime.coreBackupState.error))).toContain('重启后可能');
@@ -108,28 +138,28 @@ test('explicit retry resets failure backoff without clearing validation or creat
     await vi.advanceTimersByTimeAsync(30_000); expect(run).toHaveBeenCalledTimes(2); scheduler.stop();
 });
 
-test.each([5, 10])('loading legacy keep=%s uses 20 without writes or toggling enabled', async keep => {
+test.each([5, 20])('loading legacy keep=%s uses 10 without writes or toggling enabled', async keep => {
     vi.resetModules();
     const store = Object.fromEntries(['listBlobKeys', 'getBlob', 'setBlob', 'deleteBlob', 'tryGetJson', 'setJson'].map(name => [name, vi.fn()]));
     store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep } });
     vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
     const runtime = await import('./core-backup-runtime'); await runtime.getCoreBackups();
-    expect(runtime.coreBackupState).toMatchObject({ enabled: true, keep: 20, settingsVerified: true });
+    expect(runtime.coreBackupState).toMatchObject({ enabled: true, keep: 10, settingsVerified: true });
     expect(store.setJson).not.toHaveBeenCalled(); expect(store.setBlob).not.toHaveBeenCalled(); expect(store.deleteBlob).not.toHaveBeenCalled();
 });
 
-test('saving 20 requires exact readback; migrated legacy readback cannot mask a stale settings write', async () => {
+test('saving 10 requires exact readback; migrated legacy readback cannot mask a stale settings write', async () => {
     vi.resetModules();
     const store = Object.fromEntries(['listBlobKeys', 'getBlob', 'setBlob', 'deleteBlob', 'tryGetJson', 'setJson'].map(name => [name, vi.fn()]));
-    store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep: 10 } });
+    store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep: 20 } });
     vi.stubGlobal('__TAURITAVERN__', { api: { extension: { store } } });
     const runtime = await import('./core-backup-runtime'); await runtime.getCoreBackups();
-    await expect(runtime.configureCoreBackups(true, 20)).rejects.toThrow('读回不一致');
+    await expect(runtime.configureCoreBackups(true, 10)).rejects.toThrow('读回不一致');
     expect(runtime.coreBackupState).toMatchObject({ enabled: false, settingsVerified: false });
-    store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep: 20 } });
-    await runtime.configureCoreBackups(true, 20);
-    expect(runtime.coreBackupState).toMatchObject({ enabled: true, keep: 20, settingsVerified: true });
-    expect(store.setJson.mock.calls.at(-1)?.[0]).toMatchObject({ value: { schema: 1, enabled: true, keep: 20 } });
+    store.tryGetJson.mockResolvedValue({ found: true, value: { schema: 1, enabled: true, keep: 10 } });
+    await runtime.configureCoreBackups(true, 10);
+    expect(runtime.coreBackupState).toMatchObject({ enabled: true, keep: 10, settingsVerified: true });
+    expect(store.setJson.mock.calls.at(-1)?.[0]).toMatchObject({ value: { schema: 1, enabled: true, keep: 10 } });
 });
 
 test('selected preview dispatches only a worker job and rejects stale results after metadata persistence', async () => {

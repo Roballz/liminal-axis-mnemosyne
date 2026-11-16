@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, expect, test, vi } from 'vitest';
-import { fixture } from './fixtures';
+import { fixture, observation } from './fixtures';
+import { capture, synchronize } from './canonical';
 import { exportLibrary } from './migration';
 import { Library, ACTIVE_KEY, freshLibraryName } from './db';
 import type { BackupDisk } from '@/st/native-backups';
@@ -58,10 +59,10 @@ test('actual manual, protection, pin and disk-restore jobs verify files and prep
     vi.stubGlobal('localStorage', { getItem: (key: string) => selector.get(key), setItem });
     try {
         const original = await exportLibrary(lib);
-        const saved = await workerJob({ kind: 'manual', library: lib.db.name, keep: 20 }, disk);
+        const saved = await workerJob({ kind: 'manual', library: lib.db.name, keep: 10 }, disk);
         if (saved.state !== 'saved') throw new Error('missing manual backup');
         expect(Object.keys(saved).sort()).toEqual(['entry', 'state']);
-        const protection = await workerJob({ kind: 'before-restore', library: lib.db.name, keep: 20 }, disk);
+        const protection = await workerJob({ kind: 'before-restore', library: lib.db.name, keep: 10 }, disk);
         expect(protection.state).toBe('saved');
         const pinned = await workerJob({ kind: 'pin', key: saved.entry.key, checksum: saved.entry.checksum }, disk);
         expect(pinned.state).toBe('pinned');
@@ -82,9 +83,43 @@ test('actual manual, protection, pin and disk-restore jobs verify files and prep
 test('empty current library permits protection skip without publishing or rotating', async () => {
     const lib = await Library.open(freshLibraryName()), disk = new Disk();
     try {
-        expect(await workerJob({ kind: 'before-restore', library: lib.db.name, keep: 20 }, disk)).toEqual({ state: 'empty' });
+        expect(await workerJob({ kind: 'before-restore', library: lib.db.name, keep: 10 }, disk)).toEqual({ state: 'empty' });
         expect(disk.write).not.toHaveBeenCalled(); expect(disk.remove).not.toHaveBeenCalled();
     } finally { lib.close(); }
+});
+
+test('actual archive export/import and disk restore update the same database and preserve unrelated archive bytes', async () => {
+    const { lib, input, branch } = await fixture(2), disk = new Disk();
+    const other = await synchronize(lib, observation(3, 'other-chat'));
+    const before = await capture(lib, other.id), setItem = vi.fn();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => key === ACTIVE_KEY ? lib.db.name : null, setItem });
+    const exported = await workerJob({ kind: 'export', library: lib.db.name, branch: branch.id });
+    if (exported.state !== 'exported') throw new Error('missing export');
+    const backup = await workerJob({ kind: 'manual', library: lib.db.name, branch: branch.id, keep: 10 }, disk);
+    if (backup.state !== 'saved') throw new Error('missing backup');
+    input.messages[3].content = 'subsequent source edit'; await synchronize(lib, input);
+    const dbs = await indexedDB.databases();
+    const imported = await workerJob({ kind: 'archive-import', library: lib.db.name, branch: branch.id, blob: exported.blob });
+    expect(imported.state).toBe('archive-restored');
+    expect(await indexedDB.databases()).toEqual(dbs);
+    expect(await capture(lib, other.id)).toEqual(before);
+    const restored = await workerJob({ kind: 'archive-restore', library: lib.db.name, branch: branch.id,
+        key: backup.entry.key, checksum: backup.entry.checksum }, disk);
+    expect(restored.state).toBe('archive-restored');
+    expect(setItem).not.toHaveBeenCalled(); expect(disk.remove).not.toHaveBeenCalled();
+    expect(await capture(lib, other.id)).toEqual(before); await exportLibrary(lib); lib.close();
+});
+
+test('actual cleanup worker returns only aggregate results and retains the active database identity', async () => {
+    const { lib, input } = await fixture(1);
+    for (let i = 0; i < 4; i++) { input.memories[0].content = `new summary ${i}`; await synchronize(lib, input); }
+    const before = await indexedDB.databases(), result = await workerJob({ kind: 'clean-history', library: lib.db.name });
+    if (result.state !== 'history-cleaned') throw new Error('missing cleanup report');
+    expect(result.report.removed.memory_revisions).toBe(4);
+    expect(JSON.stringify(result)).not.toContain('new summary');
+    expect(await indexedDB.databases()).toEqual(before);
+    expect(await lib.all('memory_revisions')).toHaveLength(1);
+    await exportLibrary(lib); lib.close();
 });
 
 test('size diagnosis executes read-only in the Worker and returns only aggregate counts and bytes', async () => {

@@ -133,8 +133,9 @@ function bindMemoryWhenReady(attempt = 0) {
       bindEngine();
       bindDaily();
       bindCoreBackups(
-        () => !dailyState.pending && !dailyState.error && !dailyState.conflict && !dailyState.tableError,
+        () => !!dailyState.branch && !dailyState.pending && !dailyState.error && !dailyState.conflict && !dailyState.tableError,
         () => `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`,
+        () => dailyState.branch || undefined,
       );
       bindSummaryEditPrompt();
       bindDailyJobs();

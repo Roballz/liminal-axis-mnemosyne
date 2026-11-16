@@ -7,8 +7,9 @@ import { activeLibrary, ACTIVE_KEY, DB_PREFIX } from '@/mnemosyne/db';
 import { dailyState, invalidateDaily, syncDaily, serializeDailyActivation } from '@/mnemosyne/bridge';
 import { AUTO_BACKUP_KEEP, BACKUP_MAX_MIB, backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
 import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups, readCoreBackupPreview,
-    readCoreBackupInventory, prepareCoreBackup, saveCoreBackup, pinCoreBackup, restoreCoreBackup, retryCoreBackups } from '@/mnemosyne/core-backup-runtime';
+    readCoreBackupInventory, prepareCoreBackup, saveCoreBackup, pinCoreBackup, restoreCoreBackup, restoreCoreArchive, retryCoreBackups } from '@/mnemosyne/core-backup-runtime';
 import { backupTimeLabel } from '@/mnemosyne/backup-health';
+import { backupBankKey } from '@/mnemosyne/archive-package';
 
 const inventory = shallowRef<BackupInventory>({ entries: [] });
 const choice = ref(''), error = ref(''), notice = ref('');
@@ -36,11 +37,20 @@ const date = (time: number) => new Date(time).toLocaleString();
 const size = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
 const revision = () => `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
 const options = computed(() => [{ value: '', label: '请选择磁盘备份' }, ...inventory.value.entries.map(entry => ({
-    value: entry.key, label: `${date(entry.preview?.snapshotAt ?? entry.savedAt)} · ${kinds[entry.kind]} · ${entry.bank === currentBank.value ? '当前库' : '其他库'} · ${entry.preview ? `${entry.preview.counts.stories} 故事 / ${entry.preview.counts.memories} 摘要（缓存，待校验）` : '详情待读取'}`,
+    value: entry.key, label: `${date(entry.preview?.snapshotAt ?? entry.savedAt)} · ${kinds[entry.kind]} · ${entry.bank === currentBank.value ? '当前档案' : entry.preview?.archive?.label || '其他档案 / 旧整库'} · ${entry.preview ? `${entry.preview.counts.stories} 故事 / ${entry.preview.counts.memories} 摘要（缓存，待校验）` : '详情待读取'}`,
 }))]);
 let disposed = false, detailGeneration = 0, listGeneration = 0;
 onBeforeUnmount(() => { disposed = true; detailGeneration++; listGeneration++; });
 function clearDetail() { detailGeneration++; detail.value = undefined; detailError.value = ''; detailLoading.value = false; }
+let bankGeneration = 0;
+async function updateCurrentBank() {
+    const generation = ++bankGeneration;
+    const bank = await fingerprint(backupBankKey(localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`, dailyState.branch || undefined));
+    if (!disposed && generation === bankGeneration) currentBank.value = bank.slice(0, 16);
+}
+watch(() => [dailyState.branch, coreBackupState.library], () => {
+    choice.value = ''; clearDetail(); void updateCurrentBank();
+}, { immediate: true });
 async function previewSelection() {
     clearDetail();
     const key = choice.value, generation = detailGeneration;
@@ -70,7 +80,7 @@ async function load() {
         if (disposed || generation !== listGeneration) return;
         inventory.value = result;
         loadedAt.value = Date.now();
-        currentBank.value = (await fingerprint(localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`)).slice(0, 16);
+        await updateCurrentBank();
         if (!result.entries.some(entry => entry.key === choice.value)) choice.value = '';
         // Filename results are already visible. Optional hints never delay or hide them.
         void backups.previewHints().then(hints => {
@@ -84,18 +94,20 @@ async function load() {
 }
 async function configure() {
     const enabled = !coreBackupState.enabled;
-    if (enabled && !confirm(`启用后，仅在酒馆前台运行时每 30 分钟检查变化，每个库保留最近 ${AUTO_BACKUP_KEEP} 份自动核心包。新文件写入并读回验证后，会永久删除本功能多余的较旧自动备份；删除消息、缩短正文或删除档案不另存保护包；两次备份之间丢失的数据可能无法恢复。手动、固定、恢复前及已有历史保护文件不受影响。明文存于本机 TT 数据目录，不发送网络。启用？`)) return;
+    if (enabled && !confirm(`启用后，进入应用或切换聊天后等待前台稳定，仅检查当前聊天档案；之后间隔至少 30 分钟检查变化。每个档案分别保留最近 ${AUTO_BACKUP_KEEP} 份自动备份，不备份未在聊的档案。新文件写入并读回验证后，永久删除该档案多余的旧自动备份；两次备份之间丢失的数据可能无法恢复。手动、固定、恢复前及旧整库备份保留。明文存于本机 TT 数据目录，不发送网络。启用？`)) return;
     await configureCoreBackups(enabled, AUTO_BACKUP_KEEP);
 }
 async function saveManual() {
-    if (!confirm('把当前完整核心库另存为不会自动删除的备份，并设为本库今后自动备份的新起点？旧备份保留。')) return;
+    const branch = dailyState.branch;
+    if (!branch) throw new Error('请先打开并归档当前聊天');
+    if (!confirm('把当前聊天的单档案另存为不会自动删除的备份，并设为这个档案今后自动备份的新起点？旧备份保留。')) return;
     const lib = await activeLibrary();
     const preparingSelector = localStorage.getItem(ACTIVE_KEY);
-    await prepareCoreBackup(lib, () => !disposed && !dailyState.pending && preparingSelector === localStorage.getItem(ACTIVE_KEY));
+    await prepareCoreBackup(lib, () => !disposed && !dailyState.pending && branch === dailyState.branch && preparingSelector === localStorage.getItem(ACTIVE_KEY));
     const selector = localStorage.getItem(ACTIVE_KEY), stamp = revision();
     const result = await saveCoreBackup(lib, 'manual', coreBackupState.keep,
-        () => !disposed && !dailyState.pending && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision());
-    if (result.state === 'saved') notice.value = '手动保护备份已写入并验证；已明确设为本库新的自动备份起点。该文件不会自动删除。';
+        () => !disposed && !dailyState.pending && branch === dailyState.branch && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision(), branch);
+    if (result.state === 'saved') notice.value = '当前单档案备份已写入并验证，已设为这个档案新的自动备份起点。该文件不会自动删除。';
     await load();
 }
 async function pin() {
@@ -110,33 +122,40 @@ async function pin() {
 async function restore() {
     const entry = selected.value;
     if (!entry) return;
-    if (!confirm(`恢复 ${date(entry.snapshotAt)} 的核心包（${entry.counts.stories} 个故事、${entry.counts.memories} 条摘要）？会先保护当前非空核心库，再写入新空库，校验成功后切换。随后会按当前宿主聊天执行普通归档同步，可能更新恢复库中的当前正文，并将来源变化的旧摘要等标为待审核；不会改写宿主聊天。原库和这份磁盘备份保留。继续？`)) return;
+    const branch = dailyState.branch, scope = dailyState.scope;
+    if (entry.archive && (branch ? entry.archive.branch !== branch : !entry.archive.scopes.includes(scope)))
+        throw new Error('这份备份不属于当前档案，请切换到对应聊天后恢复');
+    const message = entry.archive
+        ? `恢复 ${date(entry.snapshotAt)} 的单档案“${entry.archive.label}”？会先保护当前档案，再在现有库内恢复这个档案。其他档案和全库设置保留。随后按宿主聊天同步当前正文；备份不会改写宿主聊天文件。继续？`
+        : `这是旧版整库备份。恢复 ${date(entry.snapshotAt)} 的核心包（${entry.counts.stories} 个故事、${entry.counts.memories} 条摘要）？会先保护当前非空核心库，再写入新空库，校验成功后切换。随后按宿主聊天同步当前正文。原库和磁盘备份保留。继续？`;
+    if (!confirm(message)) return;
     const selector = localStorage.getItem(ACTIVE_KEY), archiveError = dailyState.error;
     const lib = await activeLibrary();
     let stamp = revision();
     // pending also latches after a failure. The serial boundary below drains real
     // source writers; this stamp additionally revokes stale choices/derived edits.
     const valid = () => !disposed && (!dailyState.pending || !!archiveError && dailyState.error === archiveError) &&
-        choice.value === entry.key && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision();
+        choice.value === entry.key && branch === dailyState.branch && scope === dailyState.scope && selector === localStorage.getItem(ACTIVE_KEY) && stamp === revision();
     const switched = await serializeDailyActivation(async () => {
         if (!valid()) throw new Error('聊天、档案或选择已改变，请重新预览恢复');
         try {
             await prepareCoreBackup(lib, valid);
             stamp = revision();
-            await saveCoreBackup(lib, 'before-restore', coreBackupState.keep, valid);
+            if (!entry.archive || branch) await saveCoreBackup(lib, 'before-restore', coreBackupState.keep, valid, entry.archive ? branch : undefined);
         }
         catch (e) {
-            if (!valid() || !confirm(`当前库的保护备份未成功：${backupFailure(e)}。仍要恢复所选备份吗？原 IndexedDB 库会保留，但本次未另存保护文件。`)) return false;
+            if (!valid() || !confirm(`当前${entry.archive ? '档案' : '库'}的保护备份未成功：${backupFailure(e)}。仍要恢复所选备份吗？${entry.archive ? '当前档案将被覆盖，本次未另存保护文件。' : '原 IndexedDB 库会保留，但本次未另存保护文件。'}`)) return false;
         }
-        await restoreCoreBackup(entry.key, entry.checksum, valid);
+        if (entry.archive) await restoreCoreArchive(lib, { key: entry.key, checksum: entry.checksum }, valid, { branch: branch || undefined, scope });
+        else await restoreCoreBackup(entry.key, entry.checksum, valid);
         return true;
     });
     if (!switched) return;
     // Never await syncDaily inside its own serial boundary.
     invalidateDaily();
     try { await syncDaily(); }
-    catch { notice.value = '核心包已校验并恢复到新库，原库保留；当前聊天需要在档案页核对绑定。'; }
-    if (!notice.value) notice.value = '核心包已校验并恢复到新库，原库和旧库磁盘备份保留。';
+    catch { notice.value = entry.archive ? '单档案已恢复，其他档案保留；当前聊天需要在档案页核对同步状态。' : '核心包已校验并恢复到新库，原库保留；当前聊天需要在档案页核对绑定。'; }
+    if (!notice.value) notice.value = entry.archive ? '单档案已验证并恢复，其他档案和全库设置保留。' : '核心包已校验并恢复到新库，原库和旧库磁盘备份保留。';
     await load();
 }
 </script>
@@ -144,12 +163,12 @@ async function restore() {
 <template>
     <details class="mn-card mn-backups">
         <summary>
-            本机磁盘核心包备份
+            本机单档案备份
             <span v-if="coreBackupState.error" class="mn-backup-badge">备份失败</span>
             <small class="mn-backup-last">{{ lastBackup }}</small>
         </summary>
         <div class="mn-backup-content">
-            <p class="mn-muted">核心库独立保存在 TT 数据目录，本机明文存储，不上传。</p>
+            <p class="mn-muted">按聊天档案独立备份到 TT 数据目录，本机明文存储，不上传。</p>
             <p v-if="coreBackupState.error || error" class="mn-warning mn-backup-feedback" role="alert">{{ error || coreBackupState.error }}</p>
             <p v-if="coreBackupState.settingsError && coreBackupState.backupError" class="mn-warning mn-backup-feedback">{{ coreBackupState.settingsError }}</p>
             <p v-if="coreBackupState.failureSince" class="mn-muted">失败始于 {{ date(coreBackupState.failureSince) }}；最近失败 {{ date(coreBackupState.lastFailureAt) }}。</p>
@@ -161,9 +180,9 @@ async function restore() {
                     <h4>自动备份</h4>
                     <button v-if="coreBackupState.available" type="button" :disabled="coreBackupState.busy" @click="run(configure)">{{ coreBackupState.enabled ? '关闭自动备份' : '启用自动备份' }}</button>
                 </div>
-                <p>每库固定保留最近 {{ AUTO_BACKUP_KEEP }} 份 · 间隔至少 30 分钟</p>
+                <p>每档案保留最近 {{ AUTO_BACKUP_KEEP }} 份自动备份 · 间隔至少 30 分钟</p>
                 <p class="mn-muted">单份备份上限 {{ BACKUP_MAX_MIB }} MiB。</p>
-                <p class="mn-muted">仅在酒馆前台稳定时检查；无变化不重复保存。</p>
+                <p class="mn-muted">进入应用或聊天后，仅检查当前活跃档案；前台稳定后执行，无变化不重复保存，不备份未在聊的档案。</p>
                 <p class="mn-backup-status" role="status">{{ status }}</p>
                 <button v-if="coreBackupState.available && coreBackupState.enabled && coreBackupState.error" class="mn-backup-retry" type="button" :disabled="coreBackupState.busy" @click="retryCoreBackups(); notice = '已安排重试，前台稳定后检查；成功前保留故障提示。'">重试备份</button>
                 <p v-if="blocked" class="mn-warning" role="status">自动备份暂缓：{{ blocked }}。处理后继续检查，启用不代表已写入。</p>
@@ -173,7 +192,7 @@ async function restore() {
                         <h4>手动备份</h4>
                         <p class="mn-muted">额外保留，不自动轮换；设为自动备份新起点。</p>
                     </div>
-                    <button type="button" :disabled="coreBackupState.busy || dailyState.pending" @click="run(saveManual)">手动保存为新起点</button>
+                    <button type="button" :disabled="coreBackupState.busy || dailyState.pending || !dailyState.branch" @click="run(saveManual)">备份当前档案为新起点</button>
                 </div>
             </section>
 
@@ -185,8 +204,8 @@ async function restore() {
                 <p class="mn-backup-path"><span class="mn-muted">保存路径：</span><span>{{ BACKUP_LOCATION }}</span></p>
                 <p v-if="loading" class="mn-muted" role="status">正在连接原生接口并读取备份列表…</p>
                 <template v-if="coreBackupState.available">
-                    <p v-if="loadedAt" class="mn-muted">当前库自动备份 {{ counts.currentAuto }} 份 / 保留 {{ AUTO_BACKUP_KEEP }} 份；其他库自动备份 {{ counts.otherAuto }} 份；手动及保护备份 {{ counts.protectedFiles }} 份。迁库前的备份归入其他库，不参与当前库轮换。</p>
-                    <p v-if="loadedAt && counts.currentAuto > AUTO_BACKUP_KEEP" class="mn-warning">当前库自动备份超出保留数量，清理可能尚未完成；下次自动检查会在校验后继续，异常文件仍保留。</p>
+                    <p v-if="loadedAt" class="mn-muted">当前档案自动备份 {{ counts.currentAuto }} 份 / 保留 {{ AUTO_BACKUP_KEEP }} 份；其他档案及旧整库自动备份 {{ counts.otherAuto }} 份；手动及保护备份 {{ counts.protectedFiles }} 份。旧整库备份可继续恢复，不参与当前档案轮换。</p>
+                    <p v-if="loadedAt && counts.currentAuto > AUTO_BACKUP_KEEP" class="mn-warning">当前档案自动备份超出保留数量，清理可能尚未完成；下次自动检查会在校验后继续，异常文件仍保留。</p>
                     <p v-if="loadedAt" class="mn-muted" role="status">已读取（{{ date(loadedAt) }}）；找到 {{ inventory.entries.length }} 份备份文件，尚未逐份校验。<template v-if="!inventory.entries.length">当前目录没有本功能识别的备份文件。</template></p>
                     <p v-else class="mn-muted">尚未读取列表，备份数量未知。</p>
                     <p v-if="metadataNotice" class="mn-muted">{{ metadataNotice }}</p>
@@ -200,6 +219,7 @@ async function restore() {
                         <template v-if="selected">
                             <p class="mn-backup-status">所选备份完整校验通过；操作前仍会重读校验。</p>
                             <p>{{ date(selected.snapshotAt) }} · {{ kinds[selected.kind] }} · {{ size(selected.bytes) }}</p>
+                            <p>{{ selected.archive ? '单档案：' + selected.archive.label : '旧版整库备份' }}</p>
                             <p>{{ selected.counts.stories }} 故事 · {{ selected.counts.branches }} 分支 · {{ selected.counts.source_messages }} 消息身份 · {{ selected.counts.memories }} 摘要 · {{ selected.counts.event_chains }} 事件链 · {{ selected.counts.custom_table_rows }} 表格行</p>
                             <p class="mn-muted mn-backup-wrap">来源库：{{ selected.sourceLibrary }}</p>
                             <p v-if="selected.kind === 'before-deletion' || selected.kind === 'before-archive-deletion'" class="mn-muted">旧版保护文件仍保留，不参与轮换，也不再新建；以核心包时间为准。</p>
@@ -218,8 +238,8 @@ async function restore() {
                 <summary>备份范围与注意事项</summary>
                 <ul class="mn-muted">
                     <li>仅含核心库，不含知识库、字体、向量、密钥或宿主聊天。文件独立于 WebView 数据库和插件安装目录，但卸载、清除 TT 数据或磁盘损坏仍可能丢失，请另行导出重要资料。</li>
-                    <li>每库正常轮换保留最近 {{ AUTO_BACKUP_KEEP }} 份自动备份；清理未完成时可能暂时超出。手动、固定、恢复前副本及已有历史保护包仍保留，总文件数可能超过 {{ AUTO_BACKUP_KEEP }}；旧库不自动清理。</li>
-                    <li>删除消息、缩短正文或删除档案不再额外备份。{{ AUTO_BACKUP_KEEP }} 个半小时恢复点约对应 10 小时活跃使用，不保证连续覆盖最近 10 小时；未运行、后台、无变化或失败时不补齐。两次备份之间丢失的数据可能无法恢复。</li>
+                    <li>每档案正常轮换保留最近 {{ AUTO_BACKUP_KEEP }} 份自动备份；清理未完成时可能暂时超出。手动、固定、恢复前副本及旧整库备份仍保留，总文件数可能超过 {{ AUTO_BACKUP_KEEP }}。</li>
+                    <li>删除消息、缩短正文或删除档案不额外备份。恢复点取决于该档案的活跃时间与变化，不保证连续覆盖某个时段；未运行、后台、无变化或失败时不补齐。两次备份之间丢失的数据可能无法恢复。</li>
                     <li>后台或关闭酒馆后不发起新备份，已提交的写入可能完成。失败会延后重试并保留旧副本；单文件原子发布不等于断电持久化保证。</li>
                 </ul>
             </details>

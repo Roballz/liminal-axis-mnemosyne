@@ -28,7 +28,7 @@ import { activeLibrary, ACTIVE_KEY } from '@/mnemosyne/db';
 import { keepSummary } from '@/mnemosyne/canonical';
 import { reviewDifference, type ReviewDifference } from '@/mnemosyne/review-diagnostics';
 import { previewRoleRepairs, confirmRoleRepairs, type RoleRepairCandidate } from '@/mnemosyne/source-role-repair';
-import { exportCoreLibrary, prepareCoreBackup, restoreCorePackage, readCorePackageSize, reorganizeCore } from '@/mnemosyne/core-backup-runtime';
+import { exportCoreLibrary, prepareCoreBackup, restoreCorePackage, restoreCoreArchive, readCorePackageSize, reorganizeCore, cleanCoreHistory } from '@/mnemosyne/core-backup-runtime';
 import { BACKUP_MAX_BYTES, BACKUP_MAX_MIB, corePackageSizeError } from '@/mnemosyne/core-backups';
 import type { CorePackageSize } from '@/mnemosyne/core-package-size';
 import { regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
@@ -44,7 +44,7 @@ const choices = shallowRef<Awaited<ReturnType<typeof dailyBranchChoices>>>([]);
 const packageSize = shallowRef<CorePackageSize>();
 const reorganizeProgress = ref('');
 const sizeLabels: Record<string, string> = {
-  memory_payloads: '共享摘要内容与引用块',
+  memory_payloads: '共享摘要、事件内容与引用块',
   stories: '故事', branches: '分支', source_messages: '消息身份', source_revisions: '正文版本与旧版全文',
   source_bodies: '当前保留正文', history_snapshots: '正文历史索引', manifest_blocks: '正文引用块',
   host_bindings: '聊天绑定', message_mappings: '消息映射', memories: '摘要身份', memory_revisions: '摘要内容与依赖',
@@ -239,19 +239,21 @@ async function review(id: string, action: 'keep' | 'rebuild') {
   await syncDaily();
   await loadReviews();
 }
-async function download() {
+async function download(single = false) {
+  const archive = single ? dailyState.branch : undefined;
+  check(!single || archive && !dailyState.pending, '请等待当前聊天归档完成');
   const lib = await activeLibrary(), preparingSelector = localStorage.getItem(ACTIVE_KEY);
-  await prepareCoreBackup(lib, () => !disposed && preparingSelector === localStorage.getItem(ACTIVE_KEY));
+  await prepareCoreBackup(lib, () => !disposed && preparingSelector === localStorage.getItem(ACTIVE_KEY) && (!single || archive === dailyState.branch));
   const selector = localStorage.getItem(ACTIVE_KEY), generation = dailyState.generation;
   const result = await exportCoreLibrary(lib,
-    () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) && generation === dailyState.generation);
+    () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) && generation === dailyState.generation && (!single || archive === dailyState.branch), archive || undefined);
   const url = URL.createObjectURL(result.blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `mnemosyne-daily-v${result.version}.json`;
+  a.download = single ? `mnemosyne-archive-${archive}.json` : `mnemosyne-daily-v${result.version}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  notice.value = `核心包已生成（${(result.blob.size / 1024 / 1024).toFixed(2)} MiB），请确认浏览器已保存下载文件。`;
+  notice.value = `${single ? '当前单档案' : '整库'}核心包已生成（${(result.blob.size / 1024 / 1024).toFixed(2)} MiB），请确认浏览器已保存下载文件。`;
   if (result.blob.size > BACKUP_MAX_BYTES)
     error.value = `${corePackageSizeError(result.blob.size)}；已生成导出副本，但本版本暂不能直接导入此文件。`;
 }
@@ -279,6 +281,24 @@ async function reorganize() {
     notice.value = `已无损整理并切换到新库：整理前 ${mib(result.beforeBytes)} MiB，整理后 ${mib(result.afterBytes)} MiB。原库保留，今后写入继续共享存储。请导出新的核心包保存。`;
   } finally { reorganizeProgress.value = ''; }
 }
+async function cleanHistory() {
+  if (!confirm('永久清理当前库各档案中已替换的旧正文、旧摘要、过期派生记录和无用索引，并彻底移除旧版已删除的表。保留当前内容及其他分支仍在使用的来源依赖；无法再查看被清理的历史版本。建议先保留一份整库核心包。继续？')) return;
+  const lib = await activeLibrary(), selector = localStorage.getItem(ACTIVE_KEY);
+  await prepareCoreBackup(lib, () => !disposed && selector === localStorage.getItem(ACTIVE_KEY));
+  const stamp = `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
+  const valid = () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) &&
+    stamp === `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
+  reorganizeProgress.value = '正在后台计算历史清理范围…';
+  try {
+    const result = await serializeDailyActivation(() => cleanCoreHistory(lib, valid, value => {
+      reorganizeProgress.value = value.phase === 'validate' ? '正在校验清理后的完整引用…'
+        : `正在整理第 ${value.records} 个档案…`;
+    }));
+    packageSize.value = undefined;
+    invalidateDaily(); await refresh();
+    notice.value = `历史清理完成：数据记录从 ${mib(result.beforeBytes)} MiB 减至 ${mib(result.afterBytes)} MiB；移除 ${result.removed.memory_revisions} 个旧摘要版本、${result.removed.memory_views} 份旧视图、${result.removed.history_snapshots} 份旧正文索引。请重新导出核心包；以前下载的文件不会自动缩小。`;
+  } finally { reorganizeProgress.value = ''; }
+}
 async function copyPackageSize() {
   check(packageSize.value, '请先分析核心包体积');
   await navigator.clipboard.writeText(JSON.stringify(packageSize.value, null, 2));
@@ -303,6 +323,18 @@ async function restore(event: Event) {
     return;
   }
   notice.value = '已验证并切换到恢复的新库，原库仍保留。';
+}
+async function restoreSingle(event: Event) {
+  const input = event.target as HTMLInputElement, file = input.files?.[0]; input.value = '';
+  if (!file || !confirm('仅恢复这份单档案包对应的聊天档案，其他档案和全库设置保留。文件必须属于当前聊天档案。随后按宿主聊天同步当前正文；如需恢复宿主正文，请另外恢复宿主聊天文件。继续？')) return;
+  const lib = await activeLibrary(), selector = localStorage.getItem(ACTIVE_KEY), archive = dailyState.branch, scope = dailyState.scope;
+  const stamp = `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`, archiveError = dailyState.error;
+  const valid = () => !disposed && selector === localStorage.getItem(ACTIVE_KEY) && archive === dailyState.branch && scope === dailyState.scope &&
+    stamp === `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}` && (!dailyState.pending || !!archiveError && archiveError === dailyState.error);
+  const result = await serializeDailyActivation(() => restoreCoreArchive(lib, file, valid, { branch: archive || undefined, scope: scope || undefined }));
+  invalidateDaily(); await refresh();
+  packageSize.value = undefined;
+  notice.value = `已恢复单档案“${result.label}”，其他档案及全库设置保留。`;
 }
 async function copyKnowledge() {
   const db = currentVectorDb();
@@ -433,8 +465,12 @@ async function copyKnowledge() {
     <CoreLibraryPanel />
     <details class="mn-card">
       <summary>数据包边界与恢复</summary>
-      <p>核心包：正文/摘要及历史版本、事件与回执、自定义表、宿主映射、非秘密设置。</p>
+      <p>核心包包含当前正文、摘要、事件、自定义表、宿主映射及仍被引用的来源证据。单档案包带齐必要共享内容；整库包还包含所有档案和非秘密设置。</p>
       <p>不含：宿主聊天文件、人物/物品/地点等聊天内状态、知识库文件/向量、API 密钥。它不是整套柏宝书备份。</p>
+      <div class="mn-action-help">
+        <button :disabled="busy || dailyState.pending" @click="run(cleanHistory)">清理已替换的历史数据</button>
+        <small>一次整理旧库里的废弃版本、摘要依赖、视图节点和来源快照。保留各分支当前内容及实际使用的来源证据；完成后重新导出可缩小核心包。后台计算并校验后一次提交。</small>
+      </div>
       <div class="mn-action-help">
         <button :disabled="busy" @click="run(inspectPackageSize)">分析核心包体积</button>
         <small>只读统计各类记录的大小，帮助定位历史索引或重复记录；不上传聊天内容。</small>
@@ -461,11 +497,17 @@ async function copyKnowledge() {
         ><small>可选。复制当前角色的旧知识库及可复用向量，不调用模型、不删除旧库；无旧知识库可跳过。</small>
       </div>
       <div class="mn-action-help">
-        <button :disabled="busy" @click="run(download)">导出核心包</button
+        <button :disabled="busy || dailyState.pending || !dailyState.branch" @click="run(() => download(true))">导出当前单档案</button>
+        <small>仅导出当前聊天档案及其必要来源、共享内容，不带其他聊天档案或全库设置。</small>
+      </div>
+      <label>导入当前单档案<input type="file" accept=".json" :disabled="busy || !dailyState.scope" @change="(e) => run(() => restoreSingle(e))" /></label>
+      <small>在当前库内恢复对应档案，不切换整库、不改其他档案。单文件上限 {{ BACKUP_MAX_MIB }} MiB。</small>
+      <div class="mn-action-help">
+        <button :disabled="busy" @click="run(() => download())">导出整库核心包</button
         ><small>导出当前活动库的全部故事和分支；等待正在进行的归档完成后再导出，才包含最新聊天。</small>
       </div>
       <label
-        >恢复到新空库<input
+        >恢复整库到新空库<input
           type="file"
           accept=".json"
           :disabled="busy"

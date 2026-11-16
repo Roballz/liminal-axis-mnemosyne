@@ -13,19 +13,21 @@ type Request = <T>(request: IDBRequest<T>) => Promise<T>;
 export interface RetentionRoots {
     snapshotRoots: ReadonlySet<string>;
     sourceRoots: ReadonlySet<string>;
+    memoryRoots?: ReadonlySet<string>;
+    memoryReferenceCounts?: ReadonlyMap<string, number>;
 }
-interface RowRoots extends RetentionRoots { story?: string }
-interface Counts { snapshotRoots: Map<string, number>; sourceRoots: Map<string, number> }
+interface RowRoots extends RetentionRoots { story?: string; memoryRoots: ReadonlySet<string> }
+interface Counts { snapshotRoots: Map<string, number>; sourceRoots: Map<string, number>; memoryRoots: Map<string, number> }
 interface Delta { store: EvidenceStore; sequence: number; before?: RowRoots; after?: RowRoots }
 interface Scan { counts: Counts; watermarks: Map<EvidenceStore, number> }
-const emptyCounts = (): Counts => ({ snapshotRoots: new Map(), sourceRoots: new Map() });
-const copyCounts = (counts: Counts): Counts => ({ snapshotRoots: new Map(counts.snapshotRoots), sourceRoots: new Map(counts.sourceRoots) });
+const emptyCounts = (): Counts => ({ snapshotRoots: new Map(), sourceRoots: new Map(), memoryRoots: new Map() });
+const copyCounts = (counts: Counts): Counts => ({ snapshotRoots: new Map(counts.snapshotRoots), sourceRoots: new Map(counts.sourceRoots), memoryRoots: new Map(counts.memoryRoots) });
 
 /** Same generic collect semantics as the complete collector, including nested
  * receipts/table values. A row contributes each root once, regardless of aliases. */
 export function rowRetentionRoots(row: Row | undefined): RowRoots | undefined {
     if (!row) return undefined;
-    const snapshotRoots = new Set<string>(), sourceRoots = new Set<string>();
+    const snapshotRoots = new Set<string>(), sourceRoots = new Set<string>(), memoryRoots = new Set<string>();
     const pending: object[] = [row], seen = new Set<object>();
     while (pending.length) {
         const value = pending.pop()!;
@@ -35,13 +37,18 @@ export function rowRetentionRoots(row: Row | undefined): RowRoots | undefined {
         if (typeof item.message === 'string' && typeof item.revision === 'string') sourceRoots.add(item.revision);
         if (typeof item.basis === 'string') snapshotRoots.add(item.basis);
         if (typeof item.snapshot === 'string') snapshotRoots.add(item.snapshot);
+        const memory = value as any;
+        if (typeof memory.memory === 'string') memoryRoots.add(memory.memory);
+        if (memory.decision === 'compatible' && typeof memory.owner === 'string') memoryRoots.add(memory.owner);
+        for (const field of ['dependencies', 'memories', 'summarized', 'refs', 'sources'])
+            if (Array.isArray(memory[field])) for (const id of memory[field]) if (typeof id === 'string') memoryRoots.add(id);
         for (const child of Object.values(value)) if (child && typeof child === 'object') pending.push(child);
     }
-    return { story: typeof row.story === 'string' ? row.story : undefined, snapshotRoots, sourceRoots };
+    return { story: typeof row.story === 'string' ? row.story : undefined, snapshotRoots, sourceRoots, memoryRoots };
 }
 
 function change(counts: Counts, roots: RowRoots, amount: 1 | -1): void {
-    for (const field of ['snapshotRoots', 'sourceRoots'] as const) for (const id of roots[field]) {
+    for (const field of ['snapshotRoots', 'sourceRoots', 'memoryRoots'] as const) for (const id of roots[field]) {
         const next = (counts[field].get(id) ?? 0) + amount;
         check(Number.isSafeInteger(next) && next >= 0, '历史证据根计数不一致');
         if (next) counts[field].set(id, next); else counts[field].delete(id);
@@ -122,19 +129,18 @@ export class RetentionTransaction {
     /** Finish old-row evidence reads before explicit shared-block reclamation. */
     async flush(): Promise<void> { await this.settled(); }
 
-    private async scan(load: (store: EvidenceStore) => Promise<Row[]>): Promise<Scan> {
+    private async scan(load: (store: EvidenceStore, mark: () => void) => Promise<Row[]>): Promise<Scan> {
         const counts = emptyCounts(), watermarks = new Map<EvidenceStore, number>();
         for (const store of EVIDENCE_STORES) {
-            // The getAll request is enqueued synchronously by load. Later writes
-            // to this store are not in that read and must be applied as deltas.
-            watermarks.set(store, this.sequence);
-            const rows = await load(store);
+            // Packing can delay a read. Only writes enqueued after the actual
+            // native getAll boundary are absent from its result.
+            const rows = await load(store, () => watermarks.set(store, this.sequence));
             for (const row of rows) change(counts, rowRetentionRoots(row)!, 1);
         }
         return { counts, watermarks };
     }
 
-    async roots(story: string, refresh: boolean, load: (store: EvidenceStore) => Promise<Row[]>): Promise<RetentionRoots> {
+    async roots(story: string, refresh: boolean, load: (store: EvidenceStore, mark: () => void) => Promise<Row[]>): Promise<RetentionRoots> {
         const base = await this.start();
         let pending = this.scans.get(story);
         if (refresh || !pending && !base.stories.has(story)) {
@@ -143,7 +149,8 @@ export class RetentionTransaction {
         const scan = pending ? await pending : undefined;
         const counts = copyCounts(scan?.counts ?? base.stories.get(story)!);
         apply(counts, story, await this.settled(), scan?.watermarks);
-        return { snapshotRoots: new Set(counts.snapshotRoots.keys()), sourceRoots: new Set(counts.sourceRoots.keys()) };
+        return { snapshotRoots: new Set(counts.snapshotRoots.keys()), sourceRoots: new Set(counts.sourceRoots.keys()),
+            memoryRoots: new Set(counts.memoryRoots.keys()), memoryReferenceCounts: counts.memoryRoots };
     }
 
     /** Called after fn resolves, while the native transaction is still active. */

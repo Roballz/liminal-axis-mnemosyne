@@ -229,8 +229,8 @@ test('writes interleaved with a cold scan apply once according to each store rea
             for (const store of stores) await tx.add(store, evidence(store, 'story', rootPair(`old-${store}`, `old-source-${store}`)));
         });
         let injected: Promise<unknown> | undefined;
-        const nativeAll = Transaction.prototype.all;
-        vi.spyOn(Transaction.prototype, 'all').mockImplementation(function (this: Transaction, store, index, key) {
+        const nativeAll = Transaction.prototype.rawAll;
+        vi.spyOn(Transaction.prototype, 'rawAll').mockImplementation(function (this: Transaction, store, index, key) {
             const result = nativeAll.call(this, store, index, key);
             if (this.native.db.name === lib.db.name && store === 'reviews' && index === 'story' && !injected) {
                 // The memory and review reads precede these writes; the table read
@@ -428,7 +428,7 @@ test('internal stamps stay outside v15 packages and a restored library rebuilds 
     let restored: Library | undefined;
     try {
         const expected = await roots(lib, branch.story), pack = await exportLibrary(lib);
-        expect(pack.version).toBe(17);
+        expect(pack.version).toBe(18);
         expect(Object.keys(pack.data).sort()).toEqual([...STORES].sort());
         expect(Object.keys(pack.counts).sort()).toEqual([...STORES].sort());
         expect(pack.data).not.toHaveProperty(RETENTION_CONTROL_STORE);

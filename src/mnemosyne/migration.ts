@@ -11,7 +11,7 @@ import { isEmptyGeneratedReview, REVIEW_SOURCE_REPAIR_ID, validReviewRepairRecei
 import { verifyRestoredRows } from './restore-verification';
 export interface Package {
     format: 'mnemosyne-daily';
-    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
+    version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18;
     schema: 1;
     created: number;
     excluded: string[];
@@ -29,7 +29,7 @@ export async function snapshotLibraryForDeletion(lib: Library): Promise<Package>
         return result;
     });
     // library_meta allows only non-secret daily settings and versioned deletion/source-origin receipts.
-    const base = { format: 'mnemosyne-daily' as const, version: 17 as const, schema: 1 as const, created: Date.now(),
+    const base = { format: 'mnemosyne-daily' as const, version: 18 as const, schema: 1 as const, created: Date.now(),
         excluded: EXCLUDED, counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Record<Store, number>, data };
     return { ...base, checksum: await fingerprint(base) };
 }
@@ -62,7 +62,7 @@ export async function validateCurrentData(pack: Omit<Package, 'checksum'>): Prom
     validateStructure(pack, await validateBodyHashes(pack));
 }
 function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: ReadonlyMap<string, string> = new Map()) {
-    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
+    check(pack && pack.format === 'mnemosyne-daily' && [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(pack.version) && pack.schema === 1, '不支持的迁移包版本');
     const stores: readonly Store[] = STORES.filter(s => !(s === 'table_history' && pack.version < 11) &&
         !(s === 'source_bodies' && pack.version < 12) && !(s === 'memory_selection_nodes' && pack.version < 15) && !(s === 'memory_payloads' && pack.version < 17));
     check(pack.data && Object.keys(pack.data).length === stores.length && Object.keys(pack.data).every(s => stores.includes(s as Store)), '迁移模块不完整');
@@ -75,6 +75,7 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         maps[store] = new Map();
         for (const physical of rows) {
             check(pack.version >= 17 || !sharedRow(physical), '旧版本不支持共享内容');
+            check(pack.version >= 18 || !['event_revisions', 'event_progress'].includes(store) || !sharedRow(physical), '旧版本不支持共享事件内容');
             const r = expand(physical, store);
             check(r && r.schema === 1 && typeof r.id === 'string' && r.id && !maps[store].has(r.id), `非法或重复ID ${store}`);
             const optional = pack.version === 1 ? [] : store === 'custom_table_defs' ? ['tableSchema', 'dataVersion'] : store === 'custom_table_rows' ? ['hidden'] : [];
@@ -93,6 +94,8 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
             if (pack.version >= 13 && store === 'memory_revisions') optional.push('sourceRecovery');
             if (pack.version >= 14 && store === 'event_revisions') optional.push('overviewCoverage', 'overviewMaterialMode');
             if (pack.version >= 15 && store === 'memory_views') optional.push('selectionSchema', 'root', 'count');
+            if (pack.version >= 18 && store === 'branches') optional.push('archiveSupport');
+            if (pack.version >= 18 && store === 'memories') optional.push('retiredFingerprint', 'retiredGenerationFingerprint');
             const required = store === 'source_revisions' && (r as any).bodySchema === 1 && pack.version >= 12 ? FIELDS[store].filter(k => k !== 'content')
                 : store === 'memory_views' && (r as any).selectionSchema === 2 && pack.version >= 15 ? ['selectionSchema', 'root', 'count'] : FIELDS[store];
             const fields = ['id', 'schema', 'story', 'branch', 'owner', ...FIELDS[store], ...optional];
@@ -223,6 +226,8 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
     for (const store of ['reviews', 'event_revisions', 'event_memberships', 'event_progress', 'event_processing_receipts', 'table_receipts', 'table_history'] as Store[])
         for (const record of maps[store].values()) pin(record.snapshot);
     for (const b of maps.branches.values()) {
+        check(b.archiveSupport === undefined || b.archiveSupport === 1 && b.fork === null && !b.tableHead &&
+            !b.sourceRoleRepairs?.length && refs(get('history_snapshots', b.head)).length === 0, '单档案来源依赖标记非法');
         check(get('history_snapshots', b.head).branch === b.id && get('memory_views', b.view).branch === b.id, 'Head/视图不属于分支');
         check(Number.isSafeInteger(b.epoch) && b.epoch >= 0, '分支版本非法');
         const reachable = new Set<string>();
@@ -284,8 +289,11 @@ function validateStructure(pack: Omit<Package, 'checksum'>, legacyDigests: Reado
         check(!mappingKeys.has(key), '映射歧义');
         mappingKeys.add(key);
     }
-    for (const m of maps.memories.values())
+    for (const m of maps.memories.values()) {
         check(get('host_bindings', m.owner).story === m.story, '摘要身份跨故事');
+        check(m.retiredFingerprint === undefined || typeof m.retiredFingerprint === 'string' && /^[a-f0-9]{64}$/.test(m.retiredFingerprint), '已替换摘要标记非法');
+        check(m.retiredGenerationFingerprint === undefined || typeof m.retiredGenerationFingerprint === 'string' && /^[a-f0-9]{64}$/.test(m.retiredGenerationFingerprint), '已替换摘要生成标记非法');
+    }
     const settledMemories = new Set<string>();
     for (const m of maps.memory_revisions.values()) {
         if (m.tags !== undefined) {
@@ -568,9 +576,10 @@ export async function restoreLibrary(value: unknown, activate = true): Promise<L
     // These arrays share the original records, including untouched legacy text.
     const data = Object.fromEntries(STORES.map(store => [store, pack.data[store] ?? []])) as Package['data'];
     const counts = Object.fromEntries(STORES.map(store => [store, data[store].length])) as Package['counts'];
-    await validateCurrentData({ ...pack, version: 17, data, counts });
+    await validateCurrentData({ ...pack, version: 18, data, counts });
     const lib = await Library.open(freshLibraryName());
     try {
+        lib.preservePhysicalWrites = true;
         // Import exact physical rows; normal write packing would transform legacy rows.
         await lib.transaction(STORES, 'readwrite', async (tx) => {
             for (const store of STORES)
@@ -580,6 +589,7 @@ export async function restoreLibrary(value: unknown, activate = true): Promise<L
         // Exact row/count/order equality proves the persisted data is the same
         // validated current-format view, without another complete in-memory copy.
         await verifyRestoredRows(lib, data);
+        lib.preservePhysicalWrites = false;
         lib.compactWrites = data.library_meta.some(row => row.id === SHARED_META);
         if (activate)
             await activateLibrary(lib);

@@ -3,11 +3,11 @@ import * as Vue from 'vue';
 import { createRenderer, defineComponent, h, nextTick, ssrContextKey } from 'vue';
 import { readFileSync } from 'node:fs';
 import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc';
-const mocks = vi.hoisted(() => ({ inventory: vi.fn(), connect: vi.fn(), configure: vi.fn(), preview: vi.fn(), hints: vi.fn(), prepare: vi.fn(), save: vi.fn(), pin: vi.fn(), restore: vi.fn(), retry: vi.fn(), active: vi.fn() }));
+const mocks = vi.hoisted(() => ({ inventory: vi.fn(), connect: vi.fn(), configure: vi.fn(), preview: vi.fn(), hints: vi.fn(), prepare: vi.fn(), save: vi.fn(), pin: vi.fn(), restore: vi.fn(), restoreArchive: vi.fn(), retry: vi.fn(), active: vi.fn() }));
 vi.mock('@/mnemosyne/core-backup-runtime', async importOriginal => ({
     ...await importOriginal<typeof import('@/mnemosyne/core-backup-runtime')>(),
     readCoreBackupInventory: mocks.inventory, getCoreBackups: mocks.connect, configureCoreBackups: mocks.configure, readCoreBackupPreview: mocks.preview,
-    prepareCoreBackup: mocks.prepare, saveCoreBackup: mocks.save, pinCoreBackup: mocks.pin, restoreCoreBackup: mocks.restore, retryCoreBackups: mocks.retry,
+    prepareCoreBackup: mocks.prepare, saveCoreBackup: mocks.save, pinCoreBackup: mocks.pin, restoreCoreBackup: mocks.restore, restoreCoreArchive: mocks.restoreArchive, retryCoreBackups: mocks.retry,
 }));
 vi.mock('@/mnemosyne/db', async importOriginal => ({ ...await importOriginal<typeof import('@/mnemosyne/db')>(), activeLibrary: mocks.active }));
 vi.mock('@/mnemosyne/bridge', async () => ({
@@ -43,13 +43,13 @@ function mount() { const root = make('root'), app = renderer.createApp(Panel); a
 beforeEach(() => {
     mocks.inventory.mockReset().mockResolvedValue({ entries: [], invalid: [] });
     mocks.connect.mockReset().mockResolvedValue({ inventory: mocks.inventory, previewHints: mocks.hints, save: mocks.save, pin: mocks.pin, restore: mocks.restore }); mocks.configure.mockReset();
-    mocks.save.mockReset().mockResolvedValue({ state: 'saved' }); mocks.pin.mockReset(); mocks.restore.mockReset(); mocks.active.mockReset().mockResolvedValue({ id: 'synthetic' });
+    mocks.save.mockReset().mockResolvedValue({ state: 'saved' }); mocks.pin.mockReset(); mocks.restore.mockReset(); mocks.restoreArchive.mockReset(); mocks.active.mockReset().mockResolvedValue({ id: 'synthetic' });
     mocks.prepare.mockReset().mockResolvedValue({ disabled: 0, changed: false }); mocks.retry.mockReset();
     vi.mocked(syncDaily).mockClear(); vi.mocked(invalidateDaily).mockClear();
     mocks.preview.mockReset(); mocks.hints.mockReset().mockResolvedValue([]);
-    Object.assign(coreBackupState, { available: true, enabled: true, keep: 20, busy: false, status: BACKUP_WAITING_STATUS,
+    Object.assign(coreBackupState, { available: true, enabled: true, keep: 10, busy: false, status: BACKUP_WAITING_STATUS,
         error: '', backupError: '', settingsError: '', persistenceError: '', lastSavedAt: 0, lastFileAt: 0, failureSince: 0, lastFailureAt: 0 });
-    Object.assign(dailyState, { pending: false, error: '', conflict: false, tableError: '' });
+    Object.assign(dailyState, { pending: false, error: '', conflict: false, tableError: '', branch: 'current-archive', scope: 'current-chat' });
     vi.stubGlobal('localStorage', { getItem: () => null });
 });
 afterEach(() => { apps.splice(0).forEach(app => app.unmount()); vi.unstubAllGlobals(); });
@@ -60,7 +60,7 @@ test('empty inventory reads show progress and success without claiming a write o
     const { root } = mount();
     expect(text(root)).toContain('备份数量未知'); expect(text(root)).not.toContain('找到 0 份');
     expect(text(root)).toContain('归档未完成：摘要基线缺失');
-    expect(button(root, '手动保存').props.disabled).toBe(true);
+    expect(button(root, '备份当前档案').props.disabled).toBe(true);
     const load = button(root, '备份列表'), operation = load.props.onClick();
     await nextTick(); await nextTick();
     expect(text(root)).toContain('正在连接原生接口并读取备份列表');
@@ -139,11 +139,11 @@ test('late inventory completion after unmount cannot publish a result into a reo
     expect(button(second.root, '备份列表').props.disabled).toBe(false);
 });
 
-test('panel advertises fixed 20 retention, no deletion packages and qualified coverage', async () => {
+test('panel advertises fixed 10 retention, no deletion packages and qualified coverage', async () => {
     const { root } = mount();
-    expect(text(root)).toContain('固定保留最近 20 份');
-    expect(text(root)).toContain('不再额外备份'); expect(text(root)).toContain('不保证连续覆盖最近 10 小时');
-    expect(text(root)).toContain('已有历史保护包仍保留');
+    expect(text(root)).toContain('每档案保留最近 10 份');
+    expect(text(root)).toContain('不额外备份'); expect(text(root)).toContain('不保证连续覆盖某个时段');
+    expect(text(root)).toContain('旧整库备份仍保留');
     expect(text(root)).not.toContain('保护旧包并接受当前档案'); expect(text(root)).not.toContain('重试删除前保护');
     expect(nodes(root).some(n => n.type === 'option' && ['5', '10'].includes(String(n.props.value)))).toBe(false);
 });
@@ -153,6 +153,32 @@ const preview = (key: string, stories = 1) => ({ ...listing(key), snapshotAt: 1_
     checksum: 'a'.repeat(64), counts: { stories, branches: 1, source_messages: 2, memories: 3, event_chains: 0, custom_table_rows: 0 } });
 const select = async (root: Node, key: string) => { nodes(root).find(node => node.type === 'select')!.props.onChange(key); await nextTick(); await nextTick(); };
 const flush = async () => { for (let i = 0; i < 8; i++) await nextTick(); };
+
+test('single archive restore protects and replaces only the selected current archive, then refreshes once', async () => {
+    const archive = { branch: 'current-archive', story: 'story', scopes: ['current-chat'], label: '当前聊天' };
+    mocks.inventory.mockResolvedValue({ entries: [listing('single')] });
+    mocks.preview.mockResolvedValue({ ...preview('single'), archive });
+    mocks.restoreArchive.mockResolvedValue({ branch: archive.branch, label: archive.label, compact: true, records: 3 });
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
+    const { root } = mount(); await button(root, '备份列表').props.onClick(); await select(root, 'single'); await flush();
+    expect(text(root)).toContain('单档案：当前聊天');
+    await button(root, '从这份核心包恢复').props.onClick(); await flush();
+    expect(mocks.save).toHaveBeenCalledWith({ id: 'synthetic' }, 'before-restore', 10, expect.any(Function), archive.branch);
+    expect(mocks.restoreArchive).toHaveBeenCalledWith({ id: 'synthetic' }, { key: 'single', checksum: 'a'.repeat(64) },
+        expect.any(Function), { branch: archive.branch, scope: 'current-chat' });
+    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(invalidateDaily).toHaveBeenCalledOnce(); expect(syncDaily).toHaveBeenCalledOnce();
+    expect(text(root)).toContain('其他档案和全库设置保留');
+});
+
+test('another archive backup cannot trigger protection or restore in the current chat', async () => {
+    mocks.inventory.mockResolvedValue({ entries: [listing('other')] });
+    mocks.preview.mockResolvedValue({ ...preview('other'), archive: { branch: 'other', story: 'story', scopes: ['other-chat'], label: '其他聊天' } });
+    const { root } = mount(); await button(root, '备份列表').props.onClick(); await select(root, 'other'); await flush();
+    await button(root, '从这份核心包恢复').props.onClick(); await flush();
+    expect(text(root)).toContain('请切换到对应聊天后恢复');
+    expect(mocks.save).not.toHaveBeenCalled(); expect(mocks.restore).not.toHaveBeenCalled(); expect(mocks.restoreArchive).not.toHaveBeenCalled();
+});
 
 test('filename list appears before optional metadata and does not verify any file', async () => {
     mocks.inventory.mockResolvedValue({ entries: [listing('old'), listing('new')] });
@@ -217,8 +243,8 @@ test('settings, manual saving and file actions stay in named groups with safety 
     const { root } = mount();
     const group = (name: string) => nodes(root).find(node => node.props['aria-label'] === name)!;
     const settings = group('自动备份设置'), files = group('备份文件与恢复');
-    expect(button(settings, '关闭自动备份')).toBeDefined(); expect(button(settings, '手动保存')).toBeDefined();
-    expect(text(settings)).toContain('固定保留最近 20 份 · 间隔至少 30 分钟');
+    expect(button(settings, '关闭自动备份')).toBeDefined(); expect(button(settings, '备份当前档案')).toBeDefined();
+    expect(text(settings)).toContain('每档案保留最近 10 份自动备份 · 间隔至少 30 分钟');
     expect(text(settings)).toContain('前台稳定'); expect(text(settings)).toContain('无变化不重复保存');
     expect(button(files, '读取备份列表')).toBeDefined(); expect(text(files)).toContain('保存路径：data_root/');
     expect(nodes(files).some(node => node.type === 'select')).toBe(true);
@@ -227,7 +253,7 @@ test('settings, manual saving and file actions stay in named groups with safety 
     const notes = nodes(root).find(node => node.type === 'details' && node.props.class === 'mn-backup-notes')!;
     expect(notes.props.open).toBeUndefined(); expect(nodes(notes).some(node => node.type === 'button')).toBe(false);
     expect(text(notes)).toContain('不含知识库、字体、向量、密钥或宿主聊天');
-    expect(text(notes)).toContain('旧库不自动清理'); expect(text(root)).toContain('本机明文存储，不上传');
+    expect(text(notes)).toContain('旧整库备份仍保留'); expect(text(root)).toContain('本机明文存储，不上传');
     await button(files, '备份列表').props.onClick(); await select(root, 'auto'); await flush();
     const detail = group('所选备份详情');
     expect(nodes(files)).toContain(detail); expect(text(detail)).toContain('文件路径：');
@@ -239,7 +265,7 @@ test('unavailable native access keeps the path, read action and actual failure v
     Object.assign(coreBackupState, { available: false, error: '宿主原生接口不可用' });
     const { root } = mount();
     expect(text(root)).toContain('保存路径：'); expect(button(root, '读取备份列表')).toBeDefined();
-    expect(button(root, '关闭自动备份')).toBeUndefined(); expect(button(root, '手动保存')).toBeUndefined();
+    expect(button(root, '关闭自动备份')).toBeUndefined(); expect(button(root, '备份当前档案')).toBeUndefined();
     const alert = nodes(root).find(node => node.props.role === 'alert')!;
     expect(text(alert)).toBe('宿主原生接口不可用');
     expect(alert.parent?.type).not.toBe('details');
@@ -249,27 +275,27 @@ test('toggle keeps the enable confirmation and fixed retention, while disabling 
     const confirm = vi.fn().mockReturnValue(false); vi.stubGlobal('confirm', confirm);
     coreBackupState.enabled = false;
     const { root } = mount(); await button(root, '启用自动备份').props.onClick();
-    expect(confirm).toHaveBeenCalledOnce(); expect(confirm.mock.calls[0][0]).toContain('保留最近 20 份');
+    expect(confirm).toHaveBeenCalledOnce(); expect(confirm.mock.calls[0][0]).toContain('保留最近 10 份');
     expect(confirm.mock.calls[0][0]).toContain('永久删除'); expect(mocks.configure).not.toHaveBeenCalled();
     confirm.mockReturnValue(true); await button(root, '启用自动备份').props.onClick();
-    expect(mocks.configure).toHaveBeenLastCalledWith(true, 20);
+    expect(mocks.configure).toHaveBeenLastCalledWith(true, 10);
     coreBackupState.enabled = true; await nextTick(); await button(root, '关闭自动备份').props.onClick();
-    expect(mocks.configure).toHaveBeenLastCalledWith(false, 20); expect(confirm).toHaveBeenCalledTimes(2);
+    expect(mocks.configure).toHaveBeenLastCalledWith(false, 10); expect(confirm).toHaveBeenCalledTimes(2);
 });
 
 test('manual action still confirms, saves a protected new baseline and refreshes only the file inventory', async () => {
     const confirm = vi.fn().mockReturnValue(false); vi.stubGlobal('confirm', confirm);
-    const { root } = mount(); await button(root, '手动保存').props.onClick();
+    const { root } = mount(); await button(root, '备份当前档案').props.onClick();
     expect(mocks.save).not.toHaveBeenCalled(); expect(mocks.connect).not.toHaveBeenCalled();
     expect(confirm.mock.calls[0][0]).toContain('旧备份保留');
-    confirm.mockReturnValue(true); await button(root, '手动保存').props.onClick(); await flush();
+    confirm.mockReturnValue(true); await button(root, '备份当前档案').props.onClick(); await flush();
     expect(mocks.prepare).toHaveBeenCalledWith({ id: 'synthetic' }, expect.any(Function));
     expect(mocks.prepare.mock.invocationCallOrder[0]).toBeLessThan(mocks.save.mock.invocationCallOrder[0]);
-    expect(mocks.save).toHaveBeenCalledWith({ id: 'synthetic' }, 'manual', 20, expect.any(Function));
+    expect(mocks.save).toHaveBeenCalledWith({ id: 'synthetic' }, 'manual', 10, expect.any(Function), 'current-archive');
     const valid = mocks.save.mock.calls[0][3]; expect(valid()).toBe(true);
     dailyState.pending = true; expect(valid()).toBe(false); await nextTick();
-    expect(button(root, '手动保存').props.disabled).toBe(true);
-    expect(text(root)).toContain('手动保护备份已写入并验证'); expect(mocks.inventory).toHaveBeenCalledOnce();
+    expect(button(root, '备份当前档案').props.disabled).toBe(true);
+    expect(text(root)).toContain('当前单档案备份已写入并验证'); expect(mocks.inventory).toHaveBeenCalledOnce();
     expect(mocks.preview).not.toHaveBeenCalled();
 });
 
@@ -278,7 +304,7 @@ test('pin and restore retain their verified-file arguments and busy or pending g
     mocks.pin.mockResolvedValue({ key: 'auto' }); vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
     const { root } = mount(); await button(root, '备份列表').props.onClick(); await select(root, 'auto'); await flush();
     coreBackupState.busy = true; await nextTick();
-    for (const label of ['关闭自动备份', '手动保存', '备份列表', '固定保留', '从这份核心包恢复']) expect(button(root, label).props.disabled).toBe(true);
+    for (const label of ['关闭自动备份', '备份当前档案', '备份列表', '固定保留', '从这份核心包恢复']) expect(button(root, label).props.disabled).toBe(true);
     coreBackupState.busy = false; dailyState.pending = true; await nextTick();
     expect(button(root, '从这份核心包恢复').props.disabled).toBe(true);
     dailyState.error = '归档失败'; await nextTick();
@@ -288,7 +314,7 @@ test('pin and restore retain their verified-file arguments and busy or pending g
     await button(root, '从这份核心包恢复').props.onClick(); await flush();
     expect(mocks.prepare).toHaveBeenCalledWith({ id: 'synthetic' }, expect.any(Function));
     expect(mocks.prepare.mock.invocationCallOrder[0]).toBeLessThan(mocks.save.mock.invocationCallOrder[0]);
-    expect(mocks.save).toHaveBeenCalledWith({ id: 'synthetic' }, 'before-restore', 20, expect.any(Function));
+    expect(mocks.save).toHaveBeenCalledWith({ id: 'synthetic' }, 'before-restore', 10, expect.any(Function), undefined);
     expect(mocks.restore).toHaveBeenCalledWith('auto', 'a'.repeat(64), expect.any(Function));
     expect(invalidateDaily).toHaveBeenCalledOnce(); expect(syncDaily).toHaveBeenCalledTimes(2);
     expect(button(root, '从这份核心包恢复').props.disabled).toBe(true); // Refresh revokes the verified details.
@@ -298,11 +324,11 @@ test('pin and restore retain their verified-file arguments and busy or pending g
 });
 
 test('inventory separates 90 files into current autos, other libraries, and protected files without verification reads',async()=>{
- const {fingerprint}=await import('@/mnemosyne/model'),bank=(await fingerprint('mnemosyne_daily_default')).slice(0,16);
+ const {fingerprint}=await import('@/mnemosyne/model'),bank=(await fingerprint('mnemosyne_daily_default\narchive:current-archive')).slice(0,16);
  mocks.inventory.mockResolvedValue({entries:Array.from({length:90},(_,i)=>({key:`copy-${i}`,kind:i<75?'auto':'manual',savedAt:1_700_000_000_000+i,bank:i<25?bank:'other'}))});
  const {root}=mount();await button(root,'备份列表').props.onClick();await flush();
- expect(text(root)).toContain('当前库自动备份 25 份 / 保留 20 份');
- expect(text(root)).toContain('其他库自动备份 50 份');
+ expect(text(root)).toContain('当前档案自动备份 25 份 / 保留 10 份');
+ expect(text(root)).toContain('其他档案及旧整库自动备份 50 份');
  expect(text(root)).toContain('手动及保护备份 15 份');
  expect(text(root)).toContain('清理可能尚未完成');expect(mocks.preview).not.toHaveBeenCalled();
 });

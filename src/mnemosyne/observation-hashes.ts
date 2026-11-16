@@ -4,7 +4,8 @@ import { HostVersionMemo } from './host-version';
 import { fingerprint } from './model';
 
 interface MessageHash { role: string; content: string; hash: string; bodyHash: string }
-interface MemoryHash { memo: HostVersionMemo; encoded: string; hash: string }
+interface MemoryHash { memo: HostVersionMemo; encoded: string; hash: string;
+    content: string; generationKey?: number; generationHash: string }
 interface ObservationHashes {
     scope: string;
     messages: Map<string, MessageHash>;
@@ -40,13 +41,19 @@ export async function observationHashes(lib: Library, observation: HostObservati
             const previous = prior?.memories.get(memory.hostId);
             const memo = previous?.memo ?? new HostVersionMemo();
             const encoded = memo.read(memory);
-            const hash = previous?.encoded === encoded ? previous.hash : await encodedFingerprint(encoded);
-            next.memories.set(memory.hostId, { memo, encoded, hash });
-            return hash;
+            const [hash, generationHash] = await Promise.all([
+                previous?.encoded === encoded ? previous.hash : encodedFingerprint(encoded),
+                previous?.content === memory.content && previous.generationKey === memory.generationKey
+                    ? previous.generationHash : fingerprint([memory.content, memory.generationKey ?? null]),
+            ]);
+            next.memories.set(memory.hostId, { memo, encoded, hash, content: memory.content,
+                generationKey: memory.generationKey, generationHash });
+            return { hash, generationHash };
         })),
     ]);
     // Concurrent calls may finish in either order. A completed value cache is
     // harmless even after a failed write; never retain observations from other scopes.
     observations.set(lib, next);
-    return { hashes: messages.map(m => m.hash), bodyHashes: messages.map(m => m.bodyHash), memoryHashes: memories };
+    return { hashes: messages.map(m => m.hash), bodyHashes: messages.map(m => m.bodyHash),
+        memoryHashes: memories.map(m => m.hash), generationHashes: memories.map(m => m.generationHash) };
 }

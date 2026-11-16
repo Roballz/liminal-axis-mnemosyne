@@ -46,6 +46,12 @@ export class LibraryChanges {
     private floor = 0;
     private entries: LibraryCommit[] = [];
     private evidenceCount = 0;
+    /** Another connection committed data without this connection's row evidence. */
+    invalidate() {
+        this.floor = ++this.version;
+        this.entries = [];
+        this.evidenceCount = 0;
+    }
     commit(changes: TransactionChanges) {
         if (!changes.stores.size) return;
         const entry: LibraryCommit = { version: ++this.version, stores: changes.stores,

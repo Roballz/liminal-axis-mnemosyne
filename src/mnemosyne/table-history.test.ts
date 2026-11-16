@@ -45,7 +45,7 @@ test('tail deletion over 100 floors restores manual state; regrowth cannot resur
     } finally { f.lib.close(); }
 });
 
-test('multiple writes at one floor, schema, hiding and deletion all follow the same history', async () => {
+test('multiple writes, schema and hiding restore earlier state; permanent table deletion cannot return', async () => {
     const f = await setup();
     try {
         await f.write('第一版'); await f.write('同楼最终版');
@@ -56,7 +56,6 @@ test('multiple writes at one floor, schema, hiding and deletion all follow the s
         view = await capture(f.lib, f.branch.id);
         await saveTable(f.lib, view, { ...def, name: '后来的表名', columns: def.columns.slice(0, 1) });
         view = await capture(f.lib, f.branch.id); def = (await f.lib.get<TableDef>('custom_table_defs', f.def.id))!;
-        await saveTable(f.lib, view, { ...def, deleted: true });
         const oldVersion = (await f.lib.get<TableDef>('custom_table_defs', def.id))!.version;
         await f.advance(1);
         expect(await f.values()).toEqual(['同楼最终版']);
@@ -64,6 +63,13 @@ test('multiple writes at one floor, schema, hiding and deletion all follow the s
         expect(restored.name).toBe('逐楼状态'); expect(restored.columns).toHaveLength(2);
         expect(restored.version).toBeGreaterThan(oldVersion);
         expect((await f.lib.get<TableRow>('custom_table_rows', r.id))!.hidden).toBe(false);
+        await saveTable(f.lib, await capture(f.lib, f.branch.id), { ...restored, deleted: true });
+        expect(await f.lib.get('custom_table_defs', def.id)).toBeUndefined();
+        expect(await f.lib.get('custom_table_rows', r.id)).toBeUndefined();
+        await f.advance(2); await f.advance(1);
+        expect(await f.values()).toEqual([]);
+        const child = await forkBranch(f.lib, await capture(f.lib, f.branch.id), 'after-table-deletion');
+        expect(await f.values(child.id)).toEqual([]);
     } finally { f.lib.close(); }
 });
 
@@ -251,7 +257,7 @@ test('v10 backup enters baseline-only history and roundtrip never claims old val
             expect(view.branch.tableHistoryGap).toBe(true);
             expect(await readTables(restored, view.branch)).toEqual([]);
             const backup = await exportLibrary(restored);
-            expect(backup.version).toBe(17);
+            expect(backup.version).toBe(18);
             expect((backup.data.table_history as TableCommit[]).some(h => h.rows.some(r => r.values.v === '旧包最新值'))).toBe(true);
         } finally { restored.close(); }
     } finally { f.lib.close(); }
