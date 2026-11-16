@@ -1,7 +1,7 @@
 /** Adds table work to the existing summary request; never calls an LLM itself. */
 import type { STMessage } from '@/st/context';
 import { statuses } from './canonical';
-import { activeLibrary } from './db';
+import { activeLibrary, type Library } from './db';
 import {
     readTables,
     allowedTableSources,
@@ -11,8 +11,43 @@ import {
     type SummaryTablePlan,
     type TableInput,
 } from './tables';
-import { type CapturedView, check } from './model';
+import { type Branch, type CapturedView, type TableCommit, type TableDef, check } from './model';
 export const TABLE_OUTPUT_KEY = 'mnemosyne_tables_v2';
+/** Host sidecars outlive permanent table deletion, including its old receipts.
+ * Ignore a whole completed/obsolete plan; never rewrite its receipt fingerprint
+ * or use this read-only preflight as authorization to partially apply a batch. */
+export async function pendingSummaryTablePlans(lib: Library, branch: Branch, plans: SummaryTablePlan[]) {
+    if (!plans.length) return new Set<SummaryTablePlan>();
+    return lib.transaction(['branches', 'table_receipts', 'custom_table_defs', 'table_history'], 'readonly', async tx => {
+        const receipts = new Set((await tx.all('table_receipts', 'branch', branch.id)).map(r => r.id));
+        const received = (plan: SummaryTablePlan, id: string) => receipts.has(`${plan.operation}:${id}`);
+        const incomplete = plans.filter(plan => !plan.tables.every(item => received(plan, item.id)));
+        if (!incomplete.length) return new Set<SummaryTablePlan>();
+        const live = await tx.get<Branch>('branches', branch.id);
+        if (!live || live.story !== branch.story) return new Set(incomplete);
+        const ids = [...new Set(incomplete.flatMap(plan => plan.tables.filter(item => !received(plan, item.id)).map(item => item.id)))];
+        const defs = await Promise.all(ids.map(id => tx.get<TableDef>('custom_table_defs', id)));
+        const retired = new Set(ids.filter((_, i) => !defs[i]));
+        const deleted = new Set(ids.filter((_, i) => defs[i]?.deleted &&
+            defs[i]!.branch === branch.id && defs[i]!.story === branch.story));
+        // A rollback also makes projection tombstones. Only an explicit deleted
+        // after-image in the active history proves an old intentional soft delete.
+        // Share one ancestry walk across all pending floors/tables; never scan rows.
+        const visited = new Set<string>();
+        let head = live.tableHead;
+        while (deleted.size && head && !visited.has(head)) {
+            visited.add(head);
+            const commit = await tx.get<TableCommit>('table_history', head);
+            if (!commit || commit.branch !== branch.id || commit.story !== branch.story) break;
+            for (const def of commit.defs) if (deleted.delete(def.id) && def.deleted &&
+                def.branch === branch.id && def.story === branch.story) retired.add(def.id);
+            if (commit.checkpoint) break;
+            head = commit.parent ?? undefined;
+        }
+        return new Set(incomplete.filter(plan => plan.branch !== branch.id ||
+            plan.tables.some(item => !received(plan, item.id) && !retired.has(item.id))));
+    });
+}
 export interface SummaryTables {
     inputs: TableInput[];
     tableHead?: string;

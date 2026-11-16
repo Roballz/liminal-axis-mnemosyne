@@ -13,7 +13,7 @@ import { eventView, renderPersistentEvents, type EventView } from './events';
 import { previewReconnect, commitReconnect } from './binding-recovery';
 import { tableInjectionProjection, type TableInjectionIssues, commitSummaryTables, previewTablePlan, type SummaryTablePlan } from './tables';
 import { tableStateAt } from './table-history';
-import { TABLE_OUTPUT_KEY } from './summary-tables';
+import { TABLE_OUTPUT_KEY, pendingSummaryTablePlans } from './summary-tables';
 /** The only daily-library module that observes the ST host. */
 import { reactive, ref, shallowRef, watch } from 'vue';
 import { locateReply } from '@/st/reply-location';
@@ -723,7 +723,8 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
             dailyState.tableError = '';
             const conflicts: typeof tableConflicts.value = [];
-            const receipts = new Set((await lib.all('table_receipts', 'branch', branch.id)).map((r) => r.id));
+            const tableSources = new Map(view.memories.filter(m => validity.get(m.id) === 'valid').map(m => [m.hostId, m.id]));
+            const tablePlans: { floor: number; source: string; plan: SummaryTablePlan }[] = [];
             for (const [floor, message] of ctx.chat.entries()) {
                 const saved = message.extra?.[TABLE_OUTPUT_KEY] as
                     { version: number; leaf: string; text: string; plan: SummaryTablePlan } | undefined;
@@ -736,16 +737,19 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                     leaf.text !== saved.text
                 )
                     continue;
-                if (saved.plan.tables.every((t) => receipts.has(`${saved.plan.operation}:${t.id}`))) continue;
-                const source = view.memories.find((m) => m.hostId === saved.leaf && validity.get(m.id) === 'valid');
-                if (!source) continue;
+                const source = tableSources.get(saved.leaf);
+                if (source) tablePlans.push({ floor, source, plan: saved.plan });
+            }
+            const replayPlans = await pendingSummaryTablePlans(lib, view.branch, tablePlans.map(item => item.plan));
+            for (const { floor, source, plan } of tablePlans) {
+                if (!replayPlans.has(plan)) continue;
                 try {
                     check(host === hostVersion() && isActive() && generation === dailyState.generation, '聊天已改变');
                     await commitSummaryTables(
                         lib,
                         view,
-                        saved.plan,
-                        [source.id],
+                        plan,
+                        [source],
                         () => host === hostVersion() && isActive() && generation === dailyState.generation,
                     );
                 } catch (error) {
