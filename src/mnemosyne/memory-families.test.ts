@@ -19,7 +19,8 @@ async function inheritedFixture(compact: boolean) {
   const original=await capture(lib,f.branch.id), leaf=original.memories.find(m=>m.hostId==='leaf-0')!;
   const family=(await lib.get<Memory>('memories',leaf.owner))!;
   const duplicate={...family,...row('mem')};
-  const historical={...leaf,...row('mr'),owner:duplicate.id};
+  // Distinct generation evidence must remain available for legacy identity repair.
+  const historical={...leaf,...row('mr'),owner:duplicate.id,declaration:'historical alternative evidence'};
   await lib.transaction(STORES,'readwrite', async tx=>{await tx.add('memories',duplicate); await tx.add('memory_revisions',historical);});
   f.input.messages[0].content+=' edited';
   f.input.messages.push({key:'future-user',role:'user',content:'future question',swipe:0},{key:'future-ai',role:'assistant',content:'future answer',swipe:0});

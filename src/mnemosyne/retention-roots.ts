@@ -119,6 +119,9 @@ export class RetentionTransaction {
         return deltas;
     }
 
+    /** Finish old-row evidence reads before explicit shared-block reclamation. */
+    async flush(): Promise<void> { await this.settled(); }
+
     private async scan(load: (store: EvidenceStore) => Promise<Row[]>): Promise<Scan> {
         const counts = emptyCounts(), watermarks = new Map<EvidenceStore, number>();
         for (const store of EVIDENCE_STORES) {

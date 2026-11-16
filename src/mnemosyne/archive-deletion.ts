@@ -1,3 +1,4 @@
+import { unreferencedStorage } from './shared-garbage';
 import { payloadReader } from './shared-payloads';
 import type { Library } from './db';
 import { snapshotLibraryForDeletion, validateCurrentData, type Package } from './migration';
@@ -58,7 +59,8 @@ export async function previewArchiveDeletion(lib: Library, branchId: string): Pr
         ((store === 'message_mappings' || store === 'memories') && owners.has(r.owner!)) ||
         (store === 'manifest_blocks' && blocks.has(r.id) && !retainedBlocks.has(r.id))
     ).map(r => r.id)])) as Record<Store, string[]>;
-    const remaining = Object.fromEntries(STORES.map(s => [s, data[s].filter(r => !remove[s].includes(r.id))])) as Package['data'];
+    const without = (rows: Row[], ids: string[]) => { const removed = new Set(ids); return rows.filter(row => !removed.has(row.id)); };
+    const remaining = Object.fromEntries(STORES.map(s => [s, without(data[s], remove[s])])) as Package['data'];
     // A source version can be reused by a parent/sibling after first being archived here.
     // Keep every surviving exact source reference and preserve its immutable origin separately.
     const referenced = new Set<string>();
@@ -72,7 +74,7 @@ export async function previewArchiveDeletion(lib: Library, branchId: string): Pr
         for (const record of remaining[store]) collect(record);
     remove.source_revisions = (data.source_revisions as Revision[]).filter(r => r.story === branch.story &&
         (owners.has(r.provenance.binding) || retiredIds.has(r.provenance.binding)) && !referenced.has(r.id)).map(r => r.id);
-    remaining.source_revisions = data.source_revisions.filter(r => !remove.source_revisions.includes(r.id));
+    remaining.source_revisions = without(data.source_revisions, remove.source_revisions);
     const currentBodyRefs = new Set<string>();
     const bySnapshot = new Map(remaining.history_snapshots.map(s => [s.id, s as Snapshot]));
     const byBlock = new Map(remaining.manifest_blocks.map(b => [b.id, b as import('./model').Block]));
@@ -82,7 +84,7 @@ export async function previewArchiveDeletion(lib: Library, branchId: string): Pr
             for (const ref of block.entries) currentBodyRefs.add(ref.revision); }
     }
     remove.source_bodies = data.source_bodies.filter(b => b.story === branch.story && !currentBodyRefs.has(b.id)).map(b => b.id);
-    remaining.source_bodies = data.source_bodies.filter(b => !remove.source_bodies.includes(b.id));
+    remaining.source_bodies = without(data.source_bodies, remove.source_bodies);
     const usedOrigins = new Set((remaining.source_revisions as Revision[]).map(r => r.provenance.binding));
     const origins: RetiredSourceBindings = { id: SOURCE_ORIGINS_KEY, schema: 1, value: { version: 1,
         bindings: [...oldOrigins, ...bindings].filter(b => usedOrigins.has(b.id)) } };
@@ -90,10 +92,21 @@ export async function previewArchiveDeletion(lib: Library, branchId: string): Pr
     // Only reclaim source identities from this story, after retaining all surviving revisions/mappings.
     const usedMessages = new Set([...remaining.source_revisions.map(r => r.owner!), ...remaining.message_mappings.map(r => (r as Mapping).message)]);
     remove.source_messages = data.source_messages.filter(r => r.story === branch.story && !usedMessages.has(r.id)).map(r => r.id);
-    remaining.source_messages = data.source_messages.filter(r => !remove.source_messages.includes(r.id));
+    remaining.source_messages = without(data.source_messages, remove.source_messages);
     if (!remaining.branches.some(b => b.story === branch.story)) {
         remove.stories = [branch.story];
         remaining.stories = data.stories.filter(s => s.id !== branch.story);
+    }
+    // Logical rows above support source-evidence checks; shared reachability must
+    // use retained physical rows, otherwise unpacking would erase all payload roots.
+    const removed = Object.fromEntries(STORES.map(store => [store, new Set(remove[store])])) as Record<Store, Set<string>>;
+    const physical = Object.fromEntries(STORES.map(store => [store,
+        before.data[store].filter(row => !removed[store].has(row.id))])) as Package['data'];
+    const garbage = unreferencedStorage(physical);
+    for (const store of ['memory_payloads', 'memory_selection_nodes'] as const) {
+        remove[store].push(...garbage[store]);
+        const ids = new Set(remove[store]);
+        remaining[store] = remaining[store].filter(row => !ids.has(row.id));
     }
     try {
         await validateCurrentData({ ...before, data: remaining, counts: Object.fromEntries(STORES.map(s => [s, remaining[s].length])) as Package['counts'] });
@@ -107,7 +120,12 @@ export async function commitArchiveDeletion(lib: Library, plan: ArchiveDeletionP
     await lib.transaction(STORES, 'readwrite', async tx => {
         check(guard(), '聊天已改变，请重新预览删除');
         for (const store of STORES) check(equal(await tx.rawAll(store), plan.before.data[store]), '档案已改变，请重新预览删除');
-        for (const store of STORES) for (const id of plan.remove[store]) await tx.delete(store, id);
+        for (const store of STORES) if (store !== 'memory_payloads')
+            for (const id of plan.remove[store]) await tx.delete(store, id);
+        // Retention bookkeeping reads the deleted row's original packed fields.
+        // Drain those reads before deleting their blocks, in the same transaction.
+        await tx.flushEvidenceReads();
+        for (const id of plan.remove.memory_payloads) await tx.delete('memory_payloads', id);
         await tx.put('library_meta', plan.origins);
         const marker = await tx.get<DeletionMarker>('library_meta', DELETIONS_KEY);
         await tx.put('library_meta', { id: DELETIONS_KEY, schema: 1,
@@ -118,8 +136,10 @@ export async function commitArchiveDeletion(lib: Library, plan: ArchiveDeletionP
 
 /** Exact post-commit data used only to authorize the new backup baseline. */
 export function archiveDeletionResult(plan: ArchiveDeletionPlan): Package['data'] {
-    const data = Object.fromEntries(STORES.map(store => [store,
-        plan.before.data[store].filter(row => !plan.remove[store].includes(row.id))])) as Package['data'];
+    const data = Object.fromEntries(STORES.map(store => {
+        const removed = new Set(plan.remove[store]);
+        return [store, plan.before.data[store].filter(row => !removed.has(row.id))];
+    })) as Package['data'];
     const prior = data.library_meta.find(row => row.id === DELETIONS_KEY) as DeletionMarker | undefined;
     data.library_meta = [...data.library_meta.filter(row => row.id !== SOURCE_ORIGINS_KEY && row.id !== DELETIONS_KEY),
         plan.origins, { id: DELETIONS_KEY, schema: 1, value: { version: 1,

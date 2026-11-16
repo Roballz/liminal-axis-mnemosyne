@@ -37,6 +37,7 @@ export class Transaction {
         return operation;
     }
     flushWrites() { return this.packedWrites; }
+    async flushEvidenceReads() { await this.packedWrites; await this.retention?.flush(); }
     get sharedWrites() { return this.compactWrites; }
     retentionRoots(story: string, refresh = false) {
         check(this.retention, '当前事务未包含历史证据存储');
