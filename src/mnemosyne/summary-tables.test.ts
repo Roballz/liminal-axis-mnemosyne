@@ -133,7 +133,7 @@ test('missing output, wrong types, invented tables/rows and duplicate updates ar
         const inputs = await readTables(f.lib, f.branch);
         expect(() => parseSummaryTables(undefined, inputs, f.branch.id)).toThrow('缺少');
         expect(() => parseSummaryTables(output('fake'), inputs, f.branch.id)).toThrow('未知表');
-        expect(() => parseSummaryTables(output(f.def.id, [{ count: '1' }]), inputs, f.branch.id)).toThrow('类型错误');
+        expect(() => parseSummaryTables(output(f.def.id, [{ title: '类型校验行', count: '1' }]), inputs, f.branch.id)).toThrow('类型错误');
         expect(() =>
             parseSummaryTables(output(f.def.id, [], [{ row_id: 'fake', values: { notes: 'x' } }]), inputs, f.branch.id),
         ).toThrow('未知');

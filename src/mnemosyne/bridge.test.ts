@@ -778,9 +778,9 @@ test.each(['full', 'cached'] as const)('table source resolution cannot publish a
 test('host save failure retains a table operation, retry commits once without another model call',async()=>{
     const { newTable, saveTable, readTables, parseSummaryTables }=await import('./tables');
     const { attachTableResult }=await import('./summary-tables');
-    const view=await syncDaily(),def=newTable(view,'重试表');def.columns=[{id:'v',name:'进展',type:'text',mode:'append',description:''}];
+    const view=await syncDaily(),def=newTable(view,'重试表');def.columns=[{id:'key',name:'条目',type:'text',mode:'lock',description:''},{id:'v',name:'进展',type:'text',mode:'append',description:''}];
     await saveTable(lib,view,def);
-    const inputs=await readTables(lib,view.branch),plan=parseSummaryTables([{table_id:def.id,add:[{v:'只追加一次'}],update:[]}],inputs,view.branch.id)!;
+    const inputs=await readTables(lib,view.branch),plan=parseSummaryTables([{table_id:def.id,add:[{key:'重试条目',v:'只追加一次'}],update:[]}],inputs,view.branch.id)!;
     attachTableResult(ctx.chat,1,plan);
     vi.mocked(ctx.saveChat).mockRejectedValueOnce(Error('合成聊天保存失败'));
     await expect(syncDaily()).rejects.toThrow('聊天保存失败');expect(await lib.all('custom_table_rows')).toHaveLength(0);
@@ -838,12 +838,12 @@ test('an in-flight native summary cannot overwrite a newly edited table',async()
 test('regenerating a historical leaf clears its superseded failed table request, even with identical text',async()=>{
  const {newTable,saveTable,readTables,parseSummaryTables,applyRows}=await import('./tables');
  const {attachTableResult,TABLE_OUTPUT_KEY}=await import('./summary-tables');
- const view=await syncDaily(),def=newTable(view,'失败后重摘表');def.columns=[{id:'v',name:'值',type:'text',mode:'append',description:''}];
+ const view=await syncDaily(),def=newTable(view,'失败后重摘表');def.columns=[{id:'key',name:'条目',type:'text',mode:'lock',description:''},{id:'v',name:'值',type:'text',mode:'append',description:''}];
  await saveTable(lib,view,def);
- const plan=parseSummaryTables([{table_id:def.id,add:[{v:'旧请求'}],update:[]}],await readTables(lib,view.branch),view.branch.id)!;
+ const plan=parseSummaryTables([{table_id:def.id,add:[{key:'旧请求行',v:'旧请求'}],update:[]}],await readTables(lib,view.branch),view.branch.id)!;
  attachTableResult(ctx.chat,1,plan);
  const current=await capture(lib,view.branch.id),stored=(await lib.get<any>('custom_table_defs',def.id))!;
- await applyRows(lib,current,stored,[{row_id:null,values:{v:'后续人工值'}}],false);
+ await applyRows(lib,current,stored,[{row_id:null,values:{key:'人工行',v:'后续人工值'}}],false);
  await syncDaily();expect(dailyState.tableError).toContain('#1 楼');
  const receipts=await lib.all('table_receipts');
  attachTableResult(ctx.chat,1,null); // Same-text historical regeneration has no current table request.
@@ -1679,7 +1679,7 @@ test.each([false, true])('old-floor summary saves during new streaming reply; ar
     let tableId = '';
     if (tables) {
         const def = newTable(original, '并行摘要表');
-        def.columns = [{ id: 'v', name: '事项', type: 'text', mode: 'append', description: '' }];
+        def.columns = [{ id: 'key', name: '条目', type: 'text', mode: 'lock', description: '' }, { id: 'v', name: '事项', type: 'text', mode: 'append', description: '' }];
         await saveTable(lib, original, def); await refreshDailyTables(); tableId = def.id;
     }
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true); vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
@@ -1690,7 +1690,7 @@ test.each([false, true])('old-floor summary saves during new streaming reply; ar
         ctx.streamingProcessor = { messageId: 3, isFinished: false, isStopped: false, abortController: { signal: { aborted: false } } };
         await emit('CHARACTER_MESSAGE_RENDERED', 3);
         await expect(syncDaily()).rejects.toThrow('暂不归档');
-        return JSON.stringify({ summary: '独立的旧楼摘要', ...(tables ? { customTables: [{ table_id: tableId, add: [{ v: '已发生的事项' }], update: [] }] } : {}) });
+        return JSON.stringify({ summary: '独立的旧楼摘要', ...(tables ? { customTables: [{ table_id: tableId, add: [{ key: '已发生事项', v: '已发生的事项' }], update: [] }] } : {}) });
     });
     try {
         await runSummary(1, { checkResummary: false });
@@ -1738,7 +1738,7 @@ test.each(['edit', 'swipe', 'delete', 'chat', 'table', 'later-summary', 'policy'
     delete ctx.chat[1].extra!.bbs_leaf;
     const emit = bindFinalityEvents(), view = await syncDaily();
     const def = newTable(view, '版本校验表');
-    def.columns = [{ id: 'v', name: '事项', type: 'text', mode: 'append', description: '' }];
+    def.columns = [{ id: 'key', name: '条目', type: 'text', mode: 'lock', description: '' }, { id: 'v', name: '事项', type: 'text', mode: 'append', description: '' }];
     await saveTable(lib, view, def); await refreshDailyTables();
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true); vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
     vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
@@ -1751,10 +1751,10 @@ test.each(['edit', 'swipe', 'delete', 'chat', 'table', 'later-summary', 'policy'
         if (change === 'swipe') ctx.chat[1].swipe_id = 1;
         if (change === 'delete') ctx.chat.splice(1, 1);
         if (change === 'chat') { ctx.getCurrentChatId = () => 'other'; await emit('CHAT_CHANGED'); }
-        if (change === 'table') { def.name += '修改'; await saveTable(lib, await capture(lib, view.branch.id), def); }
+        if (change === 'table') { const saved = (await lib.get<typeof def>('custom_table_defs', def.id))!; await saveTable(lib, await capture(lib, view.branch.id), { ...saved, name: saved.name + '修改' }); }
         if (change === 'later-summary') ctx.chat[3].extra!.bbs_leaf = { id: 'later', text: '后楼已摘', delta: {}, createdAt: 2, v: 1, swipe: 0 };
         if (change === 'policy') invalidateDaily('权限已改变');
-        return JSON.stringify({ summary: '不能写入', customTables: [{ table_id: def.id, add: [{ v: '旧返回' }], update: [] }] });
+        return JSON.stringify({ summary: '不能写入', customTables: [{ table_id: def.id, add: [{ key: '旧请求行', v: '旧返回' }], update: [] }] });
     });
     try {
         await runSummary(1, { checkResummary: false });

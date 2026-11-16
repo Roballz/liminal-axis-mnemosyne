@@ -133,6 +133,7 @@ async function table() {
     def = newTable(v, "约会记录");
   def.ai = false;
   def.columns = [
+    { id: "key", name: "条目", type: "text", mode: "lock", description: "表内唯一标识" },
     {
       id: "detail",
       name: "细节",
@@ -673,7 +674,7 @@ test("manual backfill runs while automatic filling is disabled, sends original d
     expect(prompt).toContain("已有内容不另建");
     return JSON.stringify({
       customTables: [
-        { table_id: def.id, add: [{ detail: "早餐与花灯" }], update: [] },
+        { table_id: def.id, add: [{ key: "早餐与花灯", detail: "早餐与花灯" }], update: [] },
       ],
     });
   });
@@ -739,7 +740,7 @@ test("editing backfilled source invalidates raw dependent table rows and last fl
     async () =>
       JSON.stringify({
         customTables: [
-          { table_id: def.id, add: [{ detail: "旧正文事实" }], update: [] },
+          { table_id: def.id, add: [{ key: "旧正文事实", detail: "旧正文事实" }], update: [] },
         ],
       }),
   );
@@ -773,7 +774,7 @@ test("hiding and showing a backfilled row preserves provenance; explicit content
     async () =>
       JSON.stringify({
         customTables: [
-          { table_id: def.id, add: [{ detail: "旧事实" }], update: [] },
+          { table_id: def.id, add: [{ key: "旧事实", detail: "旧事实" }], update: [] },
         ],
       }),
   );
@@ -863,10 +864,10 @@ test.each(['', '{"customTables":', '{"customTables":[]}'])('joint backfill retai
   await runTableBackfill([one,two].map(t => ({ table:t.id,start:0,end:1 })), 96000, sender, 2, () => true, async review => {
     expect(review.raw).toBe(raw); expect(review.validate(raw)).not.toBe('');
     expect(await lib.all('table_receipts')).toHaveLength(0);
-    const missing = JSON.stringify({ customTables:[{table_id:one.id,add:[{detail:'手工补充'}],update:[]}] });
+    const missing = JSON.stringify({ customTables:[{table_id:one.id,add:[{key: '手工补充', detail:'手工补充'}],update:[]}] });
     await expect(review.confirm(missing)).rejects.toThrow('完整');
     expect(await lib.all('custom_table_rows')).toHaveLength(0);
-    const fixed = JSON.stringify({ customTables:[one,two].map(t => ({table_id:t.id,add:[{detail:'手工补充'}],update:[]})) });
+    const fixed = JSON.stringify({ customTables:[one,two].map(t => ({table_id:t.id,add:[{key: '手工补充', detail:'手工补充'}],update:[]})) });
     expect(review.validate(fixed)).toBe(''); await review.confirm(fixed);
     await expect(review.confirm(fixed)).rejects.toThrow('已经保存');
     return true;
@@ -906,7 +907,7 @@ test('backfill fixed batches advance without repeating bodies, reuse archived so
     for (let previous = 1; previous < batch; previous++)
       expect(messages[1].content).toContain(`已保存批次${previous}`);
     expect(committed).toHaveBeenCalledTimes(batch - 1);
-    return JSON.stringify({ customTables: [{ table_id: def.id, add: [{ detail: `已保存批次${batch}` }], update: [] }] });
+    return JSON.stringify({ customTables: [{ table_id: def.id, add: [{ key: `已保存批次${batch}`, detail: `已保存批次${batch}` }], update: [] }] });
   });
   await runTableBackfill([{ table: def.id, start: 0, end: 5 }], undefined, sender, 2, () => true, undefined, committed);
   expect(floors).toEqual([[0, 1], [2, 3], [4, 5]]);
@@ -924,7 +925,7 @@ test('backfill fixed batches advance without repeating bodies, reuse archived so
 test('backfill rereads foreign summary recovery metadata between batches without an epoch change', async () => {
   const def = await table(), before = await syncDaily(), memoryId = before.memories[0].id;
   const detail = '待人工核对的摘要派生表行';
-  await applyRows(lib, before, def, [{ row_id: null, values: { detail } }], false, [memoryId]);
+  await applyRows(lib, before, def, [{ row_id: null, values: { key: '待核对记录', detail } }], false, [memoryId]);
   await syncDaily();
   const other = await Library.open(lib.db.name);
   const raw = JSON.stringify({ customTables: [{ table_id: def.id, add: [], update: [] }] });
@@ -965,7 +966,7 @@ test('backfill exceeding a later batch budget pauses without resizing it and pre
   ctx.chat[3].mes = '第二批材料乙'.repeat(600);
   const def = await table(), committed = vi.fn();
   const sender = vi.fn(async () => JSON.stringify({
-    customTables: [{ table_id: def.id, add: [{ detail: '已保存第0至1楼' }], update: [] }],
+    customTables: [{ table_id: def.id, add: [{ key: '已保存第0至1楼', detail: '已保存第0至1楼' }], update: [] }],
   }));
   await expect(runTableBackfill([{ table: def.id, start: 0, end: 5 }], 5000, sender, 2, () => true, undefined, committed))
     .rejects.toThrow('超过预算');
@@ -986,7 +987,7 @@ test('backfill exceeding a later batch budget pauses without resizing it and pre
 
 test('backfill uses its complete request allowance above 96000 table characters and reports exact material sizes', async () => {
   const def = await table();
-  await applyRows(lib, await syncDaily(), def, [{ row_id: null, values: { detail: '合成表内容'.repeat(22000) } }], false);
+  await applyRows(lib, await syncDaily(), def, [{ row_id: null, values: { key: '超长内容行', detail: '合成表内容'.repeat(22000) } }], false);
   const sender = vi.fn(async (messages: Parameters<EventSender>[0]) => {
     const budget = backfillState.budget!;
     expect(budget.tableChars).toBeGreaterThan(96000);
@@ -1005,7 +1006,7 @@ test.each(['cancel', 'request failure'] as const)('backfill %s cannot report an 
   const def = await table(), committed = vi.fn();
   const sender = vi.fn(async () => {
     if (outcome === 'request failure') throw new Error('合成请求失败');
-    return JSON.stringify({ customTables: [{ table_id: def.id, add: [{ detail: '未确认' }], update: [] }] });
+    return JSON.stringify({ customTables: [{ table_id: def.id, add: [{ key: '未确认', detail: '未确认' }], update: [] }] });
   });
   const job = runTableBackfill([{ table: def.id, start: 0, end: 5 }], undefined, sender, 2, () => true,
     async () => false, committed);
@@ -1042,7 +1043,7 @@ test('backfill refuses a late confirmation after the archive head changes withou
 test('backfill rejects a late result after switching to a restored library with identical branch IDs', async () => {
   const def = await table(), committed = vi.fn(), originalName = lib.db.name;
   const restored = await restoreLibrary(await exportLibrary(lib), false);
-  const raw = JSON.stringify({ customTables: [{ table_id: def.id, add: [{ detail: '迟到结果' }], update: [] }] });
+  const raw = JSON.stringify({ customTables: [{ table_id: def.id, add: [{ key: '迟到结果', detail: '迟到结果' }], update: [] }] });
   const sender = vi.fn(async () => raw);
   try {
     await expect(runTableBackfill([{ table: def.id, start: 0, end: 1 }], undefined, sender, 2, () => true, async review => {
@@ -1067,7 +1068,7 @@ test('backfill publishes durable progress even if the following projection refre
   const bridge = await import('./bridge');
   vi.spyOn(bridge, 'refreshDailyTables').mockRejectedValueOnce(new Error('合成刷新失败'));
   const sender = vi.fn(async () => JSON.stringify({
-    customTables: [{ table_id: def.id, add: [{ detail: '已落库' }], update: [] }],
+    customTables: [{ table_id: def.id, add: [{ key: '已落库', detail: '已落库' }], update: [] }],
   }));
   await expect(runTableBackfill([{ table: def.id, start: 0, end: 5 }], undefined, sender, 2, () => true, undefined, committed))
     .rejects.toThrow('合成刷新失败');

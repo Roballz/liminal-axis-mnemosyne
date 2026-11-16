@@ -9,7 +9,8 @@ import { fingerprint, type MemorySelectionNode, type TableDef, type TableRow } f
 async function tableFixture() {
     const f = await fixture(2);
     const def = newTable(f.view, '合成约定表');
-    def.columns = [{ id: 'manual', name: '人工备注', type: 'text', mode: 'manual', description: '' },
+    def.columns = [{ id: 'key', name: '编号', type: 'text', mode: 'lock', description: '' },
+        { id: 'manual', name: '人工备注', type: 'text', mode: 'manual', description: '' },
         { id: 'append', name: '进展', type: 'text', mode: 'append', description: '' }, { id: 'number', name: '次数', type: 'number', mode: 'replace', description: '' }];
     def.ai = true;
     await saveTable(f.lib, f.view, def);
@@ -36,12 +37,12 @@ test('AI manual field mutation and whole-row deletion are rejected', async () =>
 });
 test('manual CRUD, AI append and replace preserve manual cells', async () => {
     const { lib, view, def, branch } = await tableFixture();
-    await applyRows(lib, view, def, [{ row_id: null, values: { manual: '人工保留', append: '初始', number: 1 } }], false);
+    await applyRows(lib, view, def, [{ row_id: null, values: { key: '行一', manual: '人工保留', append: '初始', number: 1 } }], false);
     let v = await capture(lib, branch.id);
     let r = (await lib.all<TableRow>('custom_table_rows'))[0];
     await applyRows(lib, v, def, [{ row_id: r.id, values: { append: '新增', number: 2 } }], true, [v.memories[0].id]);
     r = (await lib.all<TableRow>('custom_table_rows'))[0];
-    expect(r.values).toEqual({ manual: '人工保留', append: '初始\n新增', number: 2 });
+    expect(r.values).toEqual({ key: '行一', manual: '人工保留', append: '初始\n新增', number: 2 });
     v = await capture(lib, branch.id);
     await applyRows(lib, v, def, [{ row_id: r.id, values: {}, delete: true }], false);
     expect((await lib.get<TableRow>('custom_table_rows', r.id))?.deleted).toBe(true);
@@ -67,13 +68,13 @@ test('explicit no changes is successful and idempotently receipted', async () =>
 });
 test('schema or row edits while an AI request runs reject its stale result', async () => {
     const { lib, view, def } = await tableFixture();
-    await applyRows(lib, view, def, [{ row_id: null, values: { number: 5 } }], false);
+    await applyRows(lib, view, def, [{ row_id: null, values: { key: '迟到写入的初始行', number: 5 } }], false);
     await expect(applyRows(lib, view, def, [{ row_id: null, values: { number: 6 } }], true)).rejects.toThrow('迟到');
     lib.close();
 });
 test('table AI input includes selected range, definition and existing rows; budget does not silently truncate', async () => {
     const { lib, view, def, branch } = await tableFixture();
-    await applyRows(lib, view, def, [{ row_id: null, values: { manual: '可见人工参考' } }], false);
+    await applyRows(lib, view, def, [{ row_id: null, values: { key: '人工参考行', manual: '可见人工参考' } }], false);
     const v = await capture(lib, branch.id);
     const prompt = await tablePrompt(lib, v, def, [v.memories[0].id], 48000);
     expect(prompt).toContain(def.name);
@@ -85,7 +86,7 @@ test('table AI input includes selected range, definition and existing rows; budg
 });
 test('removed column cells stay archived but no longer enter AI input', async () => {
     const { lib, view, def, branch } = await tableFixture();
-    await applyRows(lib, view, def, [{ row_id: null, values: { manual: '被移除字段旧值' } }], false);
+    await applyRows(lib, view, def, [{ row_id: null, values: { key: '移除列测试行', manual: '被移除字段旧值' } }], false);
     let v = await capture(lib, branch.id);
     def.columns = def.columns.filter(c => c.id !== 'manual');
     await saveTable(lib, v, def);
@@ -100,7 +101,7 @@ test('round-trip into a new empty DB preserves all IDs, bodies, events, receipts
     await commitEventBatch(lib, batch, output(batch));
     let v = await capture(lib, branch.id);
     const def = newTable(v, '可迁移表');
-    def.columns = [{ id: 'name', name: '名称', type: 'text', description: '', mode: 'manual' }];
+    def.columns = [{ id: 'name', name: '名称', type: 'text', description: '', mode: 'lock' }];
     await saveTable(lib, v, def);
     v = await capture(lib, branch.id);
     const saved = (await lib.get<TableDef>('custom_table_defs', def.id))!;

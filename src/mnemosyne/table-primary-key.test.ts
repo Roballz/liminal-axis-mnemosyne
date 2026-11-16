@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { fixture } from './fixtures';
 import { capture } from './canonical';
-import { newTable, saveTable, applyRows, readTables, parseSummaryTables, commitSummaryTables, summaryTablesPrompt } from './tables';
+import { newTable, saveTable, applyRows, readTables, parseSummaryTables, commitSummaryTables, summaryTablesPrompt, validateColumns } from './tables';
 import type { TableDef, TableRow } from './model';
 
 async function setup() {
@@ -102,4 +102,11 @@ test('no-change response skips building a primary-key index over all existing ro
         Object.defineProperty(inputs[0], 'rows', { get() { throw new Error('Unexpected full row scan'); } });
         expect(parseSummaryTables(ai(f.def), inputs, f.branch.id)!.tables[0].operations).toEqual([]);
     } finally { f.lib.close(); }
+});
+
+test('first column remains a non-append primary key while later columns can append', () => {
+    const key = { id: 'key', name: '条目', type: 'text' as const, mode: 'lock' as const, description: '' };
+    const detail = { id: 'detail', name: '追加进展', type: 'text' as const, mode: 'append' as const, description: '' };
+    expect(() => validateColumns([key, detail])).not.toThrow();
+    expect(() => validateColumns([detail, key])).toThrow('第一列是主键');
 });
