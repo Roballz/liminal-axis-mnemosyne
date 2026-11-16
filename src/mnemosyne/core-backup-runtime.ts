@@ -4,7 +4,7 @@ import { nativeBackupDisk } from '@/st/native-backups';
 import { activeLibrary, activateLibrary, Library, publishUnchangedLibrary, ACTIVE_KEY, DB_PREFIX } from './db';
 import { check, fingerprint } from './model';
 import type { BackupResult } from './backup-worker-protocol';
-import { AUTO_BACKUP_INTERVAL, AUTO_BACKUP_KEEP, CoreBackups, backupFailure, backupSettings, type BackupInventory, type BackupOutcome, type BackupSettings } from './core-backups';
+import { AUTO_BACKUP_INTERVAL, AUTO_BACKUP_KEEP, CoreBackups, backupFailure, backupSettings, type BackupInventory, type BackupPreview, type BackupOutcome, type BackupSettings } from './core-backups';
 import { BACKUP_HEALTH_LIMIT, BackupHealthHistory, type BackupHealth } from './backup-health';
 import { ensureReviewSourceRepair } from './review-source-repair';
 
@@ -42,7 +42,7 @@ function applyHealth(library: string, health: BackupHealth, status?: string) {
 }
 /** One directory-only inventory per session. Filename dates remain explicitly unverified hints. */
 async function restoreFileHint(library: string) {
-    if (!manager || hintRequests.has(library) || healthHistory.get(library).lastSavedAt) return;
+    if (!manager || hintRequests.has(library)) return;
     hintRequests.add(library);
     if (hintRequests.size > BACKUP_HEALTH_LIMIT) hintRequests.delete(hintRequests.values().next().value!);
     try {
@@ -68,7 +68,11 @@ function recordOutcome(library: string, result: BackupOutcome) {
         manager?.cachePreview(result.entry);
         applyHealth(library, healthHistory.saved(library, result.entry.savedAt), result.warning ?? '核心包已写入并读回验证');
     } else if (result.state === 'unchanged') {
-        applyHealth(library, healthHistory.validated(library), '核心数据未变化，已有备份已验证');
+        if (result.entry) {
+            check(result.entry.sourceLibrary === library, '后台备份来源库不匹配');
+            healthHistory.confirmedFile(library, result.entry.savedAt);
+        }
+        applyHealth(library, healthHistory.validated(library), result.warning ?? '核心数据未变化，已有备份已验证');
     } else if (library === selectedLibrary() && !coreBackupState.error) {
         coreBackupState.status = result.state === 'too-soon' ? '尚未到下一次自动备份时间' : '当前核心库为空，未生成备份';
     }
@@ -119,8 +123,27 @@ export async function readCoreBackupPreview(key: string, isCurrent: () => boolea
         if (result.state !== 'preview' || result.entry.key !== key || !isCurrent()) throw new Error('备份选择已改变');
         await backups.rememberPreview(result.entry);
         if (!isCurrent()) throw new Error('备份选择已改变');
+        if (['auto', 'manual', 'before-restore', 'after-archive-deletion'].includes(result.entry.kind))
+            applyHealth(result.entry.sourceLibrary, healthHistory.confirmedFile(result.entry.sourceLibrary, result.entry.savedAt));
         return result.entry;
     });
+}
+
+/** Fresh filename hints never claim success. No full packages are opened by list refresh. */
+export async function readCoreBackupInventory(): Promise<BackupInventory> {
+    const backups = await getCoreBackups();
+    const inventory = await backups.inventory();
+    historicalInventory = Promise.resolve(inventory);
+    const library = selectedLibrary(), bank = (await fingerprint(library)).slice(0, 16);
+    const latest = inventory.entries.find(entry => entry.bank === bank &&
+        ['auto', 'manual', 'before-restore', 'after-archive-deletion'].includes(entry.kind));
+    if (latest) applyHealth(library, healthHistory.fileHint(library, latest.savedAt));
+    return inventory;
+}
+
+function recordVerified(library: string, entry: BackupPreview, unchanged?: true) {
+    recordOutcome(library, { state: unchanged ? 'unchanged' : 'saved', entry,
+        warning: unchanged ? '已有核心包已验证，正在完成后续处理' : '核心包已写入并读回验证，正在完成后续处理' });
 }
 
 /** Prepare known metadata repairs before callers capture their final write/export guard. */
@@ -140,7 +163,7 @@ export async function saveCoreBackup(lib: Library, kind: 'manual' | 'before-rest
     try {
         const backups = await getCoreBackups();
         const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
-            { kind, library, keep }, isCurrent, undefined, message => reportPendingNative(message, library)));
+            { kind, library, keep }, isCurrent, undefined, message => reportPendingNative(message, library), undefined, (entry, unchanged) => recordVerified(library, entry, unchanged)));
         check(['saved', 'unchanged', 'too-soon', 'empty'].includes(result.state), '后台备份结果不匹配');
         recordOutcome(library, result as BackupOutcome);
         return result as BackupOutcome;
@@ -317,7 +340,10 @@ export function bindCoreBackups(ready: () => boolean, revision: () => unknown = 
                     selected === localStorage.getItem(ACTIVE_KEY) && stamp === revision();
                 const result = await backups.runExclusive(() => runBackupWorker(backups.disk,
                     { kind: 'auto', library, keep: coreBackupState.keep }, current, undefined,
-                    message => reportPendingNative(message, library))) as BackupOutcome;
+                    message => reportPendingNative(message, library), undefined, (entry, unchanged) => recordVerified(library, entry, unchanged),
+                    // Once a snapshot is verified, normal chat edits cannot invalidate its file.
+                    // Lifecycle, library switch and the user's auto-backup setting still stop deletion.
+                    () => alive && document.visibilityState === 'visible' && coreBackupState.enabled && library === selectedLibrary())) as BackupOutcome;
                 recordOutcome(library, result);
             } catch (error) {
                 if (current()) recordFailure(library, error);

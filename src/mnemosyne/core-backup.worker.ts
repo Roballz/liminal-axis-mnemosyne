@@ -93,7 +93,7 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
             send({ type: 'done', result: { state: 'exported', blob, version: pack.version } });
             return;
         }
-        const result = await backups.save(lib, message.job.kind, message.job.keep, guard);
+        const result = await backups.save(lib, message.job.kind, message.job.keep, guard, (entry, unchanged) => send({ type: 'verified', entry, ...(unchanged ? { unchanged } : {}) }));
         send({ type: 'done', result });
     } catch (error) {
         send({ type: 'failed', error: error instanceof Error ? error.message : String(error) });

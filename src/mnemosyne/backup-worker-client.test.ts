@@ -192,3 +192,75 @@ test.each(['restore', 'export', 'import'] as const)('%s jobs cannot write, rotat
     expect(d.list).not.toHaveBeenCalled(); expect(d.write).not.toHaveBeenCalled(); expect(d.remove).not.toHaveBeenCalled();
     worker.emit({ type: 'failed', error: 'synthetic stop' }); await expect(result).rejects.toThrow('synthetic stop');
 });
+
+
+test('verified save is visible before cleanup timeout, which drains native IO and returns a saved warning',async()=>{
+ vi.useFakeTimers();const d=disk(), worker=new FakeWorker(), manager=new CoreBackups(d), verified=vi.fn();
+ let release!:()=>void;d.remove=vi.fn(()=>new Promise<void>(resolve=>{release=resolve;}));
+ const result=manager.runExclusive(()=>runBackupWorker(d,job,()=>true,()=>worker as unknown as Worker,undefined,undefined,verified));
+ await flush();worker.emit({type:'ready'});
+ const key='auto-v1-test',entry={key,kind:'auto' as const,savedAt:100,snapshotAt:100,sourceLibrary:job.library,bytes:10,counts:{} as any,checksum:'verified'};
+ worker.emit({type:'rpc',id:1,method:'write',key,blob:new Blob(['data'])});await flush();
+ worker.emit({type:'rpc',id:3,method:'read',key});await flush();
+ worker.emit({type:'verified',entry});expect(verified).toHaveBeenCalledExactlyOnceWith(entry,undefined);
+ worker.emit({type:'rpc',id:2,method:'remove',key:'old'});await flush();
+ const next=vi.fn(async()=>{}),queued=manager.runExclusive(next);
+ await vi.advanceTimersByTimeAsync(5*60_000);
+ expect(worker.terminate).toHaveBeenCalledOnce();expect(next).not.toHaveBeenCalled();
+ release();expect(await result).toMatchObject({state:'saved',entry,warning:expect.stringContaining('超时')});
+ await queued;expect(next).toHaveBeenCalledOnce();expect(d.write).toHaveBeenCalledOnce();
+});
+
+test('long rotation stays alive while disk operations complete, with only an inactivity deadline',async()=>{
+ vi.useFakeTimers();const {worker,result}=start();
+ for(let i=0;i<3;i++){
+  await vi.advanceTimersByTimeAsync(4*60_000);
+  worker.emit({type:'rpc',id:i,method:'read',key:`retained-${i}`});await flush();
+  expect(worker.terminate).not.toHaveBeenCalled();
+ }
+ worker.emit({type:'done',result:{state:'unchanged'}});
+ expect(await result).toEqual({state:'unchanged'});expect(vi.getTimerCount()).toBe(0);
+});
+
+test('a verification receipt for an unwritten file cannot turn worker failure into success',async()=>{
+ const {worker,result}=start();const rejected=expect(result).rejects.toThrow('验证回执不匹配');
+ worker.emit({type:'verified',entry:{key:'never-written',sourceLibrary:job.library} as any});await rejected;
+});
+
+
+test('verified cleanup tolerates later chat edits but stops on lifecycle/library changes; writes stay guarded', async () => {
+    const d = disk(), worker = new FakeWorker();
+    let current = true, lifecycle = true;
+    const result = runBackupWorker(d, job, () => current, () => worker as unknown as Worker,
+        undefined, undefined, undefined, () => lifecycle);
+    worker.emit({ type: 'ready' });
+    const key = 'auto-v1-verified', entry = { key, sourceLibrary: job.library } as any;
+    worker.emit({ type: 'rpc', id: 1, method: 'write', key, blob: new Blob(['data']) }); await flush();
+    worker.emit({ type: 'rpc', id: 2, method: 'read', key }); await flush();
+    worker.emit({ type: 'verified', entry });
+    current = false;
+    worker.emit({ type: 'rpc', id: 3, method: 'guard' }); await flush();
+    expect(worker.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({ result: true });
+    worker.emit({ type: 'rpc', id: 4, method: 'remove', key: 'old' }); await flush();
+    expect(d.remove).toHaveBeenCalledExactlyOnceWith('old');
+    worker.emit({ type: 'rpc', id: 5, method: 'write', key: 'new', blob: new Blob() }); await flush();
+    expect(d.write).toHaveBeenCalledOnce();
+    lifecycle = false;
+    worker.emit({ type: 'rpc', id: 6, method: 'remove', key: 'another-old' }); await flush();
+    expect(d.remove).toHaveBeenCalledOnce();
+    worker.emit({ type: 'done', result: { state: 'saved', entry } }); await result;
+});
+
+test('verified unchanged baseline survives cleanup failure without claiming a new file', async () => {
+    const d = disk(), worker = new FakeWorker(), verified = vi.fn();
+    const result = runBackupWorker(d, job, () => true, () => worker as unknown as Worker,
+        undefined, undefined, verified);
+    worker.emit({ type: 'ready' });
+    const entry = { key: 'existing', sourceLibrary: job.library, savedAt: 123 } as any;
+    worker.emit({ type: 'rpc', id: 1, method: 'read', key: entry.key }); await flush();
+    worker.emit({ type: 'verified', entry, unchanged: true });
+    expect(verified).toHaveBeenCalledExactlyOnceWith(entry, true);
+    worker.emit({ type: 'failed', error: 'cleanup interrupted' });
+    expect(await result).toEqual({ state: 'unchanged', entry, warning: expect.stringContaining('cleanup interrupted') });
+    expect(d.write).not.toHaveBeenCalled();
+});

@@ -1,3 +1,4 @@
+import { resolveMemoryFamilies } from './memory-families';
 import { readSource, snapshotVariants, retireCurrentBodies } from './current-body';
 import { ensureTableHistory, reconcileTableHistory, inheritTableHistory, rebaseTableAnnotations } from './table-history';
 import { eventView } from './events';
@@ -160,6 +161,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
     const tagUpdates = await tagOnlyRevisions(lib, observation);
     let removedEventSources = new Set<string>();
     let captured: CapturedView | undefined;
+    let rememberFamilies: (() => void) | undefined;
     const synchronized = await lib.transaction(STORES, 'readwrite', async (tx) => {
         if (baseline?.branch) {
             const live = await tx.get<Branch>('branches', baseline.branch.id);
@@ -277,7 +279,6 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 await reconcileTableHistory(tx, branch, refs, variants);
         }
         const families = await tx.all<Memory>('memories', 'owner', binding.id);
-        const familyByHost = new Map(families.map((m) => [m.hostId, m]));
         const previous = branch.view ? await tx.get<MemoryView>('memory_views', branch.view) : undefined;
         const selectedMemories = new Map(
             (
@@ -290,6 +291,10 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 .filter((m): m is MemoryRevision => !!m)
                 .map((m) => [m.owner, m]),
         );
+        const resolved = await resolveMemoryFamilies(lib, tx, branch, snapshot, refs, families, previous,
+            selectedMemories, observation.memories, memoryHashes);
+        const familyByHost = resolved.families;
+        rememberFamilies = resolved.remember;
         const selections: Record<string, string> = {};
         const selectionRevisions = new Map<string, MemoryRevision>();
         const hostRevisions = new Map<string, string>();
@@ -508,6 +513,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         if (baseline) check(baseline.isCurrent(), '删除归档期间聊天已变化，本次事务回滚');
         return branch;
     });
+    rememberFamilies?.();
     eventSourcesChecked(lib, synchronized, removedEventSources);
     if (captured) onCaptured!(captured);
     return synchronized;
@@ -552,8 +558,13 @@ export async function current(lib: Library, view: CapturedView): Promise<boolean
     );
 }
 export type MemoryStatus = 'valid' | 'excluded' | 'needs_review' | 'needs_rebuild' | 'out_of_scope';
+type StatusView = Pick<CapturedView, 'branch' | 'snapshot' | 'cutoff' | 'refs' | 'memories'>;
 export async function statuses(lib: Library, view: CapturedView): Promise<Map<string, MemoryStatus>> {
-    return lib.transaction(['history_snapshots', 'manifest_blocks', 'reviews', 'memory_revisions'], 'readonly', async (tx) => {
+    return lib.transaction(['history_snapshots', 'manifest_blocks', 'reviews', 'memory_revisions'], 'readonly',
+        tx => statusesInTransaction(tx, view));
+}
+/** Same validation inside synchronization's atomic snapshot; no nested IDB transaction. */
+export async function statusesInTransaction(tx: Transaction, view: StatusView): Promise<Map<string, MemoryStatus>> {
         const snapshots = await Promise.all(
             [...new Set(view.memories.filter(m => !m.sourceRecovery).map((m) => m.basis))].map((key) => tx.get<Snapshot>('history_snapshots', key)),
         );
@@ -677,8 +688,8 @@ export async function statuses(lib: Library, view: CapturedView): Promise<Map<st
         };
         for (const memory of view.memories) evaluate(memory);
         return result;
-    });
 }
+
 export async function keepSummary(lib: Library, view: CapturedView, memoryId: string, guard: () => boolean = () => true) {
     return keepSummaries(lib, view, [memoryId], guard);
 }

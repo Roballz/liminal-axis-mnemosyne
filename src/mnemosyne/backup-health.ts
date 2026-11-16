@@ -76,6 +76,12 @@ export class BackupHealthHistory {
         return this.update(library, { error: '', failureSince: 0, lastFailureAt: 0 }, now);
     }
 
+    confirmedFile(library: string, savedAt: number, now = Date.now()): BackupHealth {
+        const previous = this.get(library);
+        return this.update(library, { lastSavedAt: Math.max(previous.lastSavedAt, savedAt),
+            lastFileAt: Math.max(previous.lastFileAt, savedAt) }, now);
+    }
+
     fileHint(library: string, savedAt: number, now = Date.now()): BackupHealth {
         const previous = this.get(library);
         if (previous.lastFileAt >= savedAt) return previous;
@@ -89,5 +95,7 @@ export function backupTimeLabel(state: Pick<BackupHealth, 'lastSavedAt' | 'lastF
     const date = new Date(time).toLocaleString(undefined, compact
         ? { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
         : undefined);
-    return `${state.lastSavedAt ? '最近成功' : '最近文件（未复核）'}：${date}`;
+    const newer = state.lastSavedAt && state.lastFileAt > state.lastSavedAt
+        ? `；更新文件待复核：${new Date(state.lastFileAt).toLocaleString()}` : '';
+    return `${state.lastSavedAt ? '最近成功' : '最近文件（未复核）'}：${date}${newer}`;
 }

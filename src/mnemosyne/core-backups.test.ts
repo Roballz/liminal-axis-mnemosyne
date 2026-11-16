@@ -42,7 +42,7 @@ test('distinct snapshots are verified, unchanged data ignores export time, and r
     const first = await backups.save(lib, 'auto'); expect(first.state).toBe('saved');
     expect(await backups.save(lib, 'auto')).toEqual({ state: 'too-soon' });
     time.advance();
-    expect(await backups.save(lib, 'auto')).toEqual({ state: 'unchanged' });
+    expect(await backups.save(lib, 'auto')).toMatchObject({ state: 'unchanged', entry: { sourceLibrary: lib.db.name } });
     input.messages[1].content += ' changed'; await synchronize(lib, input);
     expect((await backups.save(lib, 'auto')).state).toBe('saved');
     expect(disk.write).toHaveBeenCalledTimes(2); expect((await backups.inventory()).entries).toHaveLength(2); lib.close();
@@ -137,7 +137,7 @@ test('valid smaller core library is backed up without protection or manual basel
     expect((await backups.save(lib, 'auto')).state).toBe('saved');
     expect(disk.write).toHaveBeenCalledTimes(2); expect(disk.remove).not.toHaveBeenCalled();
     expect((await backups.inventory()).entries.every(e => e.kind === 'auto')).toBe(true);
-    time.advance(); expect(await backups.save(lib, 'auto')).toEqual({ state: 'unchanged' }); lib.close();
+    time.advance(); expect(await backups.save(lib, 'auto')).toMatchObject({ state: 'unchanged', entry: { sourceLibrary: lib.db.name } }); lib.close();
 });
 
 test('same-key collision aborts rather than overwriting; changed selection cannot restore', async () => {
@@ -269,7 +269,7 @@ test('another branch is not a deletion; deleting a parent keeps child text and h
     const { lib, input, branch } = await fixture(2), disk = new Disk(), time = clock(), backups = new CoreBackups(disk, time.now);
     const child = await forkBranch(lib, await capture(lib, branch.id), 'child');
     await backups.save(lib, 'auto'); time.advance();
-    expect(await backups.save(lib, 'auto')).toEqual({ state: 'unchanged' });
+    expect(await backups.save(lib, 'auto')).toMatchObject({ state: 'unchanged', entry: { sourceLibrary: lib.db.name } });
     expect((await backups.inventory()).entries.every(e => e.kind !== 'before-deletion')).toBe(true);
     const old = await capture(lib, branch.id);
     input.messages.pop(); input.memories.pop(); await synchronize(lib, input);
@@ -460,4 +460,32 @@ test('missing, malformed, and failed preview hints never hide filename inventory
     expect(disk.read).not.toHaveBeenCalled(); expect(disk.remove).not.toHaveBeenCalled();
     disk.list.mockRejectedValueOnce(new Error('directory IO'));
     await expect(cold.inventory()).rejects.toThrow('directory IO'); lib.close();
+});
+
+
+test('verified publication is reported before cleanup; unchanged retry resumes failed rotation without another file', async () => {
+    const {lib,input}=await fixture(1), disk=new Disk(), time=clock(), backups=new CoreBackups(disk,time.now);
+    try {
+        for(let i=0;i<20;i++) {time.advance();input.messages[1].content+=i;await synchronize(lib,input);await backups.save(lib,'auto');}
+        time.advance(); input.messages[1].content+='last';await synchronize(lib,input);
+        const verified=vi.fn(); disk.remove.mockImplementationOnce(async()=>{
+            expect(verified).toHaveBeenCalledOnce();throw new Error('temporary delete IO');
+        });
+        const saved=await backups.save(lib,'auto',20,()=>true,verified);
+        expect(saved.state).toBe('saved');expect(saved).toHaveProperty('warning',expect.stringContaining('清理未完成'));
+        expect(disk.files.size).toBe(21);expect(disk.write).toHaveBeenCalledTimes(21);
+        time.advance();const retried=await backups.save(lib,'auto');
+        expect(retried).toMatchObject({state:'unchanged',entry:verified.mock.calls[0][0]});
+        expect(retried).not.toHaveProperty('warning');expect(disk.files.size).toBe(20);
+        expect(disk.write).toHaveBeenCalledTimes(21);
+    } finally {lib.close();}
+});
+
+test('failed readback never emits a verified publication',async()=>{
+ const {lib}=await fixture(1),disk=new Disk(),backups=new CoreBackups(disk),verified=vi.fn();
+ try {
+  disk.write.mockImplementationOnce(async key=>{disk.files.set(key,new Blob(['bad']));});
+  await expect(backups.save(lib,'auto',20,()=>true,verified)).rejects.toThrow();
+  expect(verified).not.toHaveBeenCalled();expect(disk.remove).not.toHaveBeenCalled();
+ }finally{lib.close();}
 });

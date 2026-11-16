@@ -7,7 +7,7 @@ import { activeLibrary, ACTIVE_KEY, DB_PREFIX } from '@/mnemosyne/db';
 import { dailyState, invalidateDaily, syncDaily, serializeDailyActivation } from '@/mnemosyne/bridge';
 import { AUTO_BACKUP_KEEP, BACKUP_MAX_MIB, backupFailure, type BackupInventory, type BackupPreview } from '@/mnemosyne/core-backups';
 import { BACKUP_WAITING_STATUS, backupArchiveBlockReason, configureCoreBackups, coreBackupState, getCoreBackups, readCoreBackupPreview,
-    prepareCoreBackup, saveCoreBackup, pinCoreBackup, restoreCoreBackup, retryCoreBackups } from '@/mnemosyne/core-backup-runtime';
+    readCoreBackupInventory, prepareCoreBackup, saveCoreBackup, pinCoreBackup, restoreCoreBackup, retryCoreBackups } from '@/mnemosyne/core-backup-runtime';
 import { backupTimeLabel } from '@/mnemosyne/backup-health';
 
 const inventory = shallowRef<BackupInventory>({ entries: [] });
@@ -19,6 +19,15 @@ const blocked = computed(() => coreBackupState.enabled ? backupArchiveBlockReaso
 const status = computed(() => blocked.value && coreBackupState.status === BACKUP_WAITING_STATUS
     ? '自动备份已启用，当前暂缓' : coreBackupState.status);
 const lastBackup = computed(() => backupTimeLabel(coreBackupState));
+const counts = computed(() => {
+    let currentAuto = 0, otherAuto = 0, protectedFiles = 0;
+    for (const entry of inventory.value.entries) {
+        if (entry.kind !== 'auto') protectedFiles++;
+        else if (entry.bank === currentBank.value) currentAuto++;
+        else otherAuto++;
+    }
+    return { currentAuto, otherAuto, protectedFiles };
+});
 const listed = computed(() => inventory.value.entries.find(entry => entry.key === choice.value));
 const selected = computed(() => detail.value?.key === choice.value ? detail.value : undefined);
 const restoreAvailable = computed(() => !dailyState.pending || !!dailyState.error);
@@ -57,8 +66,8 @@ async function load() {
     const generation = ++listGeneration;
     try {
         const backups = await getCoreBackups();
-        const result = await backups.inventory();
-        if (disposed) return;
+        const result = await readCoreBackupInventory();
+        if (disposed || generation !== listGeneration) return;
         inventory.value = result;
         loadedAt.value = Date.now();
         currentBank.value = (await fingerprint(localStorage.getItem(ACTIVE_KEY) || `${DB_PREFIX}default`)).slice(0, 16);
@@ -71,7 +80,7 @@ async function load() {
         }).catch(() => {
             if (!disposed && generation === listGeneration) metadataNotice.value = '预览元数据暂不可用；文件列表仍可用，选择后会校验原文件。';
         });
-    } finally { loading.value = false; }
+    } finally { if (!disposed && generation === listGeneration) loading.value = false; }
 }
 async function configure() {
     const enabled = !coreBackupState.enabled;
@@ -176,6 +185,8 @@ async function restore() {
                 <p class="mn-backup-path"><span class="mn-muted">保存路径：</span><span>{{ BACKUP_LOCATION }}</span></p>
                 <p v-if="loading" class="mn-muted" role="status">正在连接原生接口并读取备份列表…</p>
                 <template v-if="coreBackupState.available">
+                    <p v-if="loadedAt" class="mn-muted">当前库自动备份 {{ counts.currentAuto }} 份 / 保留 {{ AUTO_BACKUP_KEEP }} 份；其他库自动备份 {{ counts.otherAuto }} 份；手动及保护备份 {{ counts.protectedFiles }} 份。迁库前的备份归入其他库，不参与当前库轮换。</p>
+                    <p v-if="loadedAt && counts.currentAuto > AUTO_BACKUP_KEEP" class="mn-warning">当前库自动备份超出保留数量，清理可能尚未完成；下次自动检查会在校验后继续，异常文件仍保留。</p>
                     <p v-if="loadedAt" class="mn-muted" role="status">已读取（{{ date(loadedAt) }}）；找到 {{ inventory.entries.length }} 份备份文件，尚未逐份校验。<template v-if="!inventory.entries.length">当前目录没有本功能识别的备份文件。</template></p>
                     <p v-else class="mn-muted">尚未读取列表，备份数量未知。</p>
                     <p v-if="metadataNotice" class="mn-muted">{{ metadataNotice }}</p>

@@ -6,7 +6,7 @@ import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc';
 const mocks = vi.hoisted(() => ({ inventory: vi.fn(), connect: vi.fn(), configure: vi.fn(), preview: vi.fn(), hints: vi.fn(), prepare: vi.fn(), save: vi.fn(), pin: vi.fn(), restore: vi.fn(), retry: vi.fn(), active: vi.fn() }));
 vi.mock('@/mnemosyne/core-backup-runtime', async importOriginal => ({
     ...await importOriginal<typeof import('@/mnemosyne/core-backup-runtime')>(),
-    getCoreBackups: mocks.connect, configureCoreBackups: mocks.configure, readCoreBackupPreview: mocks.preview,
+    readCoreBackupInventory: mocks.inventory, getCoreBackups: mocks.connect, configureCoreBackups: mocks.configure, readCoreBackupPreview: mocks.preview,
     prepareCoreBackup: mocks.prepare, saveCoreBackup: mocks.save, pinCoreBackup: mocks.pin, restoreCoreBackup: mocks.restore, retryCoreBackups: mocks.retry,
 }));
 vi.mock('@/mnemosyne/db', async importOriginal => ({ ...await importOriginal<typeof import('@/mnemosyne/db')>(), activeLibrary: mocks.active }));
@@ -295,4 +295,14 @@ test('pin and restore retain their verified-file arguments and busy or pending g
     await button(root, '校验这份备份').props.onClick(); await flush();
     await button(root, '固定保留').props.onClick(); await flush();
     expect(mocks.pin).toHaveBeenCalledWith('auto', 'a'.repeat(64), expect.any(Function)); expect(text(root)).toContain('不参与自动轮换');
+});
+
+test('inventory separates 90 files into current autos, other libraries, and protected files without verification reads',async()=>{
+ const {fingerprint}=await import('@/mnemosyne/model'),bank=(await fingerprint('mnemosyne_daily_default')).slice(0,16);
+ mocks.inventory.mockResolvedValue({entries:Array.from({length:90},(_,i)=>({key:`copy-${i}`,kind:i<75?'auto':'manual',savedAt:1_700_000_000_000+i,bank:i<25?bank:'other'}))});
+ const {root}=mount();await button(root,'备份列表').props.onClick();await flush();
+ expect(text(root)).toContain('当前库自动备份 25 份 / 保留 20 份');
+ expect(text(root)).toContain('其他库自动备份 50 份');
+ expect(text(root)).toContain('手动及保护备份 15 份');
+ expect(text(root)).toContain('清理可能尚未完成');expect(mocks.preview).not.toHaveBeenCalled();
 });

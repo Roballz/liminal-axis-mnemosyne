@@ -64,7 +64,7 @@ function previewHints(value: unknown): BackupPreview[] {
     }).map(({ key, kind, savedAt, snapshotAt, sourceLibrary, bytes, counts, checksum }) =>
         ({ key, kind, savedAt, snapshotAt, sourceLibrary, bytes, counts, checksum }));
 }
-export type BackupOutcome = { state: 'saved'; entry: BackupPreview; warning?: string } | { state: 'unchanged' | 'too-soon' | 'empty' };
+export type BackupOutcome = { state: 'saved'; entry: BackupPreview; warning?: string } | { state: 'unchanged'; entry?: BackupPreview; warning?: string } | { state: 'too-soon' | 'empty' };
 function latestBaseline(keys: string[]): string | undefined {
     // Legacy deletion packages remain readable, but no longer gate ordinary backups.
     return keys.find(k => /^(auto|manual)-/.test(k));
@@ -202,7 +202,7 @@ export class CoreBackups {
         try { await this.disk.writePreviews({ schema: 1, entries }); } catch { /* Filename-only fallback remains available. */ }
     }
 
-    save(lib: Library, kind: BackupSaveKind, keep: typeof AUTO_BACKUP_KEEP = AUTO_BACKUP_KEEP, isCurrent: BackupGuard = () => true): Promise<BackupOutcome> {
+    save(lib: Library, kind: BackupSaveKind, keep: typeof AUTO_BACKUP_KEEP = AUTO_BACKUP_KEEP, isCurrent: BackupGuard = () => true, onVerified?: (entry: BackupPreview, unchanged?: true) => void): Promise<BackupOutcome> {
         return this.serial(async () => {
             check(keep === AUTO_BACKUP_KEEP, '自动备份固定保留最近 20 份');
             const keys = await this.keys();
@@ -214,38 +214,50 @@ export class CoreBackups {
             // A failed/unreadable latest baseline blocks writes, not just deletion.
             const baseline = kind === 'auto' ? latestBaseline(bankKeys) : undefined;
             const witnesses = new Map<string, FileWitness>();
-            const previousDigest = baseline ? (await this.read(baseline, witnesses)).file.dataDigest : undefined;
+            // Release the parsed previous package before preparing another full snapshot.
+            const previous = baseline ? await this.read(baseline, witnesses)
+                .then(({ file, entry }) => ({ digest: file.dataDigest, entry })) : undefined;
+            const previousDigest = previous?.digest;
             // The preparation frame owns the full snapshot. Only a Blob and small
             // metadata survive into publication, which parses a separate readback.
             const prepared = await this.prepareLibrary(lib, kind, previousDigest, keys, isCurrent);
-            if ('state' in prepared) return prepared;
-            const entry = await this.publish(prepared, isCurrent, kind === 'auto' ? witnesses : undefined);
-            if (kind !== 'auto') return { state: 'saved', entry };
-            // Re-list after publication. No delete happens before full persisted readback.
-            try {
-                const current = await this.keys();
-                const automatic = current.filter(k => k.startsWith('auto-') && KEY.exec(k)![3] === bank);
-                if (automatic.length > keep) {
-                    // Do not discard a good old copy in favor of an unreadable retained
-                    // entry. Validate sequentially so only one full package is live here.
-                    for (const retained of automatic.slice(0, keep)) await this.verifyRetained(retained, witnesses);
-                }
-                for (const key of automatic.slice(keep)) {
-                    if (key === entry.key) continue;
-                    check((await isCurrent()), '档案状态改变，保留新备份并暂停轮换');
-                    // Only valid, exact-owner automatic files may be retired. Unknown or
-                    // damaged files stay untouched even if this exceeds the retention cap.
-                    const old = await this.read(key);
-                    check(old.file.kind === 'auto' && old.file.sourceLibrary === lib.db.name, '轮换文件归属不匹配');
-                    check((await isCurrent()), '档案状态改变，保留新备份并暂停轮换');
-                    await this.disk.remove(key);
-                    this.previews.delete(key);
-                }
-                return { state: 'saved', entry };
-            } catch (e) {
-                return { state: 'saved', entry, warning: `新备份已验证；旧备份清理未完成，可能暂时超过 ${keep} 份：${errorText(e)}` };
+            if ('state' in prepared) {
+                if (prepared.state === 'empty' || !previous) return prepared;
+                // A prior publication may have succeeded before rotation was interrupted.
+                // Unchanged data still validates that baseline and resumes its pending cleanup.
+                onVerified?.(previous.entry, true);
+                const warning = await this.rotate(lib, bank, keep, previous.entry.key, witnesses, isCurrent);
+                return { state: 'unchanged', entry: previous.entry, ...(warning ? { warning } : {}) };
             }
+            const entry = await this.publish(prepared, isCurrent, kind === 'auto' ? witnesses : undefined, onVerified);
+            if (kind !== 'auto') return { state: 'saved', entry };
+            const warning = await this.rotate(lib, bank, keep, entry.key, witnesses, isCurrent);
+            return { state: 'saved', entry, ...(warning ? { warning } : {}) };
         });
+    }
+
+    private async rotate(lib: Library, bank: string, keep: number, published: string,
+        witnesses: Map<string, FileWitness>, isCurrent: BackupGuard): Promise<string | undefined> {
+        try {
+            const automatic = (await this.keys()).filter(k => k.startsWith('auto-') && KEY.exec(k)![3] === bank);
+            if (automatic.length > keep) {
+                for (const retained of automatic.slice(0, keep)) {
+                    check(await isCurrent(), '档案状态改变，保留新备份并暂停轮换');
+                    await this.verifyRetained(retained, witnesses);
+                }
+            }
+            for (const key of automatic.slice(keep)) {
+                if (key === published) continue;
+                check(await isCurrent(), '档案状态改变，保留新备份并暂停轮换');
+                const old = await this.read(key);
+                check(old.file.kind === 'auto' && old.file.sourceLibrary === lib.db.name, '轮换文件归属不匹配');
+                check(await isCurrent(), '档案状态改变，保留新备份并暂停轮换');
+                await this.disk.remove(key);
+                this.previews.delete(key);
+            }
+        } catch (error) {
+            return `备份已验证；旧备份清理未完成，可能暂时超过 ${keep} 份：${errorText(error)}`;
+        }
     }
 
     pin(key: string, checksum: string, isCurrent: BackupGuard = () => true): Promise<BackupPreview> {
@@ -315,11 +327,12 @@ export class CoreBackups {
     }
 
     private async publish({ key, blob, checksum }: PreparedBackup, isCurrent: BackupGuard,
-        witnesses?: Map<string, FileWitness>): Promise<BackupPreview> {
+        witnesses?: Map<string, FileWitness>, onVerified?: (entry: BackupPreview) => void): Promise<BackupPreview> {
         check((await isCurrent()), '档案仍在变化，本次备份已取消');
         await this.disk.write(key, blob); // TT stages and atomically publishes this unique file.
         const { entry } = await this.read(key, witnesses);
         check(entry.checksum === checksum && entry.bytes === blob.size, '新备份读回不一致，旧备份保留');
+        onVerified?.(entry); // Durable readback is success, independently of later metadata/rotation.
         await this.rememberPreview(entry);
         return entry;
     }

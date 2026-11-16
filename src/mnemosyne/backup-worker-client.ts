@@ -1,3 +1,4 @@
+import type { BackupPreview } from './core-backups';
 import type { ReorganizationProgress } from './core-reorganization';
 import BackupWorker from './core-backup.worker?worker&inline';
 import type { BackupDisk } from '@/st/native-backups';
@@ -9,7 +10,7 @@ import type { BackupJob, BackupResult, HostMessage, WorkerMessage, DiskRequest }
  */
 export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, isCurrent: () => boolean,
     createWorker: () => Worker = () => new BackupWorker(),
-    onPendingNative?: (message: string) => void, onProgress?: (progress: ReorganizationProgress) => void): Promise<BackupResult> {
+    onPendingNative?: (message: string) => void, onProgress?: (progress: ReorganizationProgress) => void, onVerified?: (entry: BackupPreview, unchanged?: true) => void, canRotate?: () => boolean): Promise<BackupResult> {
     const unavailable = job.kind === 'reorganize' ? '后台整理线程不可用；原库保留，请重新加载插件后重试' : job.kind === 'size'
         ? '后台体积分析线程不可用；请重新加载插件后重试'
         : job.kind === 'preview'
@@ -21,6 +22,9 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
         let worker: Worker;
         try { worker = createWorker(); } catch { reject(new Error(unavailable)); return; }
         let finished = false, started = false;
+        let verified: BackupPreview | undefined, verifiedUnchanged: true | undefined;
+        const readFiles = new Set<string>();
+        const rotationCurrent = () => verified && canRotate ? canRotate() : isCurrent();
         const written = new Set<string>();
         const inFlight = new Set<Promise<void>>();
         // Bound a broken startup/worker without releasing the disk writer reservation
@@ -38,7 +42,16 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
                 // while retaining the reservation; never start a competing write.
                 try { onPendingNative?.(`${error.message}；原生磁盘操作结果尚未确认，正在等待返回；不会继续写入或轮换`); } catch { /* reporting must not release the lock */ }
             }
-            void Promise.allSettled([...inFlight]).then(() => error ? reject(error) : resolve(result!));
+            void Promise.allSettled([...inFlight]).then(() => {
+                if (error && verified) resolve({ state: verifiedUnchanged ? 'unchanged' : 'saved', entry: verified, warning: `备份已验证；后续处理未完成：${error.message}` });
+                else if (error) reject(error);
+                else resolve(result!);
+            });
+        };
+        const activity = () => {
+            if (finished || !started) return;
+            clearTimeout(timer);
+            timer = setTimeout(() => finish(new Error('后台备份处理超时（长时间未响应），旧备份保留；请稍后重试')), 5 * 60_000);
         };
         const send = (message: HostMessage) => {
             if (finished) return;
@@ -49,7 +62,7 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
             // Detail jobs can only read their exact selected backup, never mutate disk.
             if (job.kind === 'preview' && (request.method !== 'read' || request.key !== job.key || !isCurrent()))
                 throw new Error('备份选择已改变或校验请求越界');
-            if (request.method === 'guard') return isCurrent();
+            if (request.method === 'guard') return rotationCurrent();
             if (!disk || job.kind === 'export' || job.kind === 'import' || job.kind === 'size' || job.kind === 'reorganize') throw new Error('迁移或体积分析任务不允许访问原生备份文件');
             const writer = job.kind === 'auto' || job.kind === 'manual' || job.kind === 'before-restore' || job.kind === 'pin';
             if (request.method === 'read') {
@@ -65,7 +78,10 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
                 case 'writePreviews':
                     if (!isCurrent()) throw new Error('档案状态改变，暂不保存预览元数据');
                     return disk.writePreviews?.(request.value);
-                case 'read': return disk.read(request.key);
+                case 'read': {
+                    const blob = await disk.read(request.key);
+                    readFiles.add(request.key); return blob;
+                }
                 case 'write':
                     // Recheck on the main thread immediately before native side effects,
                     // not only before the asynchronous worker roundtrip.
@@ -77,7 +93,7 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
                     written.add(request.key);
                     return;
                 case 'remove':
-                    if (!isCurrent()) throw new Error('档案状态改变，保留新备份并暂停轮换');
+                    if (!rotationCurrent()) throw new Error('档案状态改变，保留新备份并暂停轮换');
                     return disk.remove(request.key);
                 default: throw new Error('后台备份请求无效');
             }
@@ -91,7 +107,7 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
                 timer = setTimeout(() => finish(new Error('后台备份处理超时，旧备份保留；请稍后重试')), 5 * 60_000);
                 send({ type: 'start', job });
             } else if (message.type === 'rpc' && started) {
-                const task = execute(message).then(result => send({ type: 'reply', id: message.id, result }),
+                const task = execute(message).then(result => { activity(); send({ type: 'reply', id: message.id, result }); },
                     error => send({ type: 'reply', id: message.id, error: error instanceof Error ? error.message : String(error) }));
                 inFlight.add(task);
                 void task.finally(() => inFlight.delete(task));
@@ -99,6 +115,14 @@ export function runBackupWorker(disk: BackupDisk | undefined, job: BackupJob, is
                 clearTimeout(timer);
                 timer = setTimeout(() => finish(new Error('后台整理长时间未响应，原库保留')), 5 * 60_000);
                 onProgress?.(message.progress);
+            } else if (message.type === 'verified' && started) {
+                if (!['auto', 'manual', 'before-restore'].includes(job.kind) || !('library' in job) ||
+                    message.entry.sourceLibrary !== job.library || !readFiles.has(message.entry.key) ||
+                    (message.unchanged ? job.kind !== 'auto' : !written.has(message.entry.key))) {
+                    finish(new Error('后台备份验证回执不匹配')); return;
+                }
+                verified = message.entry; verifiedUnchanged = message.unchanged; activity();
+                onVerified?.(message.entry, message.unchanged);
             } else if (message.type === 'done') finish(undefined, message.result);
             else if (message.type === 'failed') finish(new Error(message.error));
         };

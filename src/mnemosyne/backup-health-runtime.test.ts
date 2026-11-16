@@ -128,3 +128,29 @@ test('startup reads filenames once and never opens packages; repeated revision s
     expect(vi.getTimerCount()).toBe(1);
     win.dispatchEvent(new Event('pagehide'));
 });
+
+test('runtime persists a verified save before worker cleanup finishes and refreshes newer filename hints without parsing',async()=>{
+ vi.resetModules();const env=environment();
+ const native=await import('@/st/native-backups'),worker=await import('./backup-worker-client'),{fingerprint}=await import('./model');
+ vi.spyOn(native,'nativeBackupDisk').mockResolvedValue(env.disk);
+ let finish!:(value:BackupOutcome)=>void;
+ vi.spyOn(worker,'runBackupWorker').mockImplementation((_disk,_job,_guard,_create,_pending,_progress,onVerified)=>{
+  const result=saved(libraryA,1_700_000_000_000);
+  if(result.state==='saved') onVerified?.(result.entry);
+  return new Promise(resolve=>{finish=resolve;});
+ });
+ const runtime=await import('./core-backup-runtime');
+ const pending=runtime.saveCoreBackup({db:{name:libraryA}} as any,'manual',20,()=>true);
+ await vi.waitFor(()=>expect(finish).toBeDefined());
+ expect(runtime.coreBackupState.lastSavedAt).toBe(1_700_000_000_000);
+ expect(new BackupHealthHistory(()=>env.local).get(libraryA).lastSavedAt).toBe(1_700_000_000_000);
+ finish({...saved(libraryA,1_700_000_000_000),warning:'清理未完成'} as BackupOutcome);await pending;
+ const bank=(await fingerprint(libraryA)).slice(0,16),newer=1_700_001_000_000;
+ vi.mocked(env.disk.list).mockResolvedValue([`auto-v1-${newer}-${bank}-11111111-1111-4111-8111-111111111111.json`]);
+ await runtime.readCoreBackupInventory();
+ expect(runtime.coreBackupState).toMatchObject({lastSavedAt:1_700_000_000_000,lastFileAt:newer});
+ expect(env.disk.read).not.toHaveBeenCalled();
+ vi.mocked(worker.runBackupWorker).mockResolvedValue({state:'preview',entry:{...(saved(libraryA,newer) as any).entry,kind:'auto',key:'selected'}});
+ await runtime.readCoreBackupPreview('selected',()=>true);
+ expect(runtime.coreBackupState.lastSavedAt).toBe(newer);
+});

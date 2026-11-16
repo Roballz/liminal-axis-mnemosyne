@@ -15,6 +15,6 @@ export type DiskCall = (
 );
 export type DiskRequest = { type: 'rpc'; id: number } & DiskCall;
 export type WorkerMessage = DiskRequest | { type: 'ready' } | { type: 'progress'; progress: ReorganizationProgress } |
-    { type: 'done'; result: BackupResult } | { type: 'failed'; error: string };
+    { type: 'verified'; entry: BackupPreview; unchanged?: true } | { type: 'done'; result: BackupResult } | { type: 'failed'; error: string };
 export type HostMessage = { type: 'start'; job: BackupJob } |
     { type: 'reply'; id: number; result?: unknown; error?: string };

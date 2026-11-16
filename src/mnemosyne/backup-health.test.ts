@@ -53,3 +53,14 @@ test('unavailable metadata storage does not change a successful backup into a fa
     expect(history.saved('mnemosyne_daily_a', 100, 100).lastSavedAt).toBe(100);
     expect(history.persistenceError).toContain('状态未能保存');
 });
+
+
+test('newer filenames remain explicitly unverified; verifying an existing file does not erase a later failure',()=>{
+ const history=new BackupHealthHistory(()=>storage()),lib='mnemosyne_daily_a';
+ history.saved(lib,100);history.failed(lib,'later failure');history.fileHint(lib,300);
+ expect(backupTimeLabel(history.get(lib))).toContain('更新文件待复核');
+ expect(history.get(lib).lastSavedAt).toBe(100);
+ const verified=history.confirmedFile(lib,300);
+ expect(verified).toMatchObject({lastSavedAt:300,error:'later failure'});
+ expect(backupTimeLabel(verified)).not.toContain('待复核');
+});
