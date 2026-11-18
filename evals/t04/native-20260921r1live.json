@@ -1,8 +1,0 @@
-{
-  "type": "error",
-  "run": "20260921r1live",
-  "code": "VERSION_CONFLICT",
-  "phase": "确认当前预览",
-  "detail": "unlisted-error",
-  "message": "Actual interface demonstration stopped; preserve source and target."
-}

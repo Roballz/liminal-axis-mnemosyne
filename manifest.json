@@ -1,13 +1,13 @@
 {
-  "display_name": "Mnemosyne 日用记忆",
-  "loading_order": 100,
+  "display_name": "Mnemosyne记事簿",
+  "loading_order": 110,
   "requires": [],
   "optional": [],
-  "js": "dist/index.js?ver=1.4.48",
-  "generate_interceptor": "mnemosyne_generateInterceptor",
-  "author": "Roballz / 柏宝书 upstream",
-  "version": "1.4.48",
-  "homePage": "https://github.com/Roballz/liminal-axis-mnemosyne",
-  "auto_update": false,
-  "minimum_client_version": "1.12.13"
+  "js": "index.js",
+  "css": "notebook.css",
+  "hooks": { "activate": "activate" },
+  "author": "Roballz",
+  "version": "0.1.0",
+  "homePage": "https://github.com/Roballz/liminal-axis-mnemosyne/tree/mnemosyne-notes",
+  "auto_update": false
 }
