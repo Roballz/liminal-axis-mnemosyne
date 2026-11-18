@@ -1100,7 +1100,9 @@ export function bindDaily() {
         } else replyFinality.cancelEdit();
     };
     if (typeof document !== 'undefined') document.addEventListener('click', confirmEdit, true);
-    const unwatch = watch(() => derivedMeta.rev, scheduleDaily);
+    // Higher-level summaries are appended to chat metadata without rebuilding the
+    // leaf-derived state. Watch the count so a committed node wakes the same batched sync.
+    const unwatch = watch([() => derivedMeta.rev, () => memory.summaries.length], scheduleDaily);
     scheduleDaily();
     const dispose = () => {
         if (!active) return;

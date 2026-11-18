@@ -1,7 +1,11 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, expect, test, vi } from 'vitest';
 import { saveMemberships } from './event-memberships';
+import { membershipBadges } from './event-membership-ui';
 import { computed } from 'vue';
+import * as client from '@/api/client';
+import { apiSettings } from '@/api/settings';
+import { checkResummary, engineState } from '@/memory/engine';
 import { Library, Transaction, activateLibrary, freshLibraryName } from './db';
 import { bindDaily, syncDaily, serializeDailyActivation, invalidateDaily, scheduleDaily, currentMembershipHints, dailyState } from './bridge';
 import { memory, recomputeDerived, scheduleLeafFlush, flushLeavesNow } from '@/memory/store';
@@ -112,6 +116,47 @@ test('summary event tags reach existing cards through automatic sync without ope
   await vi.advanceTimersByTimeAsync(1000);
   await serializeDailyActivation(async () => {});
   expect(get).not.toHaveBeenCalled();
+});
+
+test.each(['success', 'API error'])('chat cards settle after automatic threshold resummary (%s) with the plugin closed', async outcome => {
+  const original = { leafBatchThreshold: apiSettings.leafBatchThreshold, leafKeepRecent: apiSettings.leafKeepRecent,
+    summaryMaxRetries: apiSettings.summaryMaxRetries };
+  try {
+    Object.assign(apiSettings, { leafBatchThreshold: 2, leafKeepRecent: 0, summaryMaxRetries: 0 });
+    ctx.chat.push({ ...ctx.chat[0], mes: '第二问', extra: {} }, { ...ctx.chat[1], mes: '第二答', extra: {
+      bbs_leaf: { id: 'second', text: '第二条摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 } } });
+    const view = await syncDaily();
+    await saveMemberships(lib, view, { mode: 'add', memories: [view.memories[0].id], eventIds: [], newTitle: '持续关联' });
+    await syncDaily();
+    // Drain the startup timer so it cannot accidentally repair a missing notification.
+    await vi.advanceTimersByTimeAsync(200);
+    await serializeDailyActivation(async () => {});
+    const before = dailyState.revision;
+    const expected = [expect.objectContaining({ title: '持续关联' })];
+    const linked = view.memories[0].hostId;
+    expect(membershipBadges.value?.get(linked)).toEqual(expected);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    const send = vi.spyOn(client, 'requestViaMainApi');
+    const success = outcome === 'success';
+    if (success) send.mockResolvedValue('{"summary":"合成高层总结"}');
+    else send.mockRejectedValue(new Error('合成 API 错误'));
+    expect(await checkResummary()).toBe(success ? 1 : 0);
+    expect(send).toHaveBeenCalledOnce();
+    if (success) expect(membershipBadges.value).toBeNull();
+    else expect(engineState.lastError).toContain('合成 API 错误');
+
+    await vi.advanceTimersByTimeAsync(200);
+    await serializeDailyActivation(async () => {});
+    expect(dailyState.summaries).toBe(success ? 3 : 2);
+    expect(dailyState.revision).toBe(before + (success ? 1 : 0));
+    expect(dailyState.pending).toBe(false);
+    expect(membershipBadges.value?.get(linked)).toEqual(expected);
+    const get = vi.spyOn(Transaction.prototype, 'get'), all = vi.spyOn(Transaction.prototype, 'all');
+    await vi.advanceTimersByTimeAsync(1000);
+    await serializeDailyActivation(async () => {});
+    expect(get).not.toHaveBeenCalled();
+    expect(all).not.toHaveBeenCalled();
+  } finally { Object.assign(apiSettings, original); }
 });
 
 test('notifications during an automatic save do not schedule another unchanged archive pass', async () => {
