@@ -3,6 +3,7 @@ import { fixture } from './fixtures';
 import { capture, statuses, synchronize, forkBranch } from './canonical';
 import { previewRoleRepairs, confirmRoleRepairs } from './source-role-repair';
 import { eventView, prepareEventBatch, commitEventBatch } from './events';
+import { validateArchive, exportArchive } from './archive-package';
 import { exportLibrary, restoreLibrary } from './migration';
 import { STORES, fingerprint } from './model';
 import { reviewDifference } from './review-diagnostics';
@@ -44,6 +45,10 @@ test('confirmed exact roles recover explicit inputs, coverage, event progress an
     expect(await reviewDifference(lib, current, view.memories[1].id)).toMatchObject({ kind: 'text', floor: 3 });
     expect((await eventView(lib, current)).cards).toMatchObject([{ needsReview: true, blocked: true }]);
     expect(sourceContent(await capture(lib, view.branch.id, 1), candidates[0].before)).toBeUndefined();
+    const backup = await validateArchive(await exportArchive(lib, view.branch.id));
+    expect(backup.pack.data.branches.find(b => b.id === view.branch.id)).toMatchObject({
+        sourceRoleRepairs: current.branch.sourceRoleRepairs,
+    });
     lib.close();
 });
 

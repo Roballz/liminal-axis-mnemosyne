@@ -70,3 +70,48 @@ test('restoring an archive reclaims only its unreferenced shared text and preser
     expect(await lib.get('memory_payloads', sibling.id)).toEqual(sibling);
     await exportLibrary(lib); lib.close();
 });
+
+test('a verified child backup restores over its migrated branch alongside its real parent and later event changes', async () => {
+    const { reorganizeCoreLibrary } = await import('./core-reorganization');
+    const { saveMemberships } = await import('./event-memberships');
+    const { eventView } = await import('./events');
+    const { lib, branch, input } = await fixture(35);
+    input.memories[0].content = 'long parent summary '.repeat(50);
+    await synchronize(lib, input);
+    const child = await forkBranch(lib, await capture(lib, branch.id), 'child-to-restore');
+    const current = await capture(lib, child.id);
+    const members = current.memories.slice(1).map(m => m.id);
+    const event = await saveMemberships(lib, current, { mode: 'add', memories: members, eventIds: [], newTitle: 'historical event' });
+    const pack = await validateArchive(await exportArchive(lib, child.id));
+    await saveMemberships(lib, await capture(lib, child.id), { mode: 'replace', memories: [members[0]], eventIds: [] });
+    const migrated = await Library.open((await reorganizeCoreLibrary(lib, async () => true)).library, true);
+    try {
+        const parentBefore = await capture(migrated, branch.id);
+        const restore = () => restoreArchive(migrated, pack, async () => true, { branch: child.id });
+        await restore();
+        const after = await capture(migrated, child.id);
+        const card = (await eventView(migrated, after)).cards.find(c => c.chain.id === event.created)!;
+        expect(card.members.map(m => m.memory)).toEqual(members);
+        expect(await capture(migrated, branch.id)).toEqual(parentBefore);
+        expect((await restore()).records).toBe(0);
+        await exportLibrary(migrated);
+    } finally { migrated.close(); lib.close(); }
+});
+
+test('a parent protection backup excludes snapshots pinned only by a child fork', async () => {
+    const { lib, input, branch, view } = await fixture(1);
+    try {
+        // Capture a transient head with no summaries or table changes at that head.
+        input.messages.push({ key: 'tail', role: 'user', content: 'temporary tail', swipe: 0 });
+        await synchronize(lib, input);
+        const forkPoint = await capture(lib, branch.id);
+        const child = await forkBranch(lib, forkPoint, 'other-child');
+        input.messages.push({ key: 'later', role: 'assistant', content: 'later body', swipe: 0 });
+        await synchronize(lib, input);
+        expect(forkPoint.snapshot.id).not.toBe(view.snapshot.id);
+        expect((await capture(lib, child.id)).branch.fork?.snapshot).toBe(forkPoint.snapshot.id);
+        const pack = await validateArchive(await exportArchive(lib, branch.id));
+        expect(pack.pack.data.history_snapshots.some(s => s.id === forkPoint.snapshot.id)).toBe(false);
+        expect(await lib.get('history_snapshots', forkPoint.snapshot.id)).toBeDefined();
+    } finally { lib.close(); }
+});

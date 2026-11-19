@@ -5,7 +5,7 @@ import { exportLibrary, restoreLibrary } from './migration';
 import { parseStrictJson } from './json';
 import { check } from './model';
 import { measureCorePackageSize } from './core-package-size';
-import { archivePackage, exportArchive, packageData, restoreArchive } from './archive-package';
+import { archivePackage, exportArchive, packageData, validateArchive, restoreVerifiedArchive, type ArchivePackage } from './archive-package';
 import { cleanLibraryHistory } from './history-cleanup';
 import type { BackupDisk } from '@/st/native-backups';
 import type { DiskCall, DiskRequest, HostMessage, WorkerMessage } from './backup-worker-protocol';
@@ -73,18 +73,18 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
         }
         lib = await Library.open(message.job.library, true);
         if (message.job.kind === 'archive-import' || message.job.kind === 'archive-restore') {
-            let value: unknown;
+            let archive: ArchivePackage;
             if (message.job.kind === 'archive-restore') {
                 const selected = await backups.read(message.job.key);
                 check(selected.entry.checksum === message.job.checksum, '所选备份已改变，请重新预览');
-                value = selected.file.pack;
+                check(archivePackage(selected.file.pack), '请选择单档案包；旧整库备份请使用整库恢复');
+                archive = selected.file.pack; // read() validates the file and its nested package.
             } else {
                 const blob = message.job.blob;
                 check(blob instanceof Blob && blob.size > 0 && blob.size <= BACKUP_MAX_BYTES, '核心包为空或超过导入大小上限');
-                value = parseStrictJson(await blob.text(), BACKUP_MAX_BYTES);
+                archive = await validateArchive(parseStrictJson(await blob.text(), BACKUP_MAX_BYTES));
             }
-            check(archivePackage(value), '请选择单档案包；旧整库备份请使用整库恢复');
-            const report = await restoreArchive(lib, value, guard, { branch: message.job.branch, scope: message.job.scope });
+            const report = await restoreVerifiedArchive(lib, archive, guard, { branch: message.job.branch, scope: message.job.scope });
             send({ type: 'done', result: { state: 'archive-restored', report } });
             return;
         }

@@ -19,10 +19,14 @@ export const backupBankKey = (library: string, branch?: string) => branch ? `${l
 const blank = () => Object.fromEntries(STORES.map(s => [s, []])) as unknown as Package['data'];
 const label = (scope: string) => { try { return String(JSON.parse(scope)[1] || scope); } catch { return scope; } };
 
-export async function sealPackage(data: Package['data']): Promise<Package> {
-    const base = { format: 'mnemosyne-daily' as const, version: 18 as const, schema: 1 as const, created: Date.now(),
+function packageContents(data: Package['data']) {
+    return { format: 'mnemosyne-daily' as const, version: 18 as const, schema: 1 as const, created: Date.now(),
         excluded: ['host-chat-files', 'chat-state-delta', 'knowledge-files-and-vectors', 'vector-indexes', 'api-secrets'],
         counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Package['counts'], data };
+}
+
+export async function sealPackage(data: Package['data']): Promise<Package> {
+    const base = packageContents(data);
     await validateCurrentData(base);
     return { ...base, checksum: await fingerprint(base) };
 }
@@ -59,11 +63,29 @@ export async function exportArchive(lib: Library, branchId: string): Promise<Arc
         // removes superseded records separately, never while preparing a readonly backup.
         for (const store of STORES) {
             if (['branches', 'stories', 'source_messages', 'source_revisions', 'source_bodies', 'manifest_blocks',
-                'memory_payloads', 'memory_selection_nodes', 'message_mappings', 'memories', 'library_meta'].includes(store)) continue;
+                'memory_payloads', 'memory_selection_nodes', 'message_mappings', 'memories', 'library_meta', 'history_snapshots'].includes(store)) continue;
             for (const row of await tx.rawAll(store, 'branch', branchId)) pending.push([store, row.id]);
         }
         for (const binding of bindings) for (const store of ['message_mappings', 'memories'] as const)
             for (const row of await tx.rawAll(store, 'owner', binding.id)) pending.push([store, row.id]);
+        // Heads, predecessors, fork points and explicit evidence enter through recordLinks.
+        // A parent snapshot pinned solely by another chat's fork does not belong in this export.
+        // Role repairs also have implicit witnesses, which the integrity validator checks.
+        if (branch.sourceRoleRepairs?.length) {
+            const revisions = new Set(branch.sourceRoleRepairs.flatMap(pair => [pair.before.revision, pair.after.revision]));
+            const witnesses = new Map<string, boolean>();
+            for (const snapshot of await tx.rawAll<Snapshot>('history_snapshots', 'branch', branchId)) {
+                if (snapshot.snapshotSchema !== 2) continue;
+                for (const key of snapshot.blocks) {
+                    if (!witnesses.has(key)) {
+                        const block = await tx.rawGet<Block>('manifest_blocks', key);
+                        check(block, '角色修复来源清单缺失');
+                        witnesses.set(key, block.entries.some(ref => revisions.has(ref.revision)));
+                    }
+                    if (witnesses.get(key)) { pending.push(['history_snapshots', snapshot.id]); break; }
+                }
+            }
+        }
         const head = await tx.get<Snapshot>('history_snapshots', branch.head); check(head, '当前档案正文快照缺失');
         for (const key of head.blocks) {
             const block = await tx.get<Block>('manifest_blocks', key); check(block, '当前档案正文索引缺失');
@@ -141,12 +163,38 @@ export async function assertWriteStamp(tx: Transaction, stamp: number) {
     await tx.assertWriteStamp(stamp);
 }
 
+/** Import the target's records and the dependencies it uses in this destination.
+ * Following an already present parent ends at its identity. A fork's actual fixed
+ * snapshot still arrives through the separate fork.snapshot edge. */
+function incomingRecords(archive: ArchivePackage, existingBranches: ReadonlyMap<string, Row>) {
+    const target = archive.archive.branch, data = archive.pack.data;
+    if (!data.branches.some(b => b.id !== target && existingBranches.has(b.id))) return;
+    const bindings = new Set(data.host_bindings.filter(b => b.branch === target).map(b => b.id));
+    const records = new Map(STORES.map(store => [store, new Map(data[store].map(row => [row.id, row]))]));
+    const expand = payloadReader(data.memory_payloads);
+    const roots: RecordLink[] = [['branches', target]];
+    for (const store of STORES) for (const row of data[store]) {
+        if (row.branch === target || store === 'source_bodies' || store === 'library_meta' ||
+            ((store === 'message_mappings' || store === 'memories') && bindings.has(row.owner!))) roots.push([store, row.id]);
+    }
+    return markRecords(roots, (store, id) => records.get(store)!.get(id), (store, row) => {
+        if (store === 'branches' && row.id !== target && existingBranches.has(row.id)) return [];
+        return [...recordLinks(store, expand(row, store)), ...payloadLinks(store, row)];
+    });
+}
+
 export interface ArchiveRestoreResult { branch: string; label: string; records: number; compact: boolean }
 /** Replace only the named archive in one atomic transaction. Other archives' roots
  * keep their shared data, including a child fork pointing at the target's former head. */
 export async function restoreArchive(lib: Library, value: unknown, guard: () => Promise<boolean>,
     expected?: { branch?: string; scope?: string }): Promise<ArchiveRestoreResult> {
-    const archive = await validateArchive(value), target = archive.archive.branch;
+    return restoreVerifiedArchive(lib, await validateArchive(value), guard, expected);
+}
+
+/** Only for a package that passed validateArchive in this same restore operation. */
+export async function restoreVerifiedArchive(lib: Library, archive: ArchivePackage, guard: () => Promise<boolean>,
+    expected?: { branch?: string; scope?: string }): Promise<ArchiveRestoreResult> {
+    const target = archive.archive.branch;
     check(!expected || (expected.branch ? expected.branch === target
         : !expected.scope || archive.archive.scopes.includes(expected.scope)), '这个备份不属于当前聊天档案，请切换到对应聊天后恢复');
     check(await guard(), '聊天或页面已改变，未恢复档案');
@@ -180,7 +228,9 @@ export async function restoreArchive(lib: Library, value: unknown, guard: () => 
     const merged = blank();
     for (const store of STORES) merged[store] = data[store].filter(r => !owned(store, r) || retained.get(store)?.has(r.id));
     const destination = new Map(STORES.map(s => [s, new Map(merged[s].map(r => [r.id, r]))]));
+    const incoming = incomingRecords(archive, maps.get('branches')!);
     for (const store of STORES) for (const row of archive.pack.data[store]) {
+        if (incoming && !incoming.get(store)?.has(row.id)) continue;
         const prior = maps.get(store)!.get(row.id), existing = destination.get(store)!.get(row.id);
         // Dependencies are import-only. A real parent or sibling and its host binding
         // always win over a portable dependency shell.
@@ -214,7 +264,11 @@ export async function restoreArchive(lib: Library, value: unknown, guard: () => 
     // A formerly deleted origin is now a real binding again.
     merged.library_meta = merged.library_meta.map(r => r.id === 'retired-source-bindings'
         ? { ...r, value: { version: 1, bindings: (r as any).value.bindings.filter((b: Binding) => !destination.get('host_bindings')!.has(b.id)) } } as Row : r);
-    await sealPackage(merged);
+    try {
+        await validateCurrentData(packageContents(merged));
+    } catch (error) {
+        throw new Error(`单档案合并校验失败，当前档案未改动。${error instanceof Error ? error.message : String(error)}`);
+    }
     check(await guard(), '聊天或页面已改变，未恢复档案');
     const put: [Store, Row][] = [], remove: RecordLink[] = [];
     for (const store of STORES) {

@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, expect, test, vi } from 'vitest';
 import { fixture, observation } from './fixtures';
-import { capture, synchronize } from './canonical';
+import { capture, forkBranch, synchronize } from './canonical';
 import { exportLibrary } from './migration';
 import { Library, ACTIVE_KEY, freshLibraryName } from './db';
 import type { BackupDisk } from '@/st/native-backups';
@@ -108,6 +108,28 @@ test('actual archive export/import and disk restore update the same database and
     expect(restored.state).toBe('archive-restored');
     expect(setItem).not.toHaveBeenCalled(); expect(disk.remove).not.toHaveBeenCalled();
     expect(await capture(lib, other.id)).toEqual(before); await exportLibrary(lib); lib.close();
+});
+
+test('verified disk backup restores a child in a reorganized library after creating a protection copy', async () => {
+    const { lib, view } = await fixture(2), disk = new Disk();
+    try {
+        const branch = (await forkBranch(lib, view, 'child-disk-restore')).id;
+        const old = await workerJob({ kind: 'manual', library: lib.db.name, branch, keep: 10 }, disk);
+        if (old.state !== 'saved') throw new Error('missing old backup');
+        const migration = await workerJob({ kind: 'reorganize', library: lib.db.name });
+        if (migration.state !== 'reorganized') throw new Error('missing reorganized library');
+        const library = migration.report.library, { key, checksum } = old.entry;
+        expect((await workerJob({ kind: 'preview', key }, disk)).state).toBe('preview');
+        expect((await workerJob({ kind: 'before-restore', library, branch, keep: 10 }, disk)).state).toBe('saved');
+        const result = await workerJob({ kind: 'archive-restore', library, branch, key, checksum }, disk);
+        expect(result).toMatchObject({ state: 'archive-restored', report: { branch } });
+        const restored = await Library.open(library, true);
+        try {
+            expect((await capture(restored, branch)).refs).toEqual(view.refs);
+            expect((await capture(restored, view.branch.id)).branch).toEqual(view.branch);
+            await exportLibrary(restored);
+        } finally { restored.close(); }
+    } finally { lib.close(); }
 });
 
 test('actual cleanup worker returns only aggregate results and retains the active database identity', async () => {
