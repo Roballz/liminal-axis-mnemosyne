@@ -40,7 +40,7 @@ async function open(publication = false) {
   try {
     editor = dailyInstalled() && !publication ? await readDailyEventEditor() : null;
     const source = editor?.view.memories.find(m => m.level === 0 && m.hostId === props.leafId && editor!.view.refs[props.floor]?.message === m.anchor);
-    if (editor && !source) throw new Error('本楼摘要尚未归档');
+    if (editor && !source) throw new Error('本楼缺少匹配的归档摘要，请在本楼或档案页「待重新归档」中核对摘要。');
     memoryId = source?.id ?? '';
     events.value = editor ? editor.projection.cards.map(c => ({ id: c.chain.id, title: c.meta.title,
       status: c.meta.status, archived: !!c.chain.archived, needsReview: !!c.needsReview || !!c.blocked })) : pageEvents.value;

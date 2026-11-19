@@ -1,6 +1,6 @@
 import { test, expect, vi } from 'vitest';
 import { fixture, observation } from './fixtures';
-import { capture, forkBranch, synchronize, type HostObservation } from './canonical';
+import { capture, forkBranch, statuses, synchronize, type HostObservation } from './canonical';
 import { sourceSyncBaseline } from './source-sync-guard';
 import { Library, freshLibraryName, Transaction } from './db';
 import { exportLibrary } from './migration';
@@ -51,14 +51,16 @@ test('replaced body retires its unchanged old summary and does not resurrect it 
     await exportLibrary(lib); lib.close();
 });
 
-test('many invalidated prefix summaries share one basis read instead of rescanning it per summary', async () => {
+test('one edited turn leaves later prefix summaries reviewable without rescanning the basis per floor', async () => {
     const { lib, input, branch } = await fixture(100);
     const reads = vi.spyOn(Transaction.prototype, 'get');
     try {
         input.messages[0].content = 'first source correction';
         await sync(lib, input);
         expect(reads.mock.calls.filter(([store, id]) => store === 'history_snapshots' && id === branch.head).length).toBeLessThan(8);
-        expect((await capture(lib, branch.id)).memories).toEqual([]);
+        const current = await capture(lib, branch.id);
+        expect(current.memories.map(m => m.hostId)).toEqual(input.memories.slice(1).map(m => m.hostId));
+        expect(new Set((await statuses(lib, current)).values())).toEqual(new Set(['needs_review']));
     } finally { reads.mockRestore(); lib.close(); }
 });
 
@@ -111,4 +113,25 @@ test('an unaffected processing receipt uses the current selection without retain
     expect(await lib.all('memory_revisions')).toHaveLength(2);
     expect((await lib.all<any>('event_processing_receipts'))[0].memories).toEqual([unchanged]);
     await exportLibrary(lib); lib.close();
+});
+
+test('editing an old summary preserves a later dependent floor for review through archive cleanup', async () => {
+    const { cleanLibraryHistory } = await import('./history-cleanup');
+    const { lib, input, branch, view } = await fixture(3);
+    try {
+        input.memories[2].children = [input.memories[0].hostId];
+        input.memories[2].inputRefs = view.refs.slice(4);
+        input.memories[2].coverage = view.refs.slice(4);
+        const before = await capture(lib, (await sync(lib, input)).id);
+        const latest = before.memories.find(m => m.hostId === input.memories[2].hostId)!;
+        input.memories[0].content += '人工修订';
+        await sync(lib, input);
+        await cleanLibraryHistory(lib, async () => true);
+        const edited = await capture(lib, branch.id);
+        expect(edited.memories.find(m => m.id === latest.id)).toEqual(latest);
+        const states = await statuses(lib, edited);
+        expect(states.get(latest.id)).toBe('needs_rebuild');
+        expect(states.get(edited.memories.find(m => m.hostId === input.memories[1].hostId)!.id)).toBe('valid');
+        await exportLibrary(lib);
+    } finally { lib.close(); }
 });

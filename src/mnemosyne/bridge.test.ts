@@ -433,8 +433,8 @@ test('legacy hidden-role misclassification recovers child events and highest sum
     ctx.chat[1].mes += '真正改写剧情';
     invalidateDaily();
     const edited = await syncDaily();
-    expect(dailyState.review).toBe(0); expect(edited.memories).toEqual([]);
-    expect(await eventView(lib, edited)).toMatchObject({ storedCount: 1, cards: [{ meta: { overview: '' }, members: [] }] });
+    expect(dailyState.review).toBe(1); expect(edited.memories.map(m => m.hostId)).toEqual(['second-leaf']);
+    expect(await eventView(lib, edited)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, members: [{ memory: leaf.id }] }] });
     expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
 });
 
@@ -497,8 +497,8 @@ test('legacy first archive as system requires explicit repair and restores origi
     expect(selectInjectionNodes(memory.summaries, ctx.chat).map(n => n.id)).toEqual(['level-2']);
     ctx.chat[1].mes += '真正改写';
     invalidateDaily(); view = await syncDaily();
-    expect(dailyState.review).toBe(0); expect(view.memories).toEqual([]);
-    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [{ meta: { overview: '' }, members: [] }] });
+    expect(dailyState.review).toBe(1); expect(view.memories.map(m => m.hostId)).toEqual(['second-leaf']);
+    expect(await eventView(lib, view)).toMatchObject({ storedCount: 1, cards: [{ needsReview: true, members: [{ memory: leaf.id }] }] });
     expect(buildHistoryInjectionText()).not.toContain('最高层剧情总结');
 });
 

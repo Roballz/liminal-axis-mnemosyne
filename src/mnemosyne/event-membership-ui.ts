@@ -81,7 +81,7 @@ export async function openMemberships(options: { floor?: number; eventId?: strin
             const leaf = getLeaf(getContext()?.chat?.[options.floor]);
             check(!!expectedLeafId && leaf?.id === expectedLeafId, '摘要已改变，请重新打开');
             rows = rows.filter(item => item.floor === options.floor && item.hostId === expectedLeafId);
-            check(rows.length === 1, '本楼没有可对应的摘要，请先生成摘要或刷新');
+            check(rows.length === 1, '本楼缺少匹配的归档摘要，请核对当前回复，或到档案页查看「待重新归档」。');
         }
         if (options.eventId) check(projection.cards.some(card => card.chain.id === options.eventId), '事件已改变，请刷新');
         if (run !== ticket) return;

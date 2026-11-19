@@ -129,7 +129,10 @@ export async function cleanLibraryHistory(lib: Library, guard: () => Promise<boo
         const states = await statusesInTransaction(plan.tx, { branch, snapshot, refs, cutoff: refs.length,
             memories: selected.map(m => ({ ...m, recall: true, visibility: 'public' as const })) });
         const next: MemoryView = { ...row('mv'), branch: branch.id, selections: { ...selection.selections } };
-        for (const memory of selected) if (!memory.sourceRecovery && ['needs_review', 'needs_rebuild', 'out_of_scope'].includes(states.get(memory.id)!)) {
+        const currentMessages = new Set(refs.map(ref => ref.message));
+        // A selected floor with a live anchor is still actionable even when its context needs review.
+        for (const memory of selected) if (!(memory.level === 0 && memory.anchor && currentMessages.has(memory.anchor)) &&
+            !memory.sourceRecovery && ['needs_review', 'needs_rebuild', 'out_of_scope'].includes(states.get(memory.id)!)) {
             delete next.selections[memory.owner];
             const family = await plan.get<Memory>('memories', memory.owner); check(family, '摘要身份缺失');
             await plan.put('memories', { ...family, retiredFingerprint: memory.fingerprint } as Memory);

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UnarchivedSummaryAction from '@/components/UnarchivedSummaryAction.vue';
 import ReplyBlockerPanel from "@/components/ReplyBlockerPanel.vue";
 import SummaryReviewPanel from "@/components/SummaryReviewPanel.vue";
 import CoreBackupPanel from '@/components/CoreBackupPanel.vue';
@@ -7,6 +8,7 @@ import { shallowRef, ref, watch, computed, onBeforeUnmount } from 'vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import {
   dailyState,
+  unarchivedSummaries,
   dailyReplyBlocker,
   dailyBranchChoices,
   syncDaily,
@@ -90,6 +92,9 @@ watch(branch, () => { prefix.value = selected.value?.suggested ?? 0; });
 const reviewView = shallowRef<CapturedView | null>(null),
   reviewStates = shallowRef(new Map<string, string>());
 const reviewPage = ref(0);
+const unarchivedPage = ref(0);
+const unarchivedRows = computed(() => [...unarchivedSummaries.value.values()].reverse());
+watch(unarchivedSummaries, () => { unarchivedPage.value = 0; });
 const pendingMemories = computed(() => reviewView.value?.memories.filter(m => ['needs_review', 'needs_rebuild'].includes(reviewStates.value.get(m.id)!)) ?? []);
 const difference = shallowRef<{ id: string; value: ReviewDifference } | null>(null);
 const roleRepair = shallowRef<{ candidates: RoleRepairCandidate[]; eligibility: string } | null>(null);
@@ -351,6 +356,17 @@ async function copyKnowledge() {
     <div class="mn-card mn-status" role="status">
       <strong>{{ dailyState.status }}</strong>
       <p>正文 {{ dailyState.archived }} · 摘要 {{ dailyState.summaries }} · 待审核 {{ dailyState.review }}</p>
+      <details v-if="unarchivedSummaries.size">
+        <summary>待重新归档 · {{ unarchivedSummaries.size }} 条楼层摘要</summary>
+        <p>这些楼层在聊天中保留了摘要文字，当前档案缺少对应版本。核对后可直接归档。</p>
+        <p v-for="item in unarchivedRows.slice(unarchivedPage * 10, unarchivedPage * 10 + 10)" :key="item.hostId">
+          #{{ item.floor }} · {{ item.text.slice(0, 48) }} <UnarchivedSummaryAction :item="item" :disabled="busy" />
+        </p>
+        <div v-if="unarchivedRows.length > 10" class="mn-actions">
+          <button :disabled="!unarchivedPage" @click="unarchivedPage--">上一页</button>
+          <button :disabled="(unarchivedPage + 1) * 10 >= unarchivedRows.length" @click="unarchivedPage++">下一页</button>
+        </div>
+      </details>
       <details>
         <summary>当前聊天与档案标识（只读）</summary>
         <p>当前聊天：{{ currentChatName }}</p>
@@ -358,8 +374,7 @@ async function copyKnowledge() {
         <small>可切换聊天比较此标识；“已归档”表示当前聊天已保存，不表示它继承了另一聊天。没有旧绑定的聊天会自动建立独立档案。</small>
       </details>
       <small
-        >“已归档”且无 pending / 错误，表示当前聊天的正文与摘要已写入 Mnemosyne
-        独立数据库。首次归档在后台进行，本页不会为显示列表再读一遍正文。</small
+        >归档完成后，可在这里查看已入库的正文和摘要数量，以及仍需处理的楼层。</small
       >
     </div>
     <p v-if="dailyState.error || error" class="mn-warning" role="alert">{{ error || dailyState.error }}</p>

@@ -93,8 +93,9 @@ test('mixed 24 recovered and 131 ordinary L0 reviews confirm together without re
  const pack=await exportLibrary(lib);dispose?.();lib=await restoreLibrary(pack);dispose=bindDaily();next=await syncDaily();
  expect(next.memories).toEqual(confirmed);expect([...(await statuses(lib,next)).values()].every(s=>s==='valid')).toBe(true);
  ctx.chat[0].mes+=' later edit';invalidateDaily();next=await syncDaily();
- expect(next.memories).toEqual([]);
- for(const old of confirmed)expect(await lib.get('memory_revisions',old.id)).toBeUndefined();
+ expect(next.memories).toEqual(confirmed.filter(m=>m.hostId!=='mixed-0'));
+ expect(new Set((await statuses(lib,next)).values())).toEqual(new Set(['needs_review']));
+ expect(await lib.get('memory_revisions',confirmed.find(m=>m.hostId==='mixed-0')!.id)).toBeUndefined();
 },15000);
 test('ordinary L0 reviews keep the same exact-host exclusions as missing-basis recovery',async()=>{
  const view=await recovered(3,false);
@@ -137,9 +138,13 @@ test('actual engine-generated L0 dependencies remain historical while explicit c
   getLeaf(ctx.chat[1])!.text+=' summary-only change';invalidateDaily();const summaryChanged=await syncDaily();
   expect(summaryChanged.memories.find(m=>m.owner===later.owner)).toEqual(confirmed);
   expect((await statuses(lib,summaryChanged)).get(confirmed.id)).toBe('valid');
+  getLeaf(ctx.chat[5])!.tags=normalizeTags({participants:['新人物']});invalidateDaily();
+  const tagged=await syncDaily(), retagged=tagged.memories.find(m=>m.owner===later.owner)!;
+  expect(retagged.dependencies).toEqual([]);expect(retagged.basis).toBe(confirmed.basis);
+  expect((await statuses(lib,tagged)).get(retagged.id)).toBe('valid');
   ctx.chat[0].mes+=' later body edit';invalidateDaily();const changed=await syncDaily();
-  expect(changed.memories.find(m=>m.id===confirmed.id)).toBeUndefined();
-  expect(await lib.get('memory_revisions',confirmed.id)).toBeUndefined();
+  expect(changed.memories.find(m=>m.id===retagged.id)).toEqual(retagged);
+  expect((await statuses(lib,changed)).get(retagged.id)).toBe('needs_review');
  } finally {settings.apiSettings.summarySuccessPreviewEnabled=preview;}
 });
 test('155 L0 recovery rows with 131 recorded history dependencies remain one explicit body-confirmation batch',async()=>{
@@ -261,13 +266,14 @@ test('tag-only edits keep manual provenance, but later source edits and changed 
  leaf.tags=normalizeTags({participants:['four']});invalidateDaily();next=await syncDaily();
  expect(next.memories[0].sourceRecovery).toBeDefined();expect((await statuses(lib,next)).get(next.memories[0].id)).toBe('needs_review');await exportLibrary(lib);
 });
-test('later earlier-body edits retire confirmed prefixes and obsolete event evidence',async()=>{
+test('an earlier edit retires its own turn and preserves other confirmed prefixes for review',async()=>{
  const view=await recovered(2,false), next=await retainRecoveredSummaries(view,view.memories.map(m=>m.id),guardFor(view));
  const event=await editEvent(lib,next,null,{title:'synthetic preserved event',status:'open',keywords:[]},{memory:next.memories[0].id,active:true,kind:'reference'});
  ctx.chat[0].mes+=' changed';invalidateDaily();const edited=await syncDaily();
- expect(edited.memories).toEqual([]);
+ expect(edited.memories).toEqual(next.memories.filter(m=>m.hostId==='leaf-1'));
+ expect(new Set((await statuses(lib,edited)).values())).toEqual(new Set(['needs_review']));
  const events=await eventView(lib,edited);expect(events.cards.map(c=>c.chain.id)).toContain(event);expect(events.cards[0].members).toEqual([]);
- for(const old of next.memories)expect(await lib.get('memory_revisions',old.id)).toBeUndefined();
+ expect(await lib.get('memory_revisions',next.memories.find(m=>m.hostId==='leaf-0')!.id)).toBeUndefined();
  await exportLibrary(lib);
 });
 

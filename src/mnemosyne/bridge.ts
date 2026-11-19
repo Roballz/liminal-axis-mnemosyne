@@ -15,7 +15,7 @@ import { tableInjectionProjection, type TableInjectionIssues, commitSummaryTable
 import { tableStateAt } from './table-history';
 import { TABLE_OUTPUT_KEY, pendingSummaryTablePlans } from './summary-tables';
 /** The only daily-library module that observes the ST host. */
-import { reactive, ref, shallowRef, watch } from 'vue';
+import { computed, reactive, ref, shallowRef, watch } from 'vue';
 import { locateReply } from '@/st/reply-location';
 import { getContext, type STMessage } from '@/st/context';
 import { saveChatNow } from '@/st/chat-save';
@@ -30,6 +30,7 @@ import { activeLibrary, libraryActivationGeneration, ACTIVE_KEY } from './db';
 import {
     capture,
     synchronize,
+    confirmUnselectedLeaf,
     statuses,
     current,
     forkBranch,
@@ -55,7 +56,9 @@ export const dailyState = reactive({
 });
 export const tableConflicts = shallowRef<{ floor: number; reason: string }[]>([]);
 let installed = false;
+export interface UnarchivedSummary { floor: number; hostId: string; text: string; body: string }
 interface DailyCache {
+    unarchived: Map<number, UnarchivedSummary>;
     view: CapturedView;
     validity: Map<string, MemoryStatus>;
     allowed: Set<string>;
@@ -87,6 +90,8 @@ let lastCache: DailyCache | null = null;
 // Publication itself is reactive: warm recovery may restore the same projection
 // without changing dailyState.revision. Mounted chat cards must still leave null.
 const injectionCache = shallowRef<DailyCache | null>(null);
+const noUnarchived = new Map<number, UnarchivedSummary>();
+export const unarchivedSummaries = computed(() => dailyState.pending ? noUnarchived : injectionCache.value?.unarchived ?? noUnarchived);
 // This grants historical text only, never current archive/body/table/recall access.
 let promptHistory: { allowed: Set<string>; current: () => boolean } | null = null;
 let parallelHost: { host: string; version: string } | null = null;
@@ -466,7 +471,10 @@ export async function syncDaily(): Promise<CapturedView> {
 }
 /** Automatic notifications may wait behind a writer; check their binding again
  * when they actually start. Direct user/request-time sync keeps its own barrier. */
-async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> {
+async function syncDailyGuarded(isActive: () => boolean, confirmation?: {
+    item: UnarchivedSummary; view: CapturedView; open(): boolean;
+}): Promise<CapturedView> {
+    let confirmationStarted = false, confirmationSaved = false;
     const job = serial
         .catch(() => {})
         .then(async () => {
@@ -489,7 +497,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             const reusable = cache ?? lastCache;
             const metadataBinding = ctx.chatMetadata[BINDING_KEY] as { branch?: string } | undefined;
             if (
-                reusable &&
+                !confirmation && reusable &&
                 metadataBinding?.branch === reusable.view.branch.id &&
                 reusable.host === observedHost &&
                 reusable.library === lib.db.name
@@ -522,6 +530,11 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                     if (installed) refreshInjection();
                     return cache.view;
                 }
+            }
+            if (confirmation) {
+                check(confirmation.open() && unarchivedSummaries.value.get(confirmation.item.floor) === confirmation.item,
+                    '聊天或摘要已改变，请重新核对');
+                confirmationStarted = true;
             }
             dailyState.pending = true;
             dailyReplyBlocker.value = null;
@@ -668,13 +681,19 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             const receipt = ctx.chatMetadata.mnemosyne_archive_v1 as { status?: string; scope?: string; branch?: string; head?: string } | undefined;
             const cold = !reusable || reusable.library !== lib.db.name || reusable.view.branch.id !== activeBinding?.branch;
             let view: CapturedView | undefined;
-            if (cold && !dirty && !ctx.chatMetadata.mnemosyne_ids_pending && activeBinding && receipt?.status === 'saved' &&
+            if (!confirmation && cold && !dirty && !ctx.chatMetadata.mnemosyne_ids_pending && activeBinding && receipt?.status === 'saved' &&
                 receipt.scope === scope && receipt.branch === activeBinding.branch && receipt.head) {
                 dailyState.status = '正在读取档案';
                 view = await readUnchangedArchive(lib, observation, activeBinding, receipt.head, deletionGuard);
             }
             let branch: Branch;
-            if (view) {
+            if (confirmation) {
+                const target = observation.memories.find(m => m.hostId === confirmation.item.hostId);
+                check(!dirty && activeBinding && target?.content === confirmation.item.text, '楼层或摘要已改变，请重新核对');
+                view = await confirmUnselectedLeaf(lib, confirmation.view, activeBinding, target, confirmation.item.floor, deletionGuard);
+                confirmationSaved = true;
+                branch = view.branch;
+            } else if (view) {
                 check(deletionGuard(), '聊天在读取档案期间改变');
                 branch = view.branch;
                 savedHost = host;
@@ -724,11 +743,23 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             dailyState.tableError = '';
             const conflicts: typeof tableConflicts.value = [];
             const tableSources = new Map(view.memories.filter(m => validity.get(m.id) === 'valid').map(m => [m.hostId, m.id]));
+            const unarchived = new Map<number, UnarchivedSummary>();
+            let selectedHosts: Set<string> | undefined, selectedAnchors: Set<string | null> | undefined;
             const tablePlans: { floor: number; source: string; plan: SummaryTablePlan }[] = [];
             for (const [floor, message] of ctx.chat.entries()) {
                 const saved = message.extra?.[TABLE_OUTPUT_KEY] as
                     { version: number; leaf: string; text: string; plan: SummaryTablePlan } | undefined;
                 const leaf = getLeaf(message);
+                if (leaf && !tableSources.has(leaf.id) && !leaf.seed && !message.extra?.bbs_omit && leafValid(message)) {
+                    selectedHosts ??= new Set(view.memories.map(m => m.hostId));
+                    selectedAnchors ??= new Set(view.memories.map(m => m.anchor));
+                    const ref = view.refs[floor], source = ref && view.sources.get(ref.revision);
+                    if (!selectedHosts.has(leaf.id) && source?.role === 'assistant' && !selectedAnchors.has(ref.message) &&
+                        leaf.text?.trim() && source.provenance.hostKey === message.extra?.[MESSAGE_KEY] && source.content === message.mes &&
+                        (view.snapshot.variants?.[floor] ?? source.provenance.swipe) === (message.swipe_id ?? 0)) {
+                        unarchived.set(floor, { floor, hostId: leaf.id, text: leaf.text, body: message.mes });
+                    }
+                }
                 if (
                     !saved ||
                     saved.version !== 2 ||
@@ -739,6 +770,14 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
                     continue;
                 const source = tableSources.get(saved.leaf);
                 if (source) tablePlans.push({ floor, source, plan: saved.plan });
+            }
+            if (unarchived.size) {
+                const counts = new Map([...unarchived.values()].map(leaf => [leaf.hostId, 0]));
+                for (const { hostId } of observation.memories) {
+                    const count = counts.get(hostId);
+                    if (count !== undefined) counts.set(hostId, count + 1);
+                }
+                for (const [floor, leaf] of unarchived) if (counts.get(leaf.hostId) !== 1) unarchived.delete(floor);
             }
             const replayPlans = await pendingSummaryTablePlans(lib, view.branch, tablePlans.map(item => item.plan));
             for (const { floor, source, plan } of tablePlans) {
@@ -787,7 +826,7 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
             const events = await projectEvents(lib, view, validity);
             check(projectionVersion === lib.changes.version, '档案在刷新期间改变，请重试');
             cache = {
-                view,
+                view, unarchived: unarchived.size ? unarchived : noUnarchived,
                 ...projectView(view, validity),
                 ...events,
                 host,
@@ -817,7 +856,8 @@ async function syncDailyGuarded(isActive: () => boolean): Promise<CapturedView> 
         });
     serial = job;
     return job.catch((error) => {
-        if (!isActive()) throw error; // A superseded automatic job cannot change the new view.
+        if (confirmationSaved) error = new Error(`摘要已重新归档，状态刷新未完成：${String(error.message ?? error)}`);
+        if ((confirmation && !confirmationStarted) || !isActive()) throw error; // A superseded automatic job cannot change the new view.
         dailyState.pending = true;
         dailyState.status = error instanceof ReplyFinalityError ? '回复未确认 · 暂不归档' : 'pending · 可重试';
         dailyState.error = String(error.message ?? error);
@@ -907,6 +947,19 @@ export async function dailyCurrent(view: CapturedView, host: string, generation:
     return (
         host === hostVersion() && generation === dailyState.generation && (await current(await activeLibrary(), view))
     );
+}
+/** The preview belongs to an exact archived host observation. Opening it is read-only. */
+export async function confirmUnarchivedSummary(item: UnarchivedSummary, open: () => boolean) {
+    const session = await readDailyMembershipContext();
+    const chat = getContext()?.chat, activation = activeLibrary(), scope = hostScope();
+    const bound = () => installed && getContext()?.chat === chat && activation === activeLibrary() &&
+        hostScope() === scope && session.host === hostVersion() && session.generation === dailyState.generation;
+    check(await activation === session.lib && bound() && open() && unarchivedSummaries.value.get(item.floor) === item,
+        '聊天或摘要已改变，请重新核对');
+    const view = await syncDailyGuarded(bound, { item, view: session.view, open });
+    check(view.branch.id === session.view.branch.id && view.memories.some(m => m.level === 0 &&
+        m.hostId === item.hostId && m.anchor === view.refs[item.floor]?.message && m.content === item.text &&
+        cache?.validity.get(m.id) === 'valid'), '人工确认已记录，请检查最新归档状态');
 }
 export async function chooseNewStory() {
     const ctx = getContext();

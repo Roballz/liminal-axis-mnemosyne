@@ -89,7 +89,7 @@ async function tagOnlyRevisions(lib: Library, observation: HostObservation) {
     const byHost = new Map(selected.filter((m): m is MemoryRevision => !!m).map(m => [m.hostId, m]));
     const matches = await Promise.all(observation.memories.map(async host => {
         const prior = byHost.get(host.hostId);
-        if (!prior || prior.level !== 0 || prior.dependencies.length || equal(prior.tags, host.tags)) return null;
+        if (!prior || prior.level !== 0 || equal(prior.tags, host.tags)) return null;
         // Production observations place optional tags after content. Preserve an existing slot,
         // and support caller-built observations that placed that optional property at the end.
         const entries = Object.entries(host).filter(([key]) => key !== 'tags');
@@ -368,7 +368,8 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                     hostId: host.hostId,
                 };
                 const prior = selectedMemories.get(family.id);
-                if (prior && tagUpdates.get(host.hostId)?.id === prior.id) {
+                const retagged = prior && tagUpdates.get(host.hostId)?.id === prior.id;
+                if (retagged) {
                     const { tags, ...original } = prior;
                     revision = { ...original, id: revision.id, fingerprint: memoryHashes[i],
                         ...(host.tags ? { tags: host.tags } : {}) };
@@ -379,10 +380,10 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                     const sources = prior.sourceRecovery
                         ? refs.slice(0, anchor ? refs.findIndex(r => r.message === anchor) + 1 : refs.length)
                         : await summarySources(tx, prior);
-                    const updated = sources.map(r => refs.find(v => v.message === r.message));
+                    const updated = sources.map(r => currentRef(r.message));
                     if (updated.every((r): r is SourceRef => !!r)) {
                         revision.inputRefs = updated;
-                        revision.coverage = prior.sourceRecovery ? [] : prior.coverage.map(r => refs.find(v => v.message === r.message)!).filter(Boolean);
+                        revision.coverage = prior.sourceRecovery ? [] : prior.coverage.map(r => currentRef(r.message)!).filter(Boolean);
                         revision.declaration = prior.sourceRecovery
                             ? '人工核对恢复摘要：确认适用于当前楼层及此前正文；旧生成来源仍缺失，原摘要与来源声明保留。'
                             : '人工修订摘要：以当前来源版本确认内容；原生成版本保留。';
@@ -397,7 +398,10 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 // Editing tags must not silently approve a changed source or renew an old basis.
                 if (prior && !equal(prior.tags, revision.tags) && sameNarrativeRevision(prior, { ...revision, basis: prior.basis }))
                     revision.basis = prior.basis;
-                newRevisions.push({ revision, host });
+                // Tag edits already copied the selected provenance, including intentionally
+                // empty manual dependencies. Do not rebuild it from stale host generation IDs.
+                if (retagged) await tx.add('memory_revisions', revision);
+                else newRevisions.push({ revision, host });
             }
             if (host.basisSnapshot === revision.basis && !revision.sourceRecovery &&
                 !(await readBasis(revision.basis))) {
@@ -472,6 +476,14 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
             const replacedSummaries = new Set(Object.entries(previous.selections).filter(([family, id]) =>
                 selections[family] !== id && selectedMemories.get(family)?.content !== selectionRevisions.get(selections[family])?.content
             ).map(([, id]) => id));
+            // Editing one turn can invalidate the context of many later summaries.
+            // Those summaries still describe their own surviving turns and need review.
+            const changedTurns = new Set(replacedBodies);
+            for (let i = 1; sourceReplaced && i < refs.length; i++) {
+                if (observation.messages[i].role === 'assistant' && observation.messages[i - 1].role === 'user' &&
+                    replacedBodies.has(refs[i - 1].message) && priorRefs[i - 1]?.message === refs[i - 1].message &&
+                    priorRefs[i]?.message === refs[i].message) changedTurns.add(refs[i].message);
+            }
             const superseded = new Map<string, boolean>();
             const affectedBases = new Map<string, { first: number; positions: Map<string, number> }>();
             const replacedPrefix = async (memory: MemoryRevision) => {
@@ -511,7 +523,10 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 const memory = selectionRevisions.get(id)!;
                 // Retire only proven replacements. Role-only repairs and unrelated
                 // unresolved imported evidence are not body edits.
-                if (!['needs_review', 'needs_rebuild', 'out_of_scope'].includes(states.get(id)!) || !await dependsOnReplacement(id)) continue;
+                if (!['needs_review', 'needs_rebuild', 'out_of_scope'].includes(states.get(id)!)) continue;
+                if (memory.level === 0 && memory.anchor && !changedTurns.has(memory.anchor) &&
+                    !memory.coverage.some(ref => replacedBodies.has(ref.message))) continue;
+                if (!await dependsOnReplacement(id)) continue;
                 delete selections[familyId]; retiredMemories.add(id);
                 const family = families.find(f => f.id === familyId);
                 if (family) await tx.put('memories', { ...family, retiredFingerprint: memory.fingerprint,
@@ -832,6 +847,41 @@ export async function confirmRecoveredSummaries(lib: Library, view: CapturedView
         // One final live-host check for the whole batch, still inside the abortable transaction.
         check(guard(), '视图已改变，未保存本次确认；请刷新后重新确认');
         return revisions;
+    });
+}
+/** Recover just the named live host leaf. The old generation need not exist.
+ * The checked snapshot plus the anchor expresses human applicability without copying its prefix. */
+export async function confirmUnselectedLeaf(lib: Library, view: CapturedView, binding: Binding,
+    host: HostMemory, floor: number, guard: () => boolean): Promise<CapturedView> {
+    const ref = view.refs[floor], source = ref && view.sources.get(ref.revision);
+    check(view.cutoff === view.snapshot.length && view.branch.head === view.snapshot.id &&
+        source?.role === 'assistant' && source.provenance.hostKey === host.anchorKey &&
+        host.level === 0 && !host.seed && host.enabled && !host.private && host.content.trim() &&
+        !view.memories.some(m => m.hostId === host.hostId || m.anchor === ref.message), '本楼摘要身份已改变，请重新核对');
+    const [hash, generation] = await Promise.all([fingerprint(host), fingerprint([host.content, host.generationKey ?? null])]);
+    return lib.transaction(['host_bindings', 'branches', 'memories', 'memory_revisions', 'memory_views'], 'readwrite', async tx => {
+        const branch = await tx.get<Branch>('branches', view.branch.id);
+        const live = await tx.get<Binding>('host_bindings', binding.id);
+        check(guard() && branch && branch.epoch === view.branch.epoch && branch.head === view.snapshot.id &&
+            branch.view === view.selection.id && live && !live.detached && live.branch === branch.id &&
+            live.story === branch.story && equal(live, binding), '当前档案已改变，请重新核对');
+        const families = (await tx.all<Memory>('memories', 'owner', binding.id)).filter(m => m.hostId === host.hostId);
+        check(families.length === 1 && families[0].story === branch.story && !view.selection.selections[families[0].id],
+            '摘要身份缺失或不唯一，请在本楼核对并手动修订摘要');
+        const { retiredFingerprint, retiredGenerationFingerprint, ...family } = families[0];
+        const memory: MemoryRevision = { ...row('mr'), owner: family.id, story: branch.story, branch: branch.id,
+            hostId: host.hostId, content: host.content, storyTime: host.storyTime, level: 0, seed: false,
+            recall: true, visibility: 'public', basis: branch.head, anchor: ref.message, fingerprint: hash,
+            declaration: '人工核对摘要：确认适用于当前楼层及此前正文。', inputRefs: [], coverage: [], dependencies: [],
+            ...(host.tags ? { tags: host.tags } : {}) };
+        if (retiredFingerprint === hash || retiredGenerationFingerprint === generation) await tx.put('memories', family);
+        await tx.add('memory_revisions', memory);
+        const selection: MemoryView = { ...row('mv'), branch: branch.id, selections: { ...view.selection.selections, [family.id]: memory.id } };
+        await publishMemoryView(tx, selection, view.selection);
+        branch.view = selection.id; branch.epoch++;
+        await tx.put('branches', branch);
+        check(guard(), '聊天或摘要已改变，本次确认已取消');
+        return { ...view, branch, selection, memories: [...view.memories, memory] };
     });
 }
 /** Explicit approval; immutable generation provenance is never rewritten. */
