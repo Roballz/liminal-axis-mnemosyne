@@ -142,7 +142,7 @@ export async function preserveEventReferences(tx: Transaction, branch: Branch,
 /** A replaced body invalidates its old derived prose, never the event's title,
  * keywords, archive organization or another branch's copy. */
 export async function retireEventDependencies(tx: Transaction, branch: Branch, retired: Set<string>, cutoff: number,
-    replacements: ReadonlyMap<string, MemoryRevision> = new Map()) {
+    replacements: ReadonlyMap<string, MemoryRevision>, manualReplacements: ReadonlySet<string>) {
     if (!retired.size) return false;
     const families = new Set<string>(), known = new Map<string, MemoryRevision | undefined>();
     const memory = async (id: string) => {
@@ -177,9 +177,10 @@ export async function retireEventDependencies(tx: Transaction, branch: Branch, r
             if (store === 'event_memberships') {
                 const member = record as Membership, prior = await memory(member.memory);
                 const replacement = prior && replacements.get(prior.owner);
-                // A manual unlink is a current user setting, not historical prose.
-                // Carry it onto the replacement without retaining the old summary.
-                if (!member.active && member.locked && replacement && !retired.has(replacement.id)) {
+                // Link operations keep their order and original cutoff across a wording edit.
+                // Explicit unlinks also survive regeneration.
+                if (replacement && !retired.has(replacement.id) &&
+                    (manualReplacements.has(replacement.id) || !member.active && member.locked)) {
                     await tx.put(store, { ...member, memory: replacement.id } as Membership);
                     changed = true; continue;
                 }

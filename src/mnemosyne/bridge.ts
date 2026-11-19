@@ -131,6 +131,9 @@ export function locateReplyBlocker(blocker: ReplyBlocker) {
 const MESSAGE_KEY = 'mnemosyne_message_v1';
 const BINDING_KEY = 'mnemosyne_binding_v1';
 const EVIDENCE_KEY = 'mnemosyne_summary_evidence_v1';
+// Only pending native saves retain their before-text, until that exact edit is archived.
+interface NativeBodyEdit { chat: STMessage[]; scope: string; floor: number; swipe: number; before: Set<string>; after: string }
+const nativeBodyEdits = new Map<STMessage, NativeBodyEdit>();
 const MANUAL_KEY = 'mnemosyne_manual_summary_v1';
 export function markManualSummaryEdit(message: STMessage) {
     if (!installed) return;
@@ -612,14 +615,18 @@ async function syncDailyGuarded(isActive: () => boolean, confirmation?: {
             scheduledHost = host; // 归档自身补写消息 ID 不等于一次新的内容编辑。
             const observation: HostObservation = {
                 scope,
-                messages: ctx.chat.map((m) => ({
-                    key: String(m.extra![MESSAGE_KEY]),
-                    role: sourceRole(m),
-                    content: m.mes,
-                    swipe: m.swipe_id ?? 0,
+                messages: ctx.chat.map(m => ({
+                    key: String(m.extra![MESSAGE_KEY]), role: sourceRole(m), content: m.mes, swipe: m.swipe_id ?? 0,
                 })),
                 memories: [],
             };
+            const consumedEdits = new Map<STMessage, NativeBodyEdit>();
+            for (const [message, edit] of nativeBodyEdits) {
+                if (ctx.chat !== edit.chat || scope !== edit.scope || ctx.chat[edit.floor] !== message ||
+                    edit.after !== message.mes || edit.swipe !== (message.swipe_id ?? 0)) continue;
+                observation.messages[edit.floor].editedFrom = edit.before;
+                consumedEdits.set(message, edit);
+            }
             ctx.chat.forEach((m, i) => {
                 const leaf = getLeaf(m);
                 if (!leaf) return;
@@ -737,6 +744,8 @@ async function syncDailyGuarded(isActive: () => boolean, confirmation?: {
                 view = refreshed && lib.changes.version === synchronizedVersion
                     ? refreshed : await capture(lib, branch.id);
             }
+            for (const [message, edit] of consumedEdits)
+                if (nativeBodyEdits.get(message) === edit) nativeBodyEdits.delete(message);
             const validityVersion = lib.changes.version;
             let validity = await statuses(lib, view);
             check(host === hostVersion() && isActive() && generation === dailyState.generation, '归档完成；当前视图已变化');
@@ -1110,8 +1119,11 @@ export function bindDaily() {
         handlers.push({ event, callback });
     };
     const cancelBody = () => { bodyEdit = undefined; replyFinality.cancelEdit(); cancelBodyEdit(); };
-    for (const key of ['MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_SENT']) on(key, cancelBody);
-    on('CHAT_CHANGED', () => { cancelBody(); replyFinality.reset(); });
+    for (const key of ['MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_SENT']) on(key, (floor) => {
+        if (typeof floor === 'number' && ctx.chat[floor]) nativeBodyEdits.delete(ctx.chat[floor]);
+        cancelBody();
+    });
+    on('CHAT_CHANGED', () => { nativeBodyEdits.clear(); cancelBody(); replyFinality.reset(); });
     on('GENERATION_STARTED', (...args) => {
         const revision = replyFinality.revision; replyFinality.start(...args);
         if (replyFinality.revision !== revision) cancelBody();
@@ -1149,7 +1161,15 @@ export function bindDaily() {
         if (id !== null && id !== undefined && /^\d+$/.test(id) && editor) {
             const ctx = getContext();
             const text = ctx?.powerUserSettings?.trim_spaces ? editor.value.trim() : editor.value;
-            replyFinality.confirmEdit(Number(id), text);
+            const floor = Number(id), chat = ctx?.chat, message = chat?.[floor];
+            if (chat && message && text !== message.mes) {
+                const prior = nativeBodyEdits.get(message), scope = hostScope(), swipe = message.swipe_id ?? 0;
+                const before = prior?.chat === chat && prior.scope === scope && prior.floor === floor &&
+                    prior.swipe === swipe && prior.after === message.mes ? new Set(prior.before) : new Set<string>();
+                before.add(message.mes);
+                nativeBodyEdits.set(message, { chat, scope, swipe, floor, before, after: text });
+            }
+            replyFinality.confirmEdit(floor, text);
         } else replyFinality.cancelEdit();
     };
     if (typeof document !== 'undefined') document.addEventListener('click', confirmEdit, true);
@@ -1164,6 +1184,7 @@ export function bindDaily() {
         cancelBody();
         bindingEpoch++;
         automaticAgain = false;
+        nativeBodyEdits.clear();
         rendered.cancel();
         installed = false;
         hostVersions.clear();

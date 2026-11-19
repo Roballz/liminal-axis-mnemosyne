@@ -41,6 +41,7 @@ export interface HostMessage {
     content: string;
     swipe: number;
     excluded?: boolean;
+    editedFrom?: ReadonlySet<string>; // Native editor before-text, transient and never persisted.
 }
 export interface HostMemory {
     tags?: SummaryTags;
@@ -201,7 +202,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 .map((r) => [r.owner, r]),
         );
         const refs: SourceRef[] = [];
-        const replacedBodies = new Set<string>();
+        const replacedBodies = new Set<string>(), editedBodies = new Set<string>();
         const byHost = new Map<string, SourceRef>();
         const captureRevisions = onCaptured ? new Map<string, Revision>() : undefined;
         const writtenBodies = onCaptured ? new Map<string, string>() : undefined;
@@ -217,7 +218,14 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
             let revision = priorSources.get(mapping.message);
             if (revision && (revision.bodySchema === 1
                 ? revision.bodyHash !== bodyHashes[i] || revision.bodyLength !== host.content.length
-                : revision.content !== host.content)) replacedBodies.add(mapping.message);
+                : revision.content !== host.content)) {
+                replacedBodies.add(mapping.message);
+                if (host.editedFrom && revision.role === host.role && priorRefs[i]?.message === mapping.message &&
+                    priorVariants[i] === host.swipe) {
+                    const before = revision.bodySchema === 1 ? (await tx.get<SourceBody>('source_bodies', revision.id))?.content : revision.content;
+                    if (before !== undefined && host.editedFrom.has(before)) editedBodies.add(mapping.message);
+                }
+            }
             if (
                 !revision ||
                 revision.fingerprint !== hashes[i] ||
@@ -302,7 +310,8 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         const selections: Record<string, string> = {};
         const selectionRevisions = new Map<string, MemoryRevision>();
         const hostRevisions = new Map<string, string>();
-        const retiredMemories = new Set<string>();
+        let replyPositions: Map<string, number> | undefined;
+        const retiredMemories = new Set<string>(), manualReplacements = new Set<string>();
         const newRevisions: {
             revision: MemoryRevision;
             host: HostMemory;
@@ -419,6 +428,16 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                     (ref.message === revision!.anchor || equal(currentRef(ref.message), ref))) &&
                 revision.coverage.every(ref => !!currentRef(ref.message)))
                 sidecars.push({ revision, host });
+            const prior = selectedMemories.get(family.id);
+            if (host.manualEdit && host.level === 0 && host.enabled && prior && prior.id !== revision.id &&
+                prior.anchor && prior.anchor === revision.anchor && prior.hostId === host.hostId &&
+                (!replacedBodies.has(prior.anchor) || editedBodies.has(prior.anchor))) {
+                replyPositions ??= new Map(refs.map((ref, index) => [ref.message, index]));
+                const index = replyPositions.get(prior.anchor);
+                if (index !== undefined && priorRefs[index]?.message === prior.anchor && priorVariants[index] === variants[index] &&
+                    observation.messages[index].role === 'assistant' && priorSources.get(prior.anchor)?.role === 'assistant')
+                    manualReplacements.add(revision.id);
+            }
             selections[family.id] = revision.id;
             selectionRevisions.set(revision.id, revision);
             hostRevisions.set(host.hostId, revision.id);
@@ -478,11 +497,16 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
             ).map(([, id]) => id));
             // Editing one turn can invalidate the context of many later summaries.
             // Those summaries still describe their own surviving turns and need review.
-            const changedTurns = new Set(replacedBodies);
-            for (let i = 1; sourceReplaced && i < refs.length; i++) {
-                if (observation.messages[i].role === 'assistant' && observation.messages[i - 1].role === 'user' &&
-                    replacedBodies.has(refs[i - 1].message) && priorRefs[i - 1]?.message === refs[i - 1].message &&
-                    priorRefs[i]?.message === refs[i].message) changedTurns.add(refs[i].message);
+            const changedTurns = new Set(replacedBodies), editedTurns = new Set<string>();
+            for (let i = 0; sourceReplaced && i < refs.length; i++) {
+                if (observation.messages[i].role !== 'assistant' || priorRefs[i]?.message !== refs[i].message) continue;
+                const reply = refs[i].message;
+                const question = i > 0 && observation.messages[i - 1].role === 'user' &&
+                    priorRefs[i - 1]?.message === refs[i - 1].message ? refs[i - 1].message : undefined;
+                if (question && replacedBodies.has(question)) changedTurns.add(reply);
+                if (changedTurns.has(reply) && priorVariants[i] === variants[i] &&
+                    (!replacedBodies.has(reply) || editedBodies.has(reply)) &&
+                    (!question || !replacedBodies.has(question) || editedBodies.has(question))) editedTurns.add(reply);
             }
             const superseded = new Map<string, boolean>();
             const affectedBases = new Map<string, { first: number; positions: Map<string, number> }>();
@@ -524,8 +548,13 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 // Retire only proven replacements. Role-only repairs and unrelated
                 // unresolved imported evidence are not body edits.
                 if (!['needs_review', 'needs_rebuild', 'out_of_scope'].includes(states.get(id)!)) continue;
-                if (memory.level === 0 && memory.anchor && !changedTurns.has(memory.anchor) &&
-                    !memory.coverage.some(ref => replacedBodies.has(ref.message))) continue;
+                if (memory.level === 0 && memory.anchor) {
+                    const prior = selectedMemories.get(familyId);
+                    const retainedEdit = editedTurns.has(memory.anchor) && prior &&
+                        (prior.id === id || sameNarrativeRevision(prior, memory));
+                    if ((!changedTurns.has(memory.anchor) || retainedEdit) &&
+                        !memory.coverage.some(ref => replacedBodies.has(ref.message) && !editedBodies.has(ref.message))) continue;
+                }
                 if (!await dependsOnReplacement(id)) continue;
                 delete selections[familyId]; retiredMemories.add(id);
                 const family = families.find(f => f.id === familyId);
@@ -548,8 +577,8 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         }
         removedEventSources = new Set([...observedMessages].filter(removedMessage));
         let eventsChanged = await unlinkDeletedEventSources(lib, tx, branch, removedEventSources, refs.length);
-        if (baseline?.retireHistory) eventsChanged = await retireEventDependencies(tx, branch, retiredMemories, refs.length,
-            new Map(Object.entries(selections).map(([family, id]) => [family, selectionRevisions.get(id)!]))) || eventsChanged;
+        if (baseline?.retireHistory && retiredMemories.size) eventsChanged = await retireEventDependencies(tx, branch, retiredMemories, refs.length,
+            new Map(Object.entries(selections).map(([family, id]) => [family, selectionRevisions.get(id)!])), manualReplacements) || eventsChanged;
         let selection = previous;
         if (!previous || !equal(previous.selections, selections)) {
             const view: MemoryView = { ...row('mv'), branch: branch.id, selections };

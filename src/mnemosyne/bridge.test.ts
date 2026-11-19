@@ -632,7 +632,7 @@ test('retired higher summaries can be rebuilt once from the changed current chil
   expect(client.requestViaMainApi).toHaveBeenCalledTimes(1);expect(memory.summaries).toHaveLength(1);
 });
 
-test('manual summary saves retire old text, higher dependencies and event evidence without changing current bodies', async () => {
+test('manual summary saves preserve event links while retiring old text and derived prose without changing current bodies', async () => {
     const { editLeafAt } = await import('@/memory/apply');
     memory.summaries.push({ id: 'manual-parent', text: '旧上层摘要', level: 1, createdAt: 1, auto: true, childIds: ['legacy-leaf'] });
     let view = await syncDaily();
@@ -651,7 +651,7 @@ test('manual summary saves retire old text, higher dependencies and event eviden
         expect(await lib.all('memory_views', 'branch', view.branch.id)).toHaveLength(1);
         expect(await lib.all('memory_selection_nodes')).toHaveLength(1);
         const card = (await eventView(lib, view)).cards.find(c => c.chain.id === event)!;
-        expect(card.meta.overview).toBe(''); expect(card.members).toEqual([]);
+        expect(card.meta.overview).toBe(''); expect(card.members.map(m => m.memory)).toEqual([view.memories[0].id]);
         expect(await lib.all('event_processing_receipts', 'branch', view.branch.id)).toEqual([]);
         expect((await syncDaily()).memories[0].id).toBe(view.memories[0].id);
         oldIds.add(view.memories[0].id);
@@ -1557,6 +1557,51 @@ async function nativeEditFixture() {
     return { emit, original, click, close };
 }
 
+test.each(['migrated', 'generated'] as const)('native edit keeps the edited floor and its link through approval and manual revision (%s)', async kind => {
+    const { emit, click, close } = await nativeEditFixture();
+    try {
+        const { reorganizeCoreLibrary } = await import('./core-reorganization');
+        const next = await Library.open((await reorganizeCoreLibrary(lib, async () => true)).library, true);
+        const old = lib; await activateLibrary(next); lib = next; old.close();
+        const floor = kind === 'generated' ? 3 : 1;
+        if (kind === 'generated') {
+            ctx.chat.push(message(true, '迁移后的新问题'), message(false, '迁移后的新回复'));
+            const evidence = await captureSummaryEvidence([floor - 1, floor]);
+            ctx.chat[floor].extra!.bbs_leaf = { id: 'new-leaf', text: '新摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+            attachSummaryEvidence(ctx.chat, floor, evidence, [floor - 1, floor]);
+        }
+        ctx.chat.push(message(true, '下一个问题'), message(false, '下一楼回复'));
+        ctx.chat[floor + 2].extra!.bbs_leaf = { id: 'later-floor', text: '下一楼的摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+        const current = await syncDaily(), leaf = current.memories.find(m => m.anchor === current.refs[floor].message)!;
+        const { saveMemberships } = await import('./event-memberships');
+        const event = await saveMemberships(lib, current, { mode: 'add', memories: [leaf.id], eventIds: [], newTitle: '原事件' });
+        const body = '人工修正本层正文';
+        click(floor, body); ctx.chat[floor].mes = body;
+        await emit('MESSAGE_EDITED', floor); await emit('MESSAGE_UPDATED', floor);
+        await prepareSummaryEditPrompt();
+        expect(summaryEditPrompt.count).toBe(2);
+        const review = (await readDailyReview())!;
+        const pending = review.view.memories.find(m => m.owner === leaf.owner)!;
+        expect(pending.content).toBe(leaf.content);
+        expect(review.validity.get(pending.id)).toBe('needs_review');
+        await resolveSummaryEdit('keep');
+        expect(summaryEditPrompt.error).toBe('');
+        let after = await syncDaily();
+        expect((await statuses(lib, after)).get(pending.id)).toBe('valid');
+        expect((await eventView(lib, after)).cards[0].members.map(m => m.memory)).toEqual([pending.id]);
+        const { editLeafAt } = await import('@/memory/apply');
+        expect(editLeafAt(floor, '人工修改当层摘要', '', '')).toBe(true);
+        after = await syncDaily();
+        const saved = after.memories.find(m => m.owner === leaf.owner)!;
+        expect(saved.content).toBe('人工修改当层摘要');
+        expect(saved.id).not.toBe(leaf.id);
+        expect((await statuses(lib, after)).get(saved.id)).toBe('valid');
+        expect((await eventView(lib, after)).cards[0].members.map(m => m.memory)).toEqual([saved.id]);
+        expect(bridge.currentMembershipHints()?.get(saved.hostId)?.map(h => h.id)).toEqual([event.created]);
+        await exportLibrary(lib);
+    } finally { close(); }
+});
+
 test.each(['keep', 'update'] as const)('native error-suffix deletion waits for UPDATED then retires old summary; %s cannot revive it', async action => {
     const { emit, original, click, close } = await nativeEditFixture();
     try {
@@ -1609,14 +1654,14 @@ test.each(['defer', 'disabled', 'chat', 'swipe', 'generation'])('late UPDATED do
     } finally { close(); }
 });
 
-test('ordinary user edits retire old summaries once; duplicate UPDATED cannot resurrect a review prompt', async () => {
+test('ordinary user edits offer the paired summary for review once; duplicate UPDATED leaves a deferred prompt closed', async () => {
     const { emit, click, close } = await nativeEditFixture();
     try {
         click(0, '用户明确修订的问题'); ctx.chat[0].mes = '用户明确修订的问题';
         await emit('MESSAGE_EDITED', 0); await emit('MESSAGE_UPDATED', 0);
         await new Promise(resolve => setTimeout(resolve, 250));
-        expect(summaryEditPrompt.open).toBe(false);
-        expect((await syncDaily()).memories).toEqual([]);
+        expect(summaryEditPrompt).toMatchObject({ open: true, count: 1 });
+        expect((await syncDaily()).memories).toHaveLength(1);
         deferSummaryEdit(); await emit('MESSAGE_UPDATED', 0);
         await new Promise(resolve => setTimeout(resolve, 250));
         expect(summaryEditPrompt.open).toBe(false);

@@ -51,15 +51,16 @@ test('replaced body retires its unchanged old summary and does not resurrect it 
     await exportLibrary(lib); lib.close();
 });
 
-test('one edited turn leaves later prefix summaries reviewable without rescanning the basis per floor', async () => {
+test.each([true, false])('one changed turn leaves dependent floors reviewable without rescanning the basis per floor (native edit %s)', async native => {
     const { lib, input, branch } = await fixture(100);
     const reads = vi.spyOn(Transaction.prototype, 'get');
     try {
+        if (native) input.messages[0].editedFrom = new Set([input.messages[0].content]);
         input.messages[0].content = 'first source correction';
         await sync(lib, input);
         expect(reads.mock.calls.filter(([store, id]) => store === 'history_snapshots' && id === branch.head).length).toBeLessThan(8);
         const current = await capture(lib, branch.id);
-        expect(current.memories.map(m => m.hostId)).toEqual(input.memories.slice(1).map(m => m.hostId));
+        expect(current.memories.map(m => m.hostId)).toEqual(input.memories.slice(native ? 0 : 1).map(m => m.hostId));
         expect(new Set((await statuses(lib, current)).values())).toEqual(new Set(['needs_review']));
     } finally { reads.mockRestore(); lib.close(); }
 });
