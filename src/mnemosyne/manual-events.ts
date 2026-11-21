@@ -190,7 +190,7 @@ export async function prepareFloorEvent(
   const host = hostVersion(),
     generation = dailyState.generation;
   const overviewMaxChars = eventOverviewMaxChars(), materialMode = eventMaterialMode();
-  const material = eventMaterial(memory, view, new Map(view.refs.map(r => [r.message, r])), new Set(), materialMode);
+  const material = eventMaterial(memory, view, new Map(materialMode === 'summary' ? [] : view.refs.map(r => [r.message, r] as const)), new Set(), materialMode);
   const messages: ChatMsg[] = materialMode === 'both' ? await eventCreationContext(floor, view) : [];
   messages.push(
     {
@@ -290,7 +290,7 @@ async function requestEventOverview(
     `请先处理问题摘要：${problems.slice(0, 3).map(issue => `${issue.floor === undefined ? '楼层未知' : `${issue.deleted ? '原' : ''}#${issue.floor}楼`} ${issue.reason}「${issue.text.slice(0, 24)}」`).join('；') || '来源已失效，请展开事件查看关联成员'}`);
   check(memories.length, '该事件没有有效关联摘要，请先加入内容');
   const byId = new Map(view.memories.map(m => [m.id, m]));
-  const refsByMessage = new Map(view.refs.map(r => [r.message, r]));
+  const refsByMessage = new Map(materialMode === 'summary' ? [] : view.refs.map(r => [r.message, r] as const));
   const memberSet = new Set(memories);
   // eventView can synthesize legacy overview/coverage from progress. Only trust
   // an explicitly persisted full overview receipt; otherwise rebuild once.
@@ -304,7 +304,9 @@ async function requestEventOverview(
   const covered = new Set(reusable ? card.meta.summarized : []);
   const pending = memories.filter(id => !covered.has(id));
   const representedSources = new Set<string>();
-  for (const id of covered) for (const ref of eventSourceRefs(byId.get(id)!, refsByMessage)) representedSources.add(ref.revision);
+  if (materialMode !== 'summary') {
+    for (const id of covered) for (const ref of eventSourceRefs(byId.get(id)!, refsByMessage)) representedSources.add(ref.revision);
+  }
   // Selected text only; each source revision is cleaned/serialized at most once.
   const materials = await prepareEventMaterials(pending.map(id => byId.get(id)!), view, refsByMessage, representedSources, materialMode, preparationGuard);
   const modeChanged = (receipt?.overviewMaterialMode ?? 'both') !== materialMode;

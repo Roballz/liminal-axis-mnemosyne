@@ -1,3 +1,4 @@
+import { manualPrefixCandidate, matchesStoredPrefix, readStoredPrefix } from './stored-source-prefix';
 import { DB_PREFIX, ACTIVE_KEY, assertLibraryEnabled, selectedLibraryName } from './library-policy';
 export { DB_PREFIX, ACTIVE_KEY } from './library-policy';
 import { SharedPayloads, SHARED_META, SHARED_STORE, sharedStore, sharedRow } from './shared-payloads';
@@ -5,7 +6,7 @@ import { STORES, type Store, type Row, check, id } from './model';
 import { readDailySettings, settings } from './event-settings';
 import { LibraryChanges, TransactionChanges } from './change-journal';
 import { materializeMemoryView } from './memory-selections';
-import type { CompactMemoryView, MemoryView, MemorySelectionNode } from './model';
+import type { Block, CompactMemoryView, MemoryRevision, MemoryView, MemorySelectionNode, Snapshot } from './model';
 import { isEvidenceStore, rowRetentionRoots, RetentionRootsCache, RetentionTransaction, RETENTION_CONTROL_STORE } from './retention-roots';
 import { hasStorageReferences, StorageReferences, STORAGE_REFS_READY } from './storage-references';
 export const DB_VERSION = 6;
@@ -18,7 +19,7 @@ export class Transaction {
     // Explicit writes invalidate the key, including maintenance/import operations.
     private readonly immutableRows = new Map<Store, Map<string, Promise<Row | undefined>>>();
     private readCache(store: Store) {
-        if (store !== 'memory_selection_nodes' && store !== 'manifest_blocks') return undefined;
+        if (store !== 'memory_selection_nodes' && store !== 'manifest_blocks' && store !== 'history_snapshots') return undefined;
         let cache = this.immutableRows.get(store);
         if (!cache) { cache = new Map(); this.immutableRows.set(store, cache); }
         return cache;
@@ -32,7 +33,8 @@ export class Transaction {
     async assertWriteStamp(expected: number) {
         check(this.initialWriteStamp && await this.initialWriteStamp === expected, '资料已改变，本次操作已撤销，请重试');
     }
-    private payloads = new SharedPayloads(key => this.rawGet(SHARED_STORE, key), row => this.addStored(SHARED_STORE, row));
+    private payloads = new SharedPayloads(key => this.rawGet(SHARED_STORE, key), row => this.addStored(SHARED_STORE, row), undefined,
+        async memory => readStoredPrefix(memory, await this.rawGet<Snapshot>('history_snapshots', memory.basis), id => this.rawGet<Block>('manifest_blocks', id)));
     private packedWrites: Promise<unknown> = Promise.resolve();
     private packWrite(store: Store, value: Row, put: boolean): Promise<IDBValidKey> {
         // Preserve native structured-clone semantics while all shared-store
@@ -42,7 +44,10 @@ export class Transaction {
             (store === 'event_revisions' || store === 'event_progress');
         const operation = this.packedWrites.then(async () => {
             const logical = sharedRow(row) ? await this.payloads.unpack(store, row) : row;
-            const packed = compact && !sharedRow(row) ? await this.payloads.pack(store, row) : row;
+            const memory = row as MemoryRevision;
+            const prefix = compact && store === 'memory_revisions' && !sharedRow(row) && manualPrefixCandidate(memory) &&
+                await matchesStoredPrefix(memory, await this.rawGet<Snapshot>('history_snapshots', memory.basis), id => this.rawGet<Block>('manifest_blocks', id));
+            const packed = compact && !sharedRow(row) ? await this.payloads.pack(store, row, prefix) : row;
             return put ? this.putStored(store, packed, logical) : this.addStored(store, packed, logical);
         });
         this.packedWrites = operation;
@@ -51,6 +56,16 @@ export class Transaction {
     }
     flushWrites() { return this.packedWrites; }
     async flushEvidenceReads() { await this.packedWrites; await this.retention?.flush(); }
+    /** Old packed evidence may still be decoding its payloads or snapshot blocks. */
+    async deleteArchiveRows(rows: Iterable<readonly [Store, string]>) {
+        const deferred: [Store, string][] = [];
+        for (const [store, id] of rows) {
+            if (store === 'memory_payloads' || store === 'history_snapshots' || store === 'manifest_blocks') deferred.push([store, id]);
+            else await this.delete(store, id);
+        }
+        await this.flushEvidenceReads();
+        for (const [store, id] of deferred) await this.delete(store, id);
+    }
     get sharedWrites() { return this.compactWrites; }
     async retentionRoots(story: string, refresh = false) {
         check(this.retention, '当前事务未包含历史证据存储');
@@ -209,7 +224,8 @@ export class Library {
         }
         const evidence = stores.some(isEvidenceStore);
         const included = [...new Set([...stores, ...(stores.includes('memory_views') ? ['memory_selection_nodes'] : []),
-            ...(stores.some(sharedStore) ? [SHARED_STORE] : []), RETENTION_CONTROL_STORE])];
+            ...(stores.some(sharedStore) ? [SHARED_STORE] : []),
+            ...(stores.includes('memory_revisions') ? ['history_snapshots', 'manifest_blocks'] : []), RETENTION_CONTROL_STORE])];
         const native = this.db.transaction(included, mode);
         // A durable write stamp covers every store and every Library connection.
         // Reorganization checks it between pages and in the final activation barrier.

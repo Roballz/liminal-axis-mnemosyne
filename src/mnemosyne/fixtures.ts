@@ -46,7 +46,7 @@ export function withoutCompactSelections(pack: import('./migration').Package) {
         return { ...identity, selections: Object.fromEntries(entries.map(([family, revision]) => [family, revision])) };
     });
     if (pack.data.memory_payloads?.length) {
-        const expand = payloadReader(pack.data.memory_payloads);
+        const expand = payloadReader(pack.data.memory_payloads, pack.data);
         for (const store of Object.keys(SHARED_FIELDS) as (keyof typeof SHARED_FIELDS)[])
             pack.data[store] = pack.data[store].map(row => expand(row, store));
         pack.data.library_meta = pack.data.library_meta.filter(row => row.id !== SHARED_META);

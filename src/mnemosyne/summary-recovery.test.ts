@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import { Library, activateLibrary, freshLibraryName } from './db';
 import { bindDaily, syncDaily, invalidateDaily, captureSummaryEvidence, attachSummaryEvidence, confirmFork, dailyState } from './bridge';
-import { capture, statuses, keepSummary } from './canonical';
+import { capture, statuses, keepSummary, summarySources } from './canonical';
 import { exportLibrary, restoreLibrary } from './migration';
 import { withoutCompactSelections, withoutTableHistory } from './fixtures';
 import { fingerprint, row, STORES } from './model';
@@ -101,7 +101,8 @@ test('manual confirmation is explicit, free of model calls, and an earlier edit 
  expect(editLeafAt(3,summary.content,'','')).toBe(true);invalidateDaily();
  let current=await syncDaily(), approved=current.memories.find(m=>m.hostId==='new-leaf')!;
  expect(approved.id).not.toBe(summary.id);expect(approved.sourceRecovery).toBeUndefined();
- expect(approved.inputRefs).toEqual(current.refs);expect(approved.coverage).toEqual([]);
+ expect(approved.inputRefs).toEqual([]);
+ expect(await lib.transaction(['history_snapshots','manifest_blocks'],'readonly', tx => summarySources(tx, approved))).toEqual(current.refs);expect(approved.coverage).toEqual([]);
  expect(approved.declaration).toContain('人工核对恢复摘要');expect((await statuses(lib,current)).get(approved.id)).toBe('valid');
  expect(await lib.get('memory_revisions',summary.id)).toEqual(summary);
  await exportLibrary(lib);

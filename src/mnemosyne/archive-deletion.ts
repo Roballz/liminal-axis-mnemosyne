@@ -40,7 +40,7 @@ export interface ArchiveDeletionPlan {
 /** Preview exact records; shared parent history is never silently removed. */
 export async function previewArchiveDeletion(lib: Library, branchId: string): Promise<ArchiveDeletionPlan> {
     const before = await snapshotLibraryForDeletion(lib);
-    const expand = payloadReader(before.data.memory_payloads);
+    const expand = payloadReader(before.data.memory_payloads, before.data);
     const data = Object.fromEntries(STORES.map(s => [s, before.data[s].map(row => expand(row, s))])) as Package['data'];
     const branch = data.branches.find(b => b.id === branchId) as Branch | undefined;
     check(branch, '档案已不存在，请刷新列表');
@@ -120,12 +120,7 @@ export async function commitArchiveDeletion(lib: Library, plan: ArchiveDeletionP
     await lib.transaction(STORES, 'readwrite', async tx => {
         check(guard(), '聊天已改变，请重新预览删除');
         for (const store of STORES) check(equal(await tx.rawAll(store), plan.before.data[store]), '档案已改变，请重新预览删除');
-        for (const store of STORES) if (store !== 'memory_payloads')
-            for (const id of plan.remove[store]) await tx.delete(store, id);
-        // Retention bookkeeping reads the deleted row's original packed fields.
-        // Drain those reads before deleting their blocks, in the same transaction.
-        await tx.flushEvidenceReads();
-        for (const id of plan.remove.memory_payloads) await tx.delete('memory_payloads', id);
+        await tx.deleteArchiveRows(STORES.flatMap(store => plan.remove[store].map(id => [store, id] as const)));
         await tx.put('library_meta', plan.origins);
         const marker = await tx.get<DeletionMarker>('library_meta', DELETIONS_KEY);
         await tx.put('library_meta', { id: DELETIONS_KEY, schema: 1,

@@ -1,4 +1,5 @@
-import { check, type Row, type Store } from './model';
+import { archivePrefixReader, prefixEncoded } from './stored-source-prefix';
+import { check, type MemoryRevision, type SourceRef, type Row, type Store } from './model';
 
 export const SHARED_META = 'shared-storage-v1';
 export const SHARED_STORE = 'memory_payloads' as const;
@@ -35,12 +36,13 @@ export function validatePayload(row: Payload) {
         row.kind === 'node' && Array.isArray(row.value) && row.value.length > 0 && row.value.length <= 64 &&
             row.value.every((v: any) => typeof v === 'string'), '共享内容结构非法');
 }
-function expandRow(row: Row, store: Store, read: (key: string) => any): Row {
+function expandRow(row: Row, store: Store, read: (key: string) => any, prefix?: SourceRef[]): Row {
     if (!sharedRow(row)) return row;
     const value = row as any;
-    check(sharedStore(store) && value.sharedSchema === 1, '共享内容版本非法');
+    check(sharedStore(store) && (value.sharedSchema === 1 || prefixEncoded(row) && store === 'memory_revisions' && !!prefix), '共享内容版本非法');
     const result = { ...value }; delete result.sharedSchema;
-    let refs = 0;
+    if (prefix) result.inputRefs = prefix;
+    let refs = prefix ? 1 : 0;
     for (const field of fields(store)) if (isRef(result[field])) {
         refs++; result[field] = read(result[field].shared);
         check(['content', 'title', 'overview', 'text'].includes(field) ? typeof result[field] === 'string' : Array.isArray(result[field]), '共享字段类型非法');
@@ -50,7 +52,8 @@ function expandRow(row: Row, store: Store, read: (key: string) => any): Row {
 }
 
 /** Package validation shares decoded blocks. Never mutate the physical archive. */
-export function payloadReader(rows: readonly Row[]) {
+export function payloadReader(rows: readonly Row[], data: { history_snapshots?: Row[]; manifest_blocks?: Row[] } = {}) {
+    const prefix = archivePrefixReader(data);
     const byId = new Map<string, Payload>(), cache = new Map<string, any>(), visiting = new Set<string>();
     for (const row of rows as Payload[]) { validatePayload(row); check(!byId.has(row.id), '共享内容ID重复'); byId.set(row.id, row); }
     const read = (key: string, depth = 0): any => {
@@ -72,7 +75,7 @@ export function payloadReader(rows: readonly Row[]) {
     };
     // Validate unused blocks too; deletion may leave immutable unreferenced blocks.
     for (const id of byId.keys()) read(id);
-    return (row: Row, store: Store) => expandRow(row, store, read);
+    return (row: Row, store: Store) => expandRow(row, store, read, prefixEncoded(row) ? prefix(row as MemoryRevision) : undefined);
 }
 
 export class SharedPayloads {
@@ -80,7 +83,7 @@ export class SharedPayloads {
     private cacheBytes = 0;
     private pending = new Map<string, Promise<Payload | undefined>>();
     constructor(private load: (key: string) => Promise<Payload | undefined>, private add: (row: Payload) => Promise<unknown>,
-        private hash = payloadKey) {}
+        private hash = payloadKey, private readPrefix?: (row: MemoryRevision) => Promise<SourceRef[]>) {}
     private remember(row: Payload) {
         if (this.cache.has(row.id)) return;
         const size = JSON.stringify(row).length;
@@ -135,10 +138,11 @@ export class SharedPayloads {
         }
         return blocks[0].id;
     }
-    async pack(store: Store, row: Row): Promise<Row> {
+    async pack(store: Store, row: Row, verifiedPrefix = false): Promise<Row> {
         if (!sharedStore(store) || sharedRow(row)) return row;
         const result = { ...row } as any;
-        let packed = false;
+        let packed = verifiedPrefix;
+        if (verifiedPrefix) result.inputRefs = (row as MemoryRevision).inputRefs.length;
         for (const field of fields(store)) {
             const value = result[field];
             // Tiny values stay inline, avoiding more IO/overhead than the original field.
@@ -148,7 +152,7 @@ export class SharedPayloads {
                 result[field] = { shared: await this.sequence(value) }; packed = true;
             }
         }
-        if (packed) result.sharedSchema = 1;
+        if (packed) result.sharedSchema = verifiedPrefix ? 2 : 1;
         return result;
     }
     async unpack(store: Store, row: Row): Promise<Row> {
@@ -174,6 +178,7 @@ export class SharedPayloads {
         for (const field of fields(store)) if (isRef((row as any)[field])) {
             const key = (row as any)[field].shared; values.set(key, await read(key));
         }
-        return expandRow(row, store, key => structuredClone(values.get(key)));
+        const prefix = prefixEncoded(row) ? await this.readPrefix?.(row as MemoryRevision) : undefined;
+        return expandRow(row, store, key => structuredClone(values.get(key)), prefix);
     }
 }

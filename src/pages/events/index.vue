@@ -512,7 +512,7 @@ onBeforeUnmount(() => {
       <label>生成概要发送的材料<BbsSelect v-model="settings.overviewMaterialMode" :options="[
         { value: 'summary', label: '仅摘要' }, { value: 'body', label: '仅正文' }, { value: 'both', label: '摘要+正文' }
       ]" aria-label="生成概要发送的材料" /></label>
-      <small>默认摘要+正文。只影响发送的材料文本；成员ID、来源标识和原有剧情时间保留。切换后可手动更新重建覆盖，不会仅因切换自动调用模型；缺失所选材料时明确提示，不偷偷换模式。新建事件选单一材料时不附带原摘要生成的历史上下文，避免混入未选文本；摘要+正文保留原创建上下文。</small>
+      <small>默认摘要+正文。仅摘要发送摘要、成员ID和剧情时间；正文模式另附正文来源标识。切换后可手动更新重建覆盖，不会仅因切换自动调用模型；缺失所选材料时明确提示，不偷偷换模式。新建事件选单一材料时不附带原摘要生成的历史上下文，避免混入未选文本；摘要+正文保留原创建上下文。</small>
       <label
         >事件概要上限（字，含标点）<input
           v-model.number="settings.overviewMaxChars" type="number" min="1" max="20000" step="1"

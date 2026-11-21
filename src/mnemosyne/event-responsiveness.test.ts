@@ -68,7 +68,7 @@ test('event bodies resolve through the message index without scanning the chat s
     const refs = new Map(view.refs.map(r => [r.message, r])), represented = new Set<string>();
     const materials = view.memories.map(memory => eventMaterial(memory, view, refs, represented, 'both'));
     expect(materials).toHaveLength(80);
-    expect(materials.every(m => m.sources[0]?.body?.includes('合成剧情'))).toBe(true);
+    expect(materials.every(m => 'sources' in m && m.sources[0]?.body.includes('合成剧情'))).toBe(true);
     expect(find).not.toHaveBeenCalled();
     const stale = { ...view.memories[0], anchor: null, inputRefs: [{ message: 'missing', revision: view.refs[0].revision }] };
     expect(() => eventMaterial(stale, view, refs, new Set(), 'body')).toThrow('正文缺失');
@@ -144,4 +144,15 @@ test('event page sorts names naturally before limiting cards without mutating so
     state.cardLimit.value = 2;
     expect(state.shownCards.value.map((c: any) => c.meta.title)).toEqual(['S-1', 'S-2']);
   } finally { scope.stop(); }
+});
+
+test('summary-only material never enumerates a long generation source list', async () => {
+  const { lib, view } = await fixture(1);
+  try {
+    const memory = { ...view.memories[0], content: '摘'.repeat(500) };
+    Object.defineProperty(memory, 'inputRefs', { get() { throw new Error('unexpected source scan'); } });
+    const [material] = await prepareEventMaterials([memory], view, new Map(), new Set(), 'summary', () => true);
+    expect(JSON.parse(material.text)).toEqual({ id: memory.id, storyTime: memory.storyTime, summary: memory.content });
+    expect(material.bytes).toBeLessThan(2000);
+  } finally { lib.close(); }
 });

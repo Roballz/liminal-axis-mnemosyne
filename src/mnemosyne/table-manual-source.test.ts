@@ -30,7 +30,7 @@ function table(view: CapturedView, sources: string[], count = 1): TableInput[] {
     return [{ def, rows }];
 }
 
-test('legacy prefix survives appended tail and repeated manual edits with accumulated source IDs', async () => {
+test('legacy prefix survives appended tail and repeated manual edits without copying source IDs', async () => {
     const f = await fixture(2), old = leaf(f.view);
     try {
         expect(old.inputRefs).toEqual([]);
@@ -39,11 +39,12 @@ test('legacy prefix survives appended tail and repeated manual edits with accumu
         let { view, validity } = await sync(f);
         const first = leaf(view);
         expect(first.basis).not.toBe(old.basis);
-        expect(first.inputRefs).toEqual(f.view.refs.slice(0, 2));
+        expect(first.inputRefs).toEqual([]);
         expect(validity.get(first.id)).toBe('valid');
         expect((await allowedTableSources(f.lib, view, table(view, [old.id]), validity)).has(old.id)).toBe(true);
         manuallyEdit(f.input.memories[0]); ({ view, validity } = await sync(f));
         expect(leaf(view).id).not.toBe(first.id);
+        expect(leaf(view).inputRefs).toEqual([]);
         const inputs = table(view, [old.id, first.id]), before = structuredClone(inputs);
         const allowed = await allowedTableSources(f.lib, view, inputs, validity);
         expect([old.id, first.id].every(id => allowed.has(id))).toBe(true);

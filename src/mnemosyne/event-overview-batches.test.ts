@@ -309,9 +309,9 @@ test.each(['summary', 'body', 'both'] as const)('%s mode sends only selected tex
       expect(full.includes('SUMMARY_SENTINEL_ONLY')).toBe(mode !== 'body');
       expect(full.includes('BODY_SENTINEL_ONLY')).toBe(mode !== 'summary');
       expect(material.id).toBe(memory.id); expect(material.storyTime).toBe(input.memories[0].storyTime);
-      expect(material.sources[0].message).toBe(bodyView.refs[0].message);
-      expect(material.sources[0].revision).toBe(bodyView.refs[0].revision);
-      expect('summary' in material).toBe(mode !== 'body'); expect('body' in material.sources[0]).toBe(mode !== 'summary');
+      expect('summary' in material).toBe(mode !== 'body');
+      if (mode === 'summary') expect(Object.keys(material).sort()).toEqual(['id', 'storyTime', 'summary']);
+      else expect(material.sources[0]).toMatchObject({ ...bodyView.refs[0], body: expect.any(String) });
       // Mid-request setting changes must not change this operation's saved receipt.
       settings.overviewMaterialMode = mode === 'summary' ? 'body' : 'summary';
       return response();

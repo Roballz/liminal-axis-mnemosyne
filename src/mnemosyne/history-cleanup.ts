@@ -1,3 +1,4 @@
+import { coreFormatVersion, manualPrefixCandidate, matchesStoredPrefix, prefixEncoded, readStoredPrefix } from './stored-source-prefix';
 import { Library, type Transaction, type StoreIndex } from './db';
 import { STORES, check, equal, fingerprint, row, type Store, type Row, type Branch, type Memory, type MemoryRevision,
     type MemoryView, type MemorySelectionNode, type Snapshot, type Block, type Revision, type SourceBody, type TableDef } from './model';
@@ -23,7 +24,8 @@ class HistoryPlan {
     private indexes = new Map<Store, Map<string, Map<string, Set<string>>>>();
     private roots = new Map<string, RootCounts>();
     private payloads = new SharedPayloads(async id => this.rows.get('memory_payloads')!.get(id) as any,
-        async value => { this.store('memory_payloads', value); });
+        async value => { this.store('memory_payloads', value); }, undefined,
+        async memory => readStoredPrefix(memory, await this.rawGet<Snapshot>('history_snapshots', memory.basis), id => this.rawGet<Block>('manifest_blocks', id)));
     readonly tx = this as unknown as Transaction;
     constructor(data: Package['data']) {
         for (const store of STORES) { this.rows.set(store, new Map()); this.indexes.set(store, new Map());
@@ -77,9 +79,9 @@ class HistoryPlan {
         for (const value of await this.rawAll(store, index, key)) result.push((await this.get<T>(store, value.id))!);
         return result;
     }
-    async put(store: Store, value: Row) {
+    async put(store: Store, value: Row, verifiedPrefix = false) {
         if (isEvidenceStore(store)) { const old = await this.get(store, value.id); if (old) this.count(old, -1); this.count(value, 1); }
-        this.store(store, sharedStore(store) ? await this.payloads.pack(store, value) : value); return value.id;
+        this.store(store, sharedStore(store) ? await this.payloads.pack(store, value, verifiedPrefix) : value); return value.id;
     }
     async add(store: Store, value: Row) { check(!this.rows.get(store)!.has(value.id), '历史清理生成了重复身份'); return this.put(store, value); }
     async delete(store: Store, id: string) {
@@ -100,12 +102,12 @@ class HistoryPlan {
     }
 }
 
-const validation = (data: Package['data']) => ({ format: 'mnemosyne-daily' as const, version: 18 as const, schema: 1 as const,
+const validation = (data: Package['data']) => ({ format: 'mnemosyne-daily' as const, version: coreFormatVersion(data), schema: 1 as const,
     created: Date.now(), excluded: [], counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Package['counts'], data });
 const bytes = (data: Package['data']) => STORES.reduce((sum, store) => sum + 2 +
     data[store].reduce((n, row) => n + utf8ByteLength(JSON.stringify(row)) + 1, 0), 0);
 export interface HistoryCleanupReport {
-    beforeBytes: number; afterBytes: number; removed: Record<Store, number>; changed: number; archives: number;
+    beforeBytes: number; afterBytes: number; removed: Record<Store, number>; changed: number; archives: number; compactedPrefixes: number;
 }
 
 /** Existing v1-v17 history can be reclaimed in place. Build and fully validate a
@@ -180,8 +182,17 @@ export async function cleanLibraryHistory(lib: Library, guard: () => Promise<boo
     await retireSourceHistory(plan);
     // Existing unchanged events and summaries join the same immutable content pool;
     // child branches now reference that content and add payloads only on a real edit.
-    for (const store of ['memory_revisions', 'reviews', 'event_revisions', 'event_progress'] as const)
-        for (const value of await plan.all(store)) await plan.put(store, value);
+    let compactedPrefixes = 0;
+    const previouslyEncoded = new Set(before.data.memory_revisions.filter(prefixEncoded).map(row => row.id));
+    for (const store of ['memory_revisions', 'reviews', 'event_revisions', 'event_progress'] as const) {
+        for (const value of await plan.all(store)) {
+            const memory = value as MemoryRevision;
+            const prefix = store === 'memory_revisions' && manualPrefixCandidate(memory) &&
+                await matchesStoredPrefix(memory, await plan.rawGet<Snapshot>('history_snapshots', memory.basis), id => plan.rawGet<Block>('manifest_blocks', id));
+            if (prefix && !previouslyEncoded.has(memory.id)) compactedPrefixes++;
+            await plan.put(store, value, prefix);
+        }
+    }
     await plan.put('library_meta', { id: SHARED_META, schema: 1, value: { version: 1 } } as Row);
     const garbage = unreferencedStorage(plan.data());
     for (const store of ['memory_payloads', 'memory_selection_nodes'] as const)
@@ -196,7 +207,7 @@ export async function cleanLibraryHistory(lib: Library, guard: () => Promise<boo
         for (const row of before.data[store]) if (!after.has(row.id)) { deletes.push([store, row.id]); removed[store]++; }
         for (const row of data[store]) if (!equal(prior.get(row.id), row)) puts.push([store, row]);
     }
-    const report = { beforeBytes, afterBytes: bytes(data), removed, changed: puts.length, archives };
+    const report = { beforeBytes, afterBytes: bytes(data), removed, changed: puts.length, compactedPrefixes, archives };
     check(await guard(), '清理期间聊天或页面改变，未删除任何数据');
     const compact = lib.compactWrites, physical = lib.preservePhysicalWrites;
     lib.compactWrites = false; lib.preservePhysicalWrites = true;
@@ -204,9 +215,7 @@ export async function cleanLibraryHistory(lib: Library, guard: () => Promise<boo
         await lib.transaction(STORES, 'readwrite', async tx => {
             await assertWriteStamp(tx, before.stamp);
             for (const [store, row] of puts) await tx.put(store, row);
-            for (const [store, id] of deletes) if (store !== 'memory_payloads') await tx.delete(store, id);
-            await tx.flushEvidenceReads();
-            for (const [store, id] of deletes) if (store === 'memory_payloads') await tx.delete(store, id);
+            await tx.deleteArchiveRows(deletes);
             tx.rebuildStorageReferences(data);
         });
         lib.compactWrites = true;

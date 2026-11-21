@@ -287,7 +287,7 @@ async function reorganize() {
   } finally { reorganizeProgress.value = ''; }
 }
 async function cleanHistory() {
-  if (!confirm('永久清理当前库各档案中已替换且无引用的旧正文、旧摘要、过期回执和无用索引，并彻底移除旧版已删除的表。保留事件关联、概要、进展及其必要来源，待审核内容仍需审核；保留其他分支仍在使用的来源依赖。无法再查看被清理的历史版本，建议先保留一份整库核心包。继续？')) return;
+  if (!confirm('永久清理当前库各档案中已替换且无引用的旧正文、旧摘要、过期回执和无用索引，并彻底移除旧版已删除的表。与固定快照逐项一致的手改摘要来源列表会无损压缩。保留事件关联、概要、进展及其必要来源，待审核内容仍需审核；保留其他分支仍在使用的来源依赖。无法再查看被清理的历史版本，建议先保留一份整库核心包。继续？')) return;
   const lib = await activeLibrary(), selector = localStorage.getItem(ACTIVE_KEY);
   await prepareCoreBackup(lib, () => !disposed && selector === localStorage.getItem(ACTIVE_KEY));
   const stamp = `${dailyState.generation}:${dailyState.revision}:${dailyState.tableRevision}`;
@@ -301,7 +301,7 @@ async function cleanHistory() {
     }));
     packageSize.value = undefined;
     invalidateDaily(); await refresh();
-    notice.value = `历史清理完成：数据记录从 ${mib(result.beforeBytes)} MiB 减至 ${mib(result.afterBytes)} MiB；移除 ${result.removed.memory_revisions} 个旧摘要版本、${result.removed.memory_views} 份旧视图、${result.removed.history_snapshots} 份旧正文索引。请重新导出核心包；以前下载的文件不会自动缩小。`;
+    notice.value = `历史清理完成：数据记录从 ${mib(result.beforeBytes)} MiB 减至 ${mib(result.afterBytes)} MiB；移除 ${result.removed.memory_revisions} 个旧摘要版本、${result.removed.memory_views} 份旧视图、${result.removed.history_snapshots} 份旧正文索引，另压缩 ${result.compactedPrefixes} 条摘要的重复来源编号。请重新导出核心包；以前下载的文件不会自动缩小。`;
   } finally { reorganizeProgress.value = ''; }
 }
 async function copyPackageSize() {

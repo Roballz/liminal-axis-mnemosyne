@@ -1,3 +1,4 @@
+import { RECOVERED_MANUAL_PREFIX } from './stored-source-prefix';
 import { resolveMemoryFamilies } from './memory-families';
 import { readSource, snapshotVariants, retireCurrentBodies } from './current-body';
 import { ensureTableHistory, reconcileTableHistory, inheritTableHistory, rebaseTableAnnotations } from './table-history';
@@ -386,15 +387,21 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 else if (host.manualEdit && prior && !host.inputRefs) {
                     // A manual save explicitly confirms applicability to the currently displayed
                     // prefix. It does not recreate the lost generation evidence on the old revision.
-                    const sources = prior.sourceRecovery
+                    // L0 manual applicability already has an exact compact representation:
+                    // the current immutable snapshot and the reply anchor. Keep explicit
+                    // generation inputs on their own path, including real batch evidence.
+                    const prefix = host.level === 0 && !!anchor && prior.anchor === anchor &&
+                        (!!prior.sourceRecovery || !prior.inputRefs.length || prior.declaration === RECOVERED_MANUAL_PREFIX);
+                    const sources = prefix ? [] : prior.sourceRecovery
                         ? refs.slice(0, anchor ? refs.findIndex(r => r.message === anchor) + 1 : refs.length)
                         : await summarySources(tx, prior);
                     const updated = sources.map(r => currentRef(r.message));
                     if (updated.every((r): r is SourceRef => !!r)) {
                         revision.inputRefs = updated;
+                        if (prefix) revision.basis = snapshot.id;
                         revision.coverage = prior.sourceRecovery ? [] : prior.coverage.map(r => currentRef(r.message)!).filter(Boolean);
                         revision.declaration = prior.sourceRecovery
-                            ? '人工核对恢复摘要：确认适用于当前楼层及此前正文；旧生成来源仍缺失，原摘要与来源声明保留。'
+                            ? RECOVERED_MANUAL_PREFIX
                             : '人工修订摘要：以当前来源版本确认内容；原生成版本保留。';
                         // Preserve recorded dependency identities, selecting their current version below.
                         if (!host.children.length) host = { ...host, children: await Promise.all(prior.dependencies.map(async id => {

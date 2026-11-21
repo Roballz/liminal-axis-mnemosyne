@@ -1,3 +1,4 @@
+import { coreFormatVersion, prefixEncoded } from './stored-source-prefix';
 import { Library, request, type Transaction } from './db';
 import { STORES, check, equal, fingerprint, type Binding, type Branch, type Row, type Store, type Snapshot, type Block } from './model';
 import { validateCurrentData, type Package } from './migration';
@@ -20,7 +21,7 @@ const blank = () => Object.fromEntries(STORES.map(s => [s, []])) as unknown as P
 const label = (scope: string) => { try { return String(JSON.parse(scope)[1] || scope); } catch { return scope; } };
 
 function packageContents(data: Package['data']) {
-    return { format: 'mnemosyne-daily' as const, version: 18 as const, schema: 1 as const, created: Date.now(),
+    return { format: 'mnemosyne-daily' as const, version: coreFormatVersion(data), schema: 1 as const, created: Date.now(),
         excluded: ['host-chat-files', 'chat-state-delta', 'knowledge-files-and-vectors', 'vector-indexes', 'api-secrets'],
         counts: Object.fromEntries(STORES.map(s => [s, data[s].length])) as Package['counts'], data };
 }
@@ -171,7 +172,7 @@ function incomingRecords(archive: ArchivePackage, existingBranches: ReadonlyMap<
     if (!data.branches.some(b => b.id !== target && existingBranches.has(b.id))) return;
     const bindings = new Set(data.host_bindings.filter(b => b.branch === target).map(b => b.id));
     const records = new Map(STORES.map(store => [store, new Map(data[store].map(row => [row.id, row]))]));
-    const expand = payloadReader(data.memory_payloads);
+    const expand = payloadReader(data.memory_payloads, data);
     const roots: RecordLink[] = [['branches', target]];
     for (const store of STORES) for (const row of data[store]) {
         if (row.branch === target || store === 'source_bodies' || store === 'library_meta' ||
@@ -200,7 +201,7 @@ export async function restoreVerifiedArchive(lib: Library, archive: ArchivePacka
     check(await guard(), '聊天或页面已改变，未恢复档案');
     const before = await snapshotWithStamp(lib), data = before.data;
     const maps = new Map(STORES.map(s => [s, new Map(data[s].map(r => [r.id, r]))]));
-    const expand = payloadReader(data.memory_payloads);
+    const expand = payloadReader(data.memory_payloads, data);
     const retired = new Map<string, Binding>(((data.library_meta.find(r => r.id === 'retired-source-bindings') as any)?.value.bindings ?? []).map((b: Binding) => [b.id, b]));
     const get = (s: Store, id: string) => {
         const row = maps.get(s)!.get(id) ?? (s === 'host_bindings' ? retired.get(id) : undefined);
@@ -228,6 +229,7 @@ export async function restoreVerifiedArchive(lib: Library, archive: ArchivePacka
     const merged = blank();
     for (const store of STORES) merged[store] = data[store].filter(r => !owned(store, r) || retained.get(store)?.has(r.id));
     const destination = new Map(STORES.map(s => [s, new Map(merged[s].map(r => [r.id, r]))]));
+    let expandIncoming: ReturnType<typeof payloadReader> | undefined;
     const incoming = incomingRecords(archive, maps.get('branches')!);
     for (const store of STORES) for (const row of archive.pack.data[store]) {
         if (incoming && !incoming.get(store)?.has(row.id)) continue;
@@ -238,8 +240,13 @@ export async function restoreVerifiedArchive(lib: Library, archive: ArchivePacka
             store === 'host_bindings')) {
             destination.get(store)!.set(prior.id, prior); continue;
         }
-        if (existing && !(store === 'branches' && row.id === target))
-            check(equal(existing, row), `共享记录与现有档案冲突，未恢复 ${store}/${row.id}`);
+        if (existing && !(store === 'branches' && row.id === target) && !equal(existing, row)) {
+            if (store === 'memory_revisions' && (prefixEncoded(existing) || prefixEncoded(row))) {
+                expandIncoming ??= payloadReader(archive.pack.data.memory_payloads, archive.pack.data);
+                if (equal(expand(existing, store), expandIncoming(row, store))) continue;
+            }
+            throw new Error(`共享记录与现有档案冲突，未恢复 ${store}/${row.id}`);
+        }
         destination.get(store)!.set(row.id, row);
     }
     // The target must keep its real current binding after a rename. No other chat
@@ -284,9 +291,7 @@ export async function restoreVerifiedArchive(lib: Library, archive: ArchivePacka
         await lib.transaction(STORES, 'readwrite', async tx => {
             await assertWriteStamp(tx, before.stamp);
             for (const [store, row] of put) await tx.put(store, row);
-            for (const [store, id] of remove) if (store !== 'memory_payloads') await tx.delete(store, id);
-            await tx.flushEvidenceReads();
-            for (const [store, id] of remove) if (store === 'memory_payloads') await tx.delete(store, id);
+            await tx.deleteArchiveRows(remove);
         });
         lib.compactWrites = compact || merged.library_meta.some(r => r.id === SHARED_META);
     } catch (error) { lib.compactWrites = compact; throw error; }

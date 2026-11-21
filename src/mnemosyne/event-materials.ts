@@ -12,24 +12,22 @@ export function eventSourceRefs(memory: MemoryRevision, refsByMessage: Map<strin
 /** Omit disabled text fields entirely; never fall back to a different material mode. */
 export function eventMaterial(memory: MemoryRevision, view: CapturedView, refsByMessage: Map<string, SourceRef>,
   representedSources: Set<string>, mode: EventMaterialMode) {
+  const identity = { id: memory.id, storyTime: memory.storyTime };
+  if (mode !== 'body') check(memory.content.trim(), `事件成员 ${memory.id} 的摘要为空，未发送；请修复摘要或选择正文模式`);
+  if (mode === 'summary') return { ...identity, summary: memory.content };
   const refs = eventSourceRefs(memory, refsByMessage);
-  const includeSummary = mode !== 'body', includeBody = mode !== 'summary';
-  if (includeSummary) check(memory.content.trim(), `事件成员 ${memory.id} 的摘要为空，未发送；请修复摘要或选择正文模式`);
-  if (includeBody) check(refs.length, `事件成员 ${memory.id} 没有可用正文来源，未发送；请选择摘要模式或修复来源`);
-  const sources: (SourceRef & { body?: string })[] = [];
+  check(refs.length, `事件成员 ${memory.id} 没有可用正文来源，未发送；请选择摘要模式或修复来源`);
+  const sources: (SourceRef & { body: string })[] = [];
   for (const ref of refs) {
     if (representedSources.has(ref.revision)) continue;
     representedSources.add(ref.revision);
-    if (includeBody) {
-      const current = refsByMessage.get(ref.message);
-      const body = sourceRefMatches(view.branch, ref, current) ? view.sources.get(current!.revision)?.content : undefined;
-      const cleaned = body == null ? '' : cleanBody(body);
-      check(cleaned.trim(), `事件成员 ${memory.id} 的正文缺失或清洗后为空，未发送；请选择摘要模式或修复来源`);
-      sources.push({ ...ref, body: cleaned });
-    } else sources.push({ ...ref });
+    const current = refsByMessage.get(ref.message);
+    const body = sourceRefMatches(view.branch, ref, current) ? view.sources.get(current!.revision)?.content : undefined;
+    const cleaned = body == null ? '' : cleanBody(body);
+    check(cleaned.trim(), `事件成员 ${memory.id} 的正文缺失或清洗后为空，未发送；请选择摘要模式或修复来源`);
+    sources.push({ ...ref, body: cleaned });
   }
-  return { id: memory.id, storyTime: memory.storyTime,
-    ...(includeSummary ? { summary: memory.content } : {}), sources };
+  return { ...identity, ...(mode === 'both' ? { summary: memory.content } : {}), sources };
 }
 
 /** Keep long-chain preparation cooperative, outside every IndexedDB transaction. */

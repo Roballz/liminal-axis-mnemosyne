@@ -90,3 +90,53 @@ test('old packages with inline source text and predecessor chains clean up witho
     expect([...(await capture(restored, child.id)).sources.values()].map(s => s.content)).toEqual([...before.sources.values()].map(s => s.content));
     restored.close(); lib.close();
 });
+
+test('manual source prefixes compact losslessly, including after a v18/v19 restore, repeat cleanup and deletion', async () => {
+    const { lib, view, branch } = await fixture(6);
+    const { statuses } = await import('./canonical');
+    const { exportArchive, restoreArchive } = await import('./archive-package');
+    const { commitArchiveDeletion, previewArchiveDeletion } = await import('./archive-deletion');
+    const { commitManualEvent } = await import('./manual-events');
+    const declaration = '人工修订摘要：以当前来源版本确认内容；原生成版本保留。';
+    const prefix = { ...view.memories.at(-1)!, inputRefs: view.refs, declaration };
+    const subset = { ...view.memories[2], inputRefs: [view.refs[0], view.refs[5]], declaration };
+    const generated = { ...view.memories[1], inputRefs: view.refs.slice(0, 4) };
+    try {
+        await lib.transaction(['memory_revisions'], 'readwrite', async tx => {
+            for (const item of [prefix, subset, generated]) await tx.put('memory_revisions', item);
+        });
+        let captured = await capture(lib, branch.id);
+        const event = await commitManualEvent(lib, captured, null, [prefix.id], JSON.stringify({
+            title: '手改摘要', status: 'open', keywords: ['关键词'], overview: '原概要', progress: '进展',
+            latestProgress: { text: '最新进展', memory: prefix.id },
+        }), () => true);
+        captured = await capture(lib, branch.id);
+        const oldArchive = await exportArchive(lib, branch.id);
+        expect(oldArchive.pack.version).toBe(18);
+        const beforeStates = await statuses(lib, captured);
+        expect((await cleanLibraryHistory(lib, async () => true)).compactedPrefixes).toBe(1);
+        const pack = await exportLibrary(lib);
+        expect(pack.version).toBe(19);
+        expect(pack.data.memory_revisions.find(m => m.id === prefix.id)).toMatchObject({ sharedSchema: 2, inputRefs: 12 });
+        for (const original of [prefix, subset, generated]) expect(await lib.get('memory_revisions', original.id)).toEqual(original);
+        expect((await cleanLibraryHistory(lib, async () => true)).compactedPrefixes).toBe(0);
+
+        const archive = await exportArchive(lib, branch.id), restored = await restoreLibrary(pack, false);
+        try {
+            for (const source of [oldArchive, archive]) {
+                await restoreArchive(restored, source, async () => true);
+                const current = await capture(restored, branch.id);
+                expect(await statuses(restored, current)).toEqual(beforeStates);
+                expect(await restored.get('memory_revisions', prefix.id)).toEqual(prefix);
+                const card = (await eventView(restored, current)).cards.find(c => c.chain.id === event)!;
+                expect(card.members.map(m => m.memory)).toEqual([prefix.id]);
+                expect(card.meta).toMatchObject({ overview: '原概要', keywords: ['关键词'], latestProgress: { memory: prefix.id, text: '最新进展' } });
+            }
+            await commitArchiveDeletion(restored, await previewArchiveDeletion(restored, branch.id), () => true);
+            expect(await restored.get('memory_revisions', prefix.id)).toBeUndefined();
+        } finally { restored.close(); }
+        const physical = pack.data.memory_revisions.find(m => m.id === prefix.id) as any;
+        physical.inputRefs--;
+        await expect(restoreLibrary(pack, false)).rejects.toThrow('前缀与楼层不符');
+    } finally { lib.close(); }
+});
