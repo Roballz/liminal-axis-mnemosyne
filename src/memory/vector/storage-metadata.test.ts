@@ -55,7 +55,7 @@ it('v1 additive migrations preserve vectors and exact original files without ree
   expect(metadata).toEqual([{ ...legacy, sourceText: undefined, chunks: undefined, chunkCount: 2 }].map(({ sourceText, chunks, ...row }) => row));
   expect(await localStore.reconcile('migration', 'chat:old', present([item(0)]))).toEqual({ deleted: 0, missing: [], stalePayload: [] });
   const hits = await localStore.search('migration', ['chat:old'], [vector]);
-  expect(hits.results[0]).toMatchObject({ document: item(0).document, mesFull: item(0).mesFull, similarity: 1 });
+  expect(hits.results[0]).toMatchObject({ leafId: item(0).leafId, document: '', mesFull: null, similarity: 1 });
   expect(await recallKnowledge(legacy.database, metadata, [vector], cfg)).toContain('甲');
   expect(embed.embedTexts).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
 });
@@ -76,7 +76,7 @@ it('128 large payloads reconcile from hashes; unchanged reconciliation reads onl
   expect((await localStore.reconcile(database, scope, changedSource)).missing).toEqual([items[0].leafId]);
   all.mockClear(); get.mockClear();
   await localStore.updatePayload(database, scope, [{ leafId: items[1].leafId, payloadHash: 'updated', mesFull: '新正文' }]);
-  expect(get.mock.contexts.filter(store => (store as IDBObjectStore).name === 'items')).toHaveLength(1);
+  expect(get.mock.contexts.filter(store => (store as IDBObjectStore).name === 'items')).toHaveLength(0);
   expect(all).not.toHaveBeenCalled();
   expect((await localStore.reconcile(database, scope, present(items))).stalePayload).toEqual([items[1].leafId]);
   expect(all.mock.contexts.map(index => (index as IDBIndex).objectStore.name)).toEqual(['item_metadata']);
@@ -86,7 +86,7 @@ it('foreign connection revisions invalidate reconciliation and failed writes pub
   const database = crypto.randomUUID(), scope = 'chat:foreign', items = [item(0)];
   await localStore.upsert(database, scope, items);
   await localStore.reconcile(database, scope, present(items));
-  const other = await request(indexedDB.open('mnemosyne_vec_local', 2));
+  const other = await request(indexedDB.open('mnemosyne_vec_local'));
   try {
     const tx = other.transaction(['items', 'item_metadata', 'scope_versions'], 'readwrite'), done = complete(tx);
     const version = await request(tx.objectStore('scope_versions').get([database, scope]));

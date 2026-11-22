@@ -41,9 +41,13 @@ it.each(cases)('$name: blocked old connection reports a retryable error and neve
   await expect(open()).rejects.toThrow('旧页面');
   old.close();
   await expect(open()).resolves.toBeDefined();
-  const upgraded = await result(indexedDB.open(testCase.db, 2));
+  const upgraded = await result(indexedDB.open(testCase.db));
   try {
-    expect(await result(upgraded.transaction(testCase.store).objectStore(testCase.store).getAll())).toEqual([testCase.row]);
+    const rows = await result(upgraded.transaction(testCase.store).objectStore(testCase.store).getAll());
+    if (testCase.name === 'vectors') {
+      const { database, scope, leafId, vector } = testCase.row;
+      expect(rows).toEqual([{ database, scope, leafId, vector }]);
+    } else expect(rows).toEqual([testCase.row]);
   } finally { upgraded.close(); }
 });
 
@@ -63,4 +67,51 @@ it.each(cases)('$name: aborted metadata backfill retains schema v1 and original 
     expect(await result(original.transaction(testCase.store).objectStore(testCase.store).getAll())).toEqual([testCase.row]);
   } finally { original.close(); }
   await expect(open()).resolves.toBeDefined();
+});
+
+it('v2 chat compaction resumes at its committed batch, keeps other scopes and reuses the existing vectors', async () => {
+  const dbName = 'mnemosyne_vec_local', database = 'synthetic', scope = 'chat:v2';
+  const open = indexedDB.open(dbName, 2);
+  open.onupgradeneeded = () => {
+    const db = open.result;
+    const items = db.createObjectStore('items', { keyPath: ['database', 'scope', 'leafId'] });
+    items.createIndex('by_scope', ['database', 'scope']);
+    const meta = db.createObjectStore('item_metadata', { keyPath: items.keyPath });
+    meta.createIndex('by_scope', ['database', 'scope']);
+    db.createObjectStore('scope_versions', { keyPath: ['database', 'scope'] }).put({ database, scope, revision: 7 });
+    for (let i = 0; i < 130; i++) {
+      const leafId = String(i).padStart(3, '0');
+      const row = { ...cases[0].row, database, scope, leafId };
+      items.put(row);
+      meta.put({ database, scope, leafId, docHash: row.docHash, payloadHash: row.payloadHash });
+    }
+    items.put({ ...cases[0].row, scope: 'knowledge:untouched' });
+  };
+  (await result(open)).close();
+  const { localStore } = await import('./store');
+  const { encodeFloat32Base64 } = await import('./embed');
+  const query = [encodeFloat32Base64(new Float32Array([1, 0]))];
+  const originalPut = IDBObjectStore.prototype.put;
+  const fault = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+    if (this.name === 'items' && value.leafId === '065') throw new Error('synthetic interrupt');
+    return originalPut.call(this, value, key);
+  });
+  await expect(localStore.search(database, [scope], query)).rejects.toThrow('synthetic interrupt');
+  fault.mockRestore();
+  const db = await result(indexedDB.open(dbName));
+  try {
+    const read = (id: string) => result(db.transaction('items').objectStore('items').get([database, scope, id]));
+    expect(await read('063')).not.toHaveProperty('mesFull');
+    expect(await read('064')).toHaveProperty('mesFull', '原正文');
+    const getAll = vi.spyOn(IDBObjectStore.prototype, 'getAll');
+    const hits = await localStore.search(database, [scope], query, { topK: 1 });
+    expect(getAll.mock.calls.map(args => args[1])).toEqual([64, 64]);
+    expect(hits.results[0]).toMatchObject({ leafId: '000', similarity: 1, document: '', mesFull: null });
+    expect(await read('129')).toEqual({ database, scope, leafId: '129', vector: new Float32Array([1, 0]) });
+    getAll.mockClear();
+    await localStore.search(database, [scope], query);
+    expect(getAll).not.toHaveBeenCalled();
+    expect(await result(db.transaction('items').objectStore('items').get([database, 'knowledge:untouched', 'old'])))
+      .toHaveProperty('document', '原摘要');
+  } finally { db.close(); }
 });

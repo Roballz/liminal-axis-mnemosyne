@@ -45,3 +45,15 @@ it('索引持久化失败仍可本地检索，明确报告降级而不是误称�
     await expect(index.flushPending()).rejects.toThrow('quota');
   } finally { tx.mockRestore(); }
 });
+
+it('delta search matches a full snapshot after edit, removal and insertion; cold workers require a baseline', async () => {
+  const req = request(), index = new LexicalIndex();
+  await index.search(req);
+  const edited = { id: 'B', text: '改为 XJ42' }, added = { id: 'C', text: '保管 XJ42' };
+  const delta = await index.search({ ...req, documents: [edited, added], removed: ['A'] });
+  const full = await new LexicalIndex().search({ ...req, documents: [edited, added] });
+  expect(delta.hits).toEqual(full.hits);
+  expect(delta.hits.map(hit => hit.id).sort()).toEqual(['B', 'C']);
+  expect((await index.search({ ...req, documents: [], removed: [] })).hits).toEqual(full.hits);
+  await expect(index.search({ ...req, scope: 'other', documents: [], removed: [] })).rejects.toThrow('初始索引');
+});

@@ -351,20 +351,19 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const sourceKey = buildRecallCacheKey(chat, cfg);
   // 本轮候选与关联数据固定；可见近期补摘不加入本轮，也不改写已选旧记忆。
   const excluded = new Set(windowLeafIds(chat));
-  const eligibleLeaves = () => {
-    const currentChat = recallInputChat(getContext()?.chat ?? []), excluded = new Set(windowLeafIds(currentChat));
-    return collectLeaves(currentChat).filter(l => !excluded.has(l.leafId) &&
+  const eligibleLeaves = (currentChat = recallInputChat(getContext()?.chat ?? []), omitted = new Set(windowLeafIds(currentChat))) => {
+    return collectLeaves(currentChat).filter(l => !omitted.has(l.leafId) &&
       (!dailyInstalled() || (l.msgIndex >= 0 && l.msgIndex < currentChat.length)));
   };
-  const leaves = eligibleLeaves();
+  const leaves = eligibleLeaves(chat, excluded);
   const canonicalAtStart = canonicalLeaves();
   const now = latestStoryTime(chat);
-  const leafFingerprint = (items = eligibleLeaves()) => {
-    const tags = new Map(canonicalLeaves().map(l => [l.leafId, l.tags]));
+  const leafFingerprint = (items = eligibleLeaves(), projection = canonicalLeaves()) => {
+    const tags = new Map(projection.map(l => [l.leafId, l.tags]));
     return JSON.stringify(items.map(l => [l.leafId, l.docHash, l.payloadHash, l.msgIndex,
       dailyInstalled() ? tags.get(l.leafId) : getLeaf(getContext()?.chat?.[l.msgIndex])?.tags]));
   };
-  const leafVersion = leafFingerprint(leaves);
+  const leafVersion = leafFingerprint(leaves, canonicalAtStart);
   const stillCurrent = () => (!dailyInstalled() || (canonicalHost === recallHostVersion() && canonicalPolicy === JSON.stringify(dailySettings))) && !signal.aborted && epoch === recallEpoch && recallActiveHere() &&
     currentVectorDb() === database && currentChatId() === sourceChat && settingsKey() === settingsAtStart && JSON.stringify(recallScopes()) === JSON.stringify(scopes) &&
     (dailyInstalled() || (buildRecallCacheKey(getContext()?.chat ?? [], cfg) === sourceKey && leafFingerprint() === leafVersion));
@@ -394,12 +393,19 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   }
   // 使用实际召回依赖的指纹，既允许同轮重 roll，又拒绝来源/权限/候选变化后的旧文本。
   // 只保存摘要指纹，避免把百万字正文或设置中的密钥重复写入 localStorage。
-  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v4|${await digest([
+  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v5|${await digest([
     database, scopes, sourceKey, settingsAtStart, fingerprint, summaryWanted, leafVersion,
     canonicalView ? [canonicalLib!.db.name, canonicalView.branch.story, canonicalView.branch.id,
-      canonicalView.refs.slice(0, chat.length), canonicalPolicy] : null,
-    chat.map(m => [m.name, m.is_user, m.is_system, m.swipe_id, m.mes, m.extra?.bbs_omit,
-      m.extra?.type, m.extra?.bbs_internal_notice, leafValid(m) ? getLeaf(m) : null]),
+      canonicalPolicy] : null,
+    chat.map((m, i) => {
+      const ref = canonicalView?.refs[i];
+      const archived = ref && canonicalView!.sources.get(ref.revision);
+      // Capture and host use the same raw body. If evidence is unavailable or
+      // differs, include the live input so this path cannot falsely hit cache.
+      const body = archived && archived.content === m.mes ? [ref, archived.fingerprint] : [ref, null, m.mes];
+      return [m.name, m.is_user, m.is_system, m.swipe_id, body, m.extra?.bbs_omit,
+        m.extra?.type, m.extra?.bbs_internal_notice, leafValid(m) ? getLeaf(m) : null];
+    }),
     // Every plan input is already included in the exact leaf/delta snapshot
     // above. Replaying the entire chat just to hash its derived plans is redundant.
     ctx.name1, ctx.name2, memory.summaries, now, eventCards, cfg.rrfContextEnabled ? currentEventHints() : null,
@@ -461,8 +467,9 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     knowledgeWanted ? searchKnowledge(database, files, queryVectors, knowledgeConfig, signal) : Promise.resolve(undefined),
     lexicalWanted ? (async () => {
       const user = [...chat].reverse().find(m => m.is_user && !m.extra?.bbs_omit);
-      return searchBm25({ database, scope: selfScope!, documents: leaves.map(l => ({ id: l.leafId, text: l.document })),
-        queries: [user ? cleanBody(user.mes) : '', ...queries], exclude, topK: cfg.bm25Candidates }, signal);
+      return searchBm25({ database, scope: selfScope!,
+        get documents() { return leaves.map(l => ({ id: l.leafId, text: l.document })); },
+        queries: [user ? cleanBody(user.mes) : '', ...queries], exclude, topK: cfg.bm25Candidates }, signal, canonicalView ? leafVersion : undefined);
     })() : Promise.resolve(undefined),
     vectorWanted ? vecSearch(database, scopes, queryVectors, {
       topK: Math.max(1, cfg.rerankCandidates), excludeLeafIds: exclude, signal,
@@ -487,14 +494,14 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   let bm25Failed = false;
   try {
     // 2) 后端检索:多路在范围内纯按 embedding 得分取前 rerankCandidates(后端 max 融合,不套阈值),排除窗口内叶子
+    const localById = new Map(leaves.map(l => [l.leafId, l]));
     let bm25Results: HybridHit[] = [];
     if (lexicalWanted) {
       try {
         if (lexicalResult.status === 'rejected') throw lexicalResult.reason;
         const lexical = lexicalResult.value!;
-        const byId = new Map(leaves.map(l => [l.leafId, l]));
         bm25Results = lexical.hits.flatMap(hit => {
-          const leaf = byId.get(hit.id);
+          const leaf = localById.get(hit.id);
           return leaf ? [{ ...leaf, scope: selfScope!, similarity: null, queryIndex: -1, bm25Score: hit.score }] : [];
         });
         setRecallBm25(bm25Results, lexical.persistent ? 'BM25 完成' : 'BM25 内存检索');
@@ -518,13 +525,11 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
       }
     }
     if (!stillCurrent()) return;
-    if (dailyInstalled()) {
-      const allowed = new Map(leaves.map(l => [l.leafId,l]));
-      results = results.flatMap(hit => {
-        const leaf = allowed.get(hit.leafId);
-        return leaf && hit.scope === selfScope ? [{ ...hit, ...leaf }] : [];
-      });
-    }
+    results = results.flatMap(hit => {
+      if (!dailyInstalled() && hit.document) return [hit];
+      const leaf = localById.get(hit.leafId);
+      return leaf && hit.scope === selfScope ? [{ ...hit, ...leaf }] : [];
+    });
     setRecallEmbedding(
       results.map(h => ({
         leafId: h.leafId,
@@ -540,9 +545,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     if (!stillCurrent()) return;
     const hybridEnabled = cfg.bm25Candidates > 0;
     const safeEvents = eventCards.filter(c => !c.blocked && !c.needsReview);
-    const localLeaves = leaves;
     const canonicalById = new Map(canonicalAtStart.map(l => [l.leafId, l]));
-    const localById = new Map(localLeaves.map(l => [l.leafId, l]));
     const memberEvents = new Map<string, string[]>();
     for (const card of safeEvents) for (const member of card.members) {
       const ids = memberEvents.get(member.memory) ?? [];

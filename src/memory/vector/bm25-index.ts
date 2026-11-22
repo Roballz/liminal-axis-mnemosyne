@@ -4,6 +4,9 @@ export interface LexicalDocument { id: string; text: string }
 export interface LexicalRequest {
   database: string; scope: string; documents: LexicalDocument[]; queries: string[]; exclude: string[]; topK: number;
 }
+// A full request also validates a persisted index on cold start. A delta
+// applies only to the successfully acknowledged state of this same worker.
+export interface LexicalWorkerRequest extends LexicalRequest { removed?: string[] }
 export interface LexicalResult { hits: { id: string; score: number }[]; persistent: boolean }
 const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('zh', { granularity: 'word' }) : null;
 const VERSION = `minisearch-7.2-bm25plus-v1-${segmenter ? 'segmenter' : 'bigram'}`;
@@ -92,9 +95,18 @@ export class LexicalIndex {
     return task;
   }
 
-  async search(request: LexicalRequest): Promise<LexicalResult> {
+  private removeDocument(id: string) {
+    const old = this.documents.get(id);
+    if (!old) return;
+    this.index.remove(old);
+    this.documents.delete(id);
+    this.revision++;
+  }
+
+  async search(request: LexicalWorkerRequest): Promise<LexicalResult> {
     const key = JSON.stringify([request.database, request.scope]);
     if (key !== this.key) {
+      if (request.removed !== undefined) throw new Error('BM25 增量同步缺少初始索引');
       if (this.saveTimer !== undefined) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
       this.key = key; this.generation++; this.revision = 0; this.persistedRevision = -1;
       this.ready = false; this.saveRequested = false;
@@ -110,14 +122,18 @@ export class LexicalIndex {
         this.index = new MiniSearch(options); this.documents.clear(); this.persistedRevision = -1;
       }
     }
-    const current = new Map(request.documents.map(d => [d.id, { ...d }]));
-    for (const [id, old] of this.documents) {
-      if (current.get(id)?.text !== old.text) {
-        this.revision++; this.index.remove(old); this.documents.delete(id);
-      }
+    if (request.removed === undefined) {
+      const present = new Set(request.documents.map(d => d.id));
+      for (const id of this.documents.keys()) if (!present.has(id)) this.removeDocument(id);
+    } else {
+      for (const id of request.removed) this.removeDocument(id);
     }
-    for (const [id, doc] of current) if (!this.documents.has(id)) {
-      this.revision++; this.index.add(doc); this.documents.set(id, doc);
+    for (const doc of request.documents) {
+      if (this.documents.get(doc.id)?.text === doc.text) continue;
+      this.removeDocument(doc.id);
+      this.revision++;
+      const stored = { ...doc };
+      this.index.add(stored); this.documents.set(stored.id, stored);
     }
     const excluded = new Set(request.exclude);
     const scores = new Map<string, number>();

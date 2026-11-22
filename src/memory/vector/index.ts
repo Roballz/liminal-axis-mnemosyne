@@ -15,7 +15,7 @@ import { canonicalLeaves, dailyInstalled, syncDaily } from '@/mnemosyne/bridge';
 import { getContext, type STMessage } from '@/st/context';
 import { apiSettings, engineActiveHere } from '@/api/settings';
 import type { VecItem, VecPayloadItem } from '@/api/baibaoku';
-import { resetVectorStoreProbe, vecClearScope, vecReconcile, vecUpdatePayload, vecUpsert } from './store';
+import { resetVectorStoreProbe, vecClearScope, vecReconcile, vecUpdatePayload, vecUpsert, vectorManifest } from './store';
 import { getLeaf, leafValid } from '../apply';
 import { memory } from '../store';
 import { stripThinkBlocks } from '../timeTag';
@@ -78,9 +78,19 @@ function seedLeafIds(): Set<string> {
   return ids;
 }
 
+// Published archive projections are replaced as a unit. A weak key cannot
+// keep old views (and their body strings) alive across chats.
+const indexedLeaves = new WeakMap<ReturnType<typeof canonicalLeaves>, { identity: string; leaves: LeafForIndex[] }>();
 /** 扫当前 chat 收集所有有效叶子的索引素材(种子叶子除外)。 */
 export function collectLeaves(chat: STMessage[]): LeafForIndex[] {
-  if (dailyInstalled()) return canonicalLeaves().map(leaf=>({...leaf,docHash:`${leaf.docHash}:${embeddingIdentity()}`}));
+  if (dailyInstalled()) {
+    const projection = canonicalLeaves(), identity = embeddingIdentity();
+    const cached = indexedLeaves.get(projection);
+    if (cached?.identity === identity) return cached.leaves;
+    const leaves = projection.map(leaf => ({ ...leaf, docHash: `${leaf.docHash}:${identity}` }));
+    indexedLeaves.set(projection, { identity, leaves });
+    return leaves;
+  }
   const seeds = seedLeafIds();
   const out: LeafForIndex[] = [];
   for (let i = 0; i < chat.length; i++) {
@@ -151,26 +161,22 @@ export async function syncVectorIndex(signal?: AbortSignal, archiveAlreadySynced
         passRevision = mutationRevision;
         if (currentVectorDb() !== database || currentChatId() !== chatId) break;
         const leaves = collectLeaves(getContext()?.chat ?? []);
-        const present = leaves.map(l => ({
-          leafId: l.leafId,
-          docHash: l.docHash,
-          payloadHash: l.payloadHash,
-        }));
+        const present = vectorManifest(leaves);
 
         // 摘要变化走 embed+upsert；仅全文/时间变化走轻量 payload 更新。
-        const { deleted = 0, missing, stalePayload = [] } = await vecReconcile(database, scope, present);
+        const { deleted = 0, missing, stalePayload = [] } = await vecReconcile(database, scope, present, signal);
         // 原生缓存仍保守失效。Mnemosyne 在命中前校验完整候选/来源指纹，
         // 不能因清理当前回答的旧 swipe 索引就删除与它无关的同轮召回。
         if (deleted > 0 && !dailyInstalled()) invalidateRecallCache();
         const missingSet = new Set(missing);
         const staleSet = new Set(stalePayload);
-        total.embedded += await embedAndUpsert(
+        if (missingSet.size) total.embedded += await embedAndUpsert(
           database,
           scope,
           leaves.filter(l => missingSet.has(l.leafId)),
           signal,
         );
-        total.payloadUpdated += await updatePayload(
+        if (staleSet.size) total.payloadUpdated += await updatePayload(
           database,
           scope,
           leaves.filter(l => staleSet.has(l.leafId)),

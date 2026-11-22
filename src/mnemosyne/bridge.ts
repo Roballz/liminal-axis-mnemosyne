@@ -170,18 +170,39 @@ export function hostScope(): string {
     const avatar = ctx.characters?.[Number(ctx.characterId)]?.avatar ?? ctx.groupId ?? '';
     return JSON.stringify([avatar, chat]);
 }
-function hostMessageVersion(m: STMessage) {
-    return [m.extra?.[MESSAGE_KEY], sourceRole(m), m.mes, m.swipe_id, m.extra?.bbs_omit,
+function hostMessageVersion(m: STMessage, body: string | number = m.mes) {
+    return [m.extra?.[MESSAGE_KEY], sourceRole(m), body, m.swipe_id, m.extra?.bbs_omit,
         m.extra?.bbs_leaf, m.extra?.[EVIDENCE_KEY], m.extra?.[MANUAL_KEY], m.extra?.[TABLE_OUTPUT_KEY]];
 }
 const hostVersions = new HostVersionMemo();
+// Ephemeral, exact body identities for live guards. Persisted cache keys use
+// archive revisions. Replacing message objects with identical text is harmless.
+const liveBodies: { text: string; token: number }[] = [];
+let nextBodyToken = 0;
 export function hostVersion(): string {
-    return hostVersions.read([hostScope(), (getContext()?.chat ?? []).map(hostMessageVersion), memory.summaries, replyFinality.revision]);
+    const chat = getContext()?.chat ?? [];
+    liveBodies.length = chat.length;
+    const messages = chat.map((message, i) => {
+        let saved = liveBodies[i];
+        if (!saved || saved.text !== message.mes)
+            liveBodies[i] = saved = { text: message.mes, token: ++nextBodyToken };
+        return hostMessageVersion(message, saved.token);
+    });
+    return hostVersions.read([hostScope(), messages, memory.summaries, replyFinality.revision]);
 }
+// Request-local guards only need equality. Keep the existing exact host evidence
+// (including the permitted visible-summary transition) out of nested JSON keys.
+let recallGuardHost: string | undefined;
+let recallGuardRevision = 0;
 /** 只有引擎同步提交的可见近期补摘可以沿用版本；正文编辑始终得到新版本。 */
 export function recallHostVersion(): string {
     const host = hostVersion();
-    return JSON.stringify([parallelHost?.host === host ? parallelHost.version : host,
+    const effective = parallelHost?.host === host ? parallelHost.version : host;
+    if (recallGuardHost !== effective) {
+        recallGuardHost = effective;
+        recallGuardRevision++;
+    }
+    return JSON.stringify([recallGuardRevision,
         getContext()?.chat.map(m => !m.is_user && !!m.is_system)]);
 }
 function readableProjection(): DailyCache | null {
@@ -239,7 +260,7 @@ export function invalidateDaily(reason = '档案视图已更新', hostNotificati
     if (!hostNotification) summaryPolicyEpoch++;
     promptHistory = null;
     const scope = hostScope();
-    if (dailyState.scope !== scope) { tableConflicts.value = []; reason = '已切换聊天'; invalidateReplyDiagnostics(); }
+    if (dailyState.scope !== scope) { recallGuardHost = undefined; tableConflicts.value = []; reason = '已切换聊天'; invalidateReplyDiagnostics(); }
     scheduledHost = hostVersion();
     injectionCache.value = hostNotification ? appendedProjection(scheduledHost) : null;
     parallelHost = null;
@@ -1089,6 +1110,8 @@ export function bindDaily() {
     timer = undefined;
     replyFinality.reset();
     hostVersions.clear();
+    liveBodies.length = 0;
+    recallGuardHost = undefined;
     invalidateReplyDiagnostics();
     installed = true;
     savedHost = '';
@@ -1240,6 +1263,8 @@ export function bindDaily() {
         rendered.cancel();
         installed = false;
         hostVersions.clear();
+        liveBodies.length = 0;
+        recallGuardHost = undefined;
         unwatch();
         if (typeof document !== 'undefined') document.removeEventListener('click', confirmEdit, true);
         if (timer !== undefined) clearTimeout(timer);

@@ -1,7 +1,7 @@
-import { LexicalIndex, type LexicalRequest } from './bm25-index';
+import { LexicalIndex, type LexicalWorkerRequest } from './bm25-index';
 const index = new LexicalIndex();
 let queue = Promise.resolve();
-self.onmessage = (event: MessageEvent<{ id: number; request: LexicalRequest }>) => {
+self.onmessage = (event: MessageEvent<{ id: number; request: LexicalWorkerRequest }>) => {
   const { id, request } = event.data;
   queue = queue.then(async () => {
     try { self.postMessage({ id, result: await index.search(request) }); }

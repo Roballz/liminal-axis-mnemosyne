@@ -61,3 +61,24 @@ it('a pre-cancelled request never creates a Worker', async () => {
   expect(() => searchBm25(request, controller.signal)).toThrow('never start');
   expect(state.workers).toHaveLength(0);
 });
+
+it('sends only acknowledged changes, skips reading unchanged documents and fully syncs after worker loss', async () => {
+  const { searchBm25 } = await import('./bm25');
+  const a = { id: 'A', text: '旧摘要' }, b = { id: 'B', text: '保留' }, c = { id: 'C', text: '新增' };
+  const first = searchBm25({ ...request, documents: [a, b] }, undefined, 'v1');
+  const worker = state.workers[0];
+  expect(worker.posts[0].request.documents).toEqual([a, b]);
+  reply(worker); await first;
+  const same = searchBm25({ ...request, get documents(): typeof a[] { throw Error('unexpected full projection'); } }, undefined, 'v1');
+  expect(worker.posts[1].request).toMatchObject({ documents: [], removed: [] });
+  reply(worker); await same;
+  const nextDocs = [{ ...a, text: '新摘要' }, c];
+  const delta = searchBm25({ ...request, documents: nextDocs }, undefined, 'v2');
+  expect(worker.posts[2].request).toMatchObject({ documents: nextDocs, removed: ['B'] });
+  worker.dispatchEvent(new MessageEvent('message', { data: { id: worker.posts[2].id, error: 'partial failure' } }));
+  await expect(delta).rejects.toThrow('partial failure');
+  const retry = searchBm25({ ...request, documents: nextDocs }, undefined, 'v2');
+  expect(state.workers[1].posts[0].request.documents).toEqual(nextDocs);
+  expect(state.workers[1].posts[0].request).toHaveProperty('removed', undefined);
+  reply(state.workers[1]); await retry;
+});

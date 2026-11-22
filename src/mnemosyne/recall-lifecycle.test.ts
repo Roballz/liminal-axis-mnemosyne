@@ -252,7 +252,7 @@ test('同轮回答追加、swipe 与删除后重新生成复用召回，真实�
   await runVectorRecall();
   const recalled = injected(); expect(recalled).toContain('旧剧情');
   const firstQueries = [...recallDebug.queries];
-  expect(localStorage.getItem(RECALL_CACHE_STORAGE_KEY)).toContain('hybrid-v4');
+  expect(localStorage.getItem(RECALL_CACHE_STORAGE_KEY)).toContain('hybrid-v5');
   const reply = message(false, '待替换回答 A <bbs_end>2099-01-01 12:00</bbs_end>');
   reply.extra!.bbs_leaf = { id: 'tail-leaf', text: '本轮回答摘要', delta: {}, v: 1, createdAt: 2, swipe: 0 };
   ctx.chat.push(reply); scheduleDaily();
@@ -382,4 +382,21 @@ test('生成前归档失败不复用 swipe 已撤销的摘要，仍按原策略�
   expect(abort).not.toHaveBeenCalled();
   expect(promptText('mnemosyne_memory_history')).toBe('');
   expect(promptText('mnemosyne_memory_state')).toContain('合成庭院');
+});
+
+test('archived body text stays out of live guard keys and the persistent recall digest', async () => {
+  const prefix = 'synthetic-archived-prefix-'.repeat(800);
+  ctx.chat[2].mes = prefix;
+  scheduleDaily(); await syncDaily();
+  const encode = vi.spyOn(TextEncoder.prototype, 'encode');
+  await runVectorRecall();
+  expect(injected()).toContain('旧剧情');
+  await runVectorRecall();
+  expect(recallDebug.status).toContain('复用缓存');
+  expect(hostVersion()).not.toContain(prefix);
+  expect(recallHostVersion()).not.toContain(prefix);
+  expect(encode.mock.calls.some(([text]) => text?.includes(prefix))).toBe(false);
+  const before = hostVersion();
+  ctx.chat[2].mes = 'X' + prefix.slice(1);
+  expect(hostVersion()).not.toBe(before);
 });

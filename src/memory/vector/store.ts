@@ -40,6 +40,7 @@ export interface VectorStore {
     database: string,
     scope: string,
     present: Array<{ leafId: string; docHash: string; payloadHash: string }>,
+    signal?: AbortSignal,
   ): Promise<{ deleted: number; missing: string[]; stalePayload: string[] }>;
   clearScope(database: string, scope: string): Promise<{ deleted: number }>;
   stats(database: string, scopes: string[]): Promise<{ stats: Record<string, number> }>;
@@ -60,7 +61,7 @@ const backendStore: VectorStore = {
 /* ============ 本地实现:IndexedDB + JS 余弦 ============ */
 
 const DB_NAME = 'mnemosyne_vec_local';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'items';
 const META = 'item_metadata';
 const VERSIONS = 'scope_versions';
@@ -89,14 +90,15 @@ function openDb(): Promise<IDBDatabase> {
         const meta = db.createObjectStore(META, { keyPath: ['database', 'scope', 'leafId'] });
         meta.createIndex('by_scope', ['database', 'scope']);
         const versions = db.createObjectStore(VERSIONS, { keyPath: ['database', 'scope'] });
-        // Additive, atomic backfill: existing vector and body rows are untouched.
+        // v1 already needs one metadata pass. Compact chat rows in that same transaction.
         const cursor = req.transaction!.objectStore(STORE).openCursor();
         cursor.onsuccess = () => {
           const item = cursor.result;
           if (!item) return;
-          const value = item.value as LocalRecord;
+          const value = item.value as LocalRecord & LocalMetadata;
           meta.put(metadataOf(value));
-          versions.put({ database: value.database, scope: value.scope, revision: 1 });
+          if (value.scope.startsWith('chat:')) item.update(scoringRow(value));
+          versions.put({ database: value.database, scope: value.scope, revision: 1, compact: true });
           item.continue();
         };
       }
@@ -138,36 +140,85 @@ interface LocalRecord {
   database: string;
   scope: string;
   leafId: string;
-  docHash: string;
-  payloadHash?: string;
   vector: Float32Array;
-  dim: number;
-  document: string;
-  mesFull: string | null;
-  storyTime: string | null;
-  msgIndex: number | null;
+  document?: string;
+  mesFull?: string | null;
+  storyTime?: string | null;
+  msgIndex?: number | null;
 }
-type LocalMetadata = Pick<LocalRecord, 'database' | 'scope' | 'leafId' | 'docHash' | 'payloadHash'>;
-function metadataOf(row: LocalRecord): LocalMetadata {
+type LocalMetadata = Pick<LocalRecord, 'database' | 'scope' | 'leafId'> & {
+  docHash: string; payloadHash?: string;
+};
+function metadataOf(row: LocalMetadata): LocalMetadata {
   return { database: row.database, scope: row.scope, leafId: row.leafId,
     docHash: row.docHash, payloadHash: row.payloadHash };
+}
+function scoringRow(row: LocalRecord): LocalRecord {
+  return { database: row.database, scope: row.scope, leafId: row.leafId, vector: row.vector };
 }
 async function scopeVersion(tx: IDBTransaction, database: string, scope: string): Promise<number> {
   return (await reqDone(tx.objectStore(VERSIONS).get([database, scope])))?.revision ?? 0;
 }
 async function advanceScope(tx: IDBTransaction, database: string, scope: string): Promise<number> {
-  const revision = await scopeVersion(tx, database, scope) + 1;
-  tx.objectStore(VERSIONS).put({ database, scope, revision });
+  const versions = tx.objectStore(VERSIONS);
+  const prior = await reqDone(versions.get([database, scope]));
+  const revision = (prior?.revision ?? 0) + 1;
+  versions.put({ database, scope, compact: !prior, ...prior, revision });
   return revision;
 }
 type Present = { leafId: string; docHash: string; payloadHash: string };
+// Manifests built from immutable published projections can be reused by
+// identity. External callers may mutate their arrays, so keep value comparison.
+const manifestCache = new WeakMap<Present[], Present[]>();
+const ownedManifests = new WeakSet<Present[]>();
+export function vectorManifest(leaves: Present[]) {
+  const cached = manifestCache.get(leaves);
+  if (cached) return cached;
+  const manifest = leaves.map(({ leafId, docHash, payloadHash }) => ({ leafId, docHash, payloadHash }));
+  manifestCache.set(leaves, manifest);
+  ownedManifests.add(manifest);
+  return manifest;
+}
 let reconciliation: { database: string; scope: string; revision: number; present: Present[];
   missing: string[]; stalePayload: string[] } | undefined;
+
+// v2 has complete metadata already. Upgrade only the opened chat, in resumable
+// transactions. The checkpoint and the compacted rows always commit together.
+const compactedScopes = new WeakMap<IDBDatabase, Set<string>>();
+async function compactChat(db: IDBDatabase, database: string, scope: string, signal?: AbortSignal) {
+  if (!scope.startsWith('chat:')) return;
+  let known = compactedScopes.get(db);
+  if (!known) compactedScopes.set(db, known = new Set());
+  const key = JSON.stringify([database, scope]);
+  if (known.has(key)) return;
+  const limit = 64;
+  let done = false;
+  while (!done) {
+    signal?.throwIfAborted();
+    done = await writeTransaction(db, async tx => {
+      const versions = tx.objectStore(VERSIONS);
+      const version = await reqDone(versions.get([database, scope]));
+      if (!version || version.compact) return true;
+      const lower = version.after === undefined ? [database, scope] : [database, scope, version.after];
+      const range = IDBKeyRange.bound(lower, [database, scope, []], version.after !== undefined);
+      const store = tx.objectStore(STORE);
+      const rows: LocalRecord[] = await reqDone(store.getAll(range, limit));
+      for (const row of rows) if ('document' in row || 'mesFull' in row) store.put(scoringRow(row));
+      const complete = rows.length < limit;
+      versions.put({ ...version, compact: complete, after: complete ? undefined : rows[rows.length - 1].leafId });
+      return complete;
+    });
+    if (!done) await new Promise<void>(resolve => setTimeout(resolve, 0));
+  }
+  known.add(key);
+}
 
 /** 取某 [database, scope] 下全部记录(规模 = 当前聊天叶子数,单角色可控)。 */
 async function getScopeRows(database: string, scope: string, signal?: AbortSignal): Promise<LocalRecord[]> {
   signal?.throwIfAborted();
   const db = await openDb();
+  signal?.throwIfAborted();
+  await compactChat(db, database, scope, signal);
   signal?.throwIfAborted();
   const tx = db.transaction(STORE, 'readonly');
   const idx = tx.objectStore(STORE).index('by_scope');
@@ -219,21 +270,11 @@ export const localStore: VectorStore = {
     return writeTransaction(db, async tx => {
       const os = tx.objectStore(STORE);
       for (const it of items) {
-        const rec: LocalRecord = {
-          database,
-          scope,
-          leafId: it.leafId,
-          docHash: it.docHash,
-          payloadHash: it.payloadHash,
-          vector: decodeFloat32Base64(it.vector),
-          dim: it.dim,
-          document: it.document,
-          mesFull: it.mesFull ?? null,
-          storyTime: it.storyTime ?? null,
-          msgIndex: it.msgIndex ?? null,
-        };
-        os.put(rec);
-        tx.objectStore(META).put(metadataOf(rec));
+        const key = { database, scope, leafId: it.leafId };
+        const row = { ...key, vector: decodeFloat32Base64(it.vector) };
+        os.put(scope.startsWith('chat:') ? row : { ...row, document: it.document,
+          mesFull: it.mesFull ?? null, storyTime: it.storyTime ?? null, msgIndex: it.msgIndex ?? null });
+        tx.objectStore(META).put({ ...key, docHash: it.docHash, payloadHash: it.payloadHash });
       }
       await advanceScope(tx, database, scope);
       return { upserted: items.length };
@@ -245,16 +286,18 @@ export const localStore: VectorStore = {
     const db = await openDb();
     return writeTransaction(db, async tx => {
       const os = tx.objectStore(STORE);
-      const rows = await Promise.all(items.map(item => reqDone<LocalRecord | undefined>(os.get([database, scope, item.leafId]))));
+      const metadata = tx.objectStore(META);
+      const rows = await Promise.all(items.map(it => reqDone<LocalMetadata | undefined>(
+        metadata.get([database, scope, it.leafId]))));
       let updated = 0;
       for (const [i, it] of items.entries()) {
-        const rec = rows[i];
-        if (!rec) continue;
-        rec.payloadHash = it.payloadHash;
-        rec.mesFull = it.mesFull ?? null;
-        rec.storyTime = it.storyTime ?? null;
-        os.put(rec);
-        tx.objectStore(META).put(metadataOf(rec));
+        const meta = rows[i];
+        if (!meta) continue;
+        if (!scope.startsWith('chat:')) {
+          const row = await reqDone<LocalRecord>(os.get([database, scope, it.leafId]));
+          os.put({ ...row, mesFull: it.mesFull ?? null, storyTime: it.storyTime ?? null });
+        }
+        metadata.put({ ...meta, payloadHash: it.payloadHash });
         updated++;
       }
       if (updated) await advanceScope(tx, database, scope);
@@ -316,7 +359,7 @@ export const localStore: VectorStore = {
         scope: row.scope,
         similarity: bestSim,
         queryIndex: bestQuery,
-        document: row.document,
+        document: row.document ?? '',
         mesFull: row.mesFull ?? null,
         storyTime: row.storyTime ?? null,
         msgIndex: row.msgIndex ?? null,
@@ -325,15 +368,17 @@ export const localStore: VectorStore = {
   },
 
   // 删 scope 下不在 present 的陈旧叶子;返回后端没有 / hash 变了的 leafId(需重 embed)。
-  async reconcile(database, scope, present) {
-    const checked = present.map(item => ({ ...item }));
+  async reconcile(database, scope, present, signal) {
+    const checked = ownedManifests.has(present) ? present : present.map(item => ({ ...item }));
     const db = await openDb();
+    await compactChat(db, database, scope, signal);
+    signal?.throwIfAborted();
     const result = await writeTransaction(db, async tx => {
       let revision = await scopeVersion(tx, database, scope);
       const prior = reconciliation;
       if (prior?.database === database && prior.scope === scope && prior.revision === revision &&
-        prior.present.length === checked.length && checked.every((item, i) => item.leafId === prior.present[i].leafId &&
-          item.docHash === prior.present[i].docHash && item.payloadHash === prior.present[i].payloadHash)) {
+        (prior.present === checked || prior.present.length === checked.length && checked.every((item, i) => item.leafId === prior.present[i].leafId &&
+          item.docHash === prior.present[i].docHash && item.payloadHash === prior.present[i].payloadHash))) {
         return { revision, deleted: 0, missing: [...prior.missing], stalePayload: [...prior.stalePayload] };
       }
       const rows = await reqDone<LocalMetadata[]>(tx.objectStore(META).index('by_scope').getAll([database, scope]));
@@ -456,8 +501,9 @@ export async function vecReconcile(
   database: string,
   scope: string,
   present: Array<{ leafId: string; docHash: string; payloadHash: string }>,
+  signal?: AbortSignal,
 ): Promise<{ deleted: number; missing: string[]; stalePayload: string[] }> {
-  return (await getVectorStore()).reconcile(database, scope, present);
+  return (await getVectorStore()).reconcile(database, scope, present, signal);
 }
 
 export async function vecClearScope(database: string, scope: string): Promise<{ deleted: number }> {
