@@ -83,3 +83,41 @@ it('正文边界旧配置默认、非法值回退与保存重载', async () => {
   expect(settings.apiSettings.bodyStartTag).toBe('globalTime');
   expect(settings.apiSettings.bodyEndTag).toBe('endTime');
 });
+
+it('旧配置默认关闭自动切换；不完整或非法的任务配置独立补全', async () => {
+  mock.ctx.extensionSettings.mnemosyne_daily = {
+    assignments: { summary: '' }, fallbacks: { summary: { enabled: 'true', channelId: 3 } },
+  };
+  const { apiSettings, hydrateSettings } = await import('./settings'); hydrateSettings();
+  expect(apiSettings.assignments).toEqual({ summary: '', resummary: '' });
+  expect(apiSettings.fallbacks).toEqual({
+    summary: { enabled: false, channelId: '' }, resummary: { enabled: false, channelId: '' },
+  });
+});
+
+it('摘要与总结的首选和备用配置分别保存，JSON 导出重载不丢失', async () => {
+  let settings = await import('./settings'); settings.hydrateSettings();
+  settings.apiSettings.channels.push({ ...settings.newChannel(), id: 'a' }, { ...settings.newChannel(), id: 'b' });
+  settings.apiSettings.assignments = { summary: 'a', resummary: 'b' };
+  settings.apiSettings.fallbacks = {
+    summary: { enabled: true, channelId: 'b' }, resummary: { enabled: false, channelId: 'a' },
+  };
+  await (await import('vue')).nextTick(); settings.flushSettingsNow();
+  const saved = JSON.parse(JSON.stringify(mock.ctx.extensionSettings.mnemosyne_daily));
+  vi.resetModules(); mock.ctx.extensionSettings = { mnemosyne_daily: saved };
+  settings = await import('./settings'); settings.hydrateSettings();
+  expect(settings.apiSettings.assignments).toEqual({ summary: 'a', resummary: 'b' });
+  expect(settings.apiSettings.fallbacks).toEqual({
+    summary: { enabled: true, channelId: 'b' }, resummary: { enabled: false, channelId: 'a' },
+  });
+});
+
+it('旧存储缺失备用渠道或首选备用相同时关闭切换', async () => {
+  mock.ctx.extensionSettings.mnemosyne_daily = {
+    channels: [{ id: 'a' }], assignments: { summary: 'a', resummary: 'a' },
+    fallbacks: { summary: { enabled: true, channelId: 'missing' }, resummary: { enabled: true, channelId: 'a' } },
+  };
+  const { apiSettings, hydrateSettings } = await import('./settings'); hydrateSettings();
+  expect(apiSettings.fallbacks.summary).toEqual({ enabled: false, channelId: '' });
+  expect(apiSettings.fallbacks.resummary).toEqual({ enabled: false, channelId: 'a' });
+});

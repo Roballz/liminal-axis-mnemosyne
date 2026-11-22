@@ -56,6 +56,12 @@ export interface ApiChannel {
 
 export type TaskType = 'summary' | 'resummary';
 
+/** 仅在首选 API 返回指定内容错误时使用备用渠道；首选沿用 assignments。 */
+export interface TaskFallback {
+  enabled: boolean;
+  channelId: string;
+}
+
 /** 自定义提示词:空串表示沿用内置模板;任务必需的输出约定仍由各请求附加。 */
 export interface CustomPrompts {
   summary: string;
@@ -218,6 +224,8 @@ export interface ApiSettings {
   channels: ApiChannel[];
   /** 各任务指派的渠道 id */
   assignments: Record<TaskType, string>;
+  /** 摘要与总结分别配置，默认关闭，不向其他插件共享切换规则。 */
+  fallbacks: Record<TaskType, TaskFallback>;
   /** 自动摘要开关，同时控制正文时间标签和积压拦截。 */
   autoSummaryEnabled: boolean;
   /** 自动同步楼层隐藏状态；关闭后保留现有隐藏状态，仍可生成摘要。 */
@@ -386,6 +394,10 @@ function defaults(): ApiSettings {
     },
     channels: [],
     assignments: { summary: '', resummary: '' },
+    fallbacks: {
+      summary: { enabled: false, channelId: '' },
+      resummary: { enabled: false, channelId: '' },
+    },
     autoSummaryEnabled: true,
     autoHideEnabled: true,
     summaryEditPromptEnabled: false,
@@ -513,6 +525,20 @@ function normalize(raw: unknown): ApiSettings {
       : 8192;
   // 副 API 渠道:逐个补全新加的字段(老数据没有 timeoutSec/stream/excludeParams),并校验类型
   merged.channels = (Array.isArray(merged.channels) ? merged.channels : []).map(normalizeChannel);
+  // 嵌套配置逐任务补全，旧配置不会自动开启切换，也不复用另一个任务的备用渠道。
+  const rawSettings = raw as Partial<ApiSettings>;
+  merged.assignments = { ...d.assignments };
+  merged.fallbacks = { ...d.fallbacks };
+  for (const task of ['summary', 'resummary'] as const) {
+    const assigned = rawSettings.assignments?.[task];
+    merged.assignments[task] = typeof assigned === 'string' ? assigned : '';
+    const fallback = rawSettings.fallbacks?.[task];
+    const channelId = typeof fallback?.channelId === 'string' ? fallback.channelId : '';
+    merged.fallbacks[task] = {
+      enabled: fallback?.enabled === true && !!channelId && channelId !== merged.assignments[task],
+      channelId,
+    };
+  }
   // 字数档位:仅两个合法值,旧数据缺失/非法回退详细(= 老用户行为不变)
   merged.verbosity = merged.verbosity === 'concise' ? 'concise' : 'detailed';
   // 叶子层保留条数:非负整数,缺失/非法回退默认 3(0=旧行为攒够即全压)
@@ -667,6 +693,7 @@ function applyInto(target: ApiSettings, src: ApiSettings): void {
   target.vector = src.vector;
   target.channels = src.channels;
   target.assignments = src.assignments;
+  target.fallbacks = src.fallbacks;
   target.autoSummaryEnabled = src.autoSummaryEnabled;
   target.autoHideEnabled = src.autoHideEnabled;
   target.summaryEditPromptEnabled = src.summaryEditPromptEnabled;
@@ -739,13 +766,21 @@ function applySharedChannels(store: SharedChannelsStore): void {
   if (fingerprint === sharedChannelsFingerprint) return;
   apiSettings.channels = store.channels;
   sharedChannelsFingerprint = fingerprint;
+  clearMissingTaskChannels();
+}
 
+function clearMissingTaskChannels(): void {
   const ids = new Set(apiSettings.channels.map(channel => channel.id));
-  if (apiSettings.assignments.summary && !ids.has(apiSettings.assignments.summary)) {
-    apiSettings.assignments.summary = '';
-  }
-  if (apiSettings.assignments.resummary && !ids.has(apiSettings.assignments.resummary)) {
-    apiSettings.assignments.resummary = '';
+  for (const task of ['summary', 'resummary'] as const) {
+    const fallback = apiSettings.fallbacks[task];
+    if (apiSettings.assignments[task] && !ids.has(apiSettings.assignments[task])) {
+      apiSettings.assignments[task] = '';
+      fallback.enabled = false;
+    }
+    if (fallback.channelId && !ids.has(fallback.channelId)) {
+      fallback.channelId = '';
+      fallback.enabled = false;
+    }
   }
 }
 
@@ -768,6 +803,7 @@ function hydrateSharedChannels(legacyChannels: ApiChannel[]): void {
   } else {
     apiSettings.channels = legacyChannels.map(normalizeChannel);
     sharedChannelsFingerprint = channelFingerprint(apiSettings.channels);
+    clearMissingTaskChannels();
     writeSharedChannels(false);
   }
   bindSharedChannelsListener();

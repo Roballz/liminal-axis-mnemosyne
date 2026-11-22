@@ -127,6 +127,85 @@ function useChat(chat: STMessage[]) {
   } as STContext);
 }
 
+describe('摘要与总结的指定错误自动切换', () => {
+  const configuredChannels = ['summary-primary', 'summary-backup', 'resummary-primary', 'resummary-backup'].map(id => ({
+    ...settings.newChannel(), id, name: id, model: id, url: 'https://synthetic.invalid/v1',
+  }));
+  let original: Pick<settings.ApiSettings, 'channels' | 'assignments' | 'fallbacks' | 'summaryMaxRetries'>;
+  beforeEach(() => {
+    const { channels, assignments, fallbacks, summaryMaxRetries } = settings.apiSettings;
+    original = { channels, assignments, fallbacks, summaryMaxRetries };
+    Object.assign(settings.apiSettings, {
+      channels: configuredChannels,
+      assignments: { summary: 'summary-primary', resummary: 'resummary-primary' },
+      fallbacks: {
+        summary: { enabled: true, channelId: 'summary-backup' },
+        resummary: { enabled: true, channelId: 'resummary-backup' },
+      },
+      summaryMaxRetries: 0,
+    });
+    settings.apiSettings.summarySuccessPreviewEnabled = false;
+    vi.mocked(settings.getChannelForTask).mockImplementation(task =>
+      settings.apiSettings.channels.find(channel => channel.id === settings.apiSettings.assignments[task]) ?? null);
+  });
+  afterEach(() => Object.assign(settings.apiSettings, original));
+
+  it('单楼摘要切换后复用同份材料，只写入一次有效摘要', async () => {
+    const chat = [message()]; useChat(chat);
+    const prepareTables = vi.spyOn(summaryTables, 'prepareSummaryTables');
+    const send = vi.spyOn(client, 'requestCompletion')
+      .mockRejectedValueOnce(new client.ApiError('Output data may contain inappropriate content', 400))
+      .mockResolvedValueOnce(JSON.stringify(summary));
+
+    await summarizeFloor(0);
+
+    expect(send.mock.calls.map(([channel]) => channel.id)).toEqual(['summary-primary', 'summary-backup']);
+    expect(send.mock.calls[1][1]).toBe(send.mock.calls[0][1]);
+    expect(prepareTables).toHaveBeenCalledOnce();
+    expect(chat[0].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(summaryResponses[0]).toMatchObject({ applied: true, attempts: [{ kind: 'ok' }] });
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+  });
+
+  it('L1 合并为 L2 使用独立的总结备用配置，保留下级来源', async () => {
+    const first = leaf(), second = { ...leaf(), id: 'second-page' };
+    useChat([message(false, { extra: { bbs_leaf: first } }), message(false, { extra: { bbs_leaf: second } })]);
+    memory.summaries.push(
+      { id: 'left-L1', text: 'First established facts.', level: 1, createdAt: 1, auto: false, childIds: [first.id] },
+      { id: 'right-L1', text: 'Second established facts.', level: 1, createdAt: 2, auto: false, childIds: [second.id] },
+    );
+    const send = vi.spyOn(client, 'requestCompletion')
+      .mockRejectedValueOnce(new client.ApiError('Output data may contain inappropriate content', 400))
+      .mockResolvedValueOnce(JSON.stringify({ summary: 'Merged established facts.' }));
+
+    expect(await summarizeSelected(['left-L1', 'right-L1'])).toEqual({ made: 1 });
+
+    expect(send.mock.calls.map(([channel]) => channel.id)).toEqual(['resummary-primary', 'resummary-backup']);
+    expect(send.mock.calls[1][1]).toBe(send.mock.calls[0][1]);
+    expect(memory.summaries).toHaveLength(3);
+    expect(memory.summaries.at(-1)).toMatchObject({ level: 2, text: 'Merged established facts.', childIds: ['left-L1', 'right-L1'] });
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+  });
+
+  it('首选报错前正文已改变时，来源守卫阻止备用请求和摘要写入', async () => {
+    const chat = [message()]; useChat(chat);
+    const send = vi.spyOn(client, 'requestCompletion').mockImplementation(async () => {
+      chat[0].mes = 'Source edited while the primary request was pending.';
+      throw new client.ApiError('Output data may contain inappropriate content', 400);
+    });
+
+    await summarizeFloor(0);
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0][0].id).toBe('summary-primary');
+    expect(chat[0].extra?.bbs_leaf).toBeUndefined();
+    expect(memory.summaries).toHaveLength(0);
+    expect(engineState.lastError).toContain('已改变');
+    expect(engineState.running).toBe(false);
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+  });
+});
+
 it('正常摘要把中途进展和人物标签一起落叶，不再接受计划关联或模型公开', async () => {
   const prior = leaf();
   prior.delta.plans = { add: [{ kind: 'plan', content: '找到玉佩并归还', remaining: '寻找玉佩' }] };

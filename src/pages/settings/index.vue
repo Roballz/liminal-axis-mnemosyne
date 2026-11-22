@@ -6,7 +6,7 @@ import BbsSelect from '@/components/BbsSelect.vue';
 import Icon from '@/components/Icon.vue';
 import ModalMask from '@/components/ModalMask.vue';
 import { fetchModels, testChannel } from '@/api/client';
-import { apiSettings, newChannel, resolveVectorModel, sanitizeTagName, type ApiChannel, type Verbosity } from '@/api/settings';
+import { apiSettings, newChannel, resolveVectorModel, sanitizeTagName, type ApiChannel, type TaskType, type Verbosity } from '@/api/settings';
 import { getContext } from '@/st/context';
 import {
   JAILBREAK_PROMPT,
@@ -64,6 +64,53 @@ const channelOptions = computed(() => [
   { value: '', label: '跟随主 API' },
   ...apiSettings.channels.map(c => ({ value: c.id, label: c.name || '未命名渠道' })),
 ]);
+
+const summaryTasks: { task: TaskType; label: string }[] = [
+  { task: 'summary', label: '摘要' },
+  { task: 'resummary', label: '总结' },
+];
+const editingFallback = ref<{
+  task: TaskType; primaryId: string; channelId: string; enabled: boolean;
+} | null>(null);
+const fallbackTitle = computed(() => `${editingFallback.value?.task === 'summary' ? '摘要' : '总结'} · 自动切换`);
+const backupChannelOptions = computed(() => [
+  { value: '', label: '选择备用渠道' },
+  ...channelOptions.value.slice(1),
+]);
+const fallbackError = computed(() => {
+  const draft = editingFallback.value;
+  if (!draft?.enabled) return '';
+  if (draft.primaryId) {
+    const primary = apiSettings.channels.find(c => c.id === draft.primaryId);
+    if (!primary) return '首选渠道已删除，请重新选择。';
+    if (!primary.url.trim() || !primary.model.trim()) return '请先在渠道设置中补全首选渠道的 API 地址和模型。';
+  }
+  const backup = apiSettings.channels.find(c => c.id === draft.channelId);
+  if (!backup) return '请选择备用渠道。';
+  if (draft.primaryId === draft.channelId) return '首选与备用不能使用同一渠道。';
+  if (!backup.url.trim() || !backup.model.trim()) return '请先在渠道设置中补全备用渠道的 API 地址和模型。';
+  return '';
+});
+function fallbackModelName(id: string) {
+  return apiSettings.channels.find(c => c.id === id)?.model || '未设模型';
+}
+function openFallback(task: TaskType) {
+  editingFallback.value = { task, primaryId: apiSettings.assignments[task], ...apiSettings.fallbacks[task] };
+}
+function confirmFallback() {
+  const draft = editingFallback.value;
+  if (!draft || fallbackError.value) return;
+  apiSettings.assignments[draft.task] = draft.primaryId;
+  apiSettings.fallbacks[draft.task] = { enabled: draft.enabled, channelId: draft.channelId };
+  editingFallback.value = null;
+}
+function selectPrimary(task: TaskType, id: string) {
+  apiSettings.assignments[task] = id;
+  if (id && apiSettings.fallbacks[task].enabled && apiSettings.fallbacks[task].channelId === id) {
+    apiSettings.fallbacks[task].enabled = false;
+    toast('首选与备用相同，已关闭该任务的自动切换', 'info');
+  }
+}
 
 /* —— 悬浮球自定义图标:选图 → 压缩上传到 ST 服务器 → 存路径串(跨设备同步) —— */
 const orbFileInput = ref<HTMLInputElement | null>(null);
@@ -183,8 +230,15 @@ function removeChannel(id: string) {
   if (idx >= 0) list.splice(idx, 1);
   // 清理指派:副 API 清两类摘要指派(向量已改扁平端点,不再走渠道系统)
   if (scope === 'api') {
-    if (apiSettings.assignments.summary === id) apiSettings.assignments.summary = '';
-    if (apiSettings.assignments.resummary === id) apiSettings.assignments.resummary = '';
+    for (const { task } of summaryTasks) {
+      if (apiSettings.assignments[task] === id) {
+        apiSettings.assignments[task] = '';
+        apiSettings.fallbacks[task].enabled = false;
+      }
+      if (apiSettings.fallbacks[task].channelId === id) {
+        apiSettings.fallbacks[task] = { enabled: false, channelId: '' };
+      }
+    }
   }
 }
 
@@ -924,13 +978,21 @@ function exportPublicApiDocument() {
       <Collapsible title="副 API" :open="false">
         <!-- 任务指派 -->
         <div class="bbs-field bbs-assign">
-          <div class="bbs-assign-row">
-            <span class="bbs-field-label">摘要使用</span>
-            <BbsSelect v-model="apiSettings.assignments.summary" :options="channelOptions" class="bbs-assign-select" aria-label="摘要使用的渠道" />
-          </div>
-          <div class="bbs-assign-row">
-            <span class="bbs-field-label">总结使用</span>
-            <BbsSelect v-model="apiSettings.assignments.resummary" :options="channelOptions" class="bbs-assign-select" aria-label="总结使用的渠道" />
+          <div v-for="{ task, label } in summaryTasks" :key="task" class="bbs-assign-row">
+            <span class="bbs-field-label">{{ label }}使用</span>
+            <BbsSelect :model-value="apiSettings.assignments[task]" :options="channelOptions" class="bbs-assign-select" :aria-label="`${label}使用的渠道`" @update:model-value="selectPrimary(task, $event)" />
+            <button
+              class="bbs-icon-mini bbs-fallback-button"
+              :class="{ 'is-on': apiSettings.fallbacks[task].enabled }"
+              type="button"
+              aria-haspopup="dialog"
+              :title="`自动切换 · ${apiSettings.fallbacks[task].enabled ? '已开启' : '已关闭'}`"
+              :aria-label="`配置${label}自动切换（${apiSettings.fallbacks[task].enabled ? '已开启' : '已关闭'}）`"
+              @click="openFallback(task)"
+            >
+              <Icon name="settings" :size="17" />
+              <span v-if="apiSettings.fallbacks[task].enabled" class="bbs-fallback-dot" aria-hidden="true" />
+            </button>
           </div>
         </div>
         <p class="bbs-field-hint">推荐使用DeepSeek或豆包，不推荐Gemini，甲太厚</p>
@@ -1776,6 +1838,47 @@ function exportPublicApiDocument() {
       {{ migrateConfirmText }}
     </ConfirmDialog>
 
+    <!-- ===== 摘要 / 总结自动切换:编辑草稿,保存时一次写回 ===== -->
+    <ModalMask :open="!!editingFallback" @close="editingFallback = null">
+      <div v-if="editingFallback" class="bbs-modal bbs-fallback-modal" role="dialog" aria-modal="true" :aria-label="fallbackTitle">
+        <header class="bbs-modal-head">
+          <span class="bbs-modal-title">{{ fallbackTitle }}</span>
+          <button class="bbs-icon-mini" type="button" aria-label="关闭自动切换设置" @click="editingFallback = null"><Icon name="close" /></button>
+        </header>
+
+        <div class="bbs-switch-row bbs-fallback-enable">
+          <span class="bbs-field-label">启用自动切换</span>
+          <button class="bbs-toggle" :class="{ 'is-on': editingFallback.enabled }" type="button" role="switch" :aria-checked="editingFallback.enabled" aria-label="启用自动切换" @click="editingFallback.enabled = !editingFallback.enabled">
+            <span class="bbs-toggle-knob" />
+          </button>
+        </div>
+
+        <div class="bbs-fallback-models">
+          <div class="bbs-modal-field">
+            <span class="bbs-modal-label">首选模型 <span class="bbs-fallback-caption">每次优先使用</span></span>
+            <BbsSelect v-model="editingFallback.primaryId" :options="channelOptions" aria-label="首选模型的渠道" />
+            <span class="bbs-fallback-model-name">{{ editingFallback.primaryId ? fallbackModelName(editingFallback.primaryId) : '使用主界面当前选定的模型' }}</span>
+          </div>
+          <div class="bbs-modal-field">
+            <span class="bbs-modal-label">备用模型 <span class="bbs-fallback-caption">触发后重试一次</span></span>
+            <BbsSelect v-model="editingFallback.channelId" :options="backupChannelOptions" aria-label="备用模型的渠道" />
+            <span v-if="editingFallback.channelId" class="bbs-fallback-model-name">{{ fallbackModelName(editingFallback.channelId) }}</span>
+          </div>
+        </div>
+
+        <div class="bbs-fallback-note">
+          <p>仅当首选模型报错包含以下内容时，使用备用模型重新生成：</p>
+          <code>Output data may contain inappropriate content</code>
+          <p>500 / 502 / 503 / 504 等其他错误仍按原流程处理。每次请求最多切换一次；原有重试设置继续生效。</p>
+        </div>
+        <p v-if="fallbackError" class="bbs-fallback-error" role="status">{{ fallbackError }}</p>
+        <footer class="bbs-modal-foot">
+          <button class="bbs-btn" type="button" @click="editingFallback = null">取消</button>
+          <button class="bbs-btn bbs-btn-primary" type="button" :disabled="!!fallbackError" @click="confirmFallback">保存</button>
+        </footer>
+      </div>
+    </ModalMask>
+
     <!-- ===== 渠道编辑弹窗 ===== -->
     <ModalMask :open="!!editingChannel" @close="closeChannel">
       <div v-if="editingChannel" class="bbs-modal" role="dialog" aria-modal="true" aria-label="编辑渠道">
@@ -2283,20 +2386,88 @@ function exportPublicApiDocument() {
   gap: 10px;
 }
 .bbs-assign-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 1.7fr) 34px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
-/* 指派下拉:占右半区(渠道名可能长,给足宽度再截断),小一号字与其它设置行一致。
-   带上父级选择器是为了压过 BbsSelect 根节点自带的 width:100%——两者同特异度时靠
-   样式表先后决定胜负,那取决于打包顺序,不可靠 */
+/* 渠道名允许截断,右侧设置键始终保留完整点击区域。 */
 .bbs-assign-row .bbs-assign-select {
-  flex: 0 1 60%;
   min-width: 0;
 }
 .bbs-assign-select :deep(.bbs-select-trigger) {
   font-size: 12px;
+}
+.bbs-assign-row .bbs-fallback-button {
+  position: relative;
+  width: 34px;
+  height: 34px;
+}
+.bbs-assign-row .bbs-fallback-button.is-on {
+  color: var(--bbs-accent);
+  background: var(--bbs-surface-2);
+  border-color: var(--bbs-accent);
+}
+.bbs-fallback-button:focus-visible {
+  outline: 2px solid var(--bbs-accent);
+  outline-offset: 2px;
+}
+.bbs-fallback-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--bbs-accent);
+}
+.bbs-fallback-modal {
+  max-width: 420px;
+}
+.bbs-fallback-enable {
+  padding: 0 0 2px;
+}
+.bbs-fallback-models {
+  display: grid;
+  gap: 14px;
+}
+.bbs-fallback-models .bbs-modal-field {
+  min-width: 0;
+  gap: 6px;
+}
+.bbs-fallback-caption {
+  margin-left: 8px;
+  color: var(--bbs-ink-muted);
+  font-size: 11px;
+}
+.bbs-fallback-model-name {
+  color: var(--bbs-ink-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.bbs-fallback-note {
+  padding: 10px 12px;
+  border-radius: var(--bbs-radius-sm);
+  background: var(--bbs-surface-2);
+  color: var(--bbs-ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.bbs-fallback-note p {
+  margin: 0;
+}
+.bbs-fallback-note code {
+  display: block;
+  margin: 6px 0;
+  color: var(--bbs-ink);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.bbs-fallback-error {
+  margin: 0;
+  color: var(--bbs-danger);
+  font-size: 12px;
+  line-height: 1.5;
 }
 /* —— 模型可搜索 combobox —— */
 .bbs-combo {

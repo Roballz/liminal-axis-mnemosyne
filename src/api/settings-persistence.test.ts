@@ -131,3 +131,26 @@ test('incoming shared updates keep local unrelated edits and do not echo back', 
   expect(saved().excludedChars).toEqual(['External excluded']); expect(saved().customStripTags).toEqual(['external_tag']);
   expect(dispatch).toHaveBeenCalledTimes(2);
 });
+
+test('shared channels hydrate fallback IDs before cleanup; deletions disable affected task rules without echo', async () => {
+  mock.ctx.extensionSettings.mnemosyne_daily = {
+    channels: [], assignments: { summary: 'a', resummary: 'b' },
+    fallbacks: { summary: { enabled: true, channelId: 'b' }, resummary: { enabled: true, channelId: 'a' } },
+  };
+  mock.ctx.extensionSettings.mnemosyne_api_channels = {
+    schemaVersion: 1, revision: 1, channels: [{ id: 'a' }, { id: 'b' }],
+  };
+  const settings = await ready();
+  expect(settings.apiSettings.fallbacks.summary.enabled).toBe(true);
+  expect(settings.apiSettings.fallbacks.resummary.enabled).toBe(true);
+  const dispatch = vi.spyOn(events, 'dispatchEvent');
+  mock.ctx.extensionSettings.mnemosyne_api_channels = { schemaVersion: 1, revision: 2, channels: [{ id: 'b' }] };
+  events.dispatchEvent(new CustomEvent('st-baibai-api-channels:changed')); await tick();
+  expect(settings.apiSettings.assignments.summary).toBe('');
+  expect(settings.apiSettings.fallbacks.summary).toEqual({ enabled: false, channelId: 'b' });
+  expect(settings.apiSettings.fallbacks.resummary).toEqual({ enabled: false, channelId: '' });
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(200);
+  expect(saved().fallbacks).toEqual(settings.apiSettings.fallbacks);
+  expect(dispatch).toHaveBeenCalledTimes(1);
+});

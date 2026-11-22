@@ -11,6 +11,7 @@ import type { ApiChannel } from './settings';
 
 const GENERATE_URL = '/api/backends/chat-completions/generate';
 const DEFAULT_TIMEOUT_SEC = 180;
+const INAPPROPRIATE_CONTENT_ERROR = /Output data may contain inappropriate content/i;
 
 export interface ChatMsg {
   role: 'system' | 'user' | 'assistant';
@@ -18,10 +19,46 @@ export interface ChatMsg {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status?: number) {
+  constructor(message: string, readonly status?: number,
+    readonly inappropriateContent = INAPPROPRIATE_CONTENT_ERROR.test(message)) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+function errorMessage(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
+  return '副 API 返回错误';
+}
+
+function serverStatusInMessage(message: string): number | undefined {
+  const match = /(?:^\s*(?:Error\s*:\s*)?|\bHTTP(?:\s+(?:status|error))?|\bstatus(?:\s+code)?|\bcode|请求失败|状态码)\s*["']?\s*[:=(]?\s*["']?\s*(5\d\d)\b/i.exec(message);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** Compatible providers can put the upstream status inside a HTTP 200 error payload. */
+function errorStatus(error: unknown): number | undefined {
+  const messageStatus = serverStatusInMessage(errorMessage(error));
+  if (!error || typeof error !== 'object') return messageStatus;
+  const value = error as Record<string, unknown>;
+  const statuses = [value.status, value.statusCode, value.status_code, value.code,
+    (value.response as { status?: unknown } | undefined)?.status]
+    .filter(v => typeof v === 'number' || (typeof v === 'string' && /^\d{3}$/.test(v)))
+    .map(Number).filter(v => v >= 100 && v <= 599);
+  return statuses.find(v => v >= 500) ?? messageStatus ?? statuses[0];
+}
+
+function responseError(error: unknown): ApiError {
+  return new ApiError(errorMessage(error), errorStatus(error));
+}
+
+/** Match failure payloads only; successful model content is never examined. */
+export function isInappropriateContentError(error: unknown): boolean {
+  if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') return false;
+  const status = errorStatus(error);
+  if (status !== undefined && status >= 500) return false;
+  return error instanceof ApiError ? error.inappropriateContent : INAPPROPRIATE_CONTENT_ERROR.test(errorMessage(error));
 }
 
 /**
@@ -210,7 +247,12 @@ async function requestCompletionAtUrl(
 
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
-      throw new ApiError(`副 API 请求失败 (${resp.status}): ${text.slice(0, 300)}`, resp.status);
+      // Keep the UI message bounded without losing a trigger after the first 300 characters.
+      let upstreamStatus = serverStatusInMessage(text);
+      try { upstreamStatus ??= errorStatus(JSON.parse(text)?.error); } catch { /* Plain-text errors are valid. */ }
+      const status = resp.status >= 500 ? resp.status : upstreamStatus && upstreamStatus >= 500 ? upstreamStatus : resp.status;
+      throw new ApiError(`副 API 请求失败 (${resp.status}): ${text.slice(0, 300)}`, status,
+        INAPPROPRIATE_CONTENT_ERROR.test(text));
     }
 
     // 流式:按 SSE 增量拼接;非流式:直接解析 JSON。
@@ -221,7 +263,7 @@ async function requestCompletionAtUrl(
 
     const data = await resp.json();
     if (data?.error) {
-      throw new ApiError(data.error.message || '副 API 返回错误');
+      throw responseError(data.error);
     }
 
     const content = extractContent(data);
@@ -238,6 +280,7 @@ async function readSseContent(resp: Response): Promise<string> {
   if (!reader) {
     // 无法流式读取(理论上不会):退回当作整体 JSON 处理
     const data = await resp.json().catch(() => null);
+    if (data?.error) throw responseError(data.error);
     return data ? extractContent(data) : '';
   }
   const decoder = new TextDecoder();
@@ -250,7 +293,7 @@ async function readSseContent(resp: Response): Promise<string> {
     if (payload === '[DONE]') return;
     try {
       const json = JSON.parse(payload);
-      if (json?.error) throw new ApiError(json.error.message || '副 API 返回错误');
+      if (json?.error) throw responseError(json.error);
       const delta = json?.choices?.[0]?.delta?.content ?? json?.choices?.[0]?.message?.content ?? json?.choices?.[0]?.text;
       if (typeof delta === 'string') out += delta;
     } catch (e) {
@@ -258,17 +301,25 @@ async function readSseContent(resp: Response): Promise<string> {
       // 单行解析失败忽略(可能是注释行/心跳)
     }
   };
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() ?? '';
-    lines.forEach(consume);
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      lines.forEach(consume);
+    }
+    // Some compatible endpoints end the final data line without a newline.
+    consume(buf + decoder.decode());
+    return out;
+  } catch (error) {
+    // Finish the failed stream before a caller can start its backup request.
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
   }
-  // Some compatible endpoints end the final data line without a newline.
-  consume(buf + decoder.decode());
-  return out;
 }
 
 /** 从标准 OpenAI 响应体提取文本 */

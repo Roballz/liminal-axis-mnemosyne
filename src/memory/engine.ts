@@ -8,9 +8,8 @@ import { SUMMARY_TAG_PROTOCOL, PLAN_PROGRESS_PROTOCOL } from './prompts';
 import { prepareSummaryTables, parseSummaryTableResult, validateSummaryTableResult, attachTableResult } from '@/mnemosyne/summary-tables';
 import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, beginVisibleSummaryCommit, syncDaily, keepHigherMergeSources, hostScope } from '@/mnemosyne/bridge';
 import type { ChatMsg } from '@/api/client';
-import { mainApiAvailable, requestCompletion, requestViaMainApi } from '@/api/client';
-import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings';
-import type { TaskType } from '@/api/settings';
+import { resolveTaskSender as resolveSender, type TaskSender } from '@/api/taskSender';
+import { apiSettings, engineActiveHere } from '@/api/settings';
 import type { STMessage, WorldInfoEntry } from '@/st/context';
 import { getContext, getCheckWorldInfo, getEjsTemplate, setMessageText } from '@/st/context';
 import { chatRenderBatch } from '@/st/render-batch';
@@ -978,30 +977,6 @@ async function syncWindowHiddenState(chat: STMessage[]): Promise<void> {
   }
 }
 
-/**
- * 对单个 AI 楼层执行摘要。
- * 上下文:为了让摘要连贯,把该 AI 楼层连同它前面紧邻的、尚未覆盖的用户发言一起喂给模型,
- * 但只把这一个 AI 楼层(及其前置用户楼层)标记为已覆盖。
- */
-/**
- * 解析某摘要任务实际怎么发请求:
- *  - 指派了副 API 渠道 → 用该渠道(requestCompletion);
- *  - 未指派(空)→ 跟随主 API(requestViaMainApi → generateRaw,用主界面当前在用的 API,不带聊天历史)。
- * 主 API 也不可用(ST 无 generateRaw)时返回 error,调用方据此早退并写 lastError。
- */
-function resolveSender(
-  task: TaskType,
-): { send: (messages: ChatMsg[]) => Promise<string>; label: string } | { error: string } {
-  const channel = getChannelForTask(task);
-  if (channel) {
-    return { send: messages => requestCompletion(channel, messages), label: `渠道「${channel.name}」(${channel.model})` };
-  }
-  if (!mainApiAvailable()) {
-    return { error: '未指派副 API 渠道,且当前主 API 不可用(请填好主 API 后重试,或为本任务单独指派渠道)' };
-  }
-  return { send: messages => requestViaMainApi(messages), label: '主 API(主界面当前在用)' };
-}
-
 /** Snapshot actual prompt inputs before any asynchronous evidence/context reads. */
 function summaryResponseGuard(chat: STMessage[], end = chat.length - 1, dependencies = memory.summaries.map(s => s.id)) {
   const scope = hostScope(), messages = chat.slice(0, end + 1);
@@ -1077,9 +1052,10 @@ async function mergeEvidence(nodes: readonly MergeSource[], guard: () => void, c
     : '请在摘要页点「立即总结」或多选合并，核对后可保留旧总结并继续';
   throw new Error(`${label} 等 ${blocked.length} 条来源在请求前已失效或未归档。${action}。本次未调用模型。`);
 }
-function trackedSummary<T>(title: string, sender: { send: (messages: ChatMsg[]) => Promise<string> },
+function trackedSummary<T>(title: string, sender: TaskSender,
   messages: ChatMsg[], parse: (raw: string) => T, apply: (value: T) => Promise<void>, guard: () => void, preview = false, reviewFailures = false) {
-  return requestSummaryResponse({ title, scope: hostScope(), send: sender.send, messages, parse, apply, guard, preview, reviewFailures,
+  return requestSummaryResponse({ title, scope: hostScope(), send: value => sender.send(value, { beforeFallback: guard }),
+    messages, parse, apply, guard, preview, reviewFailures,
     retries: Math.max(0, apiSettings.summaryMaxRetries | 0) });
 }
 /** Explicit user confirmation only; reuse the captured parser and write path without sending. */
@@ -1316,7 +1292,7 @@ export async function draftFloorCorrection(floor: number, guard: () => boolean) 
       charCard && buildCharCardSystem(charCard), persona && buildPersonaSystem(persona),
       worldInfo && buildWorldInfoSystem(worldInfo), prompt.system].filter(Boolean).join('\n\n');
     const raw = await sender.send([{ role: 'system', content: system },
-      { role: 'user', content: prompt.user + '\n本次仅修订本楼摘要，只返回含非空 summary 字符串的 JSON。' }]);
+      { role: 'user', content: prompt.user + '\n本次仅修订本楼摘要，只返回含非空 summary 字符串的 JSON。' }], { beforeFallback: current });
     current();
     const text = llmString(extractJsonObject<SummaryDelta>(raw)?.summary);
     if (!text) throw new Error('AI 未返回有效摘要，原摘要已保留');
@@ -1328,7 +1304,7 @@ export async function draftFloorCorrection(floor: number, guard: () => boolean) 
 async function summarizeFloorWork(
   chat: STMessage[],
   aiFloor: number,
-  sender: { send: (messages: ChatMsg[]) => Promise<string>; label: string },
+  sender: TaskSender,
   options: Pick<RunSummaryOptions, 'replaceLeaf' | 'onRequestStart' | 'preview' | 'reviewFailures'> = {},
 ): Promise<void> {
   const ctx = getContext();
@@ -2243,7 +2219,7 @@ export async function draftHigherCorrection(hostId: string, guard: () => boolean
     if (jb) messages.push({ role: 'system', content: jb });
     messages.push({ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user + hints },
       { role: 'system', content: RESUMMARY_THINKING_CHECKLIST }, { role: 'assistant', content: RESUMMARY_THINKING_PREFILL });
-    const raw = await sender.send(messages);
+    const raw = await sender.send(messages, { beforeFallback: current });
     current();
     const text = llmString(extractJsonObject<{ summary?: string }>(raw)?.summary);
     if (!text) throw new Error('AI 未返回有效总结，原总结已保留');
