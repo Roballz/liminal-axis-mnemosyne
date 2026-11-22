@@ -139,3 +139,33 @@ test('摘要事件校验失效只丢弃摘要，知识库仍完成注入', async
     expect(recallDebug.knowledgeStatus).toBe('已注入');
     expect(recallDebug.status).toBe('降级召回');
 });
+
+test.each(['active', 'missing', 'omit', 'repeated user', 'stale swipe', 'unmarked'])('focus neighbors use current eligible adjacent replies (%s)', async mode => {
+    settings.apiSettings.vector.recall.bm25Candidates = 0;
+    const [before, anchor, answer, after] = leaves;
+    const focus = mode === 'unmarked' ? undefined : 1;
+    vi.mocked(rewrite.rewriteQuery).mockResolvedValue({ intent: '现在的场景', queries: ['背景', '当时的回答'], focusQueryIndex: focus });
+    vi.mocked(embed.embedTexts).mockResolvedValue([new Float32Array([1, 0]), new Float32Array([0, 1])]);
+    const chat = context.getContext()!.chat;
+    if (mode === 'missing') leaves = leaves.filter(l => l !== answer);
+    if (mode === 'omit') chat[answer.msgIndex].extra = { bbs_omit: true };
+    if (mode === 'repeated user') chat[answer.msgIndex].is_user = true;
+    vi.mocked(vector.vecSearch).mockImplementation(async (_db, _scopes, _vecs, opts) => ({
+        results: [{ ...before, scope: 'chat:synthetic', similarity: .9, queryIndex: 0 }],
+        focusLeafIds: opts?.focus ? [mode === 'stale swipe' ? 'old-revision' : anchor.leafId, before.leafId] : undefined,
+    }));
+    vi.mocked(embed.rerankDocuments).mockImplementation(async (query, docs) => {
+        expect(query).toBe('现在的场景');
+        return docs.map((doc, index) => ({ index, score: doc.includes(answer.mesFull) ? 1 : .5 })).sort((a,b) => b.score-a.score);
+    });
+    await runVectorRecall();
+    expect(recallDebug.focusQueryIndex).toBe(focus);
+    const docs = vi.mocked(embed.rerankDocuments).mock.calls[0][1];
+    expect(docs.filter(doc => doc.includes(before.mesFull))).toHaveLength(1);
+    expect(docs).not.toContain(after.mesFull);
+    if (mode === 'active') {
+        expect(text()).toContain(answer.mesFull);
+        expect(recallDebug.fusion.some(h => h.route === `#${answer.msgIndex}（#${anchor.msgIndex} 邻楼）`)).toBe(true);
+    } else expect(docs).not.toContain(answer.mesFull);
+    if (mode === 'unmarked') expect(docs).toHaveLength(1);
+});

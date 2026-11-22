@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { vecSearch as backendSearch } from '@/api/baibaoku';
 import { encodeFloat32Base64 } from './embed';
-import { localStore } from './store';
+import { localStore, resetVectorStoreProbe, vecSearch } from './store';
 
 const encode = (values: number[]) => encodeFloat32Base64(new Float32Array(values));
 const row = (leafId: string, values: number[]) => ({ leafId, docHash: leafId, payloadHash: leafId,
@@ -71,4 +71,35 @@ it('backend search passes cancellation to fetch without serializing the signal i
   expect(JSON.parse(fetch.mock.calls[0][1].body as string)).toEqual({ database: 'synthetic', scopes: ['scope'], queryVectors: [encode([1, 0])], topK: 7 });
   controller.abort(reason);
   await expect(pending).rejects.toBe(reason);
+});
+
+it('keeps the true focus top two outside global topK, with one read per scope', async () => {
+  const database = crypto.randomUUID();
+  await localStore.upsert(database, 'self', [row('other-query', [1, 0]), row('leading', [2, 1]),
+    row('second', [3, 1]), row('excluded', [0, 1])]);
+  await localStore.upsert(database, 'bundle', [row('foreign', [0, 1])]);
+  const reads = vi.spyOn(IDBIndex.prototype, 'getAll');
+  const { results, focusLeafIds } = await localStore.search(database, ['self', 'bundle'], [encode([1, 0]), encode([0, 1])],
+    { topK: 1, excludeLeafIds: ['excluded'], focus: { index: 1, scope: 'self' } });
+  expect(results.map(h => h.leafId)).toEqual(['other-query']);
+  expect(focusLeafIds).toEqual(['leading', 'second']);
+  expect(reads).toHaveBeenCalledTimes(2);
+});
+
+it.each([true, false])('backend reuses the focus vector, preserving main results on optional failure (%s)', async ok => {
+  resetVectorStoreProbe();
+  const vectors = [encode([1, 0]), encode([0, 1])], mainHit = { scope: 'self', leafId: 'main', similarity: 1 };
+  const requests: any[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/status')) return Response.json({ ok: true, data: { driver: { available: true } } });
+    const body = JSON.parse(String(init.body)); requests.push(body);
+    if (body.queryVectors.length === 2) return Response.json({ ok: true, data: { results: [mainHit] } });
+    return ok ? Response.json({ ok: true, data: { results: [{ ...mainHit, leafId: 'neighbor-anchor' }] } }) : new Response('', { status: 502 });
+  }));
+  try {
+    const result = await vecSearch('db', ['self', 'bundle'], vectors, { topK: 30, excludeLeafIds: ['recent'], focus: { index: 1, scope: 'self' } });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toMatchObject({ scopes: ['self'], queryVectors: [vectors[1]], topK: 2, excludeLeafIds: ['recent'] });
+    expect(result).toEqual({ results: [mainHit], ...(ok ? { focusLeafIds: ['neighbor-anchor'] } : { focusFailed: true }) });
+  } finally { resetVectorStoreProbe(); }
 });

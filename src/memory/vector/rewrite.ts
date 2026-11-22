@@ -35,6 +35,7 @@ const MAX_QUERY_LEN = 220;
 
 export interface RewriteResult {
   context?: RecallContext;
+  focusQueryIndex?: number;
   /** 场景意图描述(兼作 rerank 的 query) */
   intent: string;
   /** 多条检索 query(已去重限长) */
@@ -189,6 +190,7 @@ export function parseResponse(text: string): RewriteResult {
   let context: RecallContext | undefined;
   const queries: string[] = [];
   const seen = new Set<string>();
+  const marked = new Set<string>();
 
   for (const raw of lines) {
     // 去掉行首的 -/*/•、数字编号
@@ -206,17 +208,19 @@ export function parseResponse(text: string): RewriteResult {
       intent = sanitize(im[1], MAX_INTENT_LEN);
       continue;
     }
-    const qm = line.match(/^Q\s*\d*\s*[:：]\s*(.+)$/i);
+    const qm = line.match(/^Q\s*\d*\s*(\*?)\s*[:：]\s*(.+)$/i);
     if (qm) {
-      const q = sanitize(qm[1]);
+      const q = sanitize(qm[2]);
       if (!q) continue;
       const key = q.toLowerCase();
+      if (qm[1]) marked.add(key);
       if (seen.has(key)) continue;
       seen.add(key);
       if (queries.length < MAX_QUERIES) queries.push(q);
     }
   }
-  return { intent, queries, ...(context ? { context } : {}) };
+  const focusQueryIndex = marked.size === 1 ? queries.findIndex(q => marked.has(q.toLowerCase())) : -1;
+  return { intent, queries, ...(focusQueryIndex >= 0 ? { focusQueryIndex } : {}), ...(context ? { context } : {}) };
 }
 
 function sanitize(text: string, maxLength = MAX_QUERY_LEN): string {

@@ -28,14 +28,24 @@ import {
 } from '@/api/baibaoku';
 import { decodeFloat32Base64 } from './embed';
 
-type SearchOpts = { topK?: number; excludeLeafIds?: string[]; signal?: AbortSignal };
+type SearchOpts = {
+  topK?: number;
+  excludeLeafIds?: string[];
+  signal?: AbortSignal;
+  focus?: { index: number; scope: string };
+};
+interface SearchResult {
+  results: VecHit[];
+  focusLeafIds?: string[];
+  focusFailed?: boolean;
+}
 
 /** 与 baibaoku.ts 的 vec* 一一对应的最小存储接口(bundle 后端独占,不入接口)。 */
 export interface VectorStore {
   kind: 'backend' | 'local';
   upsert(database: string, scope: string, items: VecItem[]): Promise<{ upserted: number }>;
   updatePayload(database: string, scope: string, items: VecPayloadItem[]): Promise<{ updated: number }>;
-  search(database: string, scopes: string[], queryVectors: string[], opts?: SearchOpts): Promise<{ results: VecHit[] }>;
+  search(database: string, scopes: string[], queryVectors: string[], opts?: SearchOpts): Promise<SearchResult>;
   reconcile(
     database: string,
     scope: string,
@@ -52,7 +62,19 @@ const backendStore: VectorStore = {
   kind: 'backend',
   upsert: vecUpsertBackend,
   updatePayload: vecUpdatePayloadBackend,
-  search: (db, scopes, qv, opts = {}) => vecSearchBackend(db, scopes, qv, opts),
+  async search(db, scopes, vectors, opts = {}) {
+    const main = vecSearchBackend(db, scopes, vectors, opts);
+    const focus = opts.focus;
+    if (!focus) return main;
+    // The backend exposes only the multi-query max. Reuse the encoded vector.
+    const [result, extra] = await Promise.all([main,
+      vecSearchBackend(db, [focus.scope], [vectors[focus.index]], { ...opts, topK: 2 })
+        .then(({ results }) => ({ focusLeafIds: results.filter(h => h.scope === focus.scope && h.similarity > -1).map(h => h.leafId) }))
+        .catch(() => ({ focusFailed: true })),
+    ]);
+    opts.signal?.throwIfAborted();
+    return { ...result, ...extra };
+  },
   reconcile: vecReconcileBackend,
   clearScope: vecClearScopeBackend,
   stats: vecStatsBackend,
@@ -318,9 +340,11 @@ export const localStore: VectorStore = {
     const queryDimensions = new Set(queries.map(query => query.length));
     const fused = new Map<string, { row: LocalRecord; bestSim: number; bestQuery: number }>();
 
+    const leaders: { id: string; score: number }[] = [];
     let scored = 0;
     for (const scope of scopes) {
       const rows = await getScopeRows(database, scope, signal);
+      const focusIndex = opts.focus?.scope === scope ? opts.focus.index : -1;
       for (const r of rows) {
         // Cooperative scoring: allow rendering/touch input between batches.
         // IndexedDB format, score math, fusion and ordering remain unchanged.
@@ -338,6 +362,11 @@ export const localStore: VectorStore = {
         let bestQ = -1;
         for (let qi = 0; qi < queries.length; qi++) {
           const sim = dotNormalized(queries[qi], v, norm);
+          if (qi === focusIndex && sim > (leaders[1]?.score ?? -1)) {
+            const pos = !leaders.length || sim > leaders[0].score ? 0 : 1;
+            leaders.splice(pos, 0, { id: r.leafId, score: sim });
+            if (leaders.length > 2) leaders.pop();
+          }
           if (sim > best) {
             best = sim;
             bestQ = qi;
@@ -354,6 +383,7 @@ export const localStore: VectorStore = {
     signal?.throwIfAborted();
     const merged = [...fused.values()].sort((a, b) => b.bestSim - a.bestSim).slice(0, topK);
     return {
+      ...(opts.focus ? { focusLeafIds: leaders.map(h => h.id) } : {}),
       results: merged.map(({ row, bestSim, bestQuery }) => ({
         leafId: row.leafId,
         scope: row.scope,
@@ -490,7 +520,7 @@ export async function vecSearch(
   scopes: string[],
   queryVectors: string[],
   opts: SearchOpts = {},
-): Promise<{ results: VecHit[] }> {
+): Promise<SearchResult> {
   opts.signal?.throwIfAborted();
   const store = await getVectorStore();
   opts.signal?.throwIfAborted();

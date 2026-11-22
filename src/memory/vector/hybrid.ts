@@ -5,6 +5,7 @@ import type { VecHit } from '@/api/baibaoku';
 export interface HybridHit extends Omit<VecHit, 'similarity'> {
   similarity: number | null;
   tags?: SummaryTags;
+  neighborOfFloor?: number;
   bm25Score?: number;
   rrfScore?: number;
 }

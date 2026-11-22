@@ -52,6 +52,7 @@ export interface RecallDebug {
   intent: string;
   /** 查询重写产出的多条检索 query */
   queries: string[];
+  focusQueryIndex?: number;
   embedding: RecallDebugEmbedHit[];
   bm25: { leafId: string; score: number; preview: string }[];
   bm25Status: string;
@@ -62,7 +63,7 @@ export interface RecallDebug {
 }
 
 function empty(): RecallDebug {
-  return { context: undefined, contextRanked: [], at: 0, status: '', summaryStatus: '', knowledgeStatus: '', detail: '', intent: '', queries: [], embedding: [], bm25: [], bm25Status: 'BM25 未启用', fusion: [], rerank: [], injectedText: '' };
+  return { focusQueryIndex: undefined, context: undefined, contextRanked: [], at: 0, status: '', summaryStatus: '', knowledgeStatus: '', detail: '', intent: '', queries: [], embedding: [], bm25: [], bm25Status: 'BM25 未启用', fusion: [], rerank: [], injectedText: '' };
 }
 
 /** 全局召回调试快照。UI 直接订阅;recall.ts 在各阶段写入。 */
@@ -85,7 +86,8 @@ export function setRecallStatus(status: string): void {
   if (!recallDebug.at) recallDebug.at = Date.now();
 }
 
-export function setRecallRewrite(intent: string, queries: string[]): void {
+export function setRecallRewrite(intent: string, queries: string[], focusQueryIndex?: number): void {
+  recallDebug.focusQueryIndex = focusQueryIndex;
   recallDebug.intent = intent;
   recallDebug.queries = [...queries];
 }
@@ -104,7 +106,7 @@ export function setRecallBm25(hits: HybridHit[], status: string): void {
 }
 export function setRecallFusion(hits: HybridHit[]): void {
   recallDebug.fusion = hits.map(h => ({ leafId: h.leafId, score: h.rrfScore ?? null,
-    route: h.similarity !== null ? (h.bm25Score !== undefined ? '向量 + BM25' : '向量') : 'BM25', preview: previewOf(h.document) }));
+    route: h.neighborOfFloor !== undefined ? `#${h.msgIndex}（#${h.neighborOfFloor} 邻楼）` : h.similarity !== null ? (h.bm25Score !== undefined ? '向量 + BM25' : '向量') : 'BM25', preview: previewOf(h.document) }));
 }
 
 export function setRecallInjected(text: string): void {

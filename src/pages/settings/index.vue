@@ -1673,7 +1673,7 @@ function exportPublicApiDocument() {
               </p>
               <ul v-if="recallDebug.queries.length" class="bbs-dbg-qlist">
                 <li v-for="(q, i) in recallDebug.queries" :key="i" class="bbs-dbg-qitem">
-                  <span class="bbs-dbg-qno">Q{{ i + 1 }}</span><span class="bbs-dbg-qtext">{{ q }}</span>
+                  <span class="bbs-dbg-qno">Q{{ i + 1 }}{{ i === recallDebug.focusQueryIndex ? '·重点' : '' }}</span><span class="bbs-dbg-qtext">{{ q }}</span>
                 </li>
               </ul>
               <p v-else class="bbs-dbg-empty">无</p>
@@ -1703,7 +1703,7 @@ function exportPublicApiDocument() {
             </Collapsible>
             <Collapsible :title="`4 · 送入重排 · ${recallDebug.fusion.length} 条`" :open="false">
               <ul class="bbs-dbg-cards"><li v-for="(h, i) in recallDebug.fusion" :key="i" class="bbs-dbg-card">
-                <span>{{ h.route }}</span><span class="bbs-dbg-num">{{ h.score === null ? '原生向量排序' : `RRF ${h.score.toFixed(5)}` }}</span>
+                <span>{{ h.route }}</span><span v-if="h.score !== null" class="bbs-dbg-num">RRF {{ h.score.toFixed(5) }}</span><span v-else-if="h.route === '向量'" class="bbs-dbg-num">原生向量排序</span>
                 <p class="bbs-dbg-prev">{{ h.preview }}</p>
               </li></ul>
             </Collapsible>

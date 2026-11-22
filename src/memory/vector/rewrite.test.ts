@@ -95,3 +95,10 @@ it.each([
   if (hole) expect(snapshot).not.toContain('截止后人物');
   else expect(snapshot).toContain('截止后人物');
 });
+
+it('keeps a single focus after query deduplication and ignores ambiguous or discarded markers', () => {
+  const parsed = parseResponse('Q: 场地\nQ: 交接\nQ3*：交接\nQ: 人物');
+  expect(parsed).toMatchObject({ queries: ['场地', '交接', '人物'], focusQueryIndex: 1 });
+  expect(parseResponse('Q*: 甲\nQ*: 乙')).toEqual({ intent: '', queries: ['甲', '乙'] });
+  expect(parseResponse('Q: 1\nQ: 2\nQ: 3\nQ: 4\nQ: 5\nQ: 6\nQ*: 7').focusQueryIndex).toBeUndefined();
+});

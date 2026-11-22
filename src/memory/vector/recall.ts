@@ -367,8 +367,8 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const stillCurrent = () => (!dailyInstalled() || (canonicalHost === recallHostVersion() && canonicalPolicy === JSON.stringify(dailySettings))) && !signal.aborted && epoch === recallEpoch && recallActiveHere() &&
     currentVectorDb() === database && currentChatId() === sourceChat && settingsKey() === settingsAtStart && JSON.stringify(recallScopes()) === JSON.stringify(scopes) &&
     (dailyInstalled() || (buildRecallCacheKey(getContext()?.chat ?? [], cfg) === sourceKey && leafFingerprint() === leafVersion));
-  const eligibleIds = new Set(leaves.map(l => l.leafId));
-  const relevantEvents = (cards: EventCard[]) => cards.filter(c => c.members.some(m => eligibleIds.has(m.memory)));
+  const localById = new Map(leaves.map(l => [l.leafId, l]));
+  const relevantEvents = (cards: EventCard[]) => cards.filter(c => c.members.some(m => localById.has(m.memory)));
   let eventCards: EventCard[] = [];
   if (canonicalView) {
     try { eventCards = relevantEvents((await eventView(canonicalLib!, canonicalView)).cards); }
@@ -393,7 +393,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   }
   // 使用实际召回依赖的指纹，既允许同轮重 roll，又拒绝来源/权限/候选变化后的旧文本。
   // 只保存摘要指纹，避免把百万字正文或设置中的密钥重复写入 localStorage。
-  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v5|${await digest([
+  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v6|${await digest([
     database, scopes, sourceKey, settingsAtStart, fingerprint, summaryWanted, leafVersion,
     canonicalView ? [canonicalLib!.db.name, canonicalView.branch.story, canonicalView.branch.id,
       canonicalPolicy] : null,
@@ -448,7 +448,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
 
   // 1) 查询重写(强制启用,无降级):得多条 query 向量 + rerank 用的 query 文本。
   // 重写失败/无 query 会抛错 → 落到外层 catch,清空注入槽、结束本次召回。
-  const { queryVectors, rerankQuery, queries, context } = await resolveQueryVectors(signal, chat);
+  const { queryVectors, rerankQuery, queries, context, focusQueryIndex } = await resolveQueryVectors(signal, chat);
   if (!stillCurrent()) return;
   if (!queryVectors.length) {
     throw new Error('Embedding 未产出查询向量');
@@ -460,6 +460,8 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const exclude = [...excluded], selfScope = currentChatScope();
   const lexicalWanted = summaryWanted && cfg.bm25Candidates > 0 && !!selfScope;
   const vectorWanted = summaryReady && cfg.rerankCandidates > 0;
+  const focus = focusQueryIndex !== undefined && selfScope && cfg.finalRecallCount > 0 && cfg.fullTextCount > 0 &&
+    (!lexicalWanted || cfg.fusionCandidates > 0) ? { index: focusQueryIndex, scope: selfScope } : undefined;
   setRecallStatus('进行中…检索');
   // Start independent work together. Branches own their results; no late branch
   // may publish debug/injection state after this run has been superseded.
@@ -472,7 +474,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
         queries: [user ? cleanBody(user.mes) : '', ...queries], exclude, topK: cfg.bm25Candidates }, signal, canonicalView ? leafVersion : undefined);
     })() : Promise.resolve(undefined),
     vectorWanted ? vecSearch(database, scopes, queryVectors, {
-      topK: Math.max(1, cfg.rerankCandidates), excludeLeafIds: exclude, signal,
+      topK: Math.max(1, cfg.rerankCandidates), excludeLeafIds: exclude, signal, focus,
     }) : Promise.resolve(undefined),
   ]);
   signal.throwIfAborted();
@@ -494,7 +496,6 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   let bm25Failed = false;
   try {
     // 2) 后端检索:多路在范围内纯按 embedding 得分取前 rerankCandidates(后端 max 融合,不套阈值),排除窗口内叶子
-    const localById = new Map(leaves.map(l => [l.leafId, l]));
     let bm25Results: HybridHit[] = [];
     if (lexicalWanted) {
       try {
@@ -515,7 +516,10 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     if (!stillCurrent()) return;
     let results: VecHit[] = [];
     if (vectorWanted) {
-      if (vectorResult.status === 'fulfilled') results = vectorResult.value!.results;
+      if (vectorResult.status === 'fulfilled') {
+        results = vectorResult.value!.results;
+        if (vectorResult.value!.focusFailed) failSummary('重点检索失败');
+      }
       else {
         const error = vectorResult.reason;
         signal.throwIfAborted();
@@ -568,7 +572,11 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     bm25Results = bm25Results.map(tagHit);
     // 摘要补位使用完整融合榜，不被送入 rerank 的候选上限截断。
     const fused = hybridEnabled ? fuseCandidates(results, bm25Results, results.length + bm25Results.length) : [];
-    const candidates: HybridHit[] = hybridEnabled ? fused.slice(0, cfg.fusionCandidates) : results;
+    let candidates: HybridHit[] = hybridEnabled ? fused.slice(0, cfg.fusionCandidates) : results;
+    if (focus && vectorResult.status === 'fulfilled' && vectorResult.value?.focusLeafIds?.length) {
+      const neighbors = focusNeighbors(candidates, vectorResult.value.focusLeafIds, localById, focus.scope, chat);
+      if (neighbors.length) candidates = candidates.concat(neighbors.map(tagHit));
+    }
     setRecallFusion(candidates);
     if (candidates.length) setRecallStatus('进行中…重排');
     ranked = candidates.length ? await rerankCandidates(rerankQuery, candidates, signal,
@@ -635,6 +643,38 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     (!summaryWanted || summaryReady)) saveRecallCache({ key: cacheKey, text, debug: snapshotRecallDebug() });
 }
 
+/** Only the immediately adjacent reply, optionally across one player message.
+ * The eligible projection supplies the body and revision for the active branch. */
+function focusNeighbors(
+  candidates: HybridHit[], anchors: string[],
+  eligible: Map<string, ReturnType<typeof collectLeaves>[number]>, scope: string, chat: STMessage[],
+): HybridHit[] {
+  const wanted = new Map<number, number>();
+  for (const id of anchors.slice(0, 2)) {
+    const floor = eligible.get(id)?.msgIndex;
+    if (floor === undefined || !isAiFloor(chat[floor])) continue;
+    for (const direction of [-1, 1]) {
+      let next = floor + direction;
+      const between = chat[next];
+      if (between?.is_user && !between.extra?.bbs_omit && !between.extra?.type) next += direction;
+      if (isAiFloor(chat[next]) && !wanted.has(next)) wanted.set(next, floor);
+    }
+  }
+  if (!wanted.size) return [];
+  const neighbors: HybridHit[] = [];
+  const seen = new Set(candidates.filter(h => h.scope === scope).map(h => h.leafId));
+  for (const leaf of eligible.values()) {
+    const anchor = wanted.get(leaf.msgIndex);
+    if (anchor === undefined) continue;
+    if (!seen.has(leaf.leafId)) neighbors.push({
+      ...leaf, scope, similarity: null, queryIndex: -1, neighborOfFloor: anchor,
+    });
+    wanted.delete(leaf.msgIndex);
+    if (!wanted.size) break;
+  }
+  return neighbors;
+}
+
 /** 把分档结果写入调试快照:按 leaf_id 去重(保留首条),tier 取 buildRecallText 标记,缺省 drop。 */
 function recordRerankDebug(
   ranked: RankedHit[],
@@ -668,17 +708,17 @@ function recordRerankDebug(
 async function resolveQueryVectors(
   signal?: AbortSignal,
   chat?: STMessage[],
-): Promise<{ queryVectors: string[]; rerankQuery: string; queries: string[]; context?: RecallContext }> {
+): Promise<{ queryVectors: string[]; rerankQuery: string; queries: string[]; context?: RecallContext; focusQueryIndex?: number }> {
   setRecallStatus('进行中…Query 重写');
-  const { intent, queries, context } = await rewriteQuery(signal, chat);
+  const { intent, queries, context, focusQueryIndex } = await rewriteQuery(signal, chat);
   signal?.throwIfAborted();
-  setRecallRewrite(intent, queries);
+  setRecallRewrite(intent, queries, focusQueryIndex);
   if (!queries.length) throw new Error('查询重写未产出任何 query');
   // 检索向量:多条 Q(INTENT 偏长偏全文,留给 rerank,不进检索向量以免稀释)
   setRecallStatus('进行中…embedding');
   const vecs = await embedTexts(queries, signal);
   const queryVectors = vecs.map(v => encodeFloat32Base64(v));
-  return { queryVectors, rerankQuery: intent || queries[0], queries, context };
+  return { queryVectors, rerankQuery: intent || queries[0], queries, context, focusQueryIndex };
 }
 
 /** 对候选做 rerank;失败/未配置则用 embedding 相似度序降级。 */
