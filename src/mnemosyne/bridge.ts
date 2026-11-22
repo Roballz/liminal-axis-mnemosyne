@@ -1,4 +1,5 @@
 import { sourceSnapshot, sameSourceSnapshot } from '@/memory/source-snapshot';
+import { higherMergePlan, higherHostMemory } from './higher-summary-confirmation';
 import { HostVersionMemo } from './host-version';
 import { sourceNeutralChanges } from './change-journal';
 import { beginBodyEdit, settleBodyEdit, cancelBodyEdit } from './summary-edit-signal';
@@ -31,6 +32,7 @@ import {
     capture,
     synchronize,
     confirmUnselectedLeaf,
+    keepSummaries,
     statuses,
     current,
     forkBranch,
@@ -693,17 +695,7 @@ async function syncDailyGuarded(isActive: () => boolean, confirmation?: {
                 observation.memories.push(item);
             });
             for (const s of [...memory.summaries].sort((a, b) => a.level - b.level))
-                observation.memories.push({
-                    hostId: s.id,
-                    content: s.text,
-                    level: s.level,
-                    anchorKey: null,
-                    children: s.childIds,
-                    generationKey: s.createdAt,
-                    storyTime: s.timeStart || s.timeLabel || '',
-                    seed: false,
-                    enabled: true,
-                });
+                observation.memories.push(higherHostMemory(s));
             let deletionTables = dailyState.tableRevision;
             const hostGuard = () => scope === hostScope() && isActive() && generation === dailyState.generation && host === hostVersion() &&
                 getContext()?.chat === deletionChat && localStorage.getItem(ACTIVE_KEY) === deletionSelector;
@@ -1283,17 +1275,20 @@ async function archivedSummaryEvidence(indices: number[], dependencies: string[]
     // and explicit role-repair pairs at this same checked Head/view/epoch. Do not
     // impose a second, stricter revision equality that rejects those valid proofs.
     // This check only bounds the dependency to the unchanged host prefix.
-    const refs = prior.view.refs.slice(0, cutoff);
-    const validity = dependencies.length ? await statuses(lib, { ...prior.view, refs, cutoff }) : prior.validity;
-    const byHost = new Map(prior.view.memories.map(m => [m.hostId, m]));
-    if (dependencies.some(id => {
-        const m = byHost.get(id);
-        return !m || !prior.allowed.has(id) || validity.get(m.id) !== 'valid';
-    })) return null;
+    let allowedDependencies = dependencies;
+    if (cutoff === prior.view.cutoff) {
+        if (prior.changeVersion !== lib.changes.version || prior.activation !== libraryActivationGeneration()) return null;
+        allowedDependencies = dependencies.filter(id => prior.allowed.has(id));
+        if (indices.length && allowedDependencies.length !== dependencies.length) return null;
+    } else if (dependencies.length) {
+        const validity = await statuses(lib, { ...prior.view, refs: prior.view.refs.slice(0, cutoff), cutoff });
+        const byHost = new Map(prior.view.memories.map(m => [m.hostId, m]));
+        if (dependencies.some(id => !prior.allowed.has(id) || validity.get(byHost.get(id)?.id ?? '') !== 'valid')) return null;
+    }
     if (!await current(lib, prior.view) || !hostCurrent() || !finalityCurrent()) return null;
-    return { view: prior.view, host: prior.host, generation: dailyState.generation, dependencies,
+    return { view: prior.view, host: prior.host, activation: prior.activation, generation: dailyState.generation, dependencies,
         inputRefs: indices.map(i => prior.view.refs[i]), current: () => hostCurrent() && finalityCurrent(),
-        allowedDependencies: dependencies };
+        allowedDependencies };
 }
 export async function captureSummaryEvidence(indices: number[], dependencies: string[] = []) {
     if (!installed) return null;
@@ -1302,8 +1297,22 @@ export async function captureSummaryEvidence(indices: number[], dependencies: st
     const view = await syncDaily();
     const host = hostVersion();
     const generation = dailyState.generation;
-    return { view, host, generation, dependencies, inputRefs: indices.map((i) => view.refs[i]).filter(Boolean),
-        current: undefined as (() => boolean) | undefined, allowedDependencies: dependencies.filter(summaryAllowed) };
+    return { view, host, generation, activation: libraryActivationGeneration(), dependencies, inputRefs: indices.map((i) => view.refs[i]).filter(Boolean),
+        current: undefined as (() => boolean) | undefined, allowedDependencies: dependencies.length ? dependencies.filter(summaryPermission()) : [] };
+}
+/** Only the manual merge confirmation can authorize a new applicability decision. */
+export async function keepHigherMergeSources(evidence: NonNullable<Awaited<ReturnType<typeof captureSummaryEvidence>>>,
+    guard: () => void) {
+    const scope = hostScope(), library = activeLibrary(), generation = dailyState.generation;
+    const currentHost = () => installed && library === activeLibrary() && scope === hostScope() &&
+        generation === dailyState.generation && evidence.host === hostVersion();
+    await serializeDailyActivation(async () => {
+        guard();
+        const lib = await library, prior = cache ?? lastCache;
+        check(currentHost() && prior?.view === evidence.view && prior.library === lib.db.name, '聊天或档案已改变，请重新核对');
+        const { ids, retired } = higherMergePlan(evidence.view, prior.validity, memory.summaries, evidence.dependencies);
+        await keepSummaries(lib, evidence.view, ids, currentHost, prior.validity, { scope, hosts: retired });
+    });
 }
 export function attachSummaryEvidence(
     chat: STMessage[],

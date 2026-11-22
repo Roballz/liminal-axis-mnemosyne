@@ -1,3 +1,4 @@
+import { restoreRetiredHigher, retiredHigherHashes } from './higher-summary-confirmation';
 import { RECOVERED_MANUAL_PREFIX } from './stored-source-prefix';
 import { resolveMemoryFamilies } from './memory-families';
 import { readSource, snapshotVariants, retireCurrentBodies } from './current-body';
@@ -928,17 +929,23 @@ export async function confirmUnselectedLeaf(lib: Library, view: CapturedView, bi
 }
 /** Explicit approval; immutable generation provenance is never rewritten. */
 export async function keepSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true,
-    checkedStates?: ReadonlyMap<string, MemoryStatus>) {
+    checkedStates?: ReadonlyMap<string, MemoryStatus>, retired?: { scope: string; hosts: HostMemory[] }) {
     check(view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length, '只能审核当前完整档案');
     const requested = new Set(memoryIds), states = checkedStates ?? await statuses(lib, view);
     const byId = new Map(view.memories.map(m => [m.id, m]));
-    check(requested.size && requested.size === memoryIds.length, '请选择不重复的摘要');
-    check([...requested].every(id => byId.get(id)?.recall && byId.get(id)?.visibility === 'public'), '摘要不在当前有效范围');
+    const targets = retired?.hosts.length ? await retiredHigherHashes(retired.hosts) : [];
+    check((requested.size || targets.length) && requested.size === memoryIds.length, '请选择不重复的摘要');
+    check([...requested].every(id => {
+        const memory = byId.get(id);
+        return memory?.recall && memory.visibility === 'public' && memory.branch === view.branch.id && memory.story === view.branch.story;
+    }), '摘要不在当前有效范围');
     await lib.transaction(STORES, 'readwrite', async tx => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
         check(guard() && branch && branch.epoch === view.branch.epoch && branch.head === view.snapshot.id && branch.view === view.selection.id, '视图已改变，请刷新');
         const positions = new Map(view.refs.map((r,i) => [r.message,i]));
         const currentByOwner = new Map(view.memories.map(m => [m.owner,m]));
+        const restored = targets.length ? await restoreRetiredHigher(tx, view, retired!.scope, targets) : [];
+        for (const memory of restored) currentByOwner.set(memory.owner, memory);
         const plans = new Map<string, Review>();
         const prefixes = new Map<string, { length: number; matched: number }>();
         const dependenciesById = new Map(byId);
@@ -982,11 +989,37 @@ export async function keepSummaries(lib: Library, view: CapturedView, memoryIds:
                 snapshot: view.snapshot.id, decision: 'compatible', origin: 'manual', created: Date.now(),
                 reviewSchema: 2, sourceRefs, coverage, dependencies });
         }
-        const pending = new Map(plans), accepted = new Set<string>();
-        while (pending.size) {
-            const ready = [...pending.values()].filter(r => r.dependencies!.every(id => accepted.has(id) || (!pending.has(id) && states.get(id) === 'valid')));
-            check(ready.length, '请先审核或修复依赖摘要；不存在的来源不能直接保留');
-            for (const review of ready) { await tx.add('reviews', review); accepted.add(review.owner); pending.delete(review.owner); }
+        // Check every dependency against this same batch or the captured valid selection.
+        // Queue each edge once, including L0 context dependencies on earlier high summaries.
+        const inputs = new Map([...plans.values()].map(r => [r.owner, r.dependencies!]));
+        for (const m of restored) inputs.set(m.id, m.dependencies);
+        const remaining = new Map<string, number>(), parents = new Map<string, string[]>(), ready: string[] = [];
+        for (const [id, children] of inputs) {
+            let count = 0;
+            for (const child of children) {
+                if (!inputs.has(child)) {
+                    check(states.get(child) === 'valid', '请先审核或修复依赖摘要；不存在的来源不能直接保留');
+                    continue;
+                }
+                const group = parents.get(child);
+                if (group) group.push(id); else parents.set(child, [id]);
+                count++;
+            }
+            remaining.set(id, count);
+            if (!count) ready.push(id);
+        }
+        for (let i = 0; i < ready.length; i++) for (const parent of parents.get(ready[i]) ?? []) {
+            const count = remaining.get(parent)! - 1;
+            remaining.set(parent, count);
+            if (!count) ready.push(parent);
+        }
+        check(ready.length === inputs.size, '请先审核或修复依赖摘要；摘要依赖存在循环');
+        await Promise.all([...plans.values()].map(review => tx.add('reviews', review)));
+        if (restored.length) {
+            const next = { ...row('mv'), branch: branch.id, selections: { ...view.selection.selections } };
+            for (const memory of restored) next.selections[memory.owner] = memory.id;
+            await publishMemoryView(tx, next, view.selection);
+            branch.view = next.id;
         }
         check(guard(), '视图已改变，请刷新');
         branch.epoch++;

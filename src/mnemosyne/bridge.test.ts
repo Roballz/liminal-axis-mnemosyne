@@ -14,7 +14,7 @@ import { previewRoleRepairs, confirmRoleRepairs } from './source-role-repair';
 import { exportLibrary, restoreLibrary } from './migration';
 import * as client from '@/api/client';
 import * as api from '@/api/settings';
-import { recoverSummaryResponse, summarizeFloor, regenerateHigherSummary } from '@/memory/engine';
+import { recoverSummaryResponse, summarizeFloor, regenerateHigherSummary, summarizeSelected, resummarizeNow } from '@/memory/engine';
 import { invalidateSummaryAncestors } from '@/memory/apply';
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
@@ -630,6 +630,85 @@ test('retired higher summaries can be rebuilt once from the changed current chil
   const high=view.memories.find(m=>m.hostId==='high')!;
   expect(high.content).toBe('重建后的高层摘要');expect((await statuses(lib,view)).get(high.id)).toBe('valid');
   expect(client.requestViaMainApi).toHaveBeenCalledTimes(1);expect(memory.summaries).toHaveLength(1);
+});
+
+test.each(['review', 'retired'] as const)('L1→L2 with a %s parent checks before sending and confirms just that subtree', async mode => {
+    const { editLeafAt } = await import('@/memory/apply');
+    ctx.chat.push(message(true, '第二问'), message(false, '第二答'));
+    ctx.chat[3].extra!.bbs_leaf = { id: 'second', text: '第二楼摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+    memory.summaries.push(
+        { id: 'first-L1', text: '第一段的原总结', level: 1, createdAt: 3, auto: true, childIds: ['legacy-leaf'] },
+        { id: 'second-L1', text: '第二段的原总结', level: 1, createdAt: 4, auto: true, childIds: ['second'] },
+    );
+    await syncDaily();
+    if (mode === 'review') expect(editLeafAt(1, '已校对的第一楼', '', '')).toBe(true);
+    else ctx.chat[1].extra!.bbs_leaf!.text = '旧版手改第一楼';
+    const before = await syncDaily();
+    const states = await statuses(lib, before);
+    expect(before.memories.filter(m => m.level === 0).every(m => states.get(m.id) === 'valid')).toBe(true);
+    const prior = before.memories.find(m => m.hostId === 'first-L1');
+    expect(prior && states.get(prior.id)).toBe(mode === 'review' ? 'needs_rebuild' : undefined);
+    const stable = before.memories.find(m => m.hostId === 'second-L1')!;
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    const send = vi.spyOn(client, 'requestViaMainApi').mockResolvedValue('{"summary":"两段合并的总结"}');
+    api.apiSettings.summarySuccessPreviewEnabled = false;
+    const ids = ['first-L1', 'second-L1'];
+    expect((await summarizeSelected(ids)).error).toContain('L1（#1）');
+    expect(send).not.toHaveBeenCalled();
+    expect((await summarizeSelected(ids, async () => false)).error).toContain('已取消');
+    expect((await capture(lib, before.branch.id)).branch).toEqual(before.branch);
+    expect(send).not.toHaveBeenCalled();
+    const confirm = vi.fn(async (nodes: readonly { id: string }[]) => {
+        expect(nodes.map(n => n.id)).toEqual(['first-L1']); return true;
+    });
+    if (mode === 'review') expect(await summarizeSelected(ids, confirm)).toEqual({ made: 1 });
+    else {
+        const threshold = api.apiSettings.resummaryThreshold;
+        try {
+            api.apiSettings.resummaryThreshold = 2;
+            expect(await resummarizeNow(confirm)).toBe(1);
+        } finally { api.apiSettings.resummaryThreshold = threshold; }
+    }
+    expect(confirm).toHaveBeenCalledTimes(1);
+    const after = await syncDaily();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(after.memories.find(m => m.hostId === 'second-L1')).toEqual(stable);
+    const kept = after.memories.find(m => m.hostId === 'first-L1')!;
+    expect(kept.content).toBe('第一段的原总结');
+    if (prior) expect(kept.id).toBe(prior.id);
+    expect(after.memories.find(m => m.level === 2)?.dependencies).toEqual([kept.id, stable.id]);
+    expect([...(await statuses(lib, after)).values()].every(s => s === 'valid')).toBe(true);
+});
+
+test('checking a whole-view L1 batch twice reuses checked validity and does not re-read source bodies', async () => {
+    memory.summaries.push({ id: 'higher', text: '已归档总结', level: 1, createdAt: 3, auto: true, childIds: ['legacy-leaf'] });
+    await syncDaily();
+    const status = vi.spyOn(canonical, 'statuses'), reads = vi.spyOn(Transaction.prototype, 'rawGet');
+    const synchronize = vi.spyOn(canonical, 'synchronize');
+    for (let i = 0; i < 2; i++) expect((await captureSummaryEvidence([], ['higher']))?.allowedDependencies).toEqual(['higher']);
+    expect(status).not.toHaveBeenCalled(); expect(synchronize).not.toHaveBeenCalled();
+    expect(reads.mock.calls.some(([store]) => store === 'source_bodies' || store === 'memory_revisions')).toBe(false);
+});
+
+test('confirming higher merge sources cannot approve a missing leaf or leave a partial repair', async () => {
+    ctx.chat.push(message(true, '第二问'), message(false, '第二答'));
+    ctx.chat[3].extra!.bbs_leaf = { id: 'second', text: '第二摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+    memory.summaries.push(
+        { id: 'first', text: '第一段', level: 1, createdAt: 3, auto: true, childIds: ['legacy-leaf'] },
+        { id: 'next', text: '第二段', level: 1, createdAt: 4, auto: true, childIds: ['second'] });
+    await syncDaily();
+    ctx.chat[1].extra!.bbs_leaf!.text = '旧版手改';
+    ctx.chat[3].mes = '另一条回复';
+    const before = await syncDaily();
+    vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
+    vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    const send = vi.spyOn(client, 'requestViaMainApi');
+    expect((await summarizeSelected(['first', 'next'], async () => true)).error).toContain('下级摘要');
+    expect((await capture(lib, before.branch.id)).selection).toEqual(before.selection);
+    expect(send).not.toHaveBeenCalled();
 });
 
 test('manual summary saves retain event prose and reviewable higher summaries without changing current bodies', async () => {
@@ -1629,6 +1708,43 @@ test('keyboard edit of a verified reply retains the summary and overview without
         const view = await syncDaily();
         expect(view.memories[0].id).toBe(leaf.id); expect(bridge.unarchivedSummaries.value.size).toBe(0);
         expect((await eventView(lib, view)).cards[0]).toMatchObject({ needsReview: false, meta: { overview: '一直保留' } });
+    } finally { close(); }
+});
+
+test.each(['retired', 'already-pending'] as const)('one L0 edit confirmation repairs old %s L1/L2 without confirming unrelated history', async mode => {
+    const { editLeafAt } = await import('@/memory/apply');
+    const { close } = await nativeEditFixture();
+    try {
+        ctx.chat.push(message(true, '其他输入'), message(false, '其他回复'));
+        ctx.chat[3].extra!.bbs_leaf = { id: 'other-leaf', text: '另一条摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 };
+        memory.summaries.push(
+            { id: 'linked-1', text: '保留的 L1', level: 1, createdAt: 3, auto: true, childIds: ['legacy-leaf'] },
+            { id: 'linked-2', text: '保留的 L2', level: 2, createdAt: 4, auto: true, childIds: ['linked-1'] },
+            { id: 'other', text: '不相关的 L1', level: 1, createdAt: 5, auto: true, childIds: ['other-leaf'] });
+        await syncDaily();
+        expect(editLeafAt(3, '其他楼的旧修订', '', '')).toBe(true);
+        await syncDaily();
+        if (mode === 'retired') ctx.chat[1].extra!.bbs_leaf!.text = '老版本的小修';
+        else expect(editLeafAt(1, '之前的小修', '', '')).toBe(true);
+        const old = await syncDaily();
+        expect(old.memories.some(m => m.hostId === 'linked-1')).toBe(mode === 'already-pending');
+        expect(editLeafAt(1, '全书二十一章', '', '')).toBe(true);
+        await vi.waitFor(() => expect(summaryEditPrompt.open).toBe(true));
+        expect(summaryEditPrompt.affected).toEqual(['L1 总结', 'L2 总结']);
+        const writes = vi.spyOn(canonical, 'keepSummaries'), send = vi.spyOn(client, 'requestViaMainApi');
+        await resolveSummaryEdit('keep');
+        expect(summaryEditPrompt.error).toBe(''); expect(summaryEditPrompt.open).toBe(false);
+        expect(writes).toHaveBeenCalledTimes(1); expect(send).not.toHaveBeenCalled();
+        dispose?.(); dispose = bindDaily();
+        const view = await syncDaily(), states = await statuses(lib, view);
+        const byHost = new Map(view.memories.map(m => [m.hostId, m]));
+        for (const id of ['legacy-leaf', 'linked-1', 'linked-2']) expect(states.get(byHost.get(id)!.id)).toBe('valid');
+        expect(byHost.get('linked-1')?.content).toBe('保留的 L1');
+        expect(byHost.get('linked-2')?.content).toBe('保留的 L2');
+        expect(states.get(byHost.get('other')!.id)).toBe('needs_rebuild');
+        const evidence = await captureSummaryEvidence([], ['linked-1', 'linked-2']);
+        expect(evidence!.allowedDependencies).toEqual(['linked-1', 'linked-2']);
+        await exportLibrary(lib);
     } finally { close(); }
 });
 

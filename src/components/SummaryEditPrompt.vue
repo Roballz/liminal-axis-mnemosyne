@@ -60,7 +60,7 @@ async function saveRewrite(text: string) {
         <template v-if="!prompt.followup">
           <details v-if="prompt.affected.length"><summary>一并确认保留的摘要 · {{ prompt.affected.length }} 条</summary>
             <p>{{ prompt.affected.join('、') }}</p></details>
-          <p v-if="prompt.draft || prompt.count">确认保存会保留现有事件概要和最新进展。AI 更新只重写本楼摘要，一并保留列表中其他摘要的原文，随后可选择是否重写概要。</p>
+          <p v-if="prompt.draft || prompt.count">确认保存会一并核对当前分支关联的上层总结，保留总结原文、事件概要和最新进展。AI 更新只重写本楼摘要，一并保留列表中其他摘要的原文，随后可选择是否重写概要。</p>
         </template>
         <ReplyBlockerPanel v-if="prompt.blocker" :initial="prompt.blocker" :disabled="prompt.busy" @located="deferSummaryEdit()" />
         <p v-if="prompt.progress" role="status">{{ prompt.progress }}</p>

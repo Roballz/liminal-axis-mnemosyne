@@ -6,7 +6,7 @@ import { eventHintsBefore } from '@/mnemosyne/events';
 import { activeLibrary } from '@/mnemosyne/db';
 import { SUMMARY_TAG_PROTOCOL, PLAN_PROGRESS_PROTOCOL } from './prompts';
 import { prepareSummaryTables, parseSummaryTableResult, validateSummaryTableResult, attachTableResult } from '@/mnemosyne/summary-tables';
-import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, beginVisibleSummaryCommit, syncDaily, summaryAllowed, hostScope } from '@/mnemosyne/bridge';
+import { captureSummaryEvidence, assertSummaryEvidence, attachSummaryEvidence, beginVisibleSummaryCommit, syncDaily, keepHigherMergeSources, hostScope } from '@/mnemosyne/bridge';
 import type { ChatMsg } from '@/api/client';
 import { mainApiAvailable, requestCompletion, requestViaMainApi } from '@/api/client';
 import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings';
@@ -1005,13 +1005,26 @@ function resolveSender(
 /** Snapshot actual prompt inputs before any asynchronous evidence/context reads. */
 function summaryResponseGuard(chat: STMessage[], end = chat.length - 1, dependencies = memory.summaries.map(s => s.id)) {
   const scope = hostScope(), messages = chat.slice(0, end + 1);
-  const fingerprint = () => [
-    chat.slice(0, end + 1).map(m => [m.mes, m.is_user, !!m.is_system && !m.extra?.bbs_hidden,
-      m.swipe_id, m.extra?.bbs_omit, m.extra?.bbs_leaf]),
-    dependencies.map(id => memory.summaries.find(s => s.id === id) ?? null),
-    dependencies.map(id => memory.summaries.filter(s => s.childIds?.includes(id)).map(s => s.id).sort()),
-    apiSettings.summaryOnlyMode,
-  ];
+  const wanted = new Set(dependencies);
+  const fingerprint = () => {
+    const nodes = new Map<string, (typeof memory.summaries)[number]>(), parents = new Map<string, string[]>();
+    if (wanted.size) for (const node of memory.summaries) {
+      if (wanted.has(node.id) && !nodes.has(node.id)) nodes.set(node.id, node);
+      for (const child of node.childIds ?? []) {
+        if (!wanted.has(child)) continue;
+        const group = parents.get(child);
+        if (!group) parents.set(child, [node.id]);
+        else if (group.at(-1) !== node.id) group.push(node.id);
+      }
+    }
+    return [
+      chat.slice(0, end + 1).map(m => [m.mes, m.is_user, !!m.is_system && !m.extra?.bbs_hidden,
+        m.swipe_id, m.extra?.bbs_omit, m.extra?.bbs_leaf]),
+      dependencies.map(id => nodes.get(id) ?? null),
+      dependencies.map(id => parents.get(id)?.sort() ?? []),
+      apiSettings.summaryOnlyMode,
+    ];
+  };
   const source = sourceSnapshot(fingerprint());
   return () => {
     if (!engineActiveHere() || getContext()?.chat !== chat || hostScope() !== scope ||
@@ -1025,11 +1038,44 @@ async function responseEvidence(original: Awaited<ReturnType<typeof captureSumma
   if (!original) return original;
   const fresh = await captureSummaryEvidence(targets, original.dependencies);
   guard();
-  if (!fresh || fresh.view.branch.id !== original.view.branch.id ||
-      JSON.stringify(fresh.inputRefs) !== JSON.stringify(original.inputRefs) ||
-      !original.dependencies.every(id => fresh.allowedDependencies.includes(id)))
-    throw new Error('摘要来源或分支已改变，不能复用旧返回');
+  if (!fresh || fresh.activation !== original.activation || fresh.view.branch.id !== original.view.branch.id)
+    throw new Error('档案库或分支已改变，不能应用本次返回');
+  if (JSON.stringify(fresh.inputRefs) !== JSON.stringify(original.inputRefs) ||
+      fresh.allowedDependencies.length !== original.dependencies.length)
+    throw new Error('请求使用的摘要或正文来源已改变，不能应用本次返回');
+  if (!targets.length && original.view.selection.id !== fresh.view.selection.id) {
+    const used = new Set(original.dependencies);
+    const changed = original.view.memories.some(m => used.has(m.hostId) && fresh.view.selection.selections[m.owner] !== m.id);
+    if (changed) throw new Error('请求使用的下级摘要版本已改变，请重新生成总结');
+  }
   return fresh;
+}
+type MergeSource = Pick<SelectableNode, 'id' | 'text' | 'level' | 'floorLo' | 'floorHi'>;
+export type ConfirmMergeSources = (nodes: readonly MergeSource[]) => Promise<boolean>;
+
+/** Validate merge inputs before spending a model request, including legacy host-only parents. */
+async function mergeEvidence(nodes: readonly MergeSource[], guard: () => void, confirm?: ConfirmMergeSources) {
+  const ids = nodes.map(n => n.id);
+  let evidence = await captureSummaryEvidence([], ids);
+  guard();
+  if (!evidence || evidence.allowedDependencies.length === ids.length) return evidence;
+  const allowed = new Set(evidence.allowedDependencies);
+  const blocked = nodes.filter(n => !allowed.has(n.id));
+  if (confirm && blocked.every(n => n.level > 0)) {
+    if (!await confirm(blocked)) throw new Error('已取消来源确认，本次未调用模型');
+    guard();
+    const branch = evidence.view.branch.id;
+    await keepHigherMergeSources(evidence, guard);
+    evidence = await captureSummaryEvidence([], ids);
+    guard();
+    if (evidence?.view.branch.id === branch && evidence.allowedDependencies.length === ids.length) return evidence;
+    throw new Error('来源确认后档案状态已改变，请重新核对');
+  }
+  const label = blocked.slice(0, 3).map(n => n.floorLo < 0 ? `L${n.level}`
+    : `L${n.level}（#${n.floorLo}${n.floorHi > n.floorLo ? '–#' + n.floorHi : ''}）`).join('、');
+  const action = blocked.some(n => n.level === 0) ? '请先核对这些楼层的摘要和归档状态'
+    : '请在摘要页点「立即总结」或多选合并，核对后可保留旧总结并继续';
+  throw new Error(`${label} 等 ${blocked.length} 条来源在请求前已失效或未归档。${action}。本次未调用模型。`);
 }
 function trackedSummary<T>(title: string, sender: { send: (messages: ChatMsg[]) => Promise<string> },
   messages: ChatMsg[], parse: (raw: string) => T, apply: (value: T) => Promise<void>, guard: () => void, preview = false, reviewFailures = false) {
@@ -1693,9 +1739,9 @@ function autoSummaryRoots(chat: STMessage[]): AutoSummaryRoot[] {
  * 用 AI 把这批的**叙事文本**融合成一条上层节点,childIds 收纳它们(底层全部保留)。
  * 一次调用会向上连锁(加叶子→可能生 L1→可能生 L2…),按各层阈值递归。
  */
-export function checkResummary(manual: true): Promise<number | 'pending'>;
+export function checkResummary(manual: true, confirm?: ConfirmMergeSources): Promise<number | 'pending'>;
 export function checkResummary(manual?: false): Promise<number>;
-export async function checkResummary(manual = false): Promise<number | 'pending'> {
+export async function checkResummary(manual = false, confirm?: ConfirmMergeSources): Promise<number | 'pending'> {
   const preview = manual && apiSettings.summarySuccessPreviewEnabled;
   if (!engineActiveHere()) return 0;
   const ctx = getContext();
@@ -1741,7 +1787,7 @@ export async function checkResummary(manual = false): Promise<number | 'pending'
         { role: 'system', content: RESUMMARY_THINKING_CHECKLIST },
         { role: 'assistant', content: RESUMMARY_THINKING_PREFILL },
       );
-      const evidence = await captureSummaryEvidence([], batch.map(n => n.id));
+      const evidence = await mergeEvidence(batch, responseGuard, manual ? confirm : undefined);
       responseGuard();
       // 发请求 + 解析,失败按设置重试(请求报错或 JSON 无效/缺 summary 都算失败)
       await trackedSummary(`${preview ? "手动" : "自动"} L${level + 1} 总结`, sender, messages, raw => {
@@ -1847,7 +1893,7 @@ function collectSelectableNodes(chat: STMessage[]): Map<string, SelectableNode> 
  *  - 生成节点 auto=false 标手动。busy 互斥,收尾同 resummarizeNow + 隐藏/注入。
  * 返回 { made, error }:made=1 成功,0 未生成(error 说明原因)。
  */
-export async function summarizeSelected(nodeIds: string[]): Promise<{ made: number; error?: string; pending?: boolean }> {
+export async function summarizeSelected(nodeIds: string[], confirm?: ConfirmMergeSources): Promise<{ made: number; error?: string; pending?: boolean }> {
   const preview = apiSettings.summarySuccessPreviewEnabled;
   if (!engineActiveHere()) return { made: 0, error: '插件未在当前聊天生效' };
   if (busy) return { made: 0, error: '正忙,请稍后再试' };
@@ -1911,7 +1957,7 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
       { role: 'system', content: RESUMMARY_THINKING_CHECKLIST },
       { role: 'assistant', content: RESUMMARY_THINKING_PREFILL },
     );
-    const evidence = await captureSummaryEvidence([], picked.map(n => n.id));
+    const evidence = await mergeEvidence(picked, responseGuard, confirm);
     responseGuard();
     await trackedSummary(`手动合并 L${level} 总结`, sender, messages, raw => {
       const d = extractJsonObject<{ summary?: string }>(raw);
@@ -1957,14 +2003,14 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
  * 与自动路径同一套阈值/连锁逻辑(checkResummary),但带 busy 互斥,
  * 避免与正在跑的摘要/总结撞车。返回新生成的总结条数(0 = 未达阈值,什么都没做)。
  */
-export async function resummarizeNow(): Promise<number | 'pending'> {
+export async function resummarizeNow(confirm?: ConfirmMergeSources): Promise<number | 'pending'> {
   if (!engineActiveHere()) return 0;
   if (busy) return 0;
   busy = true;
   engineState.running = true;
   engineState.lastError = '';
   try {
-    return await checkResummary(true);
+    return await checkResummary(true, confirm);
   } finally {
     busy = false;
     engineState.running = false;
@@ -2143,7 +2189,6 @@ export async function regenerateHigherSummary(hostId: string): Promise<void> {
   await syncDaily();
   const target = memory.summaries.find(s => s.id === hostId);
   if (!target || !target.childIds.length) throw new Error('没有可重建的下级来源');
-  if (!target.childIds.every(summaryAllowed)) throw new Error('下级摘要仍待审核/重建，请逐层处理');
   const ctx=getContext(); if(!ctx)throw new Error('无聊天');
   const all=collectSelectableNodes(ctx.chat);
   const picked=target.childIds.map(id=>all.get(id));
@@ -2151,7 +2196,7 @@ export async function regenerateHigherSummary(hostId: string): Promise<void> {
   const nodes=picked as SelectableNode[];
   const sender=resolveSender('resummary');if('error' in sender)throw new Error(sender.error);
   const responseGuard = summaryResponseGuard(ctx.chat, Math.max(...nodes.map(n => n.floorHi)), [target.id, ...target.childIds]);
-  const evidence=await captureSummaryEvidence([],target.childIds);
+  const evidence=await mergeEvidence(nodes, responseGuard);
   responseGuard();
   const {content,hints}=joinNodesForResummary(nodes);
   const prompt=buildResummaryPrompt({user:ctx.name1,char:ctx.name2,content,level:target.level});

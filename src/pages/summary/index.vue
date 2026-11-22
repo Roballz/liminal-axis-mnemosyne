@@ -7,7 +7,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import ModalMask from '@/components/ModalMask.vue';
 import { addSummary, appendOpToLatestLeaf, deleteLeafAt, deleteSummary, deleteSummarySubtrees, editLeafAt, editLeafTagsBatch, getLeaf, editPlan, editSummary, invalidateSummaryAncestors } from '@/memory/apply';
 import { apiSettings } from '@/api/settings';
-import { batchBackfill, batchState, cancelBatchBackfill, engineState, floorBackfillState, isAiFloor, resummarizeNow, summarizeFloor, summarizeSelected, syncHiddenNow } from '@/memory/engine';
+import { type ConfirmMergeSources, batchBackfill, batchState, cancelBatchBackfill, engineState, floorBackfillState, isAiFloor, resummarizeNow, summarizeFloor, summarizeSelected, syncHiddenNow } from '@/memory/engine';
 import { estimateInjectionTokenBreakdown, refreshInjection, selectViewNodes, type ViewNode } from '@/memory/inject';
 import { createNodeFloorIndex } from '@/memory/select';
 import { compactTimeLabel, formatRange, splitTimeLabel } from '@/memory/timeTag';
@@ -16,7 +16,7 @@ import { derivedMeta, memory, recomputeDerived } from '@/memory/store';
 import type { SceneFocus } from '@/memory/types';
 import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
-import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, shallowRef, watch } from 'vue';
 import SummaryNode from './SummaryNode.vue';
 import SummaryTags from './SummaryTags.vue';
 import { normalizeTags, shortText } from '@/memory/contextTags';
@@ -35,6 +35,7 @@ const events = computed(() => {
 
 // 切聊天:重置临时视图态(展开/搜索/选择),避免上个聊天的残留跨聊天带过来。
 const resetViewStates = () => {
+  finishSourceConfirmation(false);
   cancelSummaryPress();
   summaryPressHeld = false;
   expanded.value = new Set();
@@ -56,7 +57,7 @@ onMounted(() => {
     offChatChanged = () => es.off?.(et.CHAT_CHANGED, resetViewStates);
   }
 });
-onUnmounted(() => offChatChanged?.());
+onUnmounted(() => { summaryPageActive = false; offChatChanged?.(); finishSourceConfirmation(false); });
 
 // 触屏判定:用于跳过弹窗自动聚焦(移动端自动聚焦会弹出输入法挡住界面)。
 const isTouch = typeof window !== 'undefined' && window.matchMedia?.('(hover: none)').matches;
@@ -283,12 +284,26 @@ const injectionTokenEstimate = computed(() => {
   };
 });
 
+const sourceConfirmation = shallowRef<Parameters<ConfirmMergeSources>[0]>([]);
+let sourceDecision: ((keep: boolean) => void) | undefined;
+let summaryPageActive = true;
+const confirmMergeSources: ConfirmMergeSources = nodes => {
+  if (!summaryPageActive) return Promise.resolve(false);
+  sourceConfirmation.value = nodes;
+  return new Promise(resolve => { sourceDecision = resolve; });
+};
+function finishSourceConfirmation(keep: boolean) {
+  sourceDecision?.(keep);
+  sourceDecision = undefined;
+  sourceConfirmation.value = [];
+}
+
 async function doResummarize() {
   if (resummaryRunning.value || engineState.running) return;
   resummaryRunning.value = true;
   resummaryHint.value = '';
   try {
-    const made = await resummarizeNow();
+    const made = await resummarizeNow(confirmMergeSources);
     // 有报错优先显示错误(如未指派总结渠道);否则按生成条数给反馈
     if (made === 'pending') {
       resummaryHint.value = '返回已准备好，预览确认后才保存';
@@ -668,7 +683,7 @@ async function runMerge() {
   const ids = idxs.map(i => rootNodes.value[i].id);
   merging.value = true;
   try {
-    const res = await summarizeSelected(ids);
+    const res = await summarizeSelected(ids, confirmMergeSources);
     if (res.made > 0) {
       exitSelectMode();
     } else if (res.error) {
@@ -1372,7 +1387,19 @@ provide(SUMMARY_CTX, {
       @confirm="runMerge"
     >
       将把选中的 {{ selectionSummary.count }} 条摘要合并成一条 {{ levelLabel(selectionSummary.level) }}(无视自动总结阈值)。
-      原摘要会被收纳进新总结、从列表收起(数据不删,可删掉新总结还原)。继续?
+      原摘要会被收纳进新总结、从列表收起(数据不删,可删掉新总结还原)。
+    </ConfirmDialog>
+
+    <ConfirmDialog :open="sourceConfirmation.length > 0" title="核对旧总结来源"
+      confirmText="保留并继续总结" @confirm="finishSourceConfirmation(true)" @cancel="finishSourceConfirmation(false)">
+      以下 {{ sourceConfirmation.length }} 条总结的来源需要确认。请核对文字是否仍适用于当前下级摘要。
+      <span class="bbs-merge-sources">
+        <span v-for="node in sourceConfirmation" :key="node.id">
+          <strong>L{{ node.level }} <template v-if="node.floorLo >= 0">· #{{ node.floorLo }}–#{{ node.floorHi }}</template></strong>
+          {{ node.text }}
+        </span>
+      </span>
+      确认后会保留这些总结及所依赖的旧总结，按当前有效的下级摘要恢复关联，再调用模型。
     </ConfirmDialog>
 
     <!-- 批量删除确认:选中总结代表整段历史,会连同其收纳的下层节点永久删除。 -->
@@ -1542,6 +1569,8 @@ provide(SUMMARY_CTX, {
 </template>
 
 <style scoped>
+.bbs-merge-sources { display: block; max-height: 35vh; overflow: auto; }
+.bbs-merge-sources > span { display: block; margin: 0.5em 0; white-space: pre-wrap; }
 .bbs-plan-id { display:block; font-size:10px; opacity:.55; overflow-wrap:anywhere; margin-top:4px; }
 .bbs-plan-progress { margin:5px 0; font-size:12px; }
 
