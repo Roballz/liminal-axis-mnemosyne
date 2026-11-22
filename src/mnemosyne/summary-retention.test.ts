@@ -51,7 +51,7 @@ test('replaced body retires its unchanged old summary and does not resurrect it 
     await exportLibrary(lib); lib.close();
 });
 
-test.each([true, false])('one changed turn leaves dependent floors reviewable without rescanning the basis per floor (native edit %s)', async native => {
+test.each([true, false])('one changed turn leaves unrelated floors valid without rescanning the basis per floor (native edit %s)', async native => {
     const { lib, input, branch } = await fixture(100);
     const reads = vi.spyOn(Transaction.prototype, 'get');
     try {
@@ -61,7 +61,9 @@ test.each([true, false])('one changed turn leaves dependent floors reviewable wi
         expect(reads.mock.calls.filter(([store, id]) => store === 'history_snapshots' && id === branch.head).length).toBeLessThan(8);
         const current = await capture(lib, branch.id);
         expect(current.memories.map(m => m.hostId)).toEqual(input.memories.slice(native ? 0 : 1).map(m => m.hostId));
-        expect(new Set((await statuses(lib, current)).values())).toEqual(new Set(['needs_review']));
+        const states = await statuses(lib, current);
+        for (const memory of current.memories)
+            expect(states.get(memory.id)).toBe(memory.hostId === input.memories[0].hostId ? 'needs_review' : 'valid');
     } finally { reads.mockRestore(); lib.close(); }
 });
 
@@ -116,7 +118,7 @@ test('an unaffected processing receipt uses the current selection without retain
     await exportLibrary(lib); lib.close();
 });
 
-test('editing an old summary preserves a later dependent floor for review through archive cleanup', async () => {
+test('editing an old summary leaves a later context-only floor valid through archive cleanup', async () => {
     const { cleanLibraryHistory } = await import('./history-cleanup');
     const { lib, input, branch, view } = await fixture(3);
     try {
@@ -131,7 +133,7 @@ test('editing an old summary preserves a later dependent floor for review throug
         const edited = await capture(lib, branch.id);
         expect(edited.memories.find(m => m.id === latest.id)).toEqual(latest);
         const states = await statuses(lib, edited);
-        expect(states.get(latest.id)).toBe('needs_rebuild');
+        expect(states.get(latest.id)).toBe('valid');
         expect(states.get(edited.memories.find(m => m.hostId === input.memories[1].hostId)!.id)).toBe('valid');
         await exportLibrary(lib);
     } finally { lib.close(); }

@@ -14,8 +14,11 @@ export function reviewMatchesMemory(review: Review, memory: MemoryRevision,
         review.story !== memory.story || review.branch !== memory.branch ||
         review.decision !== 'compatible' || !['manual', 'generated_sidecar'].includes(review.origin) ||
         !Array.isArray(review.sourceRefs) || !Array.isArray(review.coverage) || !Array.isArray(review.dependencies) ||
-        !matchesSources(review.sourceRefs) || !sameSourceMessages(review.coverage, memory.coverage) ||
-        review.dependencies.length !== memory.dependencies.length) return false;
+        !matchesSources(review.sourceRefs) || !sameSourceMessages(review.coverage, memory.coverage)) return false;
+    // L0 generation context remains audit evidence only. Old review receipts may
+    // contain those IDs, but their versions never decide this leaf's applicability.
+    if (memory.level === 0) return true;
+    if (review.dependencies.length !== memory.dependencies.length) return false;
     return review.dependencies.every((id, i) => {
         if (id === review.owner || id === memory.id) return false;
         const approved = revisions.get(id), original = revisions.get(memory.dependencies[i]);

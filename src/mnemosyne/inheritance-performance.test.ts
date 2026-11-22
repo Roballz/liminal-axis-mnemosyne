@@ -5,6 +5,7 @@ import { previewEventResync } from './event-resync';
 import { fixture } from './fixtures';
 import { Library, Transaction } from './db';
 import { compatibleTableHead } from './table-history';
+import { summaryApplicabilityReader } from './summary-applicability-reader';
 import { STORES, row, type Branch, type CapturedView, type EventChain, type EventRevision,
     type Membership, type MemoryRevision, type TableCommit } from './model';
 
@@ -70,9 +71,58 @@ test('1000 resync candidates encode each exact narrative signature once', async 
     expect(data.textReads()).toBe(2000);
 });
 
+test('legacy L0 source projections lazily index a shared basis once and never reread bodies', async () => {
+    const { lib, view } = await fixture(100);
+    try {
+        let refReads = 0;
+        const refs = new Proxy(view.refs, { get(target, key, receiver) {
+            if (typeof key === 'string' && /^\d+$/.test(key)) refReads++;
+            return Reflect.get(target, key, receiver);
+        } });
+        await lib.transaction(STORES, 'readonly', async tx => {
+            const reads = vi.spyOn(tx, 'get');
+            const reader = summaryApplicabilityReader(tx, [{ ...view, refs }]);
+            expect(refReads).toBe(0); expect(reads).not.toHaveBeenCalled();
+            const projected = await Promise.all(view.memories.map(memory => reader.sources(memory)));
+            for (let i = 0; i < projected.length; i++) expect(projected[i]).toEqual(view.refs.slice(i * 2, i * 2 + 2));
+            expect(refReads).toBeLessThanOrEqual(600);
+            expect(reads).not.toHaveBeenCalled();
+        });
+    } finally { lib.close(); }
+});
+
+test('growing legacy baselines share block reads instead of repeatedly expanding complete prefixes', async () => {
+    let refReads = 0;
+    const blocks = Array.from({ length: 100 }, (_, block) => ({ id: `block-${block}`, entries: new Proxy(
+        Array.from({ length: 128 }, (_, i) => ({ message: `message-${block * 128 + i}`, revision: `source-${block * 128 + i}` })),
+        { get(target, key, receiver) {
+            if (typeof key === 'string' && /^\d+$/.test(key)) refReads++;
+            return Reflect.get(target, key, receiver);
+        } }),
+    }));
+    const snapshots = blocks.map((_, i) => ({ id: `snapshot-${i}`, length: (i + 1) * 128,
+        blocks: blocks.slice(0, i + 1).map(block => block.id) }));
+    const rows = new Map([...blocks, ...snapshots].map(row => [row.id, row]));
+    const get = vi.fn(async (store: string, id: string) => store === 'source_revisions'
+        ? { role: Number(id.slice('source-'.length)) % 2 ? 'assistant' : 'user' } : rows.get(id));
+    const reader = summaryApplicabilityReader({ get } as unknown as Transaction);
+    const inputs = snapshots.map((snapshot, i) => ({ ...row('memory'), owner: `owner-${i}`, story: 'story', branch: 'branch',
+        basis: snapshot.id, level: 0, anchor: `message-${snapshot.length - 1}`, inputRefs: [], coverage: [], dependencies: [],
+        content: 'synthetic legacy summary', hostId: `leaf-${i}`, fingerprint: '', declaration: null,
+        storyTime: '', recall: true, visibility: 'public', seed: false } as MemoryRevision));
+    const projected = await Promise.all(inputs.map(memory => reader.sources(memory)));
+    for (let i = 0; i < projected.length; i++) expect(projected[i].map(ref => ref.message)).toEqual([
+        `message-${snapshots[i].length - 2}`, `message-${snapshots[i].length - 1}`,
+    ]);
+    expect(get.mock.calls.filter(([store]) => store === 'manifest_blocks')).toHaveLength(100);
+    expect(get.mock.calls.some(([store]) => store === 'source_bodies')).toBe(false);
+    expect(refReads).toBeLessThanOrEqual(13000);
+});
+
 test('a missing bottom mapping cascades through a reverse-ordered dependency chain with one revision read each', async () => {
     const data = matchingFixture(200);
     for (let i = 1; i < 200; i++) {
+        data.parent.memories[i].level = i; data.child.memories[i].level = i;
         data.parent.memories[i].dependencies = [`parent-${i - 1}`];
         data.child.memories[i].dependencies = [`child-${i - 1}`];
     }

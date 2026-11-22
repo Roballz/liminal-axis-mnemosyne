@@ -3,7 +3,7 @@ import * as Vue from 'vue';
 import { createRenderer, defineComponent, h, nextTick, ssrContextKey } from 'vue';
 import { readFileSync } from 'node:fs';
 import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc';
-const mocks = vi.hoisted(() => ({ read: vi.fn(), host: vi.fn(() => 'host'), keep: vi.fn(), recover: vi.fn(), current: vi.fn(), sync: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), host: vi.fn(() => 'host'), keep: vi.fn(), recover: vi.fn(), current: vi.fn(), sync: vi.fn(), higher: vi.fn() }));
 vi.mock('@/mnemosyne/bridge', async () => ({
   dailyState: (await import('vue')).reactive({ generation: 1, revision: 1, scope: 'scope', review: 155, pending: false }),
   readDailyReview: mocks.read, hostVersion: mocks.host, dailyCurrent: mocks.current, syncDaily: mocks.sync, invalidateDaily: vi.fn(),
@@ -11,6 +11,7 @@ vi.mock('@/mnemosyne/bridge', async () => ({
 vi.mock('@/mnemosyne/db', () => ({ activeLibrary: vi.fn(async () => ({})) }));
 vi.mock('@/mnemosyne/canonical', () => ({ keepSummaries: mocks.keep }));
 vi.mock('@/mnemosyne/summary-review-actions', () => ({ rebuildSummaryOwners: vi.fn() }));
+vi.mock('@/mnemosyne/summary-edit-prompt', () => ({ prepareHigherSummaryReview: mocks.higher }));
 vi.mock('@/mnemosyne/summary-recovery-confirmation', () => ({ summaryConfirmationPlan: (view: any, ids: Set<string>) => {
   const pending=view.memories.filter((m:any)=>ids.has(m.id)), high=pending.filter((m:any)=>m.level).length;
   return {targets:pending.filter((m:any)=>!m.level),exclusions:new Map(high?[['上层摘要',high]]:[])};
@@ -39,7 +40,7 @@ function result(count = 155, recovery = true) {
   const memories = Array.from({ length: count }, (_, i) => ({ id: `memory-${i}`, owner: `owner-${i}`, hostId: `leaf-${i}`, level: 0, content: `摘要${i}：` + '合成摘要正文'.repeat(2_000), ...(recovery ? { sourceRecovery: { reason: 'missing_basis' } } : {}) }));
   return { view: { branch: { id: 'branch', head: 'head', view: 'view', epoch: 1 }, memories, refs: [] }, validity: new Map(memories.map(m => [m.id, 'needs_review'])), host: 'host', generation: 1, lib: {} } as any;
 }
-beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); Object.assign(dailyState, { generation: 1, revision: 1, scope: 'scope', review: 155, pending: false }); mocks.read.mockReset().mockResolvedValue(result()); mocks.host.mockClear(); mocks.keep.mockReset(); mocks.recover.mockReset().mockResolvedValue({}); mocks.current.mockReset().mockResolvedValue(true); mocks.sync.mockReset(); });
+beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); Object.assign(dailyState, { generation: 1, revision: 1, scope: 'scope', review: 155, pending: false }); mocks.read.mockReset().mockResolvedValue(result()); mocks.host.mockClear(); mocks.keep.mockReset(); mocks.recover.mockReset().mockResolvedValue({}); mocks.current.mockReset().mockResolvedValue(true); mocks.sync.mockReset(); mocks.higher.mockReset().mockResolvedValue(undefined); });
 afterEach(() => { apps.splice(0).forEach(app => app.unmount()); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 test('155 review summaries mount no collapsed rows; pagination stays at ten and does not reread the host', async () => {
   const root = mount(); await flush();
@@ -52,6 +53,32 @@ test('155 review summaries mount no collapsed rows; pagination stays at ten and 
   for (let page = 0; page < 14; page++) { button(root, '下一页').props.onClick(); await flush(); expect(nodes(root).filter(n => n.type === 'article')).toHaveLength(10); }
   button(root, '下一页').props.onClick(); await flush(); expect(nodes(root).filter(n => n.type === 'article')).toHaveLength(5);
   expect(mocks.read).toHaveBeenCalledTimes(reads); expect(mocks.host).toHaveBeenCalledTimes(hashes);
+});
+test('retired host summaries remain a bounded review queue and resume by their exact identity', async () => {
+  const fixture = result(0, false);
+  fixture.unarchivedHigher = Array.from({ length: 21 }, (_, i) => ({ id: `old-high-${i}`, level: 1 + i % 2, text: '旧版保留的总结'.repeat(100) }));
+  mocks.read.mockResolvedValue(fixture);
+  const root = mount(); await flush();
+  expect(content(root)).toContain('待核对的上层总结 · 21 条');
+  expect(nodes(root).filter(node => node.type === 'article')).toHaveLength(0);
+  nodes(root).find(node => node.type === 'details')!.props.onToggle({ target: { open: true } }); await flush();
+  expect(nodes(root).filter(node => node.type === 'article')).toHaveLength(10);
+  const reads = mocks.read.mock.calls.length;
+  button(root, '下一页').props.onClick(); await flush();
+  expect(nodes(root).filter(node => node.type === 'article')).toHaveLength(10);
+  expect(mocks.read).toHaveBeenCalledTimes(reads);
+  button(root, '继续修订').props.onClick(); await settleAction();
+  expect(mocks.higher).toHaveBeenCalledExactlyOnceWith('old-high-10');
+  expect(mocks.keep).not.toHaveBeenCalled(); expect(mocks.recover).not.toHaveBeenCalled();
+  expect(content(root)).toContain('待核对的上层总结 · 21 条');
+});
+test('an archived pending higher summary can resume the same sequential editor', async () => {
+  const fixture = result(1, false); fixture.view.memories[0].level = 2;
+  mocks.read.mockResolvedValue(fixture); const root = mount(); await flush();
+  nodes(root).find(node => node.type === 'details')!.props.onToggle({ target: { open: true } }); await flush();
+  button(root, '继续修订').props.onClick(); await settleAction();
+  expect(mocks.higher).toHaveBeenCalledExactlyOnceWith('leaf-0');
+  expect(mocks.keep).not.toHaveBeenCalled();
 });
 test('successive archive revisions coalesce review reads while one read is pending', async () => {
   let resolve!: (value: any) => void;

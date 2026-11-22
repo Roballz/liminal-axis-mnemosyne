@@ -71,7 +71,7 @@ test('exact same-length edits, nested memory changes and swipes retain canonical
         const changed = await capture(lib, branch.id);
         expect(changed.refs[1].revision).not.toBe(before.refs[1].revision);
         expect(changed.sources.get(changed.refs[1].revision)?.content).toBe(input.messages[1].content);
-        expect(changed.memories[0].dependencies).toEqual([changed.memories[1].id]);
+        expect(changed.memories[0].dependencies).toEqual([]);
         digest.mockClear();
         input.messages[1].swipe = 1;
         await synchronize(lib, input);

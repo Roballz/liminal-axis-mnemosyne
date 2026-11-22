@@ -1,8 +1,11 @@
 import type { Library } from './db';
-import { capture, current, statuses, summarySources } from './canonical';
+import { capture, current, statuses } from './canonical';
 import { eventView, type EventCard } from './events';
 import { inheritForkEvents } from './fork-events';
-import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
+import { sourceRefMatches } from './source-equivalence';
+import { sameSourceMessages } from './review-source-integrity';
+import { summaryDependencies } from './summary-applicability';
+import { summaryApplicabilityReader } from './summary-applicability-reader';
 import { STORES, check, equal, type Branch, type CapturedView, type EventChain, type EventRevision, type Membership, type Progress, type MemoryRevision } from './model';
 
 export interface EventResyncPlan {
@@ -33,9 +36,10 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
     const parentPositions = new Map(parent.refs.map((ref, index) => [ref.message, index]));
     const childPositions = new Map(child.refs.map((ref, index) => [ref.message, index]));
     await lib.transaction(STORES, 'readonly', async tx => {
+        const applicability = summaryApplicabilityReader(tx, [parent, child]);
         const sourcesById = new Map<string, Promise<import('./model').SourceRef[]>>();
         const sourcesOf = (memory: MemoryRevision) => {
-            if (!sourcesById.has(memory.id)) sourcesById.set(memory.id, summarySources(tx, memory));
+            if (!sourcesById.has(memory.id)) sourcesById.set(memory.id, applicability.sources(memory));
             return sourcesById.get(memory.id)!;
         };
         for (const source of projection.valid) {
@@ -53,8 +57,12 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
                     sourceRefMatches(child.branch, parent.refs[index], child.refs[index]) &&
                     parent.snapshot.variants?.[index] === child.snapshot.variants?.[index];
             });
-            if (sameFloors && sourceRefsMatch(child.branch, sources, await sourcesOf(target)) &&
-                sourceRefsMatch(child.branch, source.coverage, target.coverage)) ids.set(source.id, target.id);
+            // Both selections passed statuses, including explicit source approvals.
+            // A fork may normalize that approval into its new L0 source records;
+            // compare their identities here, while sameFloors above still checks
+            // the exact current versions and swipe on both branches.
+            if (sameFloors && sameSourceMessages(sources, await sourcesOf(target)) &&
+                sameSourceMessages(source.coverage, target.coverage)) ids.set(source.id, target.id);
         }
         // Higher summaries also need the same selected dependencies, not just equal prose.
         const revisions = new Map<string, Promise<MemoryRevision | undefined>>();
@@ -78,7 +86,7 @@ export async function previewEventResync(lib: Library, child: CapturedView): Pro
             const target = validById.get(ids.get(source.id) ?? '');
             if (!target) continue;
             const [parent, child] = await Promise.all([
-                Promise.all(source.dependencies.map(parentDependency)), Promise.all(target.dependencies.map(childDependency)),
+                Promise.all(summaryDependencies(source).map(parentDependency)), Promise.all(summaryDependencies(target).map(childDependency)),
             ]);
             dependencies.set(source.id, { parent, child });
             for (const id of parent) {

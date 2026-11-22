@@ -3,6 +3,7 @@ import { statuses } from './canonical';
 import { syncDaily, hostScope } from './bridge';
 import { check, type MemoryRevision } from './model';
 import { regenerateFloor, regenerateHigherSummary } from '@/memory/engine';
+import { summaryDependencies } from './summary-applicability';
 
 /** Shared by the in-book review panel and the external edit prompt. */
 export async function rebuildSummaryOwners(owners: string[], branchId: string, guard: () => boolean,
@@ -19,7 +20,7 @@ export async function rebuildSummaryOwners(owners: string[], branchId: string, g
             const memory = currentByOwner.get(owner);
             check(memory, '摘要已删除，停止更新');
             if (validity.get(memory.id) === 'valid') { targets.delete(owner); continue; }
-            const dependencies = await Promise.all(memory.dependencies.map(id => lib.get<MemoryRevision>('memory_revisions', id)));
+            const dependencies = await Promise.all(summaryDependencies(memory).map(id => lib.get<MemoryRevision>('memory_revisions', id)));
             if (dependencies.every(m => m && validity.get(currentByOwner.get(m.owner)?.id ?? '') === 'valid')) { next = memory; break; }
         }
         if (!targets.size) break;

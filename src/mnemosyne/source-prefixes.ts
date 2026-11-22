@@ -9,6 +9,8 @@ interface IndexedBlock {
 export interface SourcePrefix {
     length: number;
     prefix: number;
+    /** Read one immutable source without expanding each growing historical prefix. */
+    at(index: number): SourceRef | undefined;
     /** Existing legacy applicability includes every ref through the last anchor. */
     through(anchor: string): number;
     /** Compare an approved prefix's identities without materializing the basis. */
@@ -44,7 +46,17 @@ export function sourcePrefixes(branch: Branch, current: SourceRef[], snapshots: 
             length += block.entries.length;
         }
         check(length === snapshot.length, '历史清单计数错误');
-        result.set(snapshot.id, { length, prefix, through(anchor) {
+        result.set(snapshot.id, { length, prefix, at(index) {
+            if (index < 0 || index >= length) return undefined;
+            let low = 0, high = spans.length - 1;
+            while (low < high) {
+                const middle = Math.ceil((low + high) / 2);
+                if (spans[middle].offset <= index) low = middle;
+                else high = middle - 1;
+            }
+            const span = spans[low];
+            return span?.block.entries[index - span.offset];
+        }, through(anchor) {
             let position = -1;
             for (const span of spans) {
                 const found = span.block.positions.get(anchor);

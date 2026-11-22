@@ -3,7 +3,7 @@ import { fixture } from './fixtures';
 import { capture, forkBranch, keepSummary, statuses, synchronize } from './canonical';
 import { confirmRoleRepairs, previewRoleRepairs } from './source-role-repair';
 import { exportLibrary, restoreLibrary } from './migration';
-import { row, type Review } from './model';
+import type { Review } from './model';
 
 test.each(['leaf', 'high'] as const)('a parent-confirmed coverage-only role repair remains valid on inherited %s evidence', async target => {
     const { lib, input, branch } = await fixture(2);
@@ -95,26 +95,18 @@ test('a copied legacy approval survives host swipe-number normalization when eve
     } finally { lib.close(); }
 });
 
-test('legacy inheritance never promotes a changed message identity into durable source approval', async () => {
+test('a replaced own message identity cannot be inherited as an unchanged legacy summary', async () => {
     const { lib, input, branch } = await fixture(1);
     try {
         input.messages[0].key = 'different-message-with-identical-text';
         input.messages[1].swipe = 2;
         await synchronize(lib, input);
-        let parent = await capture(lib, branch.id);
-        await lib.transaction(['reviews'], 'readwrite', tx => tx.add('reviews', {
-            ...row('review'), story: branch.story, branch: branch.id, owner: parent.memories[0].id,
-            snapshot: parent.snapshot.id, decision: 'compatible', origin: 'manual', created: Date.now(),
-        } as Review));
-        parent = await capture(lib, branch.id);
-        expect([...await statuses(lib, parent)].map(([, state]) => state)).toEqual(['valid']);
+        const parent = await capture(lib, branch.id);
+        expect(parent.memories).toEqual([]);
         const child = await forkBranch(lib, parent, 'legacy-changed-identity');
         const reviews = await lib.all<Review>('reviews', 'branch', child.id);
-        expect(reviews).toHaveLength(1);
-        expect(reviews[0].reviewSchema).toBeUndefined();
-        input.messages[1].swipe = 0;
-        await synchronize(lib, { ...input, scope: 'legacy-changed-identity' });
-        expect([...await statuses(lib, await capture(lib, child.id))].map(([, state]) => state)).toEqual(['needs_review']);
+        expect(reviews).toEqual([]);
+        expect((await capture(lib, child.id)).memories).toEqual([]);
         await exportLibrary(lib);
     } finally { lib.close(); }
 });

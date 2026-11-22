@@ -2,27 +2,28 @@ import { test, expect } from 'vitest';
 import { fixture } from './fixtures';
 import { capture, forkBranch, keepSummary, statuses, synchronize } from './canonical';
 import { Library } from './db';
-import { editEvent, eventView, wrapEvents } from './events';
+import { editEvent, eventView } from './events';
 import { reviewDifference } from './review-diagnostics';
 import { STORES } from './model';
 
-test('108 legacy summaries can need review after one early role change; readonly diagnosis preserves every row and event', async () => {
+test('an early role change reviews only its own legacy summary; readonly diagnosis preserves unrelated summaries and events', async () => {
     const { lib, input, view } = await fixture(108);
     await editEvent(lib, view, null, { title: '合成完整事件', status: 'open', keywords: [] }, { memory: view.memories[107].id, active: true, kind: 'progress' });
     input.messages[0].role = 'system';
     const branch = await synchronize(lib, input), next = await capture(lib, branch.id);
-    expect([...await statuses(lib, next)].filter(([, status]) => status === 'needs_review')).toHaveLength(108);
+    expect([...await statuses(lib, next)].filter(([, status]) => status === 'needs_review')).toHaveLength(1);
     const snapshot = () => Promise.all(STORES.map(store => lib.all(store)));
     const before = await snapshot();
-    const difference = await reviewDifference(lib, next, next.memories[107].id);
+    const difference = await reviewDifference(lib, next, next.memories[0].id);
     expect(difference.kind).toBe('role');
     expect(difference.floor).toBe(0);
     expect(difference.before?.excerpt).toBe('此旧版正文未保留');
     expect(difference.after?.excerpt).toBeDefined();
-    expect(difference.explanation).toContain('历史前缀');
+    expect(difference.explanation).toContain('其他楼层的修改不影响');
+    expect((await reviewDifference(lib, next, next.memories[107].id)).kind).toBe('unknown');
     const events = await eventView(lib, next);
-    expect(events).toMatchObject({ storedCount: 1, cards: [{ blocked: true }] });
-    expect(wrapEvents(events.cards, next, next.memories.map(m => m.id), [], { chains: 5, excerptChars: 500, totalChars: 2000, extra: 1 })).toBe('');
+    expect(events).toMatchObject({ storedCount: 1, cards: [{ blocked: false }] });
+    expect(events.cards[0].members.map(m => m.memory)).toEqual([next.memories[107].id]);
     expect(await snapshot()).toEqual(before);
     const name = lib.db.name;
     lib.close();
@@ -63,12 +64,16 @@ test('same-text replacement reports identity mismatch without guessing that it i
     const { lib, input, view } = await fixture(1);
     input.messages[0].key = 'new-identity';
     const next = await capture(lib, (await synchronize(lib, input)).id);
-    const difference = await reviewDifference(lib, next, next.memories[0].id);
+    expect(next.memories).toEqual([]);
+    // Inspect retained historical evidence without reselecting a summary whose
+    // own source identity is no longer present in the active chat.
+    const inspected = { ...next, memories: view.memories };
+    const difference = await reviewDifference(lib, inspected, view.memories[0].id);
     expect(difference.kind).toBe('identity');
     expect(difference.before?.excerpt).toBe('此旧版正文未保留');
     expect(difference.after?.excerpt).toBeDefined();
     expect(await lib.all('reviews')).toHaveLength(0);
-    expect((await statuses(lib, next)).get(view.memories[0].id)).toBe('needs_review');
+    expect((await statuses(lib, inspected)).get(view.memories[0].id)).toBe('needs_review');
     lib.close();
 });
 

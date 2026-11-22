@@ -1,5 +1,6 @@
 import { sourceSnapshot, sameSourceSnapshot } from '@/memory/source-snapshot';
 import { higherMergePlan, higherHostMemory } from './higher-summary-confirmation';
+import { unarchivedHigherSummaryRows, type UnarchivedHigherSummary } from './unarchived-higher-summaries';
 import { HostVersionMemo } from './host-version';
 import { sourceNeutralChanges } from './change-journal';
 import { beginBodyEdit, settleBodyEdit, cancelBodyEdit } from './summary-edit-signal';
@@ -61,6 +62,7 @@ let installed = false;
 export interface UnarchivedSummary { floor: number; hostId: string; text: string; body: string }
 interface DailyCache {
     unarchived: Map<number, UnarchivedSummary>;
+    unarchivedHigher: UnarchivedHigherSummary[];
     view: CapturedView;
     validity: Map<string, MemoryStatus>;
     allowed: Set<string>;
@@ -353,7 +355,8 @@ export async function readDailyReview() {
     const validity = reusable ? prior.validity : await statuses(lib, view);
     check(await current(lib, view) && lib === await activeLibrary(), '聊天或摘要已改变，请刷新后再处理');
     check(host === hostVersion() && generation === dailyState.generation, '聊天或摘要已改变，请刷新后再处理');
-    return { view, validity, host, generation, lib };
+    return { view, validity, host, generation, lib,
+        unarchivedHigher: reusable ? prior.unarchivedHigher : unarchivedHigherSummaryRows(view, memory.summaries) };
 }
 
 async function projectEvents(lib: Awaited<ReturnType<typeof activeLibrary>>, view: CapturedView,
@@ -445,10 +448,12 @@ function projectView(view: CapturedView, validity: Map<string, MemoryStatus>) {
                 msgIndex: idx,
             };
         });
+    const unarchivedHigher = unarchivedHigherSummaryRows(view, memory.summaries);
     return {
         allowed,
         leaves,
-        reviewCount: [...validity.values()].filter((v) => v === 'needs_review' || v === 'needs_rebuild').length,
+        unarchivedHigher,
+        reviewCount: [...validity.values()].filter((v) => v === 'needs_review' || v === 'needs_rebuild').length + unarchivedHigher.length,
     };
 }
 
@@ -687,6 +692,9 @@ async function syncDailyGuarded(isActive: () => boolean, confirmation?: {
                     item.inputRefs = evidence.inputRefs;
                     item.coverage = evidence.coverage;
                     item.basisSnapshot = evidence.basis;
+                    // Preserve old host fingerprints without rewriting every L0
+                    // on upgrade. Canonical applicability ignores these legacy
+                    // context citations; new sidecars always store an empty list.
                     item.children = evidence.dependencies ?? [];
                     item.generatedSidecar = evidence.generatedContent === m.mes;
                     item.declaration =
@@ -867,7 +875,7 @@ async function syncDailyGuarded(isActive: () => boolean, confirmation?: {
                 branch: branch.id,
                 archived: view.refs.length,
                 summaries: view.memories.length,
-                review: [...validity.values()].filter((v) => v === 'needs_review' || v === 'needs_rebuild').length,
+                review: cache.reviewCount,
                 scope,
                 tableRevision: dailyState.tableRevision + 1,
                 pending: false,
@@ -1332,8 +1340,10 @@ export function attachSummaryEvidence(
         generationKey: Math.max(Date.now(), (previous?.generationKey ?? 0) + 1),
         leaf: leaf.id,
         text: leaf.text,
-        inputRefs: evidence.inputRefs,
-        dependencies: evidence.dependencies,
+        // A batch shares request evidence, but each L0 owns only its actual
+        // floor inputs. Historical prompt summaries never become child edges.
+        inputRefs: coverageIndices.map(i => evidence.view.refs[i]).filter(Boolean),
+        dependencies: [],
         generatedContent: chat[floor].mes,
         ...(wordingCorrection && { wordingCorrection: true }),
         basis: evidence.view.snapshot.id,

@@ -3,6 +3,8 @@ import { dependencyOnly, sameNarrativeRevision, summarySources } from './canonic
 import { sourceRefResolver } from './source-equivalence';
 import { sourcePrefixes } from './source-prefixes';
 import { reviewMatchesMemory, sameSourceMessages } from './review-source-integrity';
+import { summaryDependencies } from './summary-applicability';
+import { summaryApplicabilityReader } from './summary-applicability-reader';
 import type { Transaction } from './db';
 import type { EventView } from './events';
 import { inheritForkEvents } from './fork-events';
@@ -12,6 +14,8 @@ import { row, type Binding, type Block, type Branch, type CapturedView, type Mem
 export async function inheritForkMemory(tx: Transaction, parent: CapturedView, branch: Branch,
     binding: Binding, selection: MemoryView, events: EventView) {
     const ids = new Map(events.valid.map(m => [m.id, row('mr').id]));
+    const copiedById = new Map<string, MemoryRevision>();
+    const applicability = summaryApplicabilityReader(tx, [parent]);
     const selectedByOwner = new Map<string, MemoryRevision>();
     for (const memory of events.valid) if (!selectedByOwner.has(memory.owner)) selectedByOwner.set(memory.owner, memory);
     const resolveRef = sourceRefResolver(parent.branch, parent.refs);
@@ -74,8 +78,9 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
     for (const memory of events.valid) {
         const family = families.get(memory.owner)!;
         const copied = { ...memory, id: ids.get(memory.id)!, branch: branch.id, owner: family.id,
-            dependencies: await Promise.all(memory.dependencies.map(copyDependency)) };
+            dependencies: await Promise.all(summaryDependencies(memory).map(copyDependency)) };
         await tx.add('memory_revisions', copied);
+        copiedById.set(copied.id, copied);
         evidenceIndex.remember(copied);
         selection.selections[family.id] = copied.id;
         // Parent-confirmed role-only repairs remain exact approvals on the copied summary.
@@ -103,7 +108,7 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         .map(async review => ({ review, owner: await equivalent(review.owner), memory: await readRevision(review.owner) }))))
         .filter((item): item is { review: Review; owner: string; memory: MemoryRevision } => !!item.owner && !!item.memory);
     const modern = inherited.filter(({ review }) => review.reviewSchema === 2);
-    await Promise.all([...new Set(modern.flatMap(({ memory, review }) =>
+    await Promise.all([...new Set(modern.flatMap(({ memory, review }) => memory.level === 0 ? [] :
         [...memory.dependencies, ...(Array.isArray(review.dependencies) ? review.dependencies : [])]))]
         .filter(id => typeof id === 'string' && id).map(readRevision));
     const legacyBases = [...new Set(inherited.filter(({ memory }) =>
@@ -120,8 +125,10 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
             (contiguous ? position !== indexes[i - 1] + 1 : position <= indexes[i - 1]))) return;
         return indexes.map(position => parent.refs[position]);
     };
+    const projectedLeaves = new Set<string>();
     for (const item of inherited) {
         const { owner, memory } = item;
+        if (projectedLeaves.has(owner)) continue;
         let { review } = item;
         if (review.reviewSchema === 2) {
             const basis = prefixes.get(memory.basis);
@@ -151,8 +158,28 @@ export async function inheritForkMemory(tx: Transaction, parent: CapturedView, b
         }
         const sourceRefs = review.sourceRefs?.map(resolveRef);
         const coverage = review.coverage?.map(resolveRef);
-        if (sourceRefs?.some(r => !r) || coverage?.some(r => !r)) continue;
-        const dependencies = review.dependencies && await Promise.all(review.dependencies.map(equivalent));
+        if (sourceRefs?.some(r => !r) || coverage?.some(r => !r)) {
+            if (memory.level === 0 && copiedById.has(owner)) {
+                // The parent status already proved this leaf's own sources. An
+                // unrelated old context prefix must not discard that approval
+                // in the child. Keep the old evidence in the parent and publish
+                // a branch-local applicability record for the inherited turn.
+                const own = await applicability.sources(memory);
+                const inputRefs = own.map(ref => parent.refs[positions.get(ref.message) ?? -1]);
+                const ownCoverage = memory.coverage.map(ref => parent.refs[positions.get(ref.message) ?? -1]);
+                if (!inputRefs.length || inputRefs.some(ref => !ref) || ownCoverage.some(ref => !ref)) continue;
+                const copied: MemoryRevision = { ...copiedById.get(owner)!, basis: branch.head,
+                    inputRefs, coverage: ownCoverage, dependencies: [],
+                    declaration: `继承已核对摘要：沿用父分支当前有效的本轮来源；旧生成证据保留于父分支（${memory.id}）。` };
+                // These receipts belong only to the not-yet-published child copy.
+                for (const prior of await tx.all<Review>('reviews', 'owner', owner)) await tx.delete('reviews', prior.id);
+                await tx.put('memory_revisions', copied);
+                copiedById.set(owner, copied); evidenceIndex.remember(copied);
+                projectedLeaves.add(owner);
+            }
+            continue;
+        }
+        const dependencies = review.dependencies && (memory.level === 0 ? [] : await Promise.all(review.dependencies.map(equivalent)));
         if (dependencies?.some(id => !id)) continue;
         await tx.add('reviews', { ...review, ...row('review'), branch: branch.id, owner, snapshot: branch.head,
             ...(sourceRefs ? { sourceRefs } : {}), ...(coverage ? { coverage } : {}),

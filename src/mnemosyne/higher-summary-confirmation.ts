@@ -11,15 +11,19 @@ export function higherHostMemory(s: MemSummary): HostMemory {
 
 /** Follow host child IDs upwards, including parents retired from the archive selection. */
 export function relatedHigherSummaries(summaries: readonly MemSummary[], sources: readonly string[]) {
+    const levels = new Map(summaries.map(summary => [summary.id, summary.level]));
     const parents = new Map<string, MemSummary[]>();
     for (const summary of summaries) for (const child of summary.childIds) {
+        if (summary.level <= (levels.get(child) ?? 0)) continue;
         const group = parents.get(child);
         if (group) group.push(summary);
         else parents.set(child, [summary]);
     }
     const related = new Map<string, MemSummary>(), queue = [...new Set(sources)];
+    const visited = new Set(queue);
     for (let i = 0; i < queue.length; i++) for (const parent of parents.get(queue[i]) ?? []) {
-        if (related.has(parent.id)) continue;
+        if (visited.has(parent.id)) continue;
+        visited.add(parent.id);
         related.set(parent.id, parent);
         queue.push(parent.id);
     }

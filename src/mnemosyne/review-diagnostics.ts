@@ -2,6 +2,7 @@ import { readSource } from './current-body';
 import { sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import type { Library } from './db';
 import { snapshotRefs } from './canonical';
+import { summaryApplicabilityReader } from './summary-applicability-reader';
 import { check, type CapturedView, type Revision, type Snapshot } from './model';
 
 export interface ReviewDifference {
@@ -17,17 +18,18 @@ export async function reviewDifference(lib: Library, view: CapturedView, memoryI
     const memory = view.memories.find(m => m.id === memoryId);
     check(memory, '摘要已不在当前视图，请重新加载');
     if (memory.sourceRecovery) return { kind: 'unknown', explanation: '旧核心包中缺少这条摘要的生成基线。摘要正文和原来源标记已保留，但当前正文不能替代当时的生成证据。可在上方明确核对并保留当前 L0 摘要，另存人工确认版本；也可手动修订或明确选择重新生成。' };
-    if (memory.dependencies.length)
+    if (memory.level > 0 && memory.dependencies.length)
         return { kind: 'dependency', explanation: '这条高层摘要还依赖下级摘要版本。请先查看待审核的 L0 摘要；下级被替换或失效也会使上级待审核或需要重建。' };
     return lib.transaction(['history_snapshots', 'manifest_blocks', 'source_revisions', 'source_bodies'], 'readonly', async tx => {
         const basis = await tx.get<Snapshot>('history_snapshots', memory.basis);
         check(basis, '原摘要的来源快照缺失');
         const refs = await snapshotRefs(tx, basis);
         const explicit = memory.inputRefs.length > 0;
-        const required = explicit ? memory.inputRefs : refs.slice(0, memory.anchor ? refs.findIndex(r => r.message === memory.anchor) + 1 : refs.length);
+        const required = await summaryApplicabilityReader(tx, [view]).sources(memory);
         const positions = new Map(view.refs.map((r, i) => [r.message, i]));
-        for (const [index, oldRef] of required.entries()) {
-            const position = explicit ? positions.get(oldRef.message) : index;
+        const originalPositions = new Map(refs.map((r, i) => [r.message, i]));
+        for (const oldRef of required) {
+            const position = positions.get(oldRef.message) ?? originalPositions.get(oldRef.message);
             const nextRef = position === undefined ? undefined : view.refs[position];
             if (sourceRefMatches(view.branch, oldRef, nextRef)) continue;
             const descriptor = await tx.get<Revision>('source_revisions', oldRef.revision);
@@ -45,7 +47,7 @@ export async function reviewDifference(lib: Library, view: CapturedView, memoryI
                 ? '来源消息身份或顺序不一致（也可能被删除）。即使文字相同也不能自动视为同一条消息；下方当前片段仅用于对照。'
                 : kind === 'role' ? '同一条消息的角色分类发生变化。' : '同一条消息的正文版本发生变化，片段从首个文字差异附近展示。';
             return { kind, floor: refs.findIndex(r => r.message === oldRef.message),
-                explanation: reason + (explicit ? ' 此摘要记录了具体输入来源。' : ' 此旧摘要未记录精确输入范围，按生成时的历史前缀校验；前面一楼变化就可能使后面很多摘要同时待审核。'),
+                explanation: reason + (explicit ? ' 此摘要记录了具体输入来源。' : ' 此旧摘要按所属楼层及同轮输入核对，其他楼层的修改不影响本条摘要。'),
                 before: preview(before), after: after ? preview(after) : undefined };
         }
         if (memory.coverage.length) {

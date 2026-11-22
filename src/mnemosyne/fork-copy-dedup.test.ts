@@ -12,10 +12,14 @@ async function sharedHistory(depth = 6) {
     for (let layer = 0; layer < depth; layer++) for (let side = 0; side < 2; side++) {
         const memory = f.input.memories[layer * 2 + side];
         memory.content = `historical layer ${layer}, side ${side}`;
+        memory.level = layer;
+        if (layer) memory.anchorKey = null;
         memory.children = layer ? f.input.memories.slice((layer - 1) * 2, layer * 2).map(m => m.hostId) : [];
     }
     const root = f.input.memories.at(-1)!;
     root.content = 'historical root';
+    root.level = depth;
+    root.anchorKey = null;
     root.children = f.input.memories.slice(-3, -1).map(m => m.hostId);
     await synchronize(f.lib, f.input);
     const before = await capture(f.lib, f.branch.id);
@@ -131,24 +135,26 @@ test('concurrent table-only evidence creates each historical revision and family
     } finally { f.lib.close(); }
 });
 
-test('missing historical table dependencies abort the fork and roll back reserved child identities', async () => {
-    const f = await sharedHistory(2);
-    try {
-        await tableEvidence(f, [f.rootId]);
-        f.input.memories = [];
-        await synchronize(f.lib, f.input);
-        await f.lib.transaction(['memory_revisions'], 'readwrite', async tx => {
-            const root = (await tx.get<MemoryRevision>('memory_revisions', f.rootId))!;
-            await tx.put('memory_revisions', { ...root, dependencies: ['missing-history'] } as MemoryRevision);
-        });
-        const before = await Promise.all(STORES.map(store => f.lib.all(store)));
-        await expect(forkBranch(f.lib, await capture(f.lib, f.branch.id), 'missing-history-child'))
-            .rejects.toThrow('继承表格历史来源依赖缺失');
-        expect(await Promise.all(STORES.map(store => f.lib.all(store)))).toEqual(before);
-    } finally { f.lib.close(); }
+test('missing or cyclic historical table dependencies abort the fork and roll back reserved child identities', async () => {
+    for (const cycle of [false, true]) {
+        const f = await sharedHistory(2);
+        try {
+            await tableEvidence(f, [f.rootId]);
+            f.input.memories = [];
+            await synchronize(f.lib, f.input);
+            await f.lib.transaction(['memory_revisions'], 'readwrite', async tx => {
+                const root = (await tx.get<MemoryRevision>('memory_revisions', f.rootId))!;
+                await tx.put('memory_revisions', { ...root, dependencies: [cycle ? root.id : 'missing-history'] } as MemoryRevision);
+            });
+            const before = await Promise.all(STORES.map(store => f.lib.all(store)));
+            await expect(forkBranch(f.lib, await capture(f.lib, f.branch.id), 'invalid-history-child'))
+                .rejects.toThrow(cycle ? '继承表格历史来源依赖循环' : '继承表格历史来源依赖缺失');
+            expect(await Promise.all(STORES.map(store => f.lib.all(store)))).toEqual(before);
+        } finally { f.lib.close(); }
+    }
 });
 
-test('selected dependency cycles fail the existing fork preflight instead of waiting on recursive copies', async () => {
+test('legacy L0 context cycles neither recurse nor copy into the child and leave parent evidence unchanged', async () => {
     const f = await fixture(2);
     try {
         const [left, right] = f.view.memories;
@@ -156,8 +162,15 @@ test('selected dependency cycles fail the existing fork preflight instead of wai
             await tx.put('memory_revisions', { ...left, dependencies: [right.id] } as MemoryRevision);
             await tx.put('memory_revisions', { ...right, dependencies: [left.id] } as MemoryRevision);
         });
-        const before = await Promise.all(STORES.map(store => f.lib.all(store)));
-        await expect(forkBranch(f.lib, await capture(f.lib, f.branch.id), 'cyclic-child')).rejects.toThrow('摘要依赖循环');
-        expect(await Promise.all(STORES.map(store => f.lib.all(store)))).toEqual(before);
+        const parent = await capture(f.lib, f.branch.id);
+        const before = await f.lib.all<MemoryRevision>('memory_revisions', 'branch', f.branch.id);
+        expect(new Set((await statuses(f.lib, parent)).values())).toEqual(new Set(['valid']));
+        const child = await forkBranch(f.lib, parent, 'independent-context-child');
+        const copied = await capture(f.lib, child.id);
+        expect(copied.memories).toHaveLength(2);
+        expect(copied.memories.every(memory => memory.level === 0 && !memory.dependencies.length)).toBe(true);
+        expect(new Set((await statuses(f.lib, copied)).values())).toEqual(new Set(['valid']));
+        expect(await f.lib.all('memory_revisions', 'branch', f.branch.id)).toEqual(before);
+        expect(await f.lib.get('branches', f.branch.id)).toEqual(parent.branch);
     } finally { f.lib.close(); }
 });

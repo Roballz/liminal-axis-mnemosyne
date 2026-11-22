@@ -23,6 +23,7 @@ import { normalizeTags, shortText } from '@/memory/contextTags';
 import { currentEventDirectory, dailyInstalled, dailyState, hostScope, hostVersion, syncDaily } from '@/mnemosyne/bridge';
 import type { MemPlan } from '@/memory/types';
 import { SUMMARY_CTX, type SummaryRow } from './ctx';
+import { SUMMARY_EDIT_NOTICE } from '@/mnemosyne/summary-edit-plan';
 
 // 打开摘要页时强制重算一次派生:未摘要楼层等派生缓存只在特定事件刷新,
 // 边聊边攒的新 AI 楼可能没触发刷新,进页先对齐一次,避免列表漏楼。
@@ -1538,12 +1539,12 @@ provide(SUMMARY_CTX, {
           </span>
           <button class="bbs-summary-act" type="button" title="关闭" @click="cancelEdit"><Icon name="close" /></button>
         </header>
-        <!-- 已被总结收纳的节点:提醒上层总结不会跟着变。叶子才提向量召回(总结不进向量库) -->
         <p v-if="editing.nested" class="bbs-field-hint bbs-nested-hint">
-          {{ editing.kind === 'leaf'
-            ? '这条已被上层总结收纳:改动会用于向量召回,但上层总结的文本不会自动更新;若总结里也有同样的错误,请一并编辑。'
-            : '这条已被更上层总结收纳:改动不会同步到上层总结;若上层里也有同样的错误,请一并编辑。' }}
+          {{ apiSettings.summaryEditPromptEnabled
+            ? '保存后将依次修订关联的上层总结，未确认的总结保留在待审核列表。'
+            : '保存后，关联的上层总结将标记为待审核，请逐条核对。' }}
         </p>
+        <p class="bbs-field-hint">{{ SUMMARY_EDIT_NOTICE }}</p>
         <!-- 时间仅叶子可编辑(起止两端);总结只压文本,无时间字段 -->
         <div v-if="editing.kind === 'leaf'" class="bbs-modal-field bbs-time-pair">
           <label class="bbs-time-col">
@@ -1561,7 +1562,7 @@ provide(SUMMARY_CTX, {
         </label>
         <footer class="bbs-modal-foot">
           <button class="bbs-btn" type="button" @click="cancelEdit">取消</button>
-          <button class="bbs-btn bbs-btn-primary" type="button" @click="saveEdit">保存</button>
+          <button class="bbs-btn bbs-btn-primary" type="button" :disabled="!editing.text.trim()" @click="saveEdit">{{ editing.nested && apiSettings.summaryEditPromptEnabled ? '保存并继续' : '保存' }}</button>
         </footer>
       </div>
     </ModalMask>

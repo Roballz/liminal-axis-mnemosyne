@@ -112,7 +112,7 @@ test.each(['summary-edit', 'body-edit', 'disabled', 'private', 'removed', 'other
     } finally { f.lib.close(); }
 });
 
-test('manual corrections of dependent summaries preserve table provenance without approving stale higher summaries', async () => {
+test('independent L0 corrections preserve table provenance without approving stale higher summaries', async () => {
     const f = await fixture(2);
     try {
         for (let i = 0; i < 2; i++) Object.assign(f.input.memories[i], {
@@ -126,8 +126,8 @@ test('manual corrections of dependent summaries preserve table provenance withou
         const [first, second] = ['leaf-0', 'leaf-1'].map(id => view.memories.find(memory => memory.hostId === id)!);
         const def = definition(f.branch), inputs = [{ def, rows: [record(def, 'first', 'S-001', [first.id]),
             record(def, 'second', 'S-002', [second.id])] }];
-        // Edit the dependent first, then its earlier source. The global summary
-        // dependency remains stale; the table must independently prove its body sources.
+        // Old context citations do not connect these L0 summaries. The true
+        // higher summary still needs review, and tables prove their own sources.
         for (const i of [1, 0]) {
             const { inputRefs, coverage, basisSnapshot, ...host } = f.input.memories[i];
             f.input.memories[i] = { ...host, content: `第${i}条的措辞更正`, children: [], manualEdit: true, generationKey: 2 };
@@ -135,7 +135,7 @@ test('manual corrections of dependent summaries preserve table provenance withou
         }
         view = await capture(f.lib, f.branch.id);
         const validity = await statuses(f.lib, view);
-        expect(validity.get(view.memories.find(memory => memory.hostId === 'leaf-1')!.id)).toBe('needs_rebuild');
+        expect(validity.get(view.memories.find(memory => memory.hostId === 'leaf-1')!.id)).toBe('valid');
         expect(validity.get(view.memories.find(memory => memory.hostId === 'higher')!.id)).toBe('needs_rebuild');
         const allowed = await allowedTableSources(f.lib, view, inputs, validity);
         const text = renderTableState(inputs, allowed);
@@ -147,7 +147,9 @@ test('manual corrections of dependent summaries preserve table provenance withou
         f.input.memories[0].content += '重新人工确认'; f.input.memories[0].generationKey = 3;
         await synchronize(f.lib, f.input);
         view = await capture(f.lib, f.branch.id);
-        expect(renderTableState(inputs, await allowedTableSources(f.lib, view, inputs, await statuses(f.lib, view)))).toBe('');
+        const afterBodyChange = renderTableState(inputs, await allowedTableSources(f.lib, view, inputs, await statuses(f.lib, view)));
+        expect(afterBodyChange).not.toContain('S-001');
+        expect(afterBodyChange).toContain('S-002');
     } finally { f.lib.close(); }
 });
 

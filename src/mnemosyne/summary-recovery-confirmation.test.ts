@@ -69,7 +69,8 @@ test('mixed 24 recovered and 131 ordinary L0 reviews confirm together without re
   else if(i%2===0) ctx.chat[i*2+1].extra.mnemosyne_summary_evidence_v1={leaf:leaf.id,text:leaf.text,basis:before.snapshot.id,
    inputRefs:[before.refs[0],...before.refs.slice(i*2,i*2+2)],coverage:before.refs.slice(i*2,i*2+2),generationKey:i+1};
  }
- ctx.chat[0].mes+=' edited';invalidateDaily();const view=await legacyReviewFixture(), originals=view.memories;
+ for(let i=0;i<155;i++)ctx.chat[i*2].mes+=' own turn edited';
+ invalidateDaily();const view=await legacyReviewFixture(), originals=view.memories;
  expect(originals.filter(m=>m.sourceRecovery)).toHaveLength(24);
  expect(originals.filter(m=>!m.sourceRecovery)).toHaveLength(131);
  expect([...(await statuses(lib,view)).values()].every(s=>s==='needs_review')).toBe(true);
@@ -94,7 +95,7 @@ test('mixed 24 recovered and 131 ordinary L0 reviews confirm together without re
  expect(next.memories).toEqual(confirmed);expect([...(await statuses(lib,next)).values()].every(s=>s==='valid')).toBe(true);
  ctx.chat[0].mes+=' later edit';invalidateDaily();next=await syncDaily();
  expect(next.memories).toEqual(confirmed.filter(m=>m.hostId!=='mixed-0'));
- expect(new Set((await statuses(lib,next)).values())).toEqual(new Set(['needs_review']));
+ expect(new Set((await statuses(lib,next)).values())).toEqual(new Set(['valid']));
  expect(await lib.get('memory_revisions',confirmed.find(m=>m.hostId==='mixed-0')!.id)).toBeUndefined();
 },15000);
 test('ordinary L0 reviews keep the same exact-host exclusions as missing-basis recovery',async()=>{
@@ -105,7 +106,7 @@ test('ordinary L0 reviews keep the same exact-host exclusions as missing-basis r
  expect(recoveredSummaryTargets(ordinary).map(m=>m.hostId)).toEqual(['leaf-0']);
  ctx.chat[1].extra.mnemosyne_message_v1='mismatched-host-key';expect(recoveredSummaryTargets(ordinary)).toEqual([]);
 });
-test('actual engine-generated L0 dependencies remain historical while explicit confirmation uses current bodies',async()=>{
+test('engine-generated L0 keeps its own sources and ignores history context after explicit confirmation',async()=>{
  const preview=settings.apiSettings.summarySuccessPreviewEnabled;settings.apiSettings.summarySuccessPreviewEnabled=false;
  vi.spyOn(settings,'engineActiveHere').mockReturnValue(true);vi.spyOn(settings,'getChannelForTask').mockReturnValue(null);
  vi.spyOn(api,'mainApiAvailable').mockReturnValue(true);vi.spyOn(hostContext,'getCheckWorldInfo').mockResolvedValue(null);
@@ -116,13 +117,13 @@ test('actual engine-generated L0 dependencies remain historical while explicit c
   for(const floor of [1,3,5]){await summarizeFloor(floor);expect(getLeaf(ctx.chat[floor])).toBeDefined();await syncDaily();}
   expect(request).toHaveBeenCalledTimes(3);
   const generated=await syncDaily(), later=generated.memories.find(m=>m.hostId===getLeaf(ctx.chat[5])!.id)!;
-  expect(later.dependencies.length).toBeGreaterThan(0);expect(later.inputRefs.length).toBeGreaterThan(0);
+  expect(later.dependencies).toEqual([]);expect(later.inputRefs).toEqual(generated.refs.slice(4,6));
   memory.summaries.push({id:'generated-higher',text:'higher generated dependency',level:1,createdAt:4,auto:true,childIds:[later.hostId]});
   invalidateDaily();const withHigher=await syncDaily();
   const event=await editEvent(lib,withHigher,null,{title:'original generated event',status:'open',keywords:[],overview:'original event overview',summarized:[later.id]},{memory:later.id,active:true,kind:'reference'});
   ctx.chat[3].extra.mnemosyne_summary_evidence_v1.basis='missing-engine-basis';
-  ctx.chat[0].mes+=' changed';invalidateDaily();const view=await legacyReviewFixture();
-  expect(view.memories.filter(m=>m.level===0&&m.dependencies.length)).toHaveLength(2);
+  ctx.chat[0].mes+=' changed';ctx.chat[4].mes+=' own turn changed';invalidateDaily();const view=await legacyReviewFixture();
+  expect(view.memories.filter(m=>m.level===0&&m.dependencies.length)).toHaveLength(0);
   expect([...(await statuses(lib,view)).values()].every(s=>s==='needs_review'||s==='needs_rebuild')).toBe(true);
   const host=JSON.stringify(ctx.chat);request.mockClear();ctx.saveChat.mockClear();
   expect(recoveredSummaryTargets(view)).toHaveLength(3);
@@ -144,10 +145,12 @@ test('actual engine-generated L0 dependencies remain historical while explicit c
   expect((await statuses(lib,tagged)).get(retagged.id)).toBe('valid');
   ctx.chat[0].mes+=' later body edit';invalidateDaily();const changed=await syncDaily();
   expect(changed.memories.find(m=>m.id===retagged.id)).toEqual(retagged);
-  expect((await statuses(lib,changed)).get(retagged.id)).toBe('needs_review');
+  expect((await statuses(lib,changed)).get(retagged.id)).toBe('valid');
+  ctx.chat[4].mes+=' own source edited again';invalidateDaily();const ownChanged=await legacyReviewFixture();
+  expect((await statuses(lib,ownChanged)).get(retagged.id)).toBe('needs_review');
  } finally {settings.apiSettings.summarySuccessPreviewEnabled=preview;}
 });
-test('155 L0 recovery rows with 131 recorded history dependencies remain one explicit body-confirmation batch',async()=>{
+test('155 L0 recovery rows ignore legacy sidecar context links and remain one explicit confirmation batch',async()=>{
  for(let i=0;i<155;i++) {
   ctx.chat.push(message(true,`dependent question ${i}`),message(false,`dependent reply ${i}`));
   ctx.chat.at(-1).extra.bbs_leaf={id:`dependent-${i}`,text:`dependent summary ${i}`,delta:{},createdAt:i+1,v:1,swipe:0};
@@ -159,7 +162,8 @@ test('155 L0 recovery rows with 131 recorded history dependencies remain one exp
   ctx.chat[floor].extra.mnemosyne_summary_evidence_v1={leaf:leaf.id,text:leaf.text,basis:`missing-dependent-${i}`,
    inputRefs:[],coverage:[],generationKey:i+1,dependencies:i<24?[]:history.filter(n=>n.msgIndex<floor-1).map(n=>n.id)};
  }
- invalidateDaily();const view=await syncDaily();expect(view.memories.filter(m=>m.dependencies.length)).toHaveLength(131);
+ expect(ctx.chat.filter((m: ReturnType<typeof message>)=>m.extra.mnemosyne_summary_evidence_v1?.dependencies.length)).toHaveLength(131);
+ invalidateDaily();const view=await syncDaily();expect(view.memories.filter(m=>m.dependencies.length)).toHaveLength(0);
  expect(view.memories.filter(m=>m.sourceRecovery)).toHaveLength(155);expect(recoveredSummaryTargets(view)).toHaveLength(155);
  const next=await retainRecoveredSummaries(view,view.memories.map(m=>m.id),guardFor(view));
  expect(next.branch.epoch).toBe(view.branch.epoch+1);expect(next.memories.every(m=>!m.dependencies.length)).toBe(true);
@@ -266,12 +270,12 @@ test('tag-only edits keep manual provenance, but later source edits and changed 
  leaf.tags=normalizeTags({participants:['four']});invalidateDaily();next=await syncDaily();
  expect(next.memories[0].sourceRecovery).toBeDefined();expect((await statuses(lib,next)).get(next.memories[0].id)).toBe('needs_review');await exportLibrary(lib);
 });
-test('an earlier edit retires its own turn and preserves other confirmed prefixes for review',async()=>{
+test('an earlier edit retires its own turn and keeps unrelated confirmed summaries valid',async()=>{
  const view=await recovered(2,false), next=await retainRecoveredSummaries(view,view.memories.map(m=>m.id),guardFor(view));
  const event=await editEvent(lib,next,null,{title:'synthetic preserved event',status:'open',keywords:[]},{memory:next.memories[0].id,active:true,kind:'reference'});
  ctx.chat[0].mes+=' changed';invalidateDaily();const edited=await syncDaily();
  expect(edited.memories).toEqual(next.memories.filter(m=>m.hostId==='leaf-1'));
- expect(new Set((await statuses(lib,edited)).values())).toEqual(new Set(['needs_review']));
+ expect(new Set((await statuses(lib,edited)).values())).toEqual(new Set(['valid']));
  const events=await eventView(lib,edited);expect(events.cards.map(c=>c.chain.id)).toContain(event);expect(events.cards[0].members).toEqual([]);
  expect(await lib.get('memory_revisions',next.memories.find(m=>m.hostId==='leaf-0')!.id)).toBeUndefined();
  await exportLibrary(lib);

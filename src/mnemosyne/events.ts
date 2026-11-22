@@ -5,8 +5,10 @@ import type { EventHint } from '@/memory/contextTags';
 import { sourceContent, sourceRefMatches, sourceRefsMatch } from './source-equivalence';
 import { parseStrictJson } from './json';
 import { Library } from './db';
-import { snapshotRefs, summarySources, statuses, capture, current, sameNarrativeRevision } from './canonical';
+import { snapshotRefs, statuses, capture, current, sameNarrativeRevision } from './canonical';
 import { snapshotVariants } from './current-body';
+import { summaryDependencies } from './summary-applicability';
+import { summaryApplicabilityReader } from './summary-applicability-reader';
 import { currentEventCache, publishCurrentEvents, sameEventValidity, type CurrentEventCache } from './event-current-cache';
 import { row, check, equal, fingerprint, type CapturedView, type EventChain, type EventRevision, type Membership, type Progress, type EventReceipt, type Branch, type Snapshot, type MemoryRevision } from './model';
 export interface EventCard {
@@ -46,7 +48,7 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
     const positions = new Map(view.refs.map((ref, index) => [ref.message, index]));
     let publish: CurrentEventCache | undefined;
     const result = await lib.transaction(['branches', 'event_chains', 'event_revisions', 'event_memberships', 'event_progress',
-        'memory_revisions', 'history_snapshots', 'manifest_blocks'], 'readonly', async (tx) => {
+        'memory_revisions', 'history_snapshots', 'manifest_blocks', 'source_revisions'], 'readonly', async (tx) => {
         const working = live && !includeHistory ? await currentEventCache(lib, tx, view) : undefined;
         // Single-chain work must not reproject every unrelated chain on each batch job.
         const requested = eventId === undefined ? undefined : await tx.get<EventChain>('event_chains', eventId);
@@ -97,22 +99,18 @@ export async function eventView(lib: Library, view: CapturedView, includeHistory
         // comes from statuses (including explicit reviews); floor numbers alone prove nothing.
         type MaterialFloors = { messages: string[]; dependencies: MaterialFloors[] };
         const floorMessages = new Map<string, Promise<MaterialFloors | null>>();
-        const basisMessages = new Map<string, Promise<Set<string> | undefined>>();
+        const applicability = summaryApplicabilityReader(tx, [view]);
         const materialFloors = (id: string): Promise<MaterialFloors | null> => {
             if (!floorMessages.has(id)) floorMessages.set(id, (async () => {
                 const memory = await readMemory(id);
                 if (!memory || !permitted.has(id)) return null;
-                const messages = [...(await summarySources(tx, memory)), ...memory.coverage].map(r => r.message);
+                const messages = (await applicability.sources(memory)).map(r => r.message);
                 if (memory.anchor) {
-                    if (!basisMessages.has(memory.basis)) basisMessages.set(memory.basis, (async () => {
-                        const basis = await readSnapshot(memory.basis);
-                        return basis && new Set((await snapshotRefs(tx, basis)).map(ref => ref.message));
-                    })());
-                    if (!(await basisMessages.get(memory.basis)!)?.has(memory.anchor)) return null;
+                    if (!await applicability.hasAnchor(memory)) return null;
                     messages.push(memory.anchor);
                 }
                 const dependencies: MaterialFloors[] = [];
-                for (const dependency of memory.dependencies) {
+                for (const dependency of summaryDependencies(memory)) {
                     const prior = await readMemory(dependency);
                     // statuses already checked exact dependencies or their explicit approval.
                     const child = prior && selected.get(prior.owner);

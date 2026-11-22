@@ -1,11 +1,11 @@
 import { test, expect, vi } from 'vitest';
 import { fixture, observation } from './fixtures';
-import { capture, forkBranch, synchronize } from './canonical';
+import { capture, forkBranch, keepSummary, statuses, synchronize } from './canonical';
 import { editEvent, eventView, setEventArchived } from './events';
 import { commitManualEvent, keepEventOverview } from './manual-events';
 import { previewEventResync, commitEventResync } from './event-resync';
 import { exportLibrary, restoreLibrary, validateData } from './migration';
-import { STORES, type CapturedView } from './model';
+import { STORES, type CapturedView, type MemoryRevision } from './model';
 import type { Library } from './db';
 
 const response = (memory: string, label = '早期') => JSON.stringify({ title: '合成事件', status: 'open', keywords: ['玉佩'],
@@ -186,4 +186,42 @@ test('resync excludes later plot, refuses stale/changed chat and never overwrite
     await synchronize(lib, { ...input, scope: 'child' });
     expect((await previewEventResync(lib, await capture(lib, child.id))).cards).toHaveLength(0);
     lib.close();
+});
+
+test.each(['explicit', 'legacy-prefix'] as const)('L0 %s context cannot discard its own approval or event when an unrelated context summary is pending', async mode => {
+    const { lib, input, view, branch } = await fixture(2);
+    try {
+        if (mode === 'explicit') input.memories[1] = { ...input.memories[1], inputRefs: view.refs.slice(2), coverage: view.refs.slice(2) };
+        await synchronize(lib, input);
+        let current = await capture(lib, branch.id);
+        const earlier = current.memories.find(m => m.hostId === 'leaf-0')!;
+        const later = current.memories.find(m => m.hostId === 'leaf-1')!;
+        // Preserve a real old dependency record; new generations no longer write it.
+        await lib.transaction(['memory_revisions'], 'readwrite', tx => tx.put('memory_revisions', {
+            ...later, dependencies: [earlier.id],
+        } as MemoryRevision));
+        input.messages[0].content += ' 未确认的早期变化';
+        input.messages[2].content += ' 已人工核对的本轮变化';
+        await synchronize(lib, input); current = await capture(lib, branch.id);
+        await keepSummary(lib, current, later.id);
+        // The old manual approval still contains its full historical prefix.
+        // Only its own turn must remain applicable after this unrelated edit.
+        input.messages[0].content += ' 后续再次改动的前文';
+        await synchronize(lib, input);
+        current = await capture(lib, branch.id);
+        const valid = await statuses(lib, current);
+        expect(valid.get(earlier.id)).toBe('needs_review'); expect(valid.get(later.id)).toBe('valid');
+        const event = await editEvent(lib, current, null, { title: '独立后续事件', status: 'open', keywords: [],
+            overview: '已经核对的后续概要', summarized: [later.id] }, { memory: later.id, active: true, kind: 'reference' });
+        const child = await forkBranch(lib, await capture(lib, branch.id), 'legacy-context-child');
+        const copied = await capture(lib, child.id);
+        expect(copied.memories.map(m => m.hostId)).toEqual(['leaf-1']);
+        expect((await statuses(lib, copied)).get(copied.memories[0].id)).toBe('valid');
+        expect((await cards(lib, child.id))[0]).toMatchObject({ blocked: false, needsReview: false,
+            meta: { overview: '已经核对的后续概要' } });
+        const plan = await previewEventResync(lib, copied);
+        expect(plan.ids.get(later.id)).toBe(copied.memories[0].id);
+        expect(plan.parentChains.map(chain => chain.id)).toContain(event);
+        await exportLibrary(lib);
+    } finally { lib.close(); }
 });

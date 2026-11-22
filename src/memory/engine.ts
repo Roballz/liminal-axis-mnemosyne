@@ -1294,23 +1294,36 @@ export async function eventCreationContext(floor: number, view?: import('@/mnemo
 }
 /** Edit dialog: use the configured summary prompt and sender, apply only the returned prose. */
 export async function draftFloorCorrection(floor: number, guard: () => boolean) {
+  if (!engineActiveHere() || busy) throw new Error('摘要引擎未启用或正在运行');
   const chat = getContext()?.chat;
   if (!chat || !isAiFloor(chat[floor]) || !leafValid(chat[floor])) throw new Error('本楼摘要已改变');
   const sender = resolveSender('summary');
   if ('error' in sender) throw new Error(sender.error);
   const targets = floorTargets(chat, floor, coveredBeforeFloor(chat, floor));
   const dependencies = selectHistoryNodesBefore(memory.summaries, chat, targets[0]).map(node => node.id);
-  const evidence = await captureSummaryEvidence(targets, dependencies);
-  const { prompt, charCard, persona, worldInfo } = await floorSummaryContext(chat, floor, targets);
-  if (!guard()) throw new Error('聊天已改变，摘要更新已停止');
-  const system = [apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT,
-    charCard && buildCharCardSystem(charCard), persona && buildPersonaSystem(persona),
-    worldInfo && buildWorldInfoSystem(worldInfo), prompt.system].filter(Boolean).join('\n\n');
-  const raw = await sender.send([{ role: 'system', content: system },
-    { role: 'user', content: prompt.user + '\n本次仅修订本楼摘要，只返回含非空 summary 字符串的 JSON。' }]);
-  const text = llmString(extractJsonObject<SummaryDelta>(raw)?.summary);
-  if (!text) throw new Error('AI 未返回有效摘要，原摘要已保留');
-  return { text, recordSources: () => attachSummaryEvidence(chat, floor, evidence, targets, true) };
+  const responseGuard = summaryResponseGuard(chat, floor, dependencies);
+  const current = () => {
+    if (!guard()) throw new Error('聊天已改变，摘要更新已停止');
+    responseGuard();
+  };
+  busy = true; engineState.running = true;
+  try {
+    const evidence = await captureSummaryEvidence(targets, dependencies);
+    current();
+    const { prompt, charCard, persona, worldInfo } = await floorSummaryContext(chat, floor, targets, evidence?.view);
+    current();
+    const system = [apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT,
+      charCard && buildCharCardSystem(charCard), persona && buildPersonaSystem(persona),
+      worldInfo && buildWorldInfoSystem(worldInfo), prompt.system].filter(Boolean).join('\n\n');
+    const raw = await sender.send([{ role: 'system', content: system },
+      { role: 'user', content: prompt.user + '\n本次仅修订本楼摘要，只返回含非空 summary 字符串的 JSON。' }]);
+    current();
+    const text = llmString(extractJsonObject<SummaryDelta>(raw)?.summary);
+    if (!text) throw new Error('AI 未返回有效摘要，原摘要已保留');
+    const fresh = await responseEvidence(evidence, targets, current);
+    assertSummaryEvidence(fresh);
+    return { text, recordSources: () => attachSummaryEvidence(chat, floor, fresh, targets, true) };
+  } finally { busy = false; engineState.running = false; }
 }
 async function summarizeFloorWork(
   chat: STMessage[],
@@ -1849,7 +1862,7 @@ interface SelectableNode {
  * 叶子来自 chat(有效叶子),楼层 = msgIndex;comp 来自 memory.summaries,楼层 = 递归后代叶子 min..max。
  * 供 summarizeSelected 排序、取时间范围、算覆盖范围。
  */
-function collectSelectableNodes(chat: STMessage[]): Map<string, SelectableNode> {
+function collectSelectableNodes(chat: STMessage[], requestedIds?: readonly string[]): Map<string, SelectableNode> {
   const map = new Map<string, SelectableNode>();
   // 叶子:id → 楼层
   const leafFloor = new Map<string, number>();
@@ -1875,7 +1888,12 @@ function collectSelectableNodes(chat: STMessage[]): Map<string, SelectableNode> 
     }
     for (const cid of c.childIds ?? []) floorsOf(cid, seen, acc);
   };
-  for (const s of memory.summaries) {
+  // A one-summary correction only needs its direct children's ranges. Avoid
+  // walking every unrelated summary subtree for each step of the edit dialog.
+  const summaries = requestedIds ? requestedIds.flatMap(id => {
+    const summary = byComp.get(id); return summary ? [summary] : [];
+  }) : memory.summaries;
+  for (const s of summaries) {
     const floors: number[] = [];
     floorsOf(s.id, new Set(), floors);
     const lo = floors.length ? Math.min(...floors) : -1;
@@ -2180,6 +2198,59 @@ export function bindEngine(): (() => void) | undefined {
     () => refreshInjection(),
   ));
   return dispose;
+}
+
+/** Prepare one higher-level correction for the sequential editor. No archive or
+ * summary content is changed until the user confirms the returned draft. */
+export async function draftHigherCorrection(hostId: string, guard: () => boolean) {
+  if (!engineActiveHere() || busy) throw new Error('摘要引擎未启用或正在运行');
+  const ctx = getContext(), target = memory.summaries.find(s => s.id === hostId);
+  if (!ctx || !target || target.level <= 0 || !target.childIds.length) throw new Error('没有可重建的下级来源');
+  const all = collectSelectableNodes(ctx.chat, target.childIds);
+  const picked = target.childIds.map(id => all.get(id));
+  if (new Set(target.childIds).size !== target.childIds.length ||
+      picked.some(node => !node || node.level >= target.level)) throw new Error('下级来源缺失或层级不符，不能重建');
+  const nodes = picked as SelectableNode[];
+  const sender = resolveSender('resummary');
+  if ('error' in sender) throw new Error(sender.error);
+  const chat = ctx.chat, scope = hostScope(), wanted = new Set([target.id, ...target.childIds]);
+  const leafMessages = new Map(nodes.filter(node => node.level === 0).map(node => [node.id, chat[node.floorLo]]));
+  // Higher corrections send child summaries only. Keep exact prompt evidence
+  // without repeatedly snapshotting every earlier body and unrelated leaf.
+  const inputs = () => {
+    const summaries = new Map(memory.summaries.filter(summary => wanted.has(summary.id)).map(summary => [summary.id, summary]));
+    return [summaries.get(hostId) ?? null, nodes.map(node => {
+      if (node.level > 0) return summaries.get(node.id) ?? null;
+      const message = chat[node.floorLo], leaf = getLeaf(message);
+      return message === leafMessages.get(node.id) && leafValid(message) && !message.extra?.bbs_omit
+        ? [leaf?.id, leaf?.text, leaf?.timeStart, leaf?.timeEnd, leaf?.createdAt, message.is_user,
+          !!message.is_system && !message.extra?.bbs_hidden, message.swipe_id] : null;
+    })];
+  };
+  const savedInputs = sourceSnapshot(inputs());
+  const current = () => {
+    if (!guard() || !engineActiveHere() || getContext()?.chat !== chat || hostScope() !== scope ||
+        !sameSourceSnapshot(inputs(), savedInputs)) throw new Error('聊天或总结已改变，本次生成已停止');
+  };
+  busy = true; engineState.running = true;
+  try {
+    const evidence = await mergeEvidence(nodes, current);
+    current();
+    const { content, hints } = joinNodesForResummary(nodes);
+    const prompt = buildResummaryPrompt({ user: ctx.name1, char: ctx.name2, content, level: target.level });
+    const messages: ChatMsg[] = [];
+    const jb = apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT;
+    if (jb) messages.push({ role: 'system', content: jb });
+    messages.push({ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user + hints },
+      { role: 'system', content: RESUMMARY_THINKING_CHECKLIST }, { role: 'assistant', content: RESUMMARY_THINKING_PREFILL });
+    const raw = await sender.send(messages);
+    current();
+    const text = llmString(extractJsonObject<{ summary?: string }>(raw)?.summary);
+    if (!text) throw new Error('AI 未返回有效总结，原总结已保留');
+    const fresh = await responseEvidence(evidence, [], current);
+    assertSummaryEvidence(fresh);
+    return { text };
+  } finally { busy = false; engineState.running = false; }
 }
 
 /** W-01: explicit, one-level rebuild; retained ancestors are not automatically regenerated. */

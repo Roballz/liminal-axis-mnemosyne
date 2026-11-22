@@ -73,7 +73,7 @@ test.each(['input', 'coverage', 'legacy-order'] as const)('live status rejects c
         else f.input.messages[0].content += '修改正文';
         await synchronize(f.lib, f.input);
         const current = await capture(f.lib, f.branch.id);
-        const memory = current.memories.find(m => m.hostId === (kind === 'legacy-order' ? 'leaf-1' : 'leaf-0'))!;
+        const memory = current.memories.find(m => m.hostId === 'leaf-0')!;
         const bad = receipt(current, memory, {
             sourceRefs: kind === 'input' ? current.refs.slice(2) : kind === 'coverage' ? current.refs.slice(0, 2) : current.refs,
             coverage: kind === 'coverage' ? current.refs.slice(2) : [],

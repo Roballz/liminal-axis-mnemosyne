@@ -1,6 +1,6 @@
 import { test, expect } from 'vitest';
 import { fixture, observation } from './fixtures';
-import { capture, forkBranch, keepSummary, synchronize } from './canonical';
+import { capture, forkBranch, keepSummary, statuses, synchronize } from './canonical';
 import { editEvent, eventView, setEventArchived, type EventCard } from './events';
 import { saveMemberships } from './event-memberships';
 import { commitManualEvent } from './manual-events';
@@ -98,7 +98,7 @@ test('summary coverage and source input beyond its anchor cannot be trimmed to a
     lib.close();
 });
 
-test.each(['missing', 'invalid'] as const)('%s floor evidence falls back to operation-time history', async kind => {
+test.each(['missing', 'invalid'] as const)('%s floor evidence never invents sources for earlier inheritance', async kind => {
     const lib = await Library.open(freshLibraryName());
     const empty = observation(0);
     empty.memories = [{ ...observation(1).memories[0], anchorKey: null }];
@@ -111,6 +111,11 @@ test.each(['missing', 'invalid'] as const)('%s floor evidence falls back to oper
         // Synthetic legacy-invalid anchor: it is not in this summary's empty basis.
         await lib.transaction(['memory_revisions'], 'readwrite', tx => tx.put('memory_revisions', memory));
         current = await capture(lib, branch.id);
+        expect((await statuses(lib, current)).get(memory.id)).toBe('needs_review');
+        const child = await forkBranch(lib, current, 'invalid-anchor');
+        expect((await capture(lib, child.id)).memories).toEqual([]);
+        expect(await cards(lib, child.id)).toEqual([]);
+        lib.close(); return;
     }
     await write(lib, current, [current.memories[0].id], '旧规则早期');
     input.messages = observation(3).messages;

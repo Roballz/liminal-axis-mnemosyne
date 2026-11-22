@@ -7,7 +7,7 @@ import * as settings from '@/api/settings';
 import * as context from '@/st/context';
 import type { STContext, STMessage } from '@/st/context';
 import * as notices from '@/st/toast';
-import { recoverSummaryResponse, regenerateFloor, batchBackfill, checkResummary, currentSummaryPromise, engineState, handleGenerationIntercept, maybeSummarizePrevAi, syncHiddenNow, openingPendingFloor, planBatches, summarizeFloor as prepareSummaryFloor, summarizeSelected as prepareSelected, resummarizeNow } from './engine';
+import { recoverSummaryResponse, regenerateFloor, batchBackfill, checkResummary, currentSummaryPromise, engineState, handleGenerationIntercept, maybeSummarizePrevAi, syncHiddenNow, openingPendingFloor, planBatches, summarizeFloor as prepareSummaryFloor, summarizeSelected as prepareSelected, resummarizeNow, draftFloorCorrection, draftHigherCorrection } from './engine';
 import { selectInjectionNodes } from './inject';
 import { buildBatchThinking, buildResummaryPrompt, buildSummaryThinking, RESUMMARY_THINKING_CHECKLIST, RESUMMARY_THINKING_PREFILL, RULE_SUMMARY_COMPOSITION, SUMMARY_OUTPUT_PROTOCOL } from './prompts';
 import { renderSourceHints, SOURCE_HINTS_HEADER } from './sourceHints';
@@ -1134,4 +1134,86 @@ it('request and response guards retain long old source strings without repeated 
     expect(chat[3].extra?.bbs_leaf?.text).toBe(summary.summary);
     expect(copies).toBe(0);
   } finally { spy.mockRestore(); }
+});
+
+describe('逐层修订的 AI 草稿', () => {
+  function setupHigher() {
+    const first = leaf(), second = { ...leaf(), id: 'second-page', text: '第二楼摘要' };
+    useChat([message(false, { extra: { bbs_leaf: first } }), message(true), message(false, { extra: { bbs_leaf: second } })]);
+    memory.summaries.push(
+      { id: 'first-L1', text: '第一段已修订总结', level: 1, createdAt: 3, auto: false, childIds: [first.id] },
+      { id: 'second-L1', text: '第二段已确认总结', level: 1, createdAt: 4, auto: false, childIds: [second.id] },
+      { id: 'target-L2', text: '待审核的原 L2 总结', level: 2, createdAt: 5, auto: true, childIds: ['first-L1', 'second-L1'] },
+      { id: 'unrelated-L1', text: '不相关总结', level: 1, createdAt: 6, auto: true, childIds: ['unrelated-leaf'] },
+    );
+    return memory.summaries.find(s => s.id === 'target-L2')!;
+  }
+  it('仅用本条下级生成可编辑草稿，不保存正文、确认上层或重复归档', async () => {
+    const target = setupHigher(), original = JSON.stringify(memory.summaries);
+    const synchronize = vi.spyOn(bridge, 'syncDaily');
+    const keep = vi.spyOn(bridge, 'keepHigherMergeSources');
+    const result = await draftHigherCorrection(target.id, () => true);
+    expect(result.text).toBe(summary.summary);
+    expect(JSON.stringify(memory.summaries)).toBe(original);
+    expect(settings.getChannelForTask).toHaveBeenCalledWith('resummary');
+    const request = JSON.stringify(vi.mocked(client.requestViaMainApi).mock.calls[0]);
+    expect(request).toContain('第一段已修订总结');
+    expect(request).toContain('第二段已确认总结');
+    expect(request).not.toContain('不相关总结');
+    expect(request).not.toContain('待审核的原 L2 总结');
+    expect(keep).not.toHaveBeenCalled();
+    expect(synchronize).not.toHaveBeenCalled();
+    expect(engineState.running).toBe(false);
+  });
+  it.each(['source', 'guard', 'chat'] as const)('生成期间%s改变后拒绝草稿，保留原总结', async change => {
+    const target = setupHigher(); let current = true;
+    vi.mocked(client.requestViaMainApi).mockImplementation(async () => {
+      if (change === 'source') memory.summaries[0].text = '模型请求期间已重写';
+      if (change === 'guard') current = false;
+      if (change === 'chat') useChat([message()]);
+      return JSON.stringify(summary);
+    });
+    await expect(draftHigherCorrection(target.id, () => current)).rejects.toThrow('已改变');
+    expect(target.text).toBe('待审核的原 L2 总结');
+    expect(engineState.running).toBe(false);
+  });
+  it('高层草稿的反复核对不读取未发送的历史正文', async () => {
+    const target = setupHigher(), chat = context.getContext()!.chat;
+    const body = vi.fn(() => '不会发送给高层总结模型的长正文'.repeat(100_000));
+    Object.defineProperty(chat[1], 'mes', { configurable: true, get: body });
+    await draftHigherCorrection(target.id, () => true);
+    expect(body).not.toHaveBeenCalled();
+    expect(target.text).toBe('待审核的原 L2 总结');
+  });
+  it('下级仍待审核时不调用模型，也不自动确认来源', async () => {
+    const target = setupHigher();
+    vi.spyOn(bridge, 'captureSummaryEvidence').mockResolvedValue({ allowedDependencies: ['second-L1'] } as any);
+    const keep = vi.spyOn(bridge, 'keepHigherMergeSources');
+    await expect(draftHigherCorrection(target.id, () => true)).rejects.toThrow('来源在请求前已失效或未归档');
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+    expect(keep).not.toHaveBeenCalled();
+    expect(engineState.running).toBe(false);
+  });
+  it('无效返回释放运行状态，重试仍只返回草稿', async () => {
+    const target = setupHigher();
+    vi.mocked(client.requestViaMainApi).mockResolvedValueOnce('{"summary":""}');
+    await expect(draftHigherCorrection(target.id, () => true)).rejects.toThrow('原总结已保留');
+    expect(engineState.running).toBe(false);
+    expect((await draftHigherCorrection(target.id, () => true)).text).toBe(summary.summary);
+    expect(target.text).toBe('待审核的原 L2 总结');
+  });
+  it('本楼 AI 摘要也先返回草稿，来源变化时不应用旧返回', async () => {
+    const first = leaf(); useChat([message(false, { extra: { bbs_leaf: first } })]);
+    const result = await draftFloorCorrection(0, () => true);
+    expect(result.text).toBe(summary.summary);
+    expect(first.text).toBe('An existing summary.');
+    expect(typeof result.recordSources).toBe('function');
+    vi.mocked(client.requestViaMainApi).mockImplementation(async () => {
+      context.getContext()!.chat[0].mes = '请求期间修改正文';
+      return JSON.stringify(summary);
+    });
+    await expect(draftFloorCorrection(0, () => true)).rejects.toThrow('已改变');
+    expect(first.text).toBe('An existing summary.');
+    expect(engineState.running).toBe(false);
+  });
 });

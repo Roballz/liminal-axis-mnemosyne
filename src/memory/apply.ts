@@ -2235,7 +2235,7 @@ export function editLeafAt(index: number, text: string, timeStart: string, timeE
   else delete leaf.delta.time;
   chat[index].extra = { ...(chat[index].extra ?? {}), bbs_leaf: leaf };
   markManualSummaryEdit(chat[index]);
-  notifySummaryEdit(index);
+  notifySummaryEdit(index, { hostId: leaf.id, level: 0 });
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要变了 → 召回结果会变,先失效再重算
@@ -2312,7 +2312,7 @@ export function editLeafFull(
   const before = chat[index].mes;
   rewriteFloorTags(chat, index, delta);
   markManualSummaryEdit(chat[index], { floor: index, before });
-  notifySummaryEdit(index);
+  notifySummaryEdit(index, { hostId: leaf.id, level: 0 });
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要正文/时间变了 → 失效旧召回
@@ -2379,13 +2379,13 @@ export function editPlan(
  * 编辑一个压缩节点(总结)的正文。总结只压文本、不含结构化数据,
  * 故只改 text 字段即可,无需 recompute。
  */
-export function editSummary(id: string, text: string): boolean {
+export function editSummary(id: string, text: string, notify = true): boolean {
   const comp = memory.summaries.find(s => s.id === id);
   if (!comp) return false;
   comp.text = text.trim();
   comp.createdAt = Math.max(Date.now(), (comp.createdAt ?? 0) + 1);
   saveMemory();
-  notifySummaryEdit();
+  if (notify) notifySummaryEdit(undefined, { hostId: comp.id, level: comp.level });
   return true;
 }
 
