@@ -169,3 +169,67 @@ test.each(['active', 'missing', 'omit', 'repeated user', 'stale swipe', 'unmarke
     } else expect(docs).not.toContain(answer.mesFull);
     if (mode === 'unmarked') expect(docs).toHaveLength(1);
 });
+
+test.each(['shared', 'both sides', 'two anchors', 'already selected', 'only brief', 'empty body', 'ineligible', 'partial rerank', 'changed'])(
+    'attaches at most one focus anchor’s eligible summaries after allocating normal slots (%s)', async mode => {
+        const [a, b, c, d] = leaves;
+        const cfg = settings.apiSettings.vector.recall;
+        Object.assign(cfg, { fullTextCount: 2, finalRecallCount: 2, bm25Count: 0, rrfCount: 0 });
+        vi.mocked(rewrite.rewriteQuery).mockResolvedValue({ queries: ['背景', '当时的回答'], focusQueryIndex: 1, intent: '合成场景' });
+        vi.mocked(embed.embedTexts).mockResolvedValue([new Float32Array([1, 0]), new Float32Array([0, 1])]);
+        const anchors = mode === 'two anchors' ? [a.leafId, d.leafId] : [d.leafId, b.leafId];
+        if (mode === 'only brief' || mode === 'already selected') cfg.bm25Count = 1;
+        if (mode === 'empty body') b.mesFull = '';
+        if (mode === 'ineligible') context.getContext()!.chat[c.msgIndex].extra = { bbs_omit: true };
+        vi.mocked(vector.vecSearch).mockResolvedValue({ results: [a, b, d].map(leaf => ({
+            ...leaf, scope: 'chat:synthetic', similarity: .72, queryIndex: 0,
+        })), focusLeafIds: anchors });
+        // Include c independently in the ordinary candidate pool too, unless its floor is excluded.
+        vi.mocked(lexical.searchBm25).mockResolvedValue({ hits: mode === 'ineligible' ? [] :
+            [mode === 'only brief' ? b : c].map(leaf => ({ id: leaf.leafId, score: 8 })), persistent: true });
+        const winners = mode === 'both sides' ? [b, d] : mode === 'two anchors' ? [d, a] : mode === 'only brief' ? [a] :
+            mode === 'already selected' ? [b] : [b, a];
+        vi.mocked(embed.rerankDocuments).mockImplementation(async (query, docs) => {
+            expect(query).toBe('合成场景');
+            if (mode === 'changed') host = 'other swipe';
+            return docs.flatMap((doc, index) => {
+                if (mode === 'partial rerank' && doc === c.mesFull) return [];
+                const rank = winners.findIndex(h => doc === (h.mesFull || h.document));
+                return [{ index, score: rank < 0 ? .42 : .97 - rank * .01 }];
+            }).sort((x, y) => y.score - x.score);
+        });
+        await runVectorRecall();
+        if (mode === 'changed') { expect(text()).toBe(''); return; }
+        const extras = recallDebug.rerank.filter(h => h.tier === 'neighbor');
+        switch (mode) {
+            case 'shared':
+            case 'partial rerank':
+                expect(extras.map(h => h.leafId)).toEqual([c.leafId]);
+                expect(extras[0].rerankScore).toBe(mode === 'partial rerank' ? null : .42);
+                expect(text()).toContain(a.mesFull);
+                expect(text().indexOf(b.mesFull)).toBeLessThan(text().indexOf(c.document));
+                expect(text()).not.toContain(c.mesFull);
+                break;
+            case 'both sides':
+                expect(extras.map(h => h.leafId).sort()).toEqual([a.leafId, c.leafId].sort());
+                expect(text().indexOf(a.document)).toBeLessThan(text().indexOf(b.mesFull));
+                expect(text().indexOf(b.mesFull)).toBeLessThan(text().indexOf(c.document));
+                expect(text().split(c.document)).toHaveLength(2);
+                break;
+            case 'two anchors':
+                expect(extras.map(h => h.leafId)).toEqual([c.leafId]);
+                expect(text().indexOf(c.document)).toBeLessThan(text().indexOf(d.mesFull));
+                expect(text()).not.toContain(b.document);
+                break;
+            case 'already selected':
+                expect(extras.map(h => h.leafId)).toEqual([a.leafId]);
+                expect(text().split(c.document)).toHaveLength(2);
+                expect(recallDebug.rerank.find(h => h.leafId === c.leafId)?.tier).toBe('brief');
+                break;
+            default:
+                expect(extras).toHaveLength(0);
+                expect(text()).not.toContain(c.document);
+        }
+        expect(embed.rerankDocuments).toHaveBeenCalledTimes(1);
+        expect(vector.vecSearch).toHaveBeenCalledTimes(1);
+    });

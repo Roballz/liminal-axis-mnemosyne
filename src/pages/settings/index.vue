@@ -735,7 +735,7 @@ function fmtRecallTime(at: number): string {
 function qLabel(queryIndex: number): string {
   return queryIndex >= 0 ? `Q${queryIndex + 1}` : '—';
 }
-const TIER_LABEL: Record<'full' | 'brief' | 'drop', string> = { full: '全文', brief: '摘要', drop: '丢弃' };
+const TIER_LABEL: Record<'full' | 'brief' | 'neighbor' | 'drop', string> = { full: '全文', brief: '摘要', neighbor: '邻楼摘要', drop: '丢弃' };
 // 状态语气:决定横幅左侧圆点的配色(成功/警示/失败/进行中)
 const recallStatusKind = computed<'ok' | 'warn' | 'fail' | 'pending'>(() => {
   const s = recallDebug.status;
@@ -3212,7 +3212,8 @@ function exportPublicApiDocument() {
   color: var(--bbs-accent-ink);
   background: var(--bbs-accent);
 }
-.bbs-dbg-tier.is-brief {
+.bbs-dbg-tier.is-brief,
+.bbs-dbg-tier.is-neighbor {
   color: var(--bbs-ink-soft);
   background: var(--bbs-surface);
   border: 1px solid var(--bbs-line-strong);

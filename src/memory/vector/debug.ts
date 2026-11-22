@@ -29,8 +29,8 @@ export interface RecallDebugRerankHit {
   rerankScore: number | null;
   rerankFallback?: boolean;
   similarity: number | null;
-  /** 分档:full=发全文,brief=发摘要,drop=两档都不达标被丢弃 */
-  tier: 'full' | 'brief' | 'drop';
+  /** 分档:full=发全文,brief=发摘要,neighbor=随附邻楼摘要,drop=两档都不达标被丢弃 */
+  tier: 'full' | 'brief' | 'neighbor' | 'drop';
   /** 来源标记:本聊天命中为楼层号「#5」,bundle 快照为「旧档」 */
   source: string;
   storyTime: string;

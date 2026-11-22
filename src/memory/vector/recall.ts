@@ -393,7 +393,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   }
   // 使用实际召回依赖的指纹，既允许同轮重 roll，又拒绝来源/权限/候选变化后的旧文本。
   // 只保存摘要指纹，避免把百万字正文或设置中的密钥重复写入 localStorage。
-  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v6|${await digest([
+  const cacheKey = sourceKey && knowledgeStoreReady && (!dailyInstalled() || canonicalView) ? `hybrid-v7|${await digest([
     database, scopes, sourceKey, settingsAtStart, fingerprint, summaryWanted, leafVersion,
     canonicalView ? [canonicalLib!.db.name, canonicalView.branch.story, canonicalView.branch.id,
       canonicalPolicy] : null,
@@ -492,7 +492,8 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   let summaryText = '', eventText = '';
   let ranked: RankedHit[] = [];
   let selected: ReturnType<typeof selectRecall> = [];
-  let tiers = new Map<string, 'full' | 'brief'>();
+  let tiers = new Map<string, InjectedTier>();
+  let neighbors: FocusNeighbor[] = [];
   let bm25Failed = false;
   try {
     // 2) 后端检索:多路在范围内纯按 embedding 得分取前 rerankCandidates(后端 max 融合,不套阈值),排除窗口内叶子
@@ -574,8 +575,16 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     const fused = hybridEnabled ? fuseCandidates(results, bm25Results, results.length + bm25Results.length) : [];
     let candidates: HybridHit[] = hybridEnabled ? fused.slice(0, cfg.fusionCandidates) : results;
     if (focus && vectorResult.status === 'fulfilled' && vectorResult.value?.focusLeafIds?.length) {
-      const neighbors = focusNeighbors(candidates, vectorResult.value.focusLeafIds, localById, focus.scope, chat);
-      if (neighbors.length) candidates = candidates.concat(neighbors.map(tagHit));
+      neighbors = focusNeighbors(vectorResult.value.focusLeafIds, localById, focus.scope, chat);
+      if (neighbors.length) {
+        const seen = new Set(candidates.filter(h => h.scope === focus.scope).map(h => h.leafId));
+        const extra = [];
+        for (const neighbor of neighbors) {
+          neighbor.hit = tagHit(neighbor.hit);
+          if (!seen.has(neighbor.hit.leafId)) extra.push(neighbor.hit);
+        }
+        candidates = candidates.concat(extra);
+      }
     }
     setRecallFusion(candidates);
     if (candidates.length) setRecallStatus('进行中…重排');
@@ -587,7 +596,7 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     const contextRanked = prioritizeRrf(fused, bm25Results, context, cfg);
     setRecallContext(context, contextRanked);
     selected = selectRecall(ranked, bm25Results, hybridEnabled ? results : ranked, cfg, contextRanked);
-    ({ text: summaryText, tiers } = buildRecallText(selected, selfScope, now));
+    ({ text: summaryText, tiers } = buildRecallText(selected, selfScope, now, neighbors));
     if (canonicalView) {
       const lib = await activeLibrary();
       if (!await current(lib, canonicalView)) {
@@ -633,6 +642,9 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
   const debugHits = [...ranked];
   const debugKeys = new Set(ranked.map(candidateKey));
   for (const { hit } of selected) if (!debugKeys.has(candidateKey(hit))) debugHits.push({ ...hit, rerankScore: null });
+  for (const { hit } of neighbors) {
+    if (tiers.get(hit.leafId) === 'neighbor' && !debugKeys.has(candidateKey(hit))) debugHits.push({ ...hit, rerankScore: null });
+  }
   recordRerankDebug(debugHits, tiers, selfScope);
   fn(RECALL_INJECT_KEY, text, IN_CHAT, recallInjectionDepth(), false, ROLE_SYSTEM, null);
   setRecallInjected(text);
@@ -643,13 +655,16 @@ async function executeVectorRecall(signal: AbortSignal): Promise<void> {
     (!summaryWanted || summaryReady)) saveRecallCache({ key: cacheKey, text, debug: snapshotRecallDebug() });
 }
 
+type InjectedTier = Exclude<RecallDebugRerankHit['tier'], 'drop'>;
+interface FocusNeighbor { hit: HybridHit; anchors: string[] }
+
 /** Only the immediately adjacent reply, optionally across one player message.
  * The eligible projection supplies the body and revision for the active branch. */
 function focusNeighbors(
-  candidates: HybridHit[], anchors: string[],
+  anchors: string[],
   eligible: Map<string, ReturnType<typeof collectLeaves>[number]>, scope: string, chat: STMessage[],
-): HybridHit[] {
-  const wanted = new Map<number, number>();
+): FocusNeighbor[] {
+  const wanted = new Map<number, string[]>();
   for (const id of anchors.slice(0, 2)) {
     const floor = eligible.get(id)?.msgIndex;
     if (floor === undefined || !isAiFloor(chat[floor])) continue;
@@ -657,18 +672,20 @@ function focusNeighbors(
       let next = floor + direction;
       const between = chat[next];
       if (between?.is_user && !between.extra?.bbs_omit && !between.extra?.type) next += direction;
-      if (isAiFloor(chat[next]) && !wanted.has(next)) wanted.set(next, floor);
+      if (!isAiFloor(chat[next])) continue;
+      const owners = wanted.get(next);
+      if (owners) owners.push(id);
+      else wanted.set(next, [id]);
     }
   }
   if (!wanted.size) return [];
-  const neighbors: HybridHit[] = [];
-  const seen = new Set(candidates.filter(h => h.scope === scope).map(h => h.leafId));
+  const neighbors: FocusNeighbor[] = [];
   for (const leaf of eligible.values()) {
-    const anchor = wanted.get(leaf.msgIndex);
-    if (anchor === undefined) continue;
-    if (!seen.has(leaf.leafId)) neighbors.push({
-      ...leaf, scope, similarity: null, queryIndex: -1, neighborOfFloor: anchor,
-    });
+    const owners = wanted.get(leaf.msgIndex);
+    if (!owners) continue;
+    neighbors.push({ anchors: owners, hit: {
+      ...leaf, scope, similarity: null, queryIndex: -1, neighborOfFloor: eligible.get(owners[0])!.msgIndex,
+    } });
     wanted.delete(leaf.msgIndex);
     if (!wanted.size) break;
   }
@@ -678,7 +695,7 @@ function focusNeighbors(
 /** 把分档结果写入调试快照:按 leaf_id 去重(保留首条),tier 取 buildRecallText 标记,缺省 drop。 */
 function recordRerankDebug(
   ranked: RankedHit[],
-  tiers: Map<string, 'full' | 'brief'>,
+  tiers: Map<string, InjectedTier>,
   selfScope: string | null,
 ): void {
   const seen = new Set<string>();
@@ -755,23 +772,41 @@ async function rerankCandidates(query: string, hits: HybridHit[], signal?: Abort
 }
 
 /**
- * 配额选择已在 selectRecall 完成；这里只沿用原生原文清洗、时间头和注入包装。
+ * 常规名额已由 selectRecall 分配。按最终顺序仅为一个实际发送原文的重点命中补齐相邻摘要。
  * 返回文本及分档，供调试面板标记独立 BM25 补位和重排结果。
  */
 function buildRecallText(
   selected: ReturnType<typeof selectRecall>,
   selfScope: string | null,
   now: string,
-): { text: string; tiers: Map<string, 'full' | 'brief'> } {
-  const tiers = new Map<string, 'full' | 'brief'>();
+  neighbors: FocusNeighbor[],
+): { text: string; tiers: Map<string, InjectedTier> } {
+  const tiers = new Map<string, InjectedTier>();
+  const picked = neighbors.length ? new Set(selected.map(s => s.hit.leafId)) : undefined;
+  let attached = false;
   const chunks: string[] = [];
   for (const { hit: h, tier } of selected) {
     const full = tier === 'full' && h.mesFull ? cleanBody(h.mesFull).trim() : '';
     const body = full || (h.document || '').trim();
     if (!body) continue;
     tiers.set(h.leafId, tier);
-    let chunk = fmtChunk(h, body, !!full, selfScope, now);
-    if (h.tags?.public) chunk += `\n公开理由：${h.tags.public.reason}`;
+    const chunk = fmtChunk(h, body, !!full, selfScope, now);
+    if (full && picked && !attached && h.scope === selfScope && h.msgIndex != null) {
+      const before: string[] = [], after: string[] = [];
+      for (const { hit, anchors } of neighbors) {
+        if (!anchors.includes(h.leafId) || picked.has(hit.leafId) || hit.msgIndex == null) continue;
+        const summary = hit.document.trim();
+        if (!summary) continue;
+        const note = fmtChunk(hit, summary, false, selfScope, now);
+        (hit.msgIndex < h.msgIndex ? before : after).push(`（相邻摘要）${note}`);
+        tiers.set(hit.leafId, 'neighbor');
+      }
+      if (before.length || after.length) {
+        chunks.push(...before, chunk, ...after);
+        attached = true;
+        continue;
+      }
+    }
     chunks.push(chunk);
   }
   if (!chunks.length) return { text: '', tiers };
@@ -800,6 +835,7 @@ function fmtStoryTimeHead(storyTime: string, now: string): string {
  */
 function fmtChunk(h: HybridHit, body: string, bodyHasInlineTime: boolean, selfScope: string | null, now: string): string {
   const src = `[${sourceLabel(h, selfScope)}]`;
+  if (h.tags?.public) body += `\n公开理由：${h.tags.public.reason}`;
   if (bodyHasInlineTime) {
     // 全文自身保留原始起止时间标签，但仍需在全文前补充相对时间，
     // 避免全文档与摘要档在时间感知上表现不一致。
