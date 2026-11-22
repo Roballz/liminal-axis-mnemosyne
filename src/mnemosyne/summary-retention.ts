@@ -139,17 +139,67 @@ export async function preserveEventReferences(tx: Transaction, branch: Branch,
     return changed;
 }
 
+/** Move the exact approved wording references. Distinct event snapshots keep
+ * their own provenance; current prose, link order and operation cutoffs survive.
+ * Discover affected chains from lightweight links, never decode branch-wide prose. */
+export async function rebindEditedEventSources(tx: Transaction, branch: Branch, replacements: ReadonlyMap<string, string>) {
+    if (!replacements.size) return false;
+    const owners = new Set<string>();
+    const map = (id: string) => replacements.get(id) ?? id;
+    for (const member of await tx.all<Membership>('event_memberships', 'branch', branch.id)) {
+        const id = map(member.memory);
+        if (id === member.memory) continue;
+        owners.add(member.owner);
+        await tx.put('event_memberships', { ...member, memory: id } as Membership);
+    }
+    for (const owner of owners) {
+        const revisions = await tx.rawAll<EventRevision>('event_revisions', 'owner', owner);
+        let head: EventRevision | undefined;
+        for (const r of revisions) if (!head || r.epoch > head.epoch) head = r;
+        const meta = head && await tx.get<EventRevision>('event_revisions', head.id);
+        if (meta && (meta.refs.some(id => replacements.has(id)) || meta.summarized?.some(id => replacements.has(id)) ||
+            meta.latestProgress && replacements.has(meta.latestProgress.memory))) {
+            await tx.put('event_revisions', { ...meta, refs: meta.refs.map(map),
+                ...(meta.summarized && { summarized: meta.summarized.map(map) }),
+                ...(meta.latestProgress && { latestProgress: { ...meta.latestProgress, memory: map(meta.latestProgress.memory) } })
+            } as EventRevision);
+        }
+        for (const entry of await tx.all<Progress>('event_progress', 'owner', owner)) {
+            if (entry.memories.some(id => replacements.has(id)))
+                await tx.put('event_progress', { ...entry, memories: entry.memories.map(map) } as Progress);
+        }
+    }
+    return owners.size > 0;
+}
+
 /** A replaced body invalidates its old derived prose, never the event's title,
  * keywords, archive organization or another branch's copy. */
 export async function retireEventDependencies(tx: Transaction, branch: Branch, retired: Set<string>, cutoff: number,
-    replacements: ReadonlyMap<string, MemoryRevision>, manualReplacements: ReadonlySet<string>) {
+    replacements: ReadonlyMap<string, MemoryRevision>, manualReplacements: ReadonlyMap<string, string>) {
     if (!retired.size) return false;
+    const wording = new Map(manualReplacements);
+    for (const [oldId, nextId] of manualReplacements) {
+        const old = await tx.get<MemoryRevision>('memory_revisions', oldId);
+        if (!old) continue;
+        // Tags may have been edited between generation of the overview and this correction.
+        for (const m of await tx.all<MemoryRevision>('memory_revisions', 'owner', old.owner))
+            if (m.id !== old.id && sameNarrativeRevision(m, old)) wording.set(m.id, nextId);
+    }
+    const rebound = await rebindEditedEventSources(tx, branch, wording);
+    const destructive = new Set([...retired].filter(id => !wording.has(id)));
+    if (!destructive.size) {
+        // Selection retirement already invalidates event processing receipts.
+        for (const receipt of await tx.all<Row>('table_receipts', 'branch', branch.id))
+            if ([...(rowRetentionRoots(receipt)?.memoryRoots ?? [])].some(id => wording.has(id)))
+                await tx.delete('table_receipts', receipt.id);
+        return rebound;
+    }
     const families = new Set<string>(), known = new Map<string, MemoryRevision | undefined>();
     const memory = async (id: string) => {
         if (!known.has(id)) known.set(id, await tx.get<MemoryRevision>('memory_revisions', id));
         return known.get(id);
     };
-    for (const id of retired) { const prior = await memory(id); if (prior?.branch === branch.id) families.add(prior.owner); }
+    for (const id of destructive) { const prior = await memory(id); if (prior?.branch === branch.id) families.add(prior.owner); }
     const obsolete = new Map<string, boolean>();
     const isObsolete = async (id: string) => {
         if (obsolete.has(id)) return obsolete.get(id)!;
@@ -157,13 +207,13 @@ export async function retireEventDependencies(tx: Transaction, branch: Branch, r
         // A historical family member never makes the currently selected version
         // (or an equivalent tag-only revision) obsolete.
         const current = source && next && (source.id === next.id || sameNarrativeRevision(source, next));
-        const affected = !current && (retired.has(id) || source?.branch === branch.id && families.has(source.owner));
+        const affected = !current && (destructive.has(id) || source?.branch === branch.id && families.has(source.owner));
         obsolete.set(id, affected); return affected;
     };
     const revisions = await tx.all<EventRevision>('event_revisions', 'branch', branch.id);
     const latest = new Map<string, EventRevision>();
     for (const r of revisions) if (!latest.has(r.owner) || latest.get(r.owner)!.epoch <= r.epoch) latest.set(r.owner, r);
-    let changed = false;
+    let changed = rebound;
     for (const store of ['event_revisions', 'event_memberships', 'event_progress', 'event_processing_receipts', 'table_receipts'] as const) {
         const records = store === 'event_revisions' ? revisions : await tx.all<Row>(store, 'branch', branch.id);
         for (const record of records) {
@@ -180,7 +230,7 @@ export async function retireEventDependencies(tx: Transaction, branch: Branch, r
                 // Link operations keep their order and original cutoff across a wording edit.
                 // Explicit unlinks also survive regeneration.
                 if (replacement && !retired.has(replacement.id) &&
-                    (manualReplacements.has(replacement.id) || !member.active && member.locked)) {
+                    !member.active && member.locked) {
                     await tx.put(store, { ...member, memory: replacement.id } as Membership);
                     changed = true; continue;
                 }

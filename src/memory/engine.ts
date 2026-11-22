@@ -1246,6 +1246,26 @@ export async function eventCreationContext(floor: number, view?: import('@/mnemo
   messages.push({ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user });
   return messages;
 }
+/** Edit dialog: use the configured summary prompt and sender, apply only the returned prose. */
+export async function draftFloorCorrection(floor: number, guard: () => boolean) {
+  const chat = getContext()?.chat;
+  if (!chat || !isAiFloor(chat[floor]) || !leafValid(chat[floor])) throw new Error('本楼摘要已改变');
+  const sender = resolveSender('summary');
+  if ('error' in sender) throw new Error(sender.error);
+  const targets = floorTargets(chat, floor, coveredBeforeFloor(chat, floor));
+  const dependencies = selectHistoryNodesBefore(memory.summaries, chat, targets[0]).map(node => node.id);
+  const evidence = await captureSummaryEvidence(targets, dependencies);
+  const { prompt, charCard, persona, worldInfo } = await floorSummaryContext(chat, floor, targets);
+  if (!guard()) throw new Error('聊天已改变，摘要更新已停止');
+  const system = [apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT,
+    charCard && buildCharCardSystem(charCard), persona && buildPersonaSystem(persona),
+    worldInfo && buildWorldInfoSystem(worldInfo), prompt.system].filter(Boolean).join('\n\n');
+  const raw = await sender.send([{ role: 'system', content: system },
+    { role: 'user', content: prompt.user + '\n本次仅修订本楼摘要，只返回含非空 summary 字符串的 JSON。' }]);
+  const text = llmString(extractJsonObject<SummaryDelta>(raw)?.summary);
+  if (!text) throw new Error('AI 未返回有效摘要，原摘要已保留');
+  return { text, recordSources: () => attachSummaryEvidence(chat, floor, evidence, targets, true) };
+}
 async function summarizeFloorWork(
   chat: STMessage[],
   aiFloor: number,

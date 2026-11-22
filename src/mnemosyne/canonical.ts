@@ -11,7 +11,7 @@ import { sourcePrefixes } from './source-prefixes';
 import { reviewMatchesMemory, sameSourceMessages } from './review-source-integrity';
 import { observationHashes } from './observation-hashes';
 import { publishMemoryView } from './memory-selections';
-import { retireSupersededSummaries, retireAbandonedTableHistory, retireEventDependencies } from './summary-retention';
+import { retireSupersededSummaries, retireAbandonedTableHistory, rebindEditedEventSources, retireEventDependencies } from './summary-retention';
 import { sameNarrativeRevision } from './memory-equivalence';
 export { sameNarrativeRevision } from './memory-equivalence';
 import { Library, Transaction } from './db';
@@ -312,7 +312,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         const selectionRevisions = new Map<string, MemoryRevision>();
         const hostRevisions = new Map<string, string>();
         let replyPositions: Map<string, number> | undefined;
-        const retiredMemories = new Set<string>(), manualReplacements = new Set<string>();
+        const retiredMemories = new Set<string>(), manualReplacements = new Map<string, string>();
         const newRevisions: {
             revision: MemoryRevision;
             host: HostMemory;
@@ -443,7 +443,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 const index = replyPositions.get(prior.anchor);
                 if (index !== undefined && priorRefs[index]?.message === prior.anchor && priorVariants[index] === variants[index] &&
                     observation.messages[index].role === 'assistant' && priorSources.get(prior.anchor)?.role === 'assistant')
-                    manualReplacements.add(revision.id);
+                    manualReplacements.set(prior.id, revision.id);
             }
             selections[family.id] = revision.id;
             selectionRevisions.set(revision.id, revision);
@@ -494,14 +494,14 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
         for (const [family, id] of Object.entries(selections)) if (await hasMissingSource(id)) delete selections[family];
         for (const ref of priorRefs) if (!currentRef(ref.message)) replacedBodies.add(ref.message);
         const sourceReplaced = replacedBodies.size > 0;
-        const summaryReplaced = previous && Object.entries(previous.selections).some(([family, id]) => {
+        const replacedSummaries = new Set<string>();
+        for (const [family, oldId] of Object.entries(previous?.selections ?? {})) {
+            if (selections[family] === oldId) continue;
             const prior = selectedMemories.get(family), next = selectionRevisions.get(selections[family]);
-            return selections[family] !== id && (!next || prior?.content !== next.content);
-        });
-        if (baseline?.retireHistory && previous && (sourceReplaced || summaryReplaced)) {
-            const replacedSummaries = new Set(Object.entries(previous.selections).filter(([family, id]) =>
-                selections[family] !== id && selectedMemories.get(family)?.content !== selectionRevisions.get(selections[family])?.content
-            ).map(([, id]) => id));
+            if (!next || prior?.content !== next.content ||
+                (prior && manualReplacements.has(oldId) && !sameNarrativeRevision(prior, next))) replacedSummaries.add(oldId);
+        }
+        if (baseline?.retireHistory && previous && (sourceReplaced || replacedSummaries.size)) {
             // Editing one turn can invalidate the context of many later summaries.
             // Those summaries still describe their own surviving turns and need review.
             const changedTurns = new Set(replacedBodies), editedTurns = new Set<string>();
@@ -515,6 +515,10 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                     (!replacedBodies.has(reply) || editedBodies.has(reply)) &&
                     (!question || !replacedBodies.has(question) || editedBodies.has(question))) editedTurns.add(reply);
             }
+            // Higher summaries still present in the host can be approved together with
+            // the edited leaf. Only do this for verified same-reply corrections.
+            const wordingOnly = [...replacedBodies].every(id => editedBodies.has(id)) &&
+                [...replacedSummaries].every(id => manualReplacements.has(id));
             const superseded = new Map<string, boolean>();
             const affectedBases = new Map<string, { first: number; positions: Map<string, number> }>();
             const replacedPrefix = async (memory: MemoryRevision) => {
@@ -555,6 +559,7 @@ export async function synchronize(lib: Library, observation: HostObservation, ba
                 // Retire only proven replacements. Role-only repairs and unrelated
                 // unresolved imported evidence are not body edits.
                 if (!['needs_review', 'needs_rebuild', 'out_of_scope'].includes(states.get(id)!)) continue;
+                if (wordingOnly && memory.level > 0 && previous.selections[familyId] === id) continue;
                 if (memory.level === 0 && memory.anchor) {
                     const prior = selectedMemories.get(familyId);
                     const retainedEdit = editedTurns.has(memory.anchor) && prior &&
@@ -834,7 +839,7 @@ export async function keepSummary(lib: Library, view: CapturedView, memoryId: st
     return keepSummaries(lib, view, [memoryId], guard);
 }
 /** A new human applicability decision for current L0 summaries; original evidence stays immutable. */
-export async function confirmRecoveredSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true) {
+export async function confirmRecoveredSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true, retainEventProse = false) {
     check(view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length, '只能确认当前完整档案');
     const requested = new Set(memoryIds), byId = new Map(view.memories.map(m => [m.id, m]));
     const positions = new Map(view.refs.map((r, i) => [r.message, i]));
@@ -876,6 +881,7 @@ export async function confirmRecoveredSummaries(lib: Library, view: CapturedView
         const next: MemoryView = { ...row('mv'), branch: branch.id, selections: { ...selection.selections } };
         for (const revision of revisions) next.selections[revision.owner] = revision.id;
         await Promise.all(revisions.map(revision => tx.add('memory_revisions', revision)));
+        if (retainEventProse) await rebindEditedEventSources(tx, branch, new Map(memories.map((m, i) => [m.id, revisions[i].id])));
         await publishMemoryView(tx, next, selection);
         branch.view = next.id;
         branch.epoch++;
@@ -921,31 +927,53 @@ export async function confirmUnselectedLeaf(lib: Library, view: CapturedView, bi
     });
 }
 /** Explicit approval; immutable generation provenance is never rewritten. */
-export async function keepSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true) {
+export async function keepSummaries(lib: Library, view: CapturedView, memoryIds: string[], guard: () => boolean = () => true,
+    checkedStates?: ReadonlyMap<string, MemoryStatus>) {
     check(view.snapshot.id === view.branch.head && view.cutoff === view.snapshot.length, '只能审核当前完整档案');
-    const requested = new Set(memoryIds), states = await statuses(lib, view);
+    const requested = new Set(memoryIds), states = checkedStates ?? await statuses(lib, view);
+    const byId = new Map(view.memories.map(m => [m.id, m]));
     check(requested.size && requested.size === memoryIds.length, '请选择不重复的摘要');
-    check([...requested].every(id => view.memories.some(m => m.id === id && m.recall && m.visibility === 'public')), '摘要不在当前有效范围');
+    check([...requested].every(id => byId.get(id)?.recall && byId.get(id)?.visibility === 'public'), '摘要不在当前有效范围');
     await lib.transaction(STORES, 'readwrite', async tx => {
         const branch = await tx.get<Branch>('branches', view.branch.id);
         check(guard() && branch && branch.epoch === view.branch.epoch && branch.head === view.snapshot.id && branch.view === view.selection.id, '视图已改变，请刷新');
         const positions = new Map(view.refs.map((r,i) => [r.message,i]));
         const currentByOwner = new Map(view.memories.map(m => [m.owner,m]));
         const plans = new Map<string, Review>();
+        const prefixes = new Map<string, { length: number; matched: number }>();
+        const dependenciesById = new Map(byId);
         for (const id of requested) {
-            const memory = view.memories.find(m => m.id === id)!;
-            const source = await summarySources(tx, memory);
-            const order = source.map(r => positions.get(r.message) ?? -1);
-            check(order.every((p,i) => p >= 0 && (!i || p > order[i-1])), '来源已删除或重排，不能直接保留；请手改或重新生成摘要');
-            const sourceRefs = order.map(i => view.refs[i]);
-            if (!memory.inputRefs.length && !dependencyOnly(memory))
-                check(equal(sourceRefs, view.refs.slice(0, sourceRefs.length)), '来源前缀身份已改变，请手改或重新生成摘要');
+            const memory = byId.get(id)!;
+            check(!memory.sourceRecovery, '旧核心包缺少这条摘要的生成来源；请核对当前正文后手动确认或重新生成，不可直接保留');
+            let sourceRefs: SourceRef[];
+            if (!memory.inputRefs.length && !dependencyOnly(memory)) {
+                let prefix = prefixes.get(memory.basis);
+                if (!prefix) {
+                    const basis = await tx.get<Snapshot>('history_snapshots', memory.basis);
+                    check(basis, '摘要基线缺失');
+                    const entries = await snapshotRefs(tx, basis);
+                    let matched = 0;
+                    while (matched < entries.length && entries[matched].message === view.refs[matched]?.message) matched++;
+                    prefix = { length: entries.length, matched }; prefixes.set(memory.basis, prefix);
+                }
+                const count = memory.anchor ? (positions.get(memory.anchor) ?? -1) + 1 : prefix.length;
+                check(count <= prefix.matched, '来源前缀身份已改变或重排，请手改或重新生成摘要');
+                sourceRefs = view.refs.slice(0, count);
+            } else {
+                let last = -1;
+                sourceRefs = memory.inputRefs.map(ref => {
+                    const pos = positions.get(ref.message) ?? -1;
+                    check(pos > last, '来源已删除或重排，不能直接保留；请手改或重新生成摘要');
+                    last = pos; return view.refs[pos];
+                });
+            }
             check(!memory.anchor || positions.has(memory.anchor), '摘要来源楼层已删除');
             const coverage = memory.coverage.map(r => view.refs[positions.get(r.message) ?? -1]);
             check(coverage.every(Boolean) && (!coverage.length || equal(coverage, view.refs.slice(positions.get(coverage[0].message)!, positions.get(coverage[0].message)! + coverage.length))), '摘要覆盖范围已改变');
             const dependencies: string[] = [];
             for (const oldId of memory.dependencies) {
-                const prior = await tx.get<MemoryRevision>('memory_revisions', oldId);
+                const prior = dependenciesById.get(oldId) ?? await tx.get<MemoryRevision>('memory_revisions', oldId);
+                if (prior) dependenciesById.set(oldId, prior);
                 const selected = prior && currentByOwner.get(prior.owner);
                 check(selected && selected.id !== memory.id, '依赖摘要已删除或无法匹配，请手改或重新生成摘要');
                 dependencies.push(selected.id);

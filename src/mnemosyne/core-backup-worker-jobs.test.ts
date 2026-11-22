@@ -80,6 +80,23 @@ test('actual manual, protection, pin and disk-restore jobs verify files and prep
     } finally { lib.close(); }
 });
 
+test('extract one overview from an archive or backup without opening or writing a database', async () => {
+    const { lib, branch, view } = await fixture(1), disk = new Disk();
+    try {
+        const { editEvent } = await import('./events');
+        const text = '旧概要仍然可以取回', eventId = await editEvent(lib, view, null, { title: '同名标题', status: 'open', keywords: [], overview: text });
+        const file = await workerJob({ kind: 'export', library: lib.db.name, branch: branch.id });
+        const backup = await workerJob({ kind: 'manual', library: lib.db.name, branch: branch.id, keep: 10 }, disk);
+        if (file.state !== 'exported' || backup.state !== 'saved') throw new Error('missing fixture');
+        const open = vi.spyOn(indexedDB, 'open');
+        const target = { kind: 'recover-overview' as const, eventId, branch: branch.id, story: branch.story };
+        for (const blob of [file.blob, disk.files.get(backup.entry.key)!])
+            expect(await workerJob({ ...target, blob })).toEqual({ state: 'overview', text });
+        await expect(workerJob({ ...target, blob: file.blob, branch: 'other' })).rejects.toThrow('当前分支');
+        expect(open).not.toHaveBeenCalled();
+    } finally { lib.close(); }
+});
+
 test('empty current library permits protection skip without publishing or rotating', async () => {
     const lib = await Library.open(freshLibraryName()), disk = new Disk();
     try {

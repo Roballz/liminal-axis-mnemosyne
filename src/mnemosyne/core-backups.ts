@@ -92,7 +92,7 @@ export function backupSettings(value: unknown): BackupSettings {
     return { schema: 1, enabled: v.enabled, keep: AUTO_BACKUP_KEEP };
 }
 
-async function validatePackage(value: unknown): Promise<CorePackage> {
+export async function validatePackage(value: unknown): Promise<CorePackage> {
     if (archivePackage(value)) return validateArchive(value);
     const pack = value as Package;
     await validateCurrentData(pack);

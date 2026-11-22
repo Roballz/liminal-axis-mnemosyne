@@ -25,6 +25,7 @@ import {
   dailyState,
   dailyCurrent,
 } from "@/mnemosyne/bridge";
+import { runBackupWorker } from '@/mnemosyne/backup-worker-client';
 import { activeLibrary } from "@/mnemosyne/db";
 import { previewEventResync, commitEventResync, type EventResyncPlan } from "@/mnemosyne/event-resync";
 import {
@@ -52,7 +53,7 @@ import {
   runEvents,
   stopDailyJob,
 } from "@/mnemosyne/jobs";
-import { check, type CapturedView } from "@/mnemosyne/model";
+import { check, type CapturedView, type EventRevision } from "@/mnemosyne/model";
 const view = shallowRef<CapturedView | null>(null),
   cards = shallowRef<EventCard[]>([]);
 const error = ref(""),
@@ -345,6 +346,32 @@ function edit(card: EventCard | null) {
   latestMemory.value = card?.meta.latestProgress?.memory ?? card?.members.at(-1)?.memory ?? "";
   keywords.value = card?.meta.keywords.join("、") ?? "";
   editing.value = true;
+}
+async function recoverOverview(card: EventCard) {
+  const captured = validView(), host = viewHost, generation = viewGeneration, lib = await activeLibrary();
+  const versions = await lib.all<EventRevision>('event_revisions', 'owner', card.chain.id);
+  const previous = versions.filter(r => r.branch === captured.branch.id && r.story === captured.branch.story &&
+    r.epoch < card.meta.epoch && r.overview?.trim()).sort((a, b) => b.epoch - a.epoch)[0];
+  check(!disposed && lib === await activeLibrary() && await dailyCurrent(captured, host, generation), '聊天或事件已改变，请刷新');
+  check(previous, '这条事件链没有留下非空的本地概要快照。可从修改前的备份复制概要，或用当前成员重新生成。');
+  edit(card);
+  overview.value = previous.overview!;
+  notice.value = '已取回最近的旧概要草稿，核对后保存。';
+}
+async function recoverFromFile(card: EventCard, event: Event) {
+  const input = event.target as HTMLInputElement, blob = input.files?.[0];
+  input.value = '';
+  if (!blob) return;
+  const captured = validView(), host = viewHost, generation = viewGeneration, lib = await activeLibrary();
+  const live = () => !disposed && scope === hostScope() && viewHost === host && hostVersion() === host &&
+    dailyState.generation === generation && view.value?.branch.id === captured.branch.id;
+  const result = await runBackupWorker(undefined, { kind: 'recover-overview', blob, story: captured.branch.story,
+    branch: captured.branch.id, eventId: card.chain.id }, live);
+  check(result.state === 'overview' && live() && lib === await activeLibrary() && await dailyCurrent(captured, host, generation),
+    '聊天或事件已改变，请重新选择备份');
+  edit(card);
+  overview.value = result.text;
+  notice.value = '已取回备份中的概要草稿，核对后保存。';
 }
 function validView() {
   check(view.value && scope === hostScope() && viewHost === hostVersion() && viewGeneration === dailyState.generation, "聊天或摘要已改变，请刷新");
@@ -661,6 +688,10 @@ onBeforeUnmount(() => {
         <strong>事件概要：</strong
         >{{ eventOverview(card) || "暂无概要，可加入成员后更新" }}
       </p>
+      <button v-if="!eventOverview(card)" :disabled="busy" @click="run(() => recoverOverview(card))">找回旧概要</button>
+      <label v-if="!eventOverview(card)" class="mn-muted">从备份提取概要
+        <input type="file" accept=".json,application/json" :disabled="busy" @change="e => run(() => recoverFromFile(card, e))" />
+      </label>
       <p class="mn-pre"><strong>最新进展：</strong>{{ card.meta.latestProgress ? [card.meta.latestProgress.time, card.meta.latestProgress.text].filter(Boolean).join(' · ') : card.meta.latestProgress === null ? '暂无明确进展' : '尚未填写，可在编辑中补充' }}</p>
       <hr />
       <details :open="!!expandedHistory[card.chain.id]" @toggle="setExpanded($event, expandedHistory, card.chain.id)">

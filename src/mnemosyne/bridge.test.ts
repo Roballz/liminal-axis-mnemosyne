@@ -632,11 +632,11 @@ test('retired higher summaries can be rebuilt once from the changed current chil
   expect(client.requestViaMainApi).toHaveBeenCalledTimes(1);expect(memory.summaries).toHaveLength(1);
 });
 
-test('manual summary saves preserve event links while retiring old text and derived prose without changing current bodies', async () => {
+test('manual summary saves retain event prose and reviewable higher summaries without changing current bodies', async () => {
     const { editLeafAt } = await import('@/memory/apply');
     memory.summaries.push({ id: 'manual-parent', text: '旧上层摘要', level: 1, createdAt: 1, auto: true, childIds: ['legacy-leaf'] });
     let view = await syncDaily();
-    const refs = view.refs, body = ctx.chat[1].mes, oldIds = new Set(view.memories.map(m => m.id));
+    const refs = view.refs, body = ctx.chat[1].mes;
     const source = view.memories.find(m => m.hostId === 'legacy-leaf')!;
     const event = await editEvent(lib, view, null, { title: '人工修改前的事件', status: 'open', keywords: [],
         overview: '依据旧摘要生成的概要', summarized: [source.id] }, { memory: source.id, active: true, kind: 'progress' });
@@ -644,17 +644,20 @@ test('manual summary saves preserve event links while retiring old text and deri
         expect(editLeafAt(1, text, '', '')).toBe(true);
         view = await syncDaily();
         expect(view.refs).toEqual(refs); expect(ctx.chat[1].mes).toBe(body);
-        expect(view.memories).toHaveLength(1); expect(view.memories[0].content).toBe(text);
-        expect((await statuses(lib, view)).get(view.memories[0].id)).toBe('valid');
-        for (const id of oldIds) expect(await lib.get('memory_revisions', id)).toBeUndefined();
-        expect(await lib.all('memory_revisions', 'branch', view.branch.id)).toHaveLength(1);
+        expect(view.memories).toHaveLength(2); expect(view.memories[0].content).toBe(text);
+        const validity = await statuses(lib, view);
+        expect(validity.get(view.memories[0].id)).toBe('valid');
+        expect(validity.get(view.memories[1].id)).toBe('needs_rebuild');
+        // The higher summary still depends on the original. Unreferenced intermediate edits are retired.
+        expect(await lib.all('memory_revisions', 'branch', view.branch.id)).toHaveLength(3);
         expect(await lib.all('memory_views', 'branch', view.branch.id)).toHaveLength(1);
         expect(await lib.all('memory_selection_nodes')).toHaveLength(1);
         const card = (await eventView(lib, view)).cards.find(c => c.chain.id === event)!;
-        expect(card.meta.overview).toBe(''); expect(card.members.map(m => m.memory)).toEqual([view.memories[0].id]);
+        expect(card.meta.overview).toBe('依据旧摘要生成的概要'); expect(card.needsReview).toBe(false);
+        expect(card.members.map(m => m.memory)).toEqual([view.memories[0].id]);
         expect(await lib.all('event_processing_receipts', 'branch', view.branch.id)).toEqual([]);
         expect((await syncDaily()).memories[0].id).toBe(view.memories[0].id);
-        oldIds.add(view.memories[0].id);
+
     }
     const restored = await restoreLibrary(await exportLibrary(lib), false);
     try { expect((await capture(restored, view.branch.id)).memories).toEqual(view.memories); }
@@ -1193,24 +1196,32 @@ test('stale edit popup cannot approve a newer edit or a different chat', async (
     api.apiSettings.summaryEditPromptEnabled = false; deferSummaryEdit();
 });
 
-test('edit popup update delegates to the existing floor regeneration and preserves completed summary', async () => {
+test('AI edit updates only this summary, keeps the old overview and offers a separate rewrite', async () => {
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
-    await syncDaily(); api.apiSettings.summaryEditPromptEnabled = true;
-    ctx.chat[1].mes += '编辑正文'; invalidateDaily(); await legacyReviewFixture(); await prepareSummaryEditPrompt();
-    const engine = await import('@/memory/engine');
-    const regenerate = vi.spyOn(engine, 'regenerateFloor').mockImplementationOnce(async floor => {
-        const evidence = await captureSummaryEvidence([0, 1]);
-        ctx.chat[floor].extra!.bbs_leaf!.text = '更新后的合成摘要';
-        attachSummaryEvidence(ctx.chat, floor, evidence, [0, 1]);
-        invalidateDaily(); return true;
-    });
-    await resolveSummaryEdit('update');
-    expect(regenerate).toHaveBeenCalledWith(1);
-    expect(summaryEditPrompt.error).toBe(''); expect(summaryEditPrompt.open).toBe(false);
-    expect((await syncDaily()).memories[0].content).toBe('更新后的合成摘要');
-    api.apiSettings.summaryEditPromptEnabled = false; deferSummaryEdit();
+    vi.spyOn(api, 'getChannelForTask').mockReturnValue(null);
+    vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
+    const request = vi.spyOn(client, 'requestViaMainApi').mockResolvedValue(JSON.stringify({
+        summary: '全书已修正为二十一章', customTables: [{ invalid: true }], tags: { participants: ['无关人物'] },
+    }));
+    const before = await syncDaily(), memory = before.memories[0];
+    const id = await editEvent(lib, before, null, { title: '章节', status: 'open', keywords: ['书'], overview: '原概要',
+        summarized: [memory.id], latestProgress: undefined }, { memory: memory.id, active: true, kind: 'reference' });
+    api.apiSettings.summaryEditPromptEnabled = true;
+    try {
+        ctx.chat[1].mes += '编辑正文'; invalidateDaily(); await legacyReviewFixture(); await prepareSummaryEditPrompt(1);
+        const body = ctx.chat[1].mes, previous = structuredClone(ctx.chat[1].extra!.bbs_leaf!);
+        request.mockRejectedValueOnce(new Error('合成请求失败'));
+        await resolveSummaryEdit('update');
+        expect(summaryEditPrompt.error).toContain('合成请求失败'); expect(ctx.chat[1].extra!.bbs_leaf).toEqual(previous);
+        await resolveSummaryEdit('update');
+        expect(request).toHaveBeenCalledTimes(2); expect(summaryEditPrompt.error).toBe('');
+        expect(summaryEditPrompt).toMatchObject({ open: true, followup: true, remainingEvents: [id] });
+        const next = await syncDaily(), source = next.memories[0];
+        expect(source.content).toBe('全书已修正为二十一章'); expect(source.inputRefs).toEqual(next.refs);
+        expect(ctx.chat[1].mes).toBe(body); expect(ctx.chat[1].extra!.bbs_leaf).toEqual({ ...previous, text: source.content });
+        expect((await eventView(lib, next)).cards[0]).toMatchObject({ needsReview: false, meta: { overview: '原概要', summarized: [source.id] } });
+    } finally { api.apiSettings.summaryEditPromptEnabled = false; deferSummaryEdit(); }
 });
-
 
 test('edit event retires old summaries without a review popup, and chat switching cancels a queued prompt', async () => {
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
@@ -1541,8 +1552,8 @@ test('explicit archive deletion still rejects a stale preview before mutation', 
 
 
 async function nativeEditFixture() {
-    let captureClick: ((e: Event) => void) | undefined;
-    vi.stubGlobal('document', { addEventListener: (event: string, fn: (e: Event) => void) => { if (event === 'click') captureClick = fn; },
+    let captureClick: ((e: Event) => void) | undefined, captureInput: ((e: Event) => void) | undefined;
+    vi.stubGlobal('document', { addEventListener: (event: string, fn: (e: Event) => void) => { if (event === 'click') captureClick = fn; if (event === 'input') captureInput = fn; },
         removeEventListener: vi.fn(), querySelector: () => null, getElementById: () => null });
     const emit = bindFinalityEvents(), original = await syncDaily();
     vi.spyOn(api, 'engineActiveHere').mockReturnValue(true);
@@ -1554,7 +1565,10 @@ async function nativeEditFixture() {
         captureClick!({ isTrusted: trusted, target: { closest: () => button } } as unknown as Event);
     };
     const close = () => { stopPrompt(); api.apiSettings.summaryEditPromptEnabled = false; deferSummaryEdit(); };
-    return { emit, original, click, close };
+    const type = (floor: number, text: string) => captureInput!({ isTrusted: true, target: {
+        value: text, matches: () => true, closest: () => ({ getAttribute: () => String(floor) }),
+    } } as unknown as Event);
+    return { emit, original, click, type, close };
 }
 
 test.each(['migrated', 'generated'] as const)('native edit keeps the edited floor and its link through approval and manual revision (%s)', async kind => {
@@ -1598,6 +1612,56 @@ test.each(['migrated', 'generated'] as const)('native edit keeps the edited floo
         expect((await statuses(lib, after)).get(saved.id)).toBe('valid');
         expect((await eventView(lib, after)).cards[0].members.map(m => m.memory)).toEqual([saved.id]);
         expect(bridge.currentMembershipHints()?.get(saved.hostId)?.map(h => h.id)).toEqual([event.created]);
+        await exportLibrary(lib);
+    } finally { close(); }
+});
+
+test('keyboard edit of a verified reply retains the summary and overview without a save-button click', async () => {
+    const { emit, type, close, original } = await nativeEditFixture();
+    try {
+        const leaf = original.memories[0], text = '已修订的章节';
+        await editEvent(lib, original, null, { title: '键盘修订', status: 'open', keywords: [], overview: '一直保留',
+            summarized: [leaf.id] }, { memory: leaf.id, active: true, kind: 'reference' });
+        type(1, text); ctx.chat[1].mes = text;
+        await emit('MESSAGE_EDITED', 1); await emit('MESSAGE_UPDATED', 1); await prepareSummaryEditPrompt(1);
+        expect(summaryEditPrompt.draft?.hostId).toBe(leaf.hostId);
+        await resolveSummaryEdit('keep'); expect(summaryEditPrompt.error).toBe('');
+        const view = await syncDaily();
+        expect(view.memories[0].id).toBe(leaf.id); expect(bridge.unarchivedSummaries.value.size).toBe(0);
+        expect((await eventView(lib, view)).cards[0]).toMatchObject({ needsReview: false, meta: { overview: '一直保留' } });
+    } finally { close(); }
+});
+
+test('one native edit saves text, people, membership and higher reviews, preserving existing event prose after reload', async () => {
+    const { emit, click, close } = await nativeEditFixture();
+    try {
+        memory.summaries.push({ id: 'book-high', text: '讨论书的章节', level: 1, createdAt: 2, auto: true, childIds: ['legacy-leaf'] });
+        let view = await syncDaily();
+        const source = view.memories[0];
+        const first = await editEvent(lib, view, null, { title: '书的来历', status: 'open', keywords: ['书'],
+            overview: '书已交到读者手里', summarized: [source.id] }, { memory: source.id, active: true, kind: 'reference' });
+        view = await syncDaily();
+        const card = (await eventView(lib, view)).cards[0];
+        await editEvent(lib, view, first, { ...card.meta, latestProgress: { version: 1, text: '读者已签收', memory: source.id, time: '' } });
+        const second = await editEvent(lib, await syncDaily(), null, { title: '校订章节', status: 'open', keywords: [] });
+        await syncDaily();
+        click(1, '这本书共二十一章'); ctx.chat[1].mes = '这本书共二十一章';
+        await emit('MESSAGE_EDITED', 1); await emit('MESSAGE_UPDATED', 1);
+        await prepareSummaryEditPrompt(1);
+        const draft = summaryEditPrompt.draft!;
+        expect(draft.eventIds).toEqual([first]); draft.text = '全书二十一章'; draft.participants = '甲、乙'; draft.eventIds.push(second);
+        const sync = vi.spyOn(canonical, 'synchronize');
+        await resolveSummaryEdit('keep');
+        expect(summaryEditPrompt.error).toBe(''); expect(summaryEditPrompt.open).toBe(false);
+        expect(sync).toHaveBeenCalledTimes(1);
+        dispose?.(); dispose = bindDaily(); view = await syncDaily();
+        expect(dailyState.review).toBe(0); expect(bridge.unarchivedSummaries.value.size).toBe(0);
+        const leaf = view.memories.find(m => m.owner === source.owner)!;
+        expect(leaf).toMatchObject({ content: '全书二十一章', tags: { participants: ['甲','乙'] } });
+        const cards = (await eventView(lib, view)).cards;
+        expect(cards.find(c => c.chain.id === first)).toMatchObject({ blocked: false, needsReview: false, meta: {
+            overview: '书已交到读者手里', summarized: [leaf.id], latestProgress: { memory: leaf.id, text: '读者已签收' } } });
+        expect(cards.find(c => c.chain.id === second)?.members.map(m => m.memory)).toEqual([leaf.id]);
         await exportLibrary(lib);
     } finally { close(); }
 });
@@ -1659,8 +1723,7 @@ test('ordinary user edits offer the paired summary for review once; duplicate UP
     try {
         click(0, '用户明确修订的问题'); ctx.chat[0].mes = '用户明确修订的问题';
         await emit('MESSAGE_EDITED', 0); await emit('MESSAGE_UPDATED', 0);
-        await new Promise(resolve => setTimeout(resolve, 250));
-        expect(summaryEditPrompt).toMatchObject({ open: true, count: 1 });
+        await vi.waitFor(() => expect(summaryEditPrompt).toMatchObject({ open: true, count: 1 }));
         expect((await syncDaily()).memories).toHaveLength(1);
         deferSummaryEdit(); await emit('MESSAGE_UPDATED', 0);
         await new Promise(resolve => setTimeout(resolve, 250));

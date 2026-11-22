@@ -1,9 +1,10 @@
 import { reorganizeCoreLibrary } from './core-reorganization';
-import { BACKUP_MAX_BYTES, CoreBackups, corePackageSizeError } from './core-backups';
+import { BACKUP_MAX_BYTES, CoreBackups, corePackageSizeError, validatePackage, type BackupFile } from './core-backups';
 import { Library } from './db';
 import { exportLibrary, restoreLibrary } from './migration';
 import { parseStrictJson } from './json';
-import { check } from './model';
+import { check, fingerprint, type EventRevision } from './model';
+import { payloadReader } from './shared-payloads';
 import { measureCorePackageSize } from './core-package-size';
 import { archivePackage, exportArchive, packageData, validateArchive, restoreVerifiedArchive, type ArchivePackage } from './archive-package';
 import { cleanLibraryHistory } from './history-cleanup';
@@ -52,6 +53,30 @@ self.onmessage = async (event: MessageEvent<HostMessage>) => {
             return;
         }
         check(await guard(), '备份或迁移页面已改变');
+        if (message.job.kind === 'recover-overview') {
+            const { blob, story, branch, eventId } = message.job;
+            check(blob instanceof Blob && blob.size > 0 && blob.size <= BACKUP_MAX_BYTES, '备份文件为空或超过读取上限');
+            const value = parseStrictJson(await blob.text(), BACKUP_MAX_BYTES) as BackupFile;
+            let source: unknown = value;
+            if (value?.format === 'mnemosyne-core-backup-v1') {
+                const { checksum, ...base } = value;
+                check(await fingerprint(base) === checksum, '磁盘备份校验和不匹配');
+                source = value.pack;
+            }
+            const { data } = packageData(await validatePackage(source));
+            check(data.event_chains.some(c => c.id === eventId && c.branch === branch && c.story === story),
+                '所选备份中没有当前分支的这条事件链');
+            const decode = payloadReader(data.memory_payloads ?? []);
+            let latest: EventRevision | undefined;
+            for (const record of data.event_revisions) {
+                if (record.owner !== eventId || record.branch !== branch || record.story !== story) continue;
+                const revision = decode(record, 'event_revisions') as EventRevision;
+                if (revision.overview?.trim() && (!latest || revision.epoch > latest.epoch)) latest = revision;
+            }
+            check(latest?.overview && await guard(), '备份中没有可用概要，或当前事件已改变');
+            send({ type: 'done', result: { state: 'overview', text: latest.overview } });
+            return;
+        }
         if (message.job.kind === 'pin') {
             const entry = await backups.pin(message.job.key, message.job.checksum, guard);
             send({ type: 'done', result: { state: 'pinned', entry } });

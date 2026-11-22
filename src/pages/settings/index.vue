@@ -962,7 +962,7 @@ function exportPublicApiDocument() {
           <span class="bbs-field-label">编辑后弹窗处理摘要</span>
           <input v-model="apiSettings.summaryEditPromptEnabled" type="checkbox" class="bbs-checkbox" />
         </label>
-        <p class="bbs-field-hint">默认关闭。开启后，编辑正文或摘要产生待审核摘要时，在聊天界面弹出“保留摘要 / 更新摘要 / 过后处理”；更新会调用摘要 API，过后处理保留待审核状态。</p>
+        <p class="bbs-field-hint">默认关闭。开启后，可在聊天中核对楼层、编辑摘要和在场人物、调整所属事件链，一次保存。AI 更新只重写本楼摘要，成功后可另选事件链重写概要。</p>
         <label class="bbs-switch-row">
           <span class="bbs-field-label">启用自动摘要</span>
           <input v-model="apiSettings.autoSummaryEnabled" type="checkbox" class="bbs-checkbox" />

@@ -31,6 +31,8 @@ export interface MembershipRequest {
     memories: string[];
     eventIds: string[];
     newTitle?: string;
+    /** Explicit compound-edit confirmation retains prose for the changed membership only. */
+    retainOverview?: boolean;
 }
 export interface MembershipResult { added: number; removed: number; already: number; created: string | null }
 export async function saveMemberships(lib: Library, view: CapturedView, request: MembershipRequest,
@@ -83,8 +85,13 @@ export async function saveMemberships(lib: Library, view: CapturedView, request:
             }
             const base = { story: branch.story, branch: branch.id, owner: eventId, snapshot: view.snapshot.id, cutoff: view.cutoff, epoch: branch.epoch };
             const meta = change.card?.meta;
+            const removed = new Set(change.removes);
+            const retained = request.mode === 'replace' && request.retainOverview && meta?.overview
+                ? { refs: meta.refs.filter(id => !removed.has(id)),
+                    summarized: [...new Set([...(meta.summarized ?? []).filter(id => !removed.has(id)), ...change.adds])],
+                    ...(meta.latestProgress && removed.has(meta.latestProgress.memory) ? { latestProgress: null } : {}) } : {};
             await tx.add('event_revisions', { ...(meta ?? { eventSchema: 2, title, status: 'open', keywords: [], overview: '', summarized: [], refs: [], latestProgress: null }),
-                ...row('er'), ...base, created: Date.now() } as EventRevision);
+                ...retained, ...row('er'), ...base, created: Date.now() } as EventRevision);
             for (const [active, ids] of [[true, change.adds], [false, change.removes]] as const) for (const memory of ids) {
                 await tx.add('event_memberships', { ...row('link'), ...base, memory, active, kind: 'progress', origin: 'manual', locked: true } as Membership);
                 if (active) result.added++; else result.removed++;

@@ -2235,11 +2235,27 @@ export function editLeafAt(index: number, text: string, timeStart: string, timeE
   else delete leaf.delta.time;
   chat[index].extra = { ...(chat[index].extra ?? {}), bbs_leaf: leaf };
   markManualSummaryEdit(chat[index]);
-  notifySummaryEdit();
+  notifySummaryEdit(index);
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要变了 → 召回结果会变,先失效再重算
   scheduleVectorIndex(); // 正文变了 → docHash 变,防抖重 embed,召回及时用上新内容
+  return true;
+}
+
+/** Compound edit: preserve legacy dates, delta and body sidecars; publish one host change. */
+export function saveLeafCorrection(floor: number, id: string, text: string, tags: SummaryTags | undefined) {
+  const message = getContext()?.chat[floor], leaf = getLeaf(message);
+  if (!message || !leaf || leaf.id !== id || !leafValid(message) || !text.trim()) return false;
+  if (text.trim() !== leaf.text) {
+    leaf.text = text.trim();
+    markManualSummaryEdit(message);
+  }
+  if (tags) leaf.tags = normalizeTags(tags);
+  recomputeDerived();
+  scheduleLeafFlush();
+  invalidateRecallCache();
+  scheduleVectorIndex();
   return true;
 }
 
@@ -2293,9 +2309,10 @@ export function editLeafFull(
   chat[index].extra = { ...(chat[index].extra ?? {}), bbs_leaf: leaf };
   // 编辑改了 delta → 同步重写该楼正文的 <bbs_items>/<bbs_vars> 旁注(否则旁注停留在上次摘要的旧值),
   // 与 applyLeafForFloor 落叶时同口径:物品净变动以「本楼之前状态」为基准算 from→to,变量直接渲染命令。
+  const before = chat[index].mes;
   rewriteFloorTags(chat, index, delta);
-  markManualSummaryEdit(chat[index]);
-  notifySummaryEdit();
+  markManualSummaryEdit(chat[index], { floor: index, before });
+  notifySummaryEdit(index);
   recomputeDerived();
   scheduleLeafFlush();
   invalidateRecallCache(); // 摘要正文/时间变了 → 失效旧召回

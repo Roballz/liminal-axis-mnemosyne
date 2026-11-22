@@ -135,10 +135,14 @@ const EVIDENCE_KEY = 'mnemosyne_summary_evidence_v1';
 interface NativeBodyEdit { chat: STMessage[]; scope: string; floor: number; swipe: number; before: Set<string>; after: string }
 const nativeBodyEdits = new Map<STMessage, NativeBodyEdit>();
 const MANUAL_KEY = 'mnemosyne_manual_summary_v1';
-export function markManualSummaryEdit(message: STMessage) {
+export function markManualSummaryEdit(message: STMessage, bodyEdit?: { floor: number; before: string }) {
     if (!installed) return;
     const leaf = getLeaf(message);
     if (!leaf) return;
+    const chat = getContext()?.chat;
+    if (bodyEdit && message.mes !== bodyEdit.before && chat?.[bodyEdit.floor] === message)
+        nativeBodyEdits.set(message, { chat, scope: hostScope(), swipe: message.swipe_id ?? 0, floor: bodyEdit.floor,
+            before: new Set([bodyEdit.before]), after: message.mes });
     message.extra ??= {};
     const previous = message.extra[MANUAL_KEY] as { generationKey?: number } | undefined;
     message.extra[MANUAL_KEY] = { leaf: leaf.id, text: leaf.text, generationKey: Math.max(Date.now(), (previous?.generationKey ?? 0) + 1) };
@@ -316,6 +320,23 @@ export async function dailyBranch(): Promise<Branch | null> {
     return (await (await activeLibrary()).get<Branch>('branches', binding.branch)) ?? null;
 }
 
+/** Fixed pre-edit validity excludes unrelated pending items from a compound edit. */
+export function priorEditReview() {
+    const prior = cache ?? lastCache;
+    if (prior && prior.activation === libraryActivationGeneration() &&
+        (getContext()?.chatMetadata[BINDING_KEY] as { branch?: string })?.branch === prior.view.branch.id)
+        return { branch: prior.view.branch.id, selections: prior.view.selection.selections, validity: prior.validity };
+}
+/** Read the exact projection syncDaily just published, including its membership
+ * directory. The compound editor can reuse it without a second archive/status pass. */
+export async function syncedEditReview(view: CapturedView) {
+    const lib = await activeLibrary(), prior = cache;
+    check(prior && prior.view === view && prior.activation === libraryActivationGeneration() &&
+        prior.library === lib.db.name && prior.changeVersion === lib.changes.version && prior.host === hostVersion(),
+        '聊天或摘要已改变，请重新核对');
+    return { view, validity: prior.validity, host: prior.host, generation: dailyState.generation, lib,
+        memberships: prior.memberships, events: prior.eventDirectory };
+}
 /** Read-only review UI: reuse the archived projection after checking its exact live version. */
 export async function readDailyReview() {
     if (!(await replyFinality.assertArchivable(false))()) throw new ReplyFinalityError();
@@ -638,6 +659,7 @@ async function syncDailyGuarded(isActive: () => boolean, confirmation?: {
                           coverage: SourceRef[];
                           dependencies?: string[];
                           generatedContent?: string;
+                          wordingCorrection?: boolean;
                           basis?: string;
                           generationKey?: number;
                       }
@@ -659,6 +681,7 @@ async function syncDailyGuarded(isActive: () => boolean, confirmation?: {
                     item.generationKey = manual.generationKey;
                 } else if (evidence?.leaf === leaf.id && evidence.text === leaf.text) {
                     if (evidence.generationKey !== undefined) item.generationKey = evidence.generationKey;
+                    if (evidence.wordingCorrection) item.manualEdit = true;
                     item.inputRefs = evidence.inputRefs;
                     item.coverage = evidence.coverage;
                     item.basisSnapshot = evidence.basis;
@@ -969,6 +992,7 @@ export async function confirmUnarchivedSummary(item: UnarchivedSummary, open: ()
     check(view.branch.id === session.view.branch.id && view.memories.some(m => m.level === 0 &&
         m.hostId === item.hostId && m.anchor === view.refs[item.floor]?.message && m.content === item.text &&
         cache?.validity.get(m.id) === 'valid'), '人工确认已记录，请检查最新归档状态');
+    return view;
 }
 export async function chooseNewStory() {
     const ctx = getContext();
@@ -1077,6 +1101,18 @@ export function bindDaily() {
     if (!ctx) return;
     let active = true, eventEpoch = 0;
     let bodyEdit: { id: number; floor: number; chat: STMessage[]; message: STMessage; text: string; swipe: number; scope: string; epoch: number } | undefined;
+    // TT can save an ordinary edit from the keyboard. Remember a trusted input in
+    // its real editor, then match the saved reply and swipe on MESSAGE_EDITED.
+    let typed: { editor: HTMLTextAreaElement; edit: NativeBodyEdit; message: STMessage } | undefined;
+    const editorInput = (event: Event) => {
+        const target = (event.composedPath?.()[0] ?? event.target) as HTMLTextAreaElement | null;
+        if (!event.isTrusted || !target?.matches?.('.edit_textarea') || typed?.editor === target) return;
+        const id = target.closest('.mes')?.getAttribute('mesid');
+        const chat = getContext()?.chat, floor = Number(id), message = chat?.[floor];
+        if (!id || !/^\d+$/.test(id) || !chat || !message) return;
+        typed = { editor: target, message, edit: { chat, floor, scope: hostScope(), swipe: message.swipe_id ?? 0,
+            before: new Set([message.mes]), after: '' } };
+    };
     const rendered = chatRenderBatch(scheduleDaily);
     const handlers: { event: string; callback: (...args: any[]) => void }[] = [];
     const on = (key: string, action?: (...args: any[]) => void | Promise<void>) => {
@@ -1118,7 +1154,7 @@ export function bindDaily() {
         ctx.eventSource.on(event, callback);
         handlers.push({ event, callback });
     };
-    const cancelBody = () => { bodyEdit = undefined; replyFinality.cancelEdit(); cancelBodyEdit(); };
+    const cancelBody = () => { typed = undefined; bodyEdit = undefined; replyFinality.cancelEdit(); cancelBodyEdit(); };
     for (const key of ['MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_SENT']) on(key, (floor) => {
         if (typeof floor === 'number' && ctx.chat[floor]) nativeBodyEdits.delete(ctx.chat[floor]);
         cancelBody();
@@ -1136,7 +1172,17 @@ export function bindDaily() {
     on('MESSAGE_EDITED', (floor) => {
         replyFinality.editStarted(floor);
         const chat = getContext()?.chat, message = typeof floor === 'number' ? chat?.[floor] : undefined;
-        bodyEdit = chat && message ? { id: beginBodyEdit(), floor, chat, message, text: message.mes,
+        if (typed && message === typed.message && typed.edit.chat === chat && typed.edit.floor === floor &&
+            typed.edit.scope === hostScope() && typed.edit.swipe === (message.swipe_id ?? 0) &&
+            typed.editor.value.trim() === message.mes.trim() && !nativeBodyEdits.has(message)) {
+            nativeBodyEdits.set(message, { ...typed.edit, after: message.mes });
+        }
+        typed = undefined;
+        const proof = message && nativeBodyEdits.get(message);
+        if (proof && proof.chat === chat && proof.floor === floor && proof.scope === hostScope() &&
+            proof.swipe === (message!.swipe_id ?? 0) &&
+            proof.after.trim().replace(/\r\n/g, '\n') === message!.mes.trim().replace(/\r\n/g, '\n')) proof.after = message!.mes;
+        bodyEdit = chat && message ? { id: beginBodyEdit(floor), floor, chat, message, text: message.mes,
             swipe: message.swipe_id ?? 0, scope: hostScope(), epoch: eventEpoch } : undefined;
     });
     // UPDATED must consume the trusted confirmation below; the event alone is not acceptance.
@@ -1148,13 +1194,16 @@ export function bindDaily() {
             edit.message.mes !== edit.text || (edit.message.swipe_id ?? 0) !== edit.swipe) return;
         bodyEdit = undefined;
         // Await the completion receipt before allowing the prompt to read review state.
-        settleBodyEdit(edit.id);
+        const archived = lastCache;
+        const source = archived && archived.view.sources.get(archived.view.refs[floor]?.revision);
+        const proof = nativeBodyEdits.get(edit.message);
+        settleBodyEdit(edit.id, !!source && !!proof?.before.has(source.content));
     });
     // TT also emits EDITED/UPDATED for slash commands and automatic output revision.
     // Only a real click on its confirmation button authorizes a quarantined fragment.
     const confirmEdit = (event: Event) => {
         if (!event.isTrusted) return;
-        const button = (event.target as Element | null)?.closest?.('.mes_edit_done');
+        const button = ((event.composedPath?.()[0] ?? event.target) as Element | null)?.closest?.('.mes_edit_done');
         if (!button) { replyFinality.cancelEdit(); return; }
         const element = button.closest('.mes'), id = element?.getAttribute('mesid');
         const editor = element?.querySelector<HTMLTextAreaElement>('.edit_textarea');
@@ -1172,7 +1221,10 @@ export function bindDaily() {
             replyFinality.confirmEdit(floor, text);
         } else replyFinality.cancelEdit();
     };
-    if (typeof document !== 'undefined') document.addEventListener('click', confirmEdit, true);
+    if (typeof document !== 'undefined') {
+        document.addEventListener('click', confirmEdit, true);
+        document.addEventListener('input', editorInput, true);
+    }
     // Higher-level summaries are appended to chat metadata without rebuilding the
     // leaf-derived state. Watch the count so a committed node wakes the same batched sync.
     const unwatch = watch([() => derivedMeta.rev, () => memory.summaries.length], scheduleDaily);
@@ -1258,6 +1310,7 @@ export function attachSummaryEvidence(
     floor: number,
     evidence: Awaited<ReturnType<typeof captureSummaryEvidence>>,
     coverageIndices: number[],
+    wordingCorrection = false,
 ) {
     if (!evidence) return;
     const leaf = getLeaf(chat[floor]);
@@ -1273,6 +1326,7 @@ export function attachSummaryEvidence(
         inputRefs: evidence.inputRefs,
         dependencies: evidence.dependencies,
         generatedContent: chat[floor].mes,
+        ...(wordingCorrection && { wordingCorrection: true }),
         basis: evidence.view.snapshot.id,
         coverage:
             coverageIndices.length === 2 &&

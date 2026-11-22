@@ -50,13 +50,13 @@ export function recoveredSummaryTargets(view: CapturedView) {
 }
 
 /** All selected rows commit together; no model call, host edit, replay or per-row synchronization. */
-export async function retainRecoveredSummaries(view: CapturedView, ids: string[], guard: () => boolean) {
+export async function retainRecoveredSummaries(view: CapturedView, ids: string[], guard: () => boolean, retainEventProse = false) {
     const revisions = await serializeDailyActivation(async () => {
         const lib = await activeLibrary();
         check(guard() && await current(lib, view), '聊天或摘要已改变，请刷新后重新确认');
         const eligible = new Set(recoveredSummaryTargets(view).map(m => m.id));
         check(ids.length && ids.every(id => eligible.has(id)), '摘要已删除、停用或无法映射；请刷新后重新选择');
-        return confirmRecoveredSummaries(lib, view, ids, guard);
+        return confirmRecoveredSummaries(lib, view, ids, guard, retainEventProse);
     });
     invalidateDaily();
     try {

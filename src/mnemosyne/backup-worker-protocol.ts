@@ -5,13 +5,13 @@ import type { CorePackageSize } from './core-package-size';
 import type { ArchiveRestoreResult } from './archive-package';
 import type { HistoryCleanupReport } from './history-cleanup';
 
-export type BackupJob = { library: string; branch?: string; kind: BackupSaveKind; keep: 10 } | { kind: 'preview'; key: string } |
+export type BackupJob = { kind: 'recover-overview'; blob: Blob; branch: string; story: string; eventId: string } | { library: string; branch?: string; kind: BackupSaveKind; keep: 10 } | { kind: 'preview'; key: string } |
     { kind: 'pin'; key: string; checksum: string } | { kind: 'restore'; key: string; checksum: string } |
     { kind: 'export'; library: string; branch?: string } | { kind: 'size'; library: string } |
     { kind: 'reorganize'; library: string } | { kind: 'clean-history'; library: string } | { kind: 'import'; blob: Blob } |
     { kind: 'archive-import'; library: string; blob: Blob; branch?: string; scope?: string } |
     { kind: 'archive-restore'; library: string; key: string; checksum: string; branch?: string; scope?: string };
-export type BackupResult = BackupOutcome | { state: 'preview' | 'pinned'; entry: BackupPreview } |
+export type BackupResult = { state: 'overview'; text: string } | BackupOutcome | { state: 'preview' | 'pinned'; entry: BackupPreview } |
     { state: 'exported'; blob: Blob; version: Package['version'] } | { state: 'restored'; library: string } |
     { state: 'archive-restored'; report: ArchiveRestoreResult } |
     { state: 'history-cleaned'; report: HistoryCleanupReport } |
