@@ -5,55 +5,88 @@
 export function extractJsonObject<T = unknown>(raw: string): T | null {
   if (!raw || typeof raw !== 'string') return null;
 
-  let s = raw.trim();
+  // 检查记录有时由 assistant prefill 打开，实际返回里只有闭合标签。
+  const marker = /\{|<think(?:ing)?\b|<\/think(?:ing)?>/gi;
+  const tag = /<think(?:ing)?\b|<\/think(?:ing)?>/gi;
+  let checkPrefill = true;
+  let match;
+  while ((match = marker.exec(raw))) {
+    if (match[0] !== '{') {
+      if (!match[0].startsWith('</')) {
+        tag.lastIndex = marker.lastIndex;
+        let depth = 1;
+        while (depth > 0) {
+          const nested = tag.exec(raw);
+          if (!nested) return null;
+          depth += nested[0].startsWith('</') ? -1 : 1;
+        }
+        marker.lastIndex = tag.lastIndex;
+      }
+      checkPrefill = false;
+      continue;
+    }
 
-  // 去掉 <think>…</think> / <thinking>…</thinking> 思维链(大小写不敏感)
-  s = s.replace(/<think(?:ing)?\b[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+    const start = match.index;
+    const end = objectEnd(raw, start);
+    if (checkPrefill) {
+      checkPrefill = false;
+      // 裸闭合标签前的对象可能是检查草稿。跳过对象内部的字面标签，
+      // 后记中新开的思考块也不属于这段 prefill。
+      tag.lastIndex = end < 0 ? start + 1 : end;
+      if (tag.exec(raw)?.[0].startsWith('</')) {
+        marker.lastIndex = tag.lastIndex;
+        continue;
+      }
+    }
 
-  // 未闭合的检查块可能只是被截断的草稿,不能把其中的 JSON 当成最终结果。
-  if (/^<think(?:ing)?\b/i.test(s)) return null;
+    const direct = end < 0 ? null : tryParse<T>(raw.slice(start, end));
+    if (direct !== null) return direct;
 
-  // assistant prefill 场景下,返回可能只包含续写的思维链正文 + </thinking> + JSON,
-  // 没有开头 <thinking>。此时丢弃最后一个闭合标签及其之前的全部文本。
-  const danglingThinkClose = s.match(/<\/think(?:ing)?>/gi);
-  if (danglingThinkClose) {
-    const lastClose = Math.max(
-      s.toLowerCase().lastIndexOf('</think>'),
-      s.toLowerCase().lastIndexOf('</thinking>'),
-    );
-    if (lastClose >= 0) {
-      const close = s.slice(lastClose).match(/^<\/think(?:ing)?>/i)?.[0] ?? '';
-      s = s.slice(lastClose + close.length).trim();
+    // 围栏前的说明偶尔包含 {占位符}。只跳过这种非 JSON 前言，不从残缺对象里捞内层结果。
+    if (end >= 0 && /^\{\s*[^"“”}\s]/u.test(raw.slice(start, end))) {
+      const fence = /^[^`{}<>]*```(?:json)?\s*(?=\{)/i.exec(raw.slice(end));
+      if (fence) {
+        marker.lastIndex = end + fence[0].length;
+        continue;
+      }
+    }
+
+    // 引号不规范时，原串算出的右边界也可能有误；修复后再从同一起点配平。
+    const body = raw.slice(start, raw.lastIndexOf('}') + 1);
+    const cleaned = body
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/,\s*([}\]])/g, '$1');
+    const normalized = cleaned !== body ? parseFirstObject<T>(cleaned) : null;
+    return normalized ?? parseFirstObject<T>(escapeStrayQuotes(body))
+      ?? (cleaned !== body ? parseFirstObject<T>(escapeStrayQuotes(cleaned)) : null);
+  }
+  return null;
+}
+
+/** 从外层左花括号开始，返回其配对右花括号之后的位置。JSON.parse 负责校验语法。 */
+function objectEnd(text: string, start: number): number {
+  let depth = 1;
+  let inString = false;
+  for (let i = start + 1; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') {
+      inString = true;
+    } else if (c === '{') {
+      depth++;
+    } else if (c === '}' && --depth === 0) {
+      return i + 1;
     }
   }
+  return -1;
+}
 
-  // 去掉 ```json ... ``` / ``` ... ``` 围栏
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) s = fence[1].trim();
-
-  // 截取第一个 { 到最后一个 } 之间(去掉前后说明文字)
-  const first = s.indexOf('{');
-  const last = s.lastIndexOf('}');
-  if (first === -1 || last === -1 || last <= first) return null;
-  let body = s.slice(first, last + 1);
-
-  // 直接尝试
-  const direct = tryParse<T>(body);
-  if (direct !== null) return direct;
-
-  // 容错清洗:智能引号 -> 直引号,去尾随逗号
-  const cleaned = body
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/,\s*([}\]])/g, '$1');
-  const cleanedParsed = tryParse<T>(cleaned);
-  if (cleanedParsed !== null) return cleanedParsed;
-
-  // 仍失败:多半是正文里有未转义的英文双引号(如英文对白 He said "hi")。补转义后再试。
-  // 原串与清洗串各补一次(清洗把智能引号变直引号后可能新增野引号,故也要补)。
-  const repaired = tryParse<T>(escapeStrayQuotes(body));
-  if (repaired !== null) return repaired;
-  return tryParse<T>(escapeStrayQuotes(cleaned));
+function parseFirstObject<T>(body: string): T | null {
+  const end = objectEnd(body, 0);
+  return end < 0 ? null : tryParse<T>(body.slice(0, end));
 }
 
 /**

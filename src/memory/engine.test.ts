@@ -417,7 +417,7 @@ describe('summary request roles', () => {
     const chat = [message()];
     useChat(chat);
     vi.mocked(client.requestViaMainApi).mockResolvedValue(
-      `<thinking>Source and coverage records.</thinking>${JSON.stringify(summary)}`,
+      `<thinking>Source and coverage records.</thinking>${JSON.stringify(summary)}}误加}，不输出`,
     );
 
     await summarizeFloor(0);
@@ -618,7 +618,7 @@ describe('summary request roles', () => {
     useChat(chat);
     const floors = [1, 2].map(n => ({ ...summary, n, summary: `Verified floor ${n}.` }));
     vi.mocked(client.requestViaMainApi).mockResolvedValue(
-      `<thinking>Per-floor source records.</thinking>${JSON.stringify({ floors })}`,
+      `<thinking>Per-floor source records.</thinking>${JSON.stringify({ floors })}\n<thinking>核对 {"floors": []}`,
     );
 
     expect(await batchBackfill({ floors: [1, 3] })).toMatchObject({ done: 2, total: 2, cancelled: false });
@@ -722,7 +722,7 @@ describe.each(['automatic', 'manual'] as const)('compression audit output (%s)',
     const finalSummary = 'The confirmed merged facts.';
     // A prefilled completion may omit the opening tag from the returned text.
     vi.mocked(client.requestViaMainApi).mockResolvedValue(
-      `F1 | source 1 | confirmed fact\nCoverage: F1 | confirmed merged facts\n</thinking>\n${JSON.stringify({ summary: finalSummary })}`,
+      `F1 | source 1 | confirmed fact\nCoverage: F1 | confirmed merged facts\n</thinking>\n${JSON.stringify({ summary: finalSummary })}\n好像超字数了。{"summary":"草稿"}`,
     );
 
     expect(await compress(ids)).toBe(1);
