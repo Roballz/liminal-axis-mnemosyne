@@ -18,8 +18,7 @@ import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, shallowRef, watch } from 'vue';
 import SummaryNode from './SummaryNode.vue';
-import SummaryLength from './SummaryLength.vue';
-import SummaryTags from './SummaryTags.vue';
+import SummaryCardBody from './SummaryCardBody.vue';
 import { normalizeTags, shortText } from '@/memory/contextTags';
 import { currentEventDirectory, dailyInstalled, dailyState, hostScope, hostVersion, syncDaily } from '@/mnemosyne/bridge';
 import type { MemPlan } from '@/memory/types';
@@ -41,6 +40,7 @@ const resetViewStates = () => {
   cancelSummaryPress();
   summaryPressHeld = false;
   expanded.value = new Set();
+  openTexts.value.clear();
   searchQuery.value = '';
   searchOpen.value = false;
   closeImportHistory();
@@ -402,6 +402,7 @@ const rootNodes = computed<ViewNode[]>(() => {
 
 /* ---- 视图态:展开 / 搜索 / 选择(三者互斥,均为临时 UI 态,不持久化) ---- */
 const expanded = ref<Set<string>>(new Set()); // 已展开的 comp id
+const openTexts = ref(new Set<string>()); // 总结全文与下层目录可分别开合。
 const searchQuery = ref('');
 // 搜索框默认收起,点工具行放大镜才展开——平时不占版面。收起即清空搜索词。
 const searchOpen = ref(false);
@@ -503,6 +504,11 @@ function toggleSearch() {
   else openSearch();
 }
 
+function toggleText(id: string) {
+  if (openTexts.value.has(id)) openTexts.value.delete(id);
+  else openTexts.value.add(id);
+}
+
 function toggleExpand(id: string) {
   const next = new Set(expanded.value);
   if (next.has(id)) next.delete(id);
@@ -572,7 +578,9 @@ function startSummaryPress(event: PointerEvent) {
   summaryPressHeld = false; // 上次手势可能没有派发 click，不能吞掉这次正常点击。
   if (selectMode.value || searching.value || event.button !== 0 || !event.isPrimary) return;
   const target = event.target instanceof Element ? event.target : null;
-  if (!target || target.closest('button, input, textarea, select, a, label, [contenteditable], [role="button"]')) return;
+  if (!target) return;
+  const control = target.closest('button, input, textarea, select, a, label, [contenteditable], [role="button"]');
+  if (control && !control.classList.contains('bbs-summary-text-toggle')) return;
   const card = target.closest<HTMLElement>('.bbs-summary-card[data-summary-id]');
   const id = card?.dataset.summaryId;
   if (!card || !id) return;
@@ -895,8 +903,8 @@ async function publishSelected() {
 
 // 注入递归卡片(SummaryNode)所需的状态、helper 与动作,免逐层 props 透传
 provide(SUMMARY_CTX, {
-  events, byId, expanded, selectMode, searching, selectedIds,
-  toggleExpand, toggleSelect, openEdit, onDelete,
+  events, byId, expanded, openTexts, selectMode, searching, searchQuery, selectedIds,
+  toggleExpand, toggleText, toggleSelect, openEdit, onDelete,
   nodeFloors, toRow, levelLabel, floorLabel, rowTime, rowRelative, highlightParts,
 });
 </script>
@@ -1250,8 +1258,8 @@ provide(SUMMARY_CTX, {
         :aria-checked="selectMode ? selectedIds.has(r.id) : undefined"
         :tabindex="selectMode ? 0 : undefined"
         @click="selectMode && toggleSelect(r.id)"
-        @keydown.enter.prevent="selectMode && toggleSelect(r.id)"
-        @keydown.space.prevent="selectMode && toggleSelect(r.id)"
+        @keydown.enter.self.prevent="selectMode && toggleSelect(r.id)"
+        @keydown.space.self.prevent="selectMode && toggleSelect(r.id)"
       >
         <!-- 选择模式:复选框仅作视觉状态,点整卡即可勾选(label 不再包 input,避免双触发) -->
         <span v-if="selectMode" class="bbs-summary-check" aria-hidden="true">
@@ -1264,52 +1272,7 @@ provide(SUMMARY_CTX, {
           />
         </span>
         <div class="bbs-summary-main">
-          <SummaryTags v-if="r.kind === 'leaf' && r.msgIndex !== undefined" :floor="r.msgIndex" :leaf-id="r.id" />
-          <header class="bbs-summary-meta">
-            <!-- 总结:层级标签 + 范围药丸 + 相对时间(留题首行)+ 绝对时间(窄屏换行) -->
-            <template v-if="r.kind === 'comp'">
-              <span class="bbs-summary-badge">{{ levelLabel(r.level, r.imported) }}</span>
-              <span class="bbs-summary-loc">{{ floorLabel(r) }}</span>
-              <SummaryLength :text="r.text" />
-              <span v-if="rowRelative(r)" class="bbs-summary-rel">({{ rowRelative(r) }})</span>
-              <span v-if="rowTime(r)" class="bbs-summary-time">{{ rowTime(r) }}</span>
-            </template>
-            <!-- 摘要:相对时间 + 楼层号都做成等高小标签(盒子居中,免去 CJK 基线下沉),绝对时间作题首文本(窄屏换行) -->
-            <template v-else>
-              <span v-if="rowRelative(r)" class="bbs-summary-rel">{{ rowRelative(r) }}</span>
-              <span class="bbs-summary-loc">{{ floorLabel(r) }}</span>
-              <SummaryLength :text="r.text" />
-              <span v-if="rowTime(r)" class="bbs-summary-dateline">{{ rowTime(r) }}</span>
-            </template>
-            <span v-if="r.stale" class="bbs-summary-stale">待更新</span>
-            <!-- 操作键:编辑对任何命中行开放(结构安全;叶子改完向量自动重 embed,总结不进向量库);
-                 删除仅根行(删深层会级联删祖先总结链);选择模式无操作 -->
-            <span v-if="!selectMode" class="bbs-summary-acts">
-              <button
-                class="bbs-summary-act"
-                type="button"
-                :title="r.imported ? '编辑导入历史' : r.kind === 'comp' ? '编辑总结' : '编辑摘要'"
-                @click="openEdit(r)"
-              >
-                <Icon name="edit" />
-              </button>
-              <button
-                v-if="!r.isChild"
-                class="bbs-summary-act bbs-summary-del"
-                type="button"
-                :title="r.imported ? '删除导入历史' : r.kind === 'comp' ? '删除总结(下层会展开)' : '删除摘要'"
-                @click="onDelete(r)"
-              >
-                <Icon name="trash" />
-              </button>
-            </span>
-          </header>
-          <p class="bbs-summary-text">
-            <template v-for="(seg, i) in highlightParts(r.text)" :key="i">
-              <mark v-if="seg.hit" class="bbs-hit">{{ seg.t }}</mark>
-              <template v-else>{{ seg.t }}</template>
-            </template>
-          </p>
+          <SummaryCardBody :row="r" :child="r.isChild" />
         </div>
       </article>
     </div>
@@ -2228,14 +2191,6 @@ provide(SUMMARY_CTX, {
 .bbs-search-clear:hover {
   color: var(--bbs-accent);
   background: var(--bbs-surface-2);
-}
-
-/* —— 搜索命中高亮:强调色淡底,不改字色保证可读 —— */
-.bbs-hit {
-  background: var(--bbs-accent-soft);
-  color: inherit;
-  border-radius: 3px;
-  padding: 0 1px;
 }
 
 /* —— 摘要列表 —— */

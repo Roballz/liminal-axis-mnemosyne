@@ -28,10 +28,13 @@ export interface SummaryCtx {
   events: ComputedRef<EventHint[]>;
   byId: ComputedRef<Map<string, ViewNode>>;
   expanded: Ref<Set<string>>;
+  openTexts: Ref<Set<string>>;
   selectMode: Ref<boolean>;
   searching: ComputedRef<boolean>;
+  searchQuery: Ref<string>;
   selectedIds: Ref<Set<string>>;
   toggleExpand: (id: string) => void;
+  toggleText: (id: string) => void;
   toggleSelect: (id: string) => void;
   openEdit: (r: SummaryRow) => void;
   onDelete: (r: SummaryRow) => void;

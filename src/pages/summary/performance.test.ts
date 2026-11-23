@@ -34,10 +34,14 @@ it('240张摘要目录按需读取，首屏有界，折叠总结不挂载隐藏�
   expect(html.match(/class="bbs-summary-length"/g)).toHaveLength(40);
   expect(html).toContain('7字</small>'); // 合成摘要239
   expect(html).toContain('显示更多');
+  expect(html).not.toContain('class="bbs-summary-preview"');
   hints.mockClear();
   memory.summaries = [{ id: 'compressed', level: 1, text: '合成 总结\n𠮷。', childIds: chat.map(m => m.extra.bbs_leaf.id), createdAt: count, auto: false }];
   const collapsed = await renderToString(createSSRApp(SummaryPage));
   expect(collapsed).toContain('展开下层 240 条');
+  expect(collapsed).toContain('aria-label="展开总结全文"');
+  expect(collapsed).toContain('class="bbs-summary-preview"');
+  expect(collapsed).not.toContain('class="bbs-summary-text"');
   expect(collapsed.match(/class="bbs-summary-length"/g)).toHaveLength(1);
   expect(collapsed).toContain('6字</small>');
   expect(collapsed).not.toContain('bbs-tags-top');

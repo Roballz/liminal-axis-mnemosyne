@@ -4,8 +4,7 @@
  * 展开时下方 grid(0fr↔1fr)容器平滑撑开,内部递归渲染子节点 + 组尾收起条。
  * 折叠分支按需挂载，避免隐藏的历史摘要也创建标签/弹窗组件。
  */
-import SummaryTags from './SummaryTags.vue';
-import SummaryLength from './SummaryLength.vue';
+import SummaryCardBody from './SummaryCardBody.vue';
 import Icon from '@/components/Icon.vue';
 import { computed, inject } from 'vue';
 import type { ViewNode } from '@/memory/inject';
@@ -36,33 +35,7 @@ const isChild = computed(() => props.depth > 0);
       :class="{ 'is-deep': row.level > 0, 'is-child': isChild, 'is-expanded': isExpanded && expandable }"
     >
       <div class="bbs-summary-main">
-        <SummaryTags v-if="row.kind === 'leaf' && row.msgIndex !== undefined" :floor="row.msgIndex" :leaf-id="row.id" />
-        <header class="bbs-summary-meta">
-          <template v-if="row.kind === 'comp'">
-            <span class="bbs-summary-badge">{{ ctx.levelLabel(row.level, row.imported) }}</span>
-            <span class="bbs-summary-loc">{{ ctx.floorLabel(row) }}</span>
-            <SummaryLength :text="row.text" />
-            <span v-if="ctx.rowRelative(row)" class="bbs-summary-rel">({{ ctx.rowRelative(row) }})</span>
-            <span v-if="ctx.rowTime(row)" class="bbs-summary-time">{{ ctx.rowTime(row) }}</span>
-          </template>
-          <template v-else>
-            <span v-if="ctx.rowRelative(row)" class="bbs-summary-rel">{{ ctx.rowRelative(row) }}</span>
-            <span class="bbs-summary-loc">{{ ctx.floorLabel(row) }}</span>
-            <SummaryLength :text="row.text" />
-            <span v-if="ctx.rowTime(row)" class="bbs-summary-dateline">{{ ctx.rowTime(row) }}</span>
-          </template>
-          <!-- 操作键:编辑对任何层级开放(结构安全:不改 id、不断链;叶子改完向量索引自动重 embed,
-               总结不进向量库、只影响上下文注入);删除仅根行——删深层叶子会级联删整条祖先总结链 -->
-          <span class="bbs-summary-acts">
-            <button class="bbs-summary-act" type="button" :title="row.imported ? '编辑导入历史' : row.kind === 'comp' ? '编辑总结' : '编辑摘要'" @click="ctx.openEdit(row)">
-              <Icon name="edit" />
-            </button>
-            <button v-if="!isChild" class="bbs-summary-act bbs-summary-del" type="button" :title="row.imported ? '删除导入历史' : row.kind === 'comp' ? '删除总结(下层会展开)' : '删除摘要'" @click="ctx.onDelete(row)">
-              <Icon name="trash" />
-            </button>
-          </span>
-        </header>
-        <p class="bbs-summary-text">{{ row.text }}</p>
+        <SummaryCardBody :row="row" :child="isChild" />
         <!-- 展开开关:卡片底部整条,标注「展开/收起下层 N 条」;展开态翻转文案 + 卡片描边点亮 -->
         <button
           v-if="expandable"
