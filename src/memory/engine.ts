@@ -1763,7 +1763,7 @@ export async function checkResummary(manual = false, confirm?: ConfirmMergeSourc
 
     const responseGuard = summaryResponseGuard(chat, batch[batch.length - 1].floorHi, batch.map(n => n.id));
     const { content, hints } = joinNodesForResummary(batch);
-    // 传**输出层级**(level+1):L1(普通总结,300-500字)/ L2+(二次总结,字数随输入动态)
+    // 传输出层级：L1 采用档位字数，L2 及以上按输入长度计算。
     const prompt = buildResummaryPrompt({ user: ctx.name1, char: ctx.name2, content, level: level + 1 });
 
     try {

@@ -18,6 +18,7 @@ import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, shallowRef, watch } from 'vue';
 import SummaryNode from './SummaryNode.vue';
+import SummaryLength from './SummaryLength.vue';
 import SummaryTags from './SummaryTags.vue';
 import { normalizeTags, shortText } from '@/memory/contextTags';
 import { currentEventDirectory, dailyInstalled, dailyState, hostScope, hostVersion, syncDaily } from '@/mnemosyne/bridge';
@@ -1269,6 +1270,7 @@ provide(SUMMARY_CTX, {
             <template v-if="r.kind === 'comp'">
               <span class="bbs-summary-badge">{{ levelLabel(r.level, r.imported) }}</span>
               <span class="bbs-summary-loc">{{ floorLabel(r) }}</span>
+              <SummaryLength :text="r.text" />
               <span v-if="rowRelative(r)" class="bbs-summary-rel">({{ rowRelative(r) }})</span>
               <span v-if="rowTime(r)" class="bbs-summary-time">{{ rowTime(r) }}</span>
             </template>
@@ -1276,6 +1278,7 @@ provide(SUMMARY_CTX, {
             <template v-else>
               <span v-if="rowRelative(r)" class="bbs-summary-rel">{{ rowRelative(r) }}</span>
               <span class="bbs-summary-loc">{{ floorLabel(r) }}</span>
+              <SummaryLength :text="r.text" />
               <span v-if="rowTime(r)" class="bbs-summary-dateline">{{ rowTime(r) }}</span>
             </template>
             <span v-if="r.stale" class="bbs-summary-stale">待更新</span>

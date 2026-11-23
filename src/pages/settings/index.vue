@@ -319,7 +319,7 @@ const PROMPT_METAS: PromptMeta[] = [
   {
     key: 'resummary',
     label: '总结提示词',
-    hint: '把多条楼层摘要压成一条 L1 总结(普通总结,固定 300-500 字)。',
+    hint: '把多条楼层摘要合并成一条 L1 总结，目标字数随档位调整。',
     builtin: RESUMMARY_PROMPT,
     macros: RESUMMARY_MACROS,
   },
@@ -1039,7 +1039,7 @@ function exportPublicApiDocument() {
           <span class="bbs-field-label">字数档位</span>
           <BbsSelect v-model="apiSettings.verbosity" :options="VERBOSITY_OPTIONS" class="bbs-select-narrow" aria-label="字数档位" />
         </div>
-        <p class="bbs-field-hint">一键调节摘要/总结/二次总结的目标字数。详细=信息全(摘要150-300、总结300-500字)；精简=省token(摘要80-150、总结150-300字)。仅影响内置提示词,自定义模板不受影响。</p>
+        <p class="bbs-field-hint">详细档每楼摘要 400–600 字，L1 总结 800–1,000 字。精简档每楼摘要 80–150 字，L1 总结 150–300 字。更高层总结合并时按输入长度计算。自定义模板使用字数宏时也会跟随档位。</p>
         <label class="bbs-num-row">
           <span class="bbs-field-label">保留最近 AI 消息数</span>
           <input v-model.number="apiSettings.keepRecent" class="bbs-input bbs-num" type="number" min="0" />

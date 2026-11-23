@@ -5,6 +5,7 @@
  * 折叠分支按需挂载，避免隐藏的历史摘要也创建标签/弹窗组件。
  */
 import SummaryTags from './SummaryTags.vue';
+import SummaryLength from './SummaryLength.vue';
 import Icon from '@/components/Icon.vue';
 import { computed, inject } from 'vue';
 import type { ViewNode } from '@/memory/inject';
@@ -40,12 +41,14 @@ const isChild = computed(() => props.depth > 0);
           <template v-if="row.kind === 'comp'">
             <span class="bbs-summary-badge">{{ ctx.levelLabel(row.level, row.imported) }}</span>
             <span class="bbs-summary-loc">{{ ctx.floorLabel(row) }}</span>
+            <SummaryLength :text="row.text" />
             <span v-if="ctx.rowRelative(row)" class="bbs-summary-rel">({{ ctx.rowRelative(row) }})</span>
             <span v-if="ctx.rowTime(row)" class="bbs-summary-time">{{ ctx.rowTime(row) }}</span>
           </template>
           <template v-else>
             <span v-if="ctx.rowRelative(row)" class="bbs-summary-rel">{{ ctx.rowRelative(row) }}</span>
             <span class="bbs-summary-loc">{{ ctx.floorLabel(row) }}</span>
+            <SummaryLength :text="row.text" />
             <span v-if="ctx.rowTime(row)" class="bbs-summary-dateline">{{ ctx.rowTime(row) }}</span>
           </template>
           <!-- 操作键:编辑对任何层级开放(结构安全:不改 id、不断链;叶子改完向量索引自动重 embed,

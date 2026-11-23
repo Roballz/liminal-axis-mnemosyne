@@ -336,7 +336,7 @@ describe.each(['detailed', 'concise'] as const)('prompt assembly (%s)', verbosit
     const parts = buildSummaryPrompt(args);
     const prompt = combined(parts);
     expect(prompt).toContain(args.content);
-    expect(prompt).toContain(verbosity === 'detailed' ? '150-300' : '80-150');
+    expect(prompt).toContain(verbosity === 'detailed' ? '400-600' : '80-150');
     expect(prompt).toContain(RULE_ABSOLUTE_TIME_LANGUAGE);
     expect(prompt).not.toContain(SUMMARY_OUTPUT_PROTOCOL);
     expect(THINKING_CHECKLIST).toContain(SUMMARY_OUTPUT_PROTOCOL);
@@ -356,6 +356,7 @@ describe.each(['detailed', 'concise'] as const)('prompt assembly (%s)', verbosit
   it('keeps batch floor boundaries, count macros and the summary-only protocol', () => {
     const parts = buildBatchSummaryPrompt({ ...args, floorCount: 3 });
     const prompt = combined(parts);
+    expect(prompt).toContain(verbosity === 'detailed' ? '400-600' : '80-150');
     const thinking = buildBatchThinking(3);
     expectFactWorkflow(thinking.checklist);
     expect(thinking.checklist).toContain(SUMMARY_OUTPUT_PROTOCOL);
@@ -403,7 +404,7 @@ describe.each(['detailed', 'concise'] as const)('prompt assembly (%s)', verbosit
       expect(parts.system.split(RULE_SUMMARY_COMPOSITION)).toHaveLength(2);
     }
     if (level === 1) {
-      expect(prompt).toContain(verbosity === 'detailed' ? '300-500' : '150-300');
+      expect(prompt).toContain(verbosity === 'detailed' ? '800-1000' : '150-300');
     } else {
       expect(prompt).toContain(verbosity === 'detailed' ? '400' : '300');
       expect(prompt).toContain(verbosity === 'detailed' ? '500' : '400');

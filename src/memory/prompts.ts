@@ -1060,8 +1060,8 @@ interface VerbosityProfile {
 }
 const VERBOSITY_PROFILES: Record<Verbosity, VerbosityProfile> = {
   detailed: {
-    summaryWords: '150-300',
-    resummaryWords: '300-500',
+    summaryWords: '400-600',
+    resummaryWords: '800-1000',
     resummary2MinRatio: 0.4,
     resummary2MaxRatio: 0.5,
   },
