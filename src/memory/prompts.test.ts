@@ -296,13 +296,17 @@ describe('relationship retention and departure protocol', () => {
       Object.assign(apiSettings.prompts, { resummary: '', resummary2: '' });
       if (level === 1) apiSettings.prompts.resummary = 'CUSTOM {{content}}';
       else apiSettings.prompts.resummary2 = 'CUSTOM {{content}}';
-      expect(buildResummaryPrompt({ ...args, level }).system).toContain(RULE_RELATION_MOMENTUM);
+      const parts = buildResummaryPrompt({ ...args, level });
+      expect(parts.system).toContain(level === 1 ? RULE_RELATION_MOMENTUM : '以可观察的阶段变化为单位');
+      if (level >= 2) expect(parts.system).not.toContain('独立语义单元保留一句');
     }
   });
 
   it('no longer treats intimacy or flirting as deletable repeated process when it forms a trend', () => {
     expect(RESUMMARY_PROMPT).toContain('关系线(与上面同优');
-    expect(RESUMMARY2_PROMPT).toContain('承载关系推进/退缩的亲密互动与调情');
+    expect(RESUMMARY2_PROMPT).toContain('只在能体现持续变化时概括其模式');
+    expect(RESUMMARY2_PROMPT).toContain('材料仅有转述时沿用转述');
+    expect(RESUMMARY2_PROMPT).not.toContain('独立语义单元保留一句');
     expect(RESUMMARY2_PROMPT).not.toContain('购物、换衣、调情等过程');
     expect(RESUMMARY_THINKING_CHECKLIST).toContain('关系线保留');
     expect(THINKING_CHECKLIST).toContain('关系线保留');
@@ -388,10 +392,15 @@ describe.each(['detailed', 'concise'] as const)('prompt assembly (%s)', verbosit
     }
     const parts = buildResummaryPrompt({ ...args, content: 'x'.repeat(1000), level });
     const prompt = combined(parts);
-    expectFactWorkflow(RESUMMARY_THINKING_CHECKLIST);
+    if (level === 1) expectFactWorkflow(parts.checklist);
+    else {
+      expect(parts.checklist).toContain('能否整件删掉某段');
+      expect(parts.checklist).toContain('旁白与内心不得写成已告知');
+      expect(parts.checklist).toContain('根键只有 summary');
+    }
     expect(prompt).toContain(RULE_ABSOLUTE_TIME_LANGUAGE);
     expect(prompt).not.toContain(SUMMARY_OUTPUT_PROTOCOL);
-    expect(RESUMMARY_THINKING_CHECKLIST).toContain(SUMMARY_OUTPUT_PROTOCOL);
+    expect(parts.checklist).toContain(SUMMARY_OUTPUT_PROTOCOL);
     expect(prompt).not.toContain(SUMMARY_FACT_PREPARATION);
     expect(prompt).not.toMatch(/不要思维链|不要输出思维链|严禁输出 JSON 以外/);
     expect(prompt).not.toMatch(/\{\{\w+\}\}/);
@@ -400,13 +409,14 @@ describe.each(['detailed', 'concise'] as const)('prompt assembly (%s)', verbosit
       expect(prompt).toContain(level === 1 ? 'CUSTOM L1' : 'CUSTOM L2');
       expect(parts.system).not.toContain(RULE_SUMMARY_COMPOSITION);
     } else {
-      expect(prompt).toContain(level === 1 ? '规则条件和比较参照' : '其中明确揭示且有后续意义的持续事实');
-      expect(parts.system.split(RULE_SUMMARY_COMPOSITION)).toHaveLength(2);
+      expect(prompt).toContain(level === 1 ? '规则条件和比较参照' : '允许整件、整段舍弃');
+      expect(parts.system.split('\n【摘要成文顺序】\n')).toHaveLength(2);
     }
     if (level === 1) {
       expect(prompt).toContain(verbosity === 'detailed' ? '800-1000' : '150-300');
     } else {
-      expect(prompt).toContain(verbosity === 'detailed' ? '400' : '300');
+      if (custom) expect(prompt).toContain(verbosity === 'detailed' ? '400' : '300');
+      else expect(prompt).not.toContain(verbosity === 'detailed' ? '400' : '300');
       expect(prompt).toContain(verbosity === 'detailed' ? '500' : '400');
     }
   });

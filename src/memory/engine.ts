@@ -17,7 +17,7 @@ import { toast } from '@/st/toast';
 import { addSummary, createNpcPresenceClassifier, deriveMemory, finalizeDelta, fmtVarOpsInline, getLeaf, invalidateSummaryAncestors, itemChangesOf, leafValid, makeLeafId, pruneBrokenComps, syncItemLogFromMessage } from './apply';
 import { extractJsonObject } from './json';
 import { clearInjection, refreshInjection, renderHistoryNodes, selectHistoryNodesBefore } from './inject';
-import { buildBatchSummaryPrompt, buildBatchThinking, buildCharCardSystem, buildPersonaSystem, buildResummaryPrompt, buildSummaryPrompt, buildSummaryThinking, buildWorldInfoSystem, fmtItemLogInline, JAILBREAK_PROMPT, RESUMMARY_THINKING_CHECKLIST, RESUMMARY_THINKING_PREFILL, selectRecentResolvedPlans } from './prompts';
+import { buildBatchSummaryPrompt, buildBatchThinking, buildCharCardSystem, buildPersonaSystem, buildResummaryPrompt, buildSummaryPrompt, buildSummaryThinking, buildWorldInfoSystem, fmtItemLogInline, JAILBREAK_PROMPT, RESUMMARY_THINKING_PREFILL, selectRecentResolvedPlans } from './prompts';
 import { clampToTimeTags, cleanBody, parseTimeRange, syncTimeTagRegex, writeItemLogTag, writeVarLogTag } from './timeTag';
 import { renderSourceHints, type SourceExcerpt } from './sourceHints';
 import { memory, recomputeDerived, scheduleLeafFlush, saveMemory } from './store';
@@ -1773,7 +1773,7 @@ export async function checkResummary(manual = false, confirm?: ConfirmMergeSourc
       messages.push(
         { role: 'system', content: prompt.system },
         { role: 'user', content: prompt.user + hints },
-        { role: 'system', content: RESUMMARY_THINKING_CHECKLIST },
+        { role: 'system', content: prompt.checklist },
         { role: 'assistant', content: RESUMMARY_THINKING_PREFILL },
       );
       const evidence = await mergeEvidence(batch, responseGuard, manual ? confirm : undefined);
@@ -1948,7 +1948,7 @@ export async function summarizeSelected(nodeIds: string[], confirm?: ConfirmMerg
     messages.push(
       { role: 'system', content: prompt.system },
       { role: 'user', content: prompt.user + hints },
-      { role: 'system', content: RESUMMARY_THINKING_CHECKLIST },
+      { role: 'system', content: prompt.checklist },
       { role: 'assistant', content: RESUMMARY_THINKING_PREFILL },
     );
     const evidence = await mergeEvidence(picked, responseGuard, confirm);
@@ -2218,7 +2218,7 @@ export async function draftHigherCorrection(hostId: string, guard: () => boolean
     const jb = apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT;
     if (jb) messages.push({ role: 'system', content: jb });
     messages.push({ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user + hints },
-      { role: 'system', content: RESUMMARY_THINKING_CHECKLIST }, { role: 'assistant', content: RESUMMARY_THINKING_PREFILL });
+      { role: 'system', content: prompt.checklist }, { role: 'assistant', content: RESUMMARY_THINKING_PREFILL });
     const raw = await sender.send(messages, { beforeFallback: current });
     current();
     const text = llmString(extractJsonObject<{ summary?: string }>(raw)?.summary);
@@ -2250,7 +2250,7 @@ export async function regenerateHigherSummary(hostId: string): Promise<void> {
   busy=true;engineState.running=true;
   try {
     const messages:ChatMsg[]=[{role:'system',content:prompt.system},{role:'user',content:prompt.user+hints},
-      {role:'system',content:RESUMMARY_THINKING_CHECKLIST},{role:'assistant',content:RESUMMARY_THINKING_PREFILL}];
+      {role:'system',content:prompt.checklist},{role:'assistant',content:RESUMMARY_THINKING_PREFILL}];
     await trackedSummary(`重建 L${target.level} 总结`,sender,messages,raw=>{
       const parsed=extractJsonObject<{summary?:string}>(raw);const text=llmString(parsed?.summary);
       if(!text)throw new Error('重建返回缺少摘要');return text;

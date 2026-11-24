@@ -731,7 +731,7 @@ describe.each(['automatic', 'manual'] as const)('compression audit output (%s)',
     expect(messages.slice(-4)).toEqual([
       { role: 'system', content: expect.stringContaining('{ "summary":') },
       expect.objectContaining({ role: 'user' }),
-      { role: 'system', content: RESUMMARY_THINKING_CHECKLIST },
+      { role: 'system', content: level === 0 ? RESUMMARY_THINKING_CHECKLIST : expect.stringContaining('【高层总结完成前核查】') },
       { role: 'assistant', content: RESUMMARY_THINKING_PREFILL },
     ]);
     const sourceText = level === 0 ? 'An existing summary.' : 'Earlier summary 0.';
@@ -740,7 +740,7 @@ describe.each(['automatic', 'manual'] as const)('compression audit output (%s)',
     expect(messages.at(-3)?.content).toContain('[2] ');
     expect(messages.at(-3)?.content).not.toMatch(/\[M\d+-P\d+\]/);
     expect(messages.at(-4)?.content).not.toContain(sourceText);
-    expect(messages.at(-4)?.content).toContain(RULE_SUMMARY_COMPOSITION);
+    expect(messages.at(-4)?.content).toContain(level === 0 ? RULE_SUMMARY_COMPOSITION : '允许整件、整段舍弃');
     expect(messages.at(-3)?.content).not.toContain('【输出要求】');
     expect(messages.at(-3)?.content).not.toContain(SOURCE_HINTS_HEADER);
     expect(messages.map(m => m.content).join('\n').split(SUMMARY_OUTPUT_PROTOCOL)).toHaveLength(2);
@@ -783,7 +783,7 @@ describe.each(['automatic', 'manual'] as const)('compression audit output (%s)',
     expect(messages.at(-3)?.content).not.toMatch(/\[M\d+-P\d+\]/);
     expect(inputs.map(input => input.text)).toEqual(texts);
     expect(memory.summaries.at(-1)?.text).toBe(summary.summary);
-    expect(messages.at(-2)?.content).toBe(RESUMMARY_THINKING_CHECKLIST);
+    expect(messages.at(-2)?.content).toBe(expected.checklist);
     if (custom) {
       expect(messages.at(-3)?.content).toContain('CUSTOM ');
       expect(settings.apiSettings.prompts.resummary2).toBe('CUSTOM {{content}}\nBUDGET {{target_min}}-{{target_max}}');
