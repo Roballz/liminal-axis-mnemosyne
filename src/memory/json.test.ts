@@ -38,15 +38,43 @@ describe('extractJsonObject with visible audit records', () => {
   });
 });
 
-describe('extractJsonObject stops at the end of the answer', () => {
+describe('extractJsonObject selects the last complete answer', () => {
   it.each([
     '}误加}，不输出',
-    '好像字数超了，应该改成 {"summary":"后记里的示例"}',
+    '好像字数超了。',
     '\n<thinking>重新检查 {"summary":"草稿"}',
-    '\n<think>重新检查</think>\n```json\n{"summary":"第二轮"}\n```',
+    '\n<think>重新检查 {"summary":"草稿"}</think>',
   ])('ignores trailing text: %s', tail => {
     expect(extractJsonObject(json + tail)).toEqual(result);
     expect(extractJsonObject(`检查完毕。</thinking>\n\`\`\`json\n${json}${tail}\n\`\`\``)).toEqual(result);
+  });
+
+  it.each([
+    '最初的答案 {"summary":"初稿"}。改为：',
+    '```json\n{"summary":"初稿"}\n```\n<think>{"summary":"检查草稿"}</think>\n```json\n',
+    '{"summary":"初稿"}{无效占位}{"syntax": nope}\n',
+    '{“summary”:“早期版本}”}',
+    '{"summary":"前一版缺右括号"\n',
+    '{"summary":"前一版缺右括号"\n```json\n',
+  ])('uses the last answer outside audit blocks: %s', prefix => {
+    expect(extractJsonObject(prefix + json + '\n```\n}字数超了')).toEqual(result);
+  });
+
+  it('keeps the last complete answer before an invalid or truncated replacement', () => {
+    for (const tail of ['{"summary":nope}', '{"floors":[{"summary":"内层"}]', '<think>{"summary":"草稿"}']) {
+      expect(extractJsonObject('{"summary":"初稿"}' + json + tail)).toEqual(result);
+    }
+    expect(extractJsonObject(json + '{}')).toEqual({});
+  });
+
+  it('handles quote repairs in the last answer and skips drafts in a prefill', () => {
+    expect(extractJsonObject(json + '{“summary”:“新版 }”}多余}')).toEqual({ summary: '新版 }' });
+    expect(extractJsonObject(json + '{"summary":"He said "look } here" today."}'))
+      .toEqual({ summary: 'He said "look } here" today.' });
+    expect(extractJsonObject('{"summary":"草稿"}{"summary":"仍是草稿"}</thinking>')).toBeNull();
+    expect(extractJsonObject('检查 {尚未闭合</thinking>' + json)).toEqual(result);
+    expect(extractJsonObject('检查 {"summary":"未合引号</thinking>\n' + json)).toEqual(result);
+    expect(extractJsonObject(json + '{"summary":"正文含 </thinking>"}')).toEqual({ summary: '正文含 </thinking>' });
   });
 
   it('reads a fenced answer after prose containing a brace placeholder', () => {

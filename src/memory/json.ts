@@ -1,92 +1,112 @@
-/**
- * 从 LLM 文本输出里健壮地提取 JSON 对象。
- * 应对:```json 围栏、思维链前后缀、智能引号、尾随逗号。
- */
+/** 取思考块外最后一个完整 JSON 对象，由调用方校验摘要或批量楼层字段。 */
 export function extractJsonObject<T = unknown>(raw: string): T | null {
   if (!raw || typeof raw !== 'string') return null;
+  return scanObjects<T>(raw, 0, false, true, null);
+}
 
-  // 检查记录有时由 assistant prefill 打开，实际返回里只有闭合标签。
+function scanObjects<T>(raw: string, from: number, relaxedQuotes: boolean, mayEndPrefill: boolean, last: T | null): T | null {
   const marker = /\{|<think(?:ing)?\b|<\/think(?:ing)?>/gi;
   const tag = /<think(?:ing)?\b|<\/think(?:ing)?>/gi;
-  let checkPrefill = true;
+  marker.lastIndex = from;
+  let retryFrom = -1;
+  let retryMayEndPrefill = false;
   let match;
   while ((match = marker.exec(raw))) {
     if (match[0] !== '{') {
-      if (!match[0].startsWith('</')) {
+      if (match[0].startsWith('</')) {
+        // 只有闭合标签的 assistant prefill，其前面的对象都属于检查草稿。
+        if (mayEndPrefill) { last = null; retryFrom = -1; }
+      } else {
         tag.lastIndex = marker.lastIndex;
         let depth = 1;
-        while (depth > 0) {
-          const nested = tag.exec(raw);
-          if (!nested) return null;
-          depth += nested[0].startsWith('</') ? -1 : 1;
+        while (depth > 0 && (match = tag.exec(raw))) {
+          depth += match[0].startsWith('</') ? -1 : 1;
         }
+        if (depth > 0) break;
         marker.lastIndex = tag.lastIndex;
       }
-      checkPrefill = false;
+      mayEndPrefill = false;
       continue;
     }
 
     const start = match.index;
-    const end = objectEnd(raw, start);
-    if (checkPrefill) {
-      checkPrefill = false;
-      // 裸闭合标签前的对象可能是检查草稿。跳过对象内部的字面标签，
-      // 后记中新开的思考块也不属于这段 prefill。
-      tag.lastIndex = end < 0 ? start + 1 : end;
-      if (tag.exec(raw)?.[0].startsWith('</')) {
-        marker.lastIndex = tag.lastIndex;
-        continue;
+    const end = objectEnd(raw, start, relaxedQuotes);
+    const body = raw.slice(start, end);
+    const parsed = body.endsWith('}') ? parseObject<T>(body) : null;
+    if (parsed !== null) {
+      last = parsed;
+      retryFrom = -1;
+    } else if (!relaxedQuotes && retryFrom < 0 && /["“”]/.test(body)) {
+      retryFrom = start;
+      retryMayEndPrefill = mayEndPrefill;
+    }
+    marker.lastIndex = end;
+    // 未合引号的 prefill 草稿可能吞掉真正的闭合标签与随后单独给出的答案。
+    if (parsed === null && last === null && mayEndPrefill && end === raw.length) {
+      tag.lastIndex = start + 1;
+      const boundary = tag.exec(raw);
+      if (boundary?.[0].startsWith('</') && /^\s*(?:```(?:json)?\s*)?\{/.test(raw.slice(tag.lastIndex))) {
+        marker.lastIndex = boundary.index;
       }
     }
-
-    const direct = end < 0 ? null : tryParse<T>(raw.slice(start, end));
-    if (direct !== null) return direct;
-
-    // 围栏前的说明偶尔包含 {占位符}。只跳过这种非 JSON 前言，不从残缺对象里捞内层结果。
-    if (end >= 0 && /^\{\s*[^"“”}\s]/u.test(raw.slice(start, end))) {
-      const fence = /^[^`{}<>]*```(?:json)?\s*(?=\{)/i.exec(raw.slice(end));
-      if (fence) {
-        marker.lastIndex = end + fence[0].length;
-        continue;
-      }
-    }
-
-    // 引号不规范时，原串算出的右边界也可能有误；修复后再从同一起点配平。
-    const body = raw.slice(start, raw.lastIndexOf('}') + 1);
-    const cleaned = body
-      .replace(/[“”]/g, '"')
-      .replace(/[‘’]/g, "'")
-      .replace(/,\s*([}\]])/g, '$1');
-    const normalized = cleaned !== body ? parseFirstObject<T>(cleaned) : null;
-    return normalized ?? parseFirstObject<T>(escapeStrayQuotes(body))
-      ?? (cleaned !== body ? parseFirstObject<T>(escapeStrayQuotes(cleaned)) : null);
   }
-  return null;
+
+  // 野引号可能导致普通扫描误判对象边界。只对最后一次成功之后的失败片段重扫一次。
+  if (!relaxedQuotes && retryFrom >= 0) return scanObjects(raw, retryFrom, true, retryMayEndPrefill, last);
+  return last;
 }
 
-/** 从外层左花括号开始，返回其配对右花括号之后的位置。JSON.parse 负责校验语法。 */
-function objectEnd(text: string, start: number): number {
+/** 返回闭合位置之后的下标；破损片段遇到下一段围栏或思考标签时交回外层扫描。 */
+function objectEnd(text: string, start: number, relaxedQuotes: boolean): number {
   let depth = 1;
-  let inString = false;
+  let quote = '';
   for (let i = start + 1; i < text.length; i++) {
     const c = text[i];
-    if (inString) {
+    const delimiter = c === '“' ? '”' : c;
+    const isQuote = delimiter === '"' || delimiter === '”';
+    if (quote) {
       if (c === '\\') i++;
-      else if (c === '"') inString = false;
-    } else if (c === '"') {
-      inString = true;
+      else if (isQuote && (relaxedQuotes ? endsString(text, i) : delimiter === quote)) quote = '';
+    } else if (isQuote) {
+      quote = delimiter;
     } else if (c === '{') {
+      // 新行的对象仅在前一个位置无法容纳 JSON 值时才是重新起稿。
+      let prev = i - 1;
+      while (prev > start && /\s/.test(text[prev])) prev--;
+      if (!':[,'.includes(text[prev]) && /[\r\n]/.test(text.slice(prev + 1, i))) return i;
       depth++;
     } else if (c === '}' && --depth === 0) {
       return i + 1;
+    } else if (c === '<') {
+      const tag = /<\/?think(?:ing)?\b/iy;
+      tag.lastIndex = i;
+      if (tag.test(text)) return i;
+    } else if (c === '`' && text.startsWith('```', i)) {
+      return i;
     }
   }
-  return -1;
+  return text.length;
 }
 
-function parseFirstObject<T>(body: string): T | null {
-  const end = objectEnd(body, 0);
-  return end < 0 ? null : tryParse<T>(body.slice(0, end));
+function parseObject<T>(body: string): T | null {
+  // 后记里的 {占位符} 不是 JSON，避免为每个占位符抛出解析异常。
+  if (!/^\{\s*["“”}]/u.test(body)) return null;
+  const direct = tryParse<T>(body);
+  if (direct !== null) return direct;
+  const cleaned = body.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/,\s*([}\]])/g, '$1');
+  if (cleaned !== body) {
+    const normalized = tryParse<T>(cleaned);
+    if (normalized !== null) return normalized;
+  }
+  const escaped = escapeStrayQuotes(body);
+  return (escaped !== body ? tryParse<T>(escaped) : null)
+    ?? (cleaned !== body ? tryParse<T>(escapeStrayQuotes(cleaned)) : null);
+}
+
+function endsString(text: string, quoteAt: number): boolean {
+  let next = quoteAt + 1;
+  while (next < text.length && /\s/.test(text[next])) next++;
+  return next === text.length || ':,}]'.includes(text[next]);
 }
 
 /**
@@ -113,10 +133,7 @@ function escapeStrayQuotes(s: string): string {
       continue;
     }
     if (c === '"') {
-      let j = i + 1;
-      while (j < s.length && /\s/.test(s[j])) j++;
-      const next = j < s.length ? s[j] : '';
-      if (next === '' || next === ':' || next === ',' || next === '}' || next === ']') {
+      if (endsString(s, i)) {
         out += c;        // 结束引号
         inString = false;
       } else {
