@@ -94,3 +94,24 @@ it('全局弹窗可自动显示手动成功返回，关闭不提交，历史入�
   const history = mount(); button(history.root, '查看').props.onClick(); await nextTick();
   expect(nodes(history.root).some(n => n.type === 'form')).toBe(true); history.app.unmount();
 });
+
+it('聊天界面收到自动高层时保留正在编辑的草稿，关闭当前弹窗后接着审核', async () => {
+  const root = make('root'), app = renderer.createApp(Panel, { dialogOnly: true });
+  app.provide(ssrContextKey, {}); app.mount(root);
+  const options = { scope: 'chat-a', retries: 0, preview: true, messages: [], parse: JSON.parse,
+    send: async () => '{"summary":"原稿"}', apply: vi.fn(), guard: () => {} };
+  await requestSummaryResponse({ ...options, title: '手动摘要' });
+  await nextTick();
+  nodes(root).find(n => n.type === 'textarea')!.props.onInput({ target: { value: '{"summary":"编辑中"}' } });
+  await requestSummaryResponse({ ...options, title: '自动 L1 总结' });
+  await nextTick();
+  expect(text(root)).toContain('手动摘要');
+  expect(nodes(root).find(n => n.type === 'textarea')!.props.value).toContain('编辑中');
+  button(root, '关闭').props.onClick(); await nextTick();
+  expect(text(root)).toContain('自动 L1 总结');
+  expect(summaryResponses[1].attempts[0].draft).toContain('编辑中');
+  button(root, '关闭').props.onClick(); await nextTick();
+  expect(nodes(root).some(n => n.type === 'form')).toBe(false);
+  expect(options.apply).not.toHaveBeenCalled();
+  app.unmount();
+});

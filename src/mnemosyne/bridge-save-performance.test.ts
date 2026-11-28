@@ -5,7 +5,8 @@ import { membershipBadges } from './event-membership-ui';
 import { computed } from 'vue';
 import * as client from '@/api/client';
 import { apiSettings } from '@/api/settings';
-import { checkResummary, engineState } from '@/memory/engine';
+import { checkResummary, engineState, recoverSummaryResponse } from '@/memory/engine';
+import { summaryResponses } from '@/memory/summary-response';
 import { Library, Transaction, activateLibrary, freshLibraryName } from './db';
 import { bindDaily, syncDaily, serializeDailyActivation, invalidateDaily, scheduleDaily, currentMembershipHints, dailyState } from './bridge';
 import { memory, recomputeDerived, scheduleLeafFlush, flushLeavesNow } from '@/memory/store';
@@ -118,11 +119,11 @@ test('summary event tags reach existing cards through automatic sync without ope
   expect(get).not.toHaveBeenCalled();
 });
 
-test.each(['success', 'API error'])('chat cards settle after automatic threshold resummary (%s) with the plugin closed', async outcome => {
+test.each(['success', 'review', 'API error'])('chat cards settle after automatic threshold resummary (%s) with the plugin closed', async outcome => {
   const original = { leafBatchThreshold: apiSettings.leafBatchThreshold, leafKeepRecent: apiSettings.leafKeepRecent,
-    summaryMaxRetries: apiSettings.summaryMaxRetries };
+    summaryMaxRetries: apiSettings.summaryMaxRetries, summarySuccessPreviewEnabled: apiSettings.summarySuccessPreviewEnabled };
   try {
-    Object.assign(apiSettings, { leafBatchThreshold: 2, leafKeepRecent: 0, summaryMaxRetries: 0 });
+    Object.assign(apiSettings, { leafBatchThreshold: 2, leafKeepRecent: 0, summaryMaxRetries: 0, summarySuccessPreviewEnabled: outcome === 'review' });
     ctx.chat.push({ ...ctx.chat[0], mes: '第二问', extra: {} }, { ...ctx.chat[1], mes: '第二答', extra: {
       bbs_leaf: { id: 'second', text: '第二条摘要', delta: {}, createdAt: 2, v: 1, swipe: 0 } } });
     const view = await syncDaily();
@@ -137,10 +138,19 @@ test.each(['success', 'API error'])('chat cards settle after automatic threshold
     expect(membershipBadges.value?.get(linked)).toEqual(expected);
     vi.spyOn(client, 'mainApiAvailable').mockReturnValue(true);
     const send = vi.spyOn(client, 'requestViaMainApi');
-    const success = outcome === 'success';
+    const success = outcome !== 'API error';
     if (success) send.mockResolvedValue('{"summary":"合成高层总结"}');
     else send.mockRejectedValue(new Error('合成 API 错误'));
-    expect(await checkResummary()).toBe(success ? 1 : 0);
+    if (outcome === 'review') {
+      expect(await checkResummary()).toBe('pending');
+      expect(dailyState.summaries).toBe(2);
+      const get = vi.spyOn(Transaction.prototype, 'get'), all = vi.spyOn(Transaction.prototype, 'all');
+      expect(await checkResummary()).toBe('pending');
+      expect(get).not.toHaveBeenCalled();
+      expect(all).not.toHaveBeenCalled();
+      await recoverSummaryResponse(summaryResponses[0], '{"summary":"审核后的高层总结"}');
+      expect(memory.summaries.at(-1)?.text).toBe('审核后的高层总结');
+    } else expect(await checkResummary()).toBe(success ? 1 : 0);
     expect(send).toHaveBeenCalledOnce();
     if (success) expect(membershipBadges.value).toBeNull();
     else expect(engineState.lastError).toContain('合成 API 错误');
@@ -151,7 +161,7 @@ test.each(['success', 'API error'])('chat cards settle after automatic threshold
     expect(dailyState.revision).toBe(before + (success ? 1 : 0));
     expect(dailyState.pending).toBe(false);
     expect(membershipBadges.value?.get(linked)).toEqual(expected);
-    const get = vi.spyOn(Transaction.prototype, 'get'), all = vi.spyOn(Transaction.prototype, 'all');
+    const get = vi.spyOn(Transaction.prototype, 'get').mockClear(), all = vi.spyOn(Transaction.prototype, 'all').mockClear();
     await vi.advanceTimersByTimeAsync(1000);
     await serializeDailyActivation(async () => {});
     expect(get).not.toHaveBeenCalled();

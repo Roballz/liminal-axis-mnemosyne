@@ -1,5 +1,5 @@
 import { sourceSnapshot, sameSourceSnapshot } from './source-snapshot';
-import { requestSummaryResponse, applySummaryResponse, summaryResponses, type SummaryResponse } from './summary-response';
+import { requestSummaryResponse, applySummaryResponse, openSummaryResponse, summaryResponseError, summaryResponses, type SummaryResponse } from './summary-response';
 import { generatedTags, type EventHint } from './contextTags';
 import { describePlanWrite } from './plan-write';
 import { eventHintsBefore } from '@/mnemosyne/events';
@@ -1052,10 +1052,15 @@ async function mergeEvidence(nodes: readonly MergeSource[], guard: () => void, c
     : '请在摘要页点「立即总结」或多选合并，核对后可保留旧总结并继续';
   throw new Error(`${label} 等 ${blocked.length} 条来源在请求前已失效或未归档。${action}。本次未调用模型。`);
 }
+const pendingThresholdReviews = new WeakMap<STMessage[], {
+  record: SummaryResponse; guard: () => void;
+}>();
+const continuingThresholdChecks = new WeakMap<STMessage[], Promise<unknown>>();
 function trackedSummary<T>(title: string, sender: TaskSender,
-  messages: ChatMsg[], parse: (raw: string) => T, apply: (value: T) => Promise<void>, guard: () => void, preview = false, reviewFailures = false) {
+  messages: ChatMsg[], parse: (raw: string) => T, apply: (value: T) => Promise<void>, guard: () => void,
+  preview = false, reviewFailures = false, onPreview?: (record: SummaryResponse) => void) {
   return requestSummaryResponse({ title, scope: hostScope(), send: value => sender.send(value, { beforeFallback: guard }),
-    messages, parse, apply, guard, preview, reviewFailures,
+    messages, parse, apply, guard, preview, reviewFailures, onPreview,
     retries: Math.max(0, apiSettings.summaryMaxRetries | 0) });
 }
 /** Explicit user confirmation only; reuse the captured parser and write path without sending. */
@@ -1063,12 +1068,29 @@ export async function recoverSummaryResponse(record: SummaryResponse, text: stri
   if (busy || engineState.running) throw new Error('请等当前摘要任务结束后再确认');
   const chat = getContext()?.chat;
   if (!chat || record.scope !== hostScope()) throw new Error('请回到本次请求所属聊天');
+  const pending = pendingThresholdReviews.get(chat);
+  const threshold = pending?.record.id === record.id ? pending : undefined;
   busy = true; engineState.running = true;
   try {
     await applySummaryResponse(record, text);
     engineState.lastError = '';
-    await afterSummaryHideAndInject(chat);
+    if (threshold) pendingThresholdReviews.delete(chat);
+    // 自动高层仅新增父节点，L0 已完成隐藏，写父节点时也已刷新注入。
+    if (!record.autoLevel) await afterSummaryHideAndInject(chat);
+  } catch (error) {
+    // 失效来源可在下次检测时重新生成；单纯输错 JSON 仍可编辑这份草稿。
+    if (threshold && !summaryResponseError(record, text)) pendingThresholdReviews.delete(chat);
+    throw error;
   } finally { busy = false; engineState.running = false; }
+  if (record.autoLevel && getContext()?.chat === chat && hostScope() === record.scope) {
+    // 新层只依赖已确认的子节点。它独立生成，聊天补 L0 和召回无需等这次请求。
+    const next = checkResummary(false, undefined, record.autoLevel).catch(error => {
+      if (getContext()?.chat === chat) engineState.lastError = error instanceof Error ? error.message : String(error);
+    }).finally(() => {
+      if (continuingThresholdChecks.get(chat) === next) continuingThresholdChecks.delete(chat);
+    });
+    continuingThresholdChecks.set(chat, next);
+  }
 }
 
 /**
@@ -1728,24 +1750,43 @@ function autoSummaryRoots(chat: STMessage[]): AutoSummaryRoot[] {
  * 用 AI 把这批的**叙事文本**融合成一条上层节点,childIds 收纳它们(底层全部保留)。
  * 一次调用会向上连锁(加叶子→可能生 L1→可能生 L2…),按各层阈值递归。
  */
-export function checkResummary(manual: true, confirm?: ConfirmMergeSources): Promise<number | 'pending'>;
-export function checkResummary(manual?: false): Promise<number>;
-export async function checkResummary(manual = false, confirm?: ConfirmMergeSources): Promise<number | 'pending'> {
-  const preview = manual && apiSettings.summarySuccessPreviewEnabled;
+export async function checkResummary(manual = false, confirm?: ConfirmMergeSources, startLevel = 0): Promise<number | 'pending'> {
   if (!engineActiveHere()) return 0;
   const ctx = getContext();
   if (!ctx) return 0;
   const chat = ctx.chat ?? [];
+  const continuation = !startLevel && continuingThresholdChecks.get(chat);
+  if (continuation) {
+    if (!manual) return 0;
+    const scope = hostScope();
+    await continuation;
+    if (getContext()?.chat !== chat || hostScope() !== scope || !engineActiveHere()) return 0;
+  }
+  const pending = pendingThresholdReviews.get(chat);
+  if (pending && pending.record.scope === hostScope() && !pending.record.applied && summaryResponses.includes(pending.record)) {
+    // 自动触发只查会话草稿，跳过树遍历、来源读库和模型请求；手动检测可以重开。
+    if (!manual) return 'pending';
+    try {
+      pending.guard();
+      openSummaryResponse(pending.record);
+      return 'pending';
+    } catch { pendingThresholdReviews.delete(chat); }
+  }
 
   let made = 0; // 本次连锁共生成的总结条数
   let roots: AutoSummaryRoot[] | undefined;
 
   // 最高现存压缩层级,作为连锁上限(+1 容纳新生成的层)
-  const maxLevel = memory.summaries.reduce((m, s) => Math.max(m, s.level), 0);
+  let maxLevel = 0;
+  const counts = new Map<number, number>();
+  for (const node of memory.summaries) {
+    maxLevel = Math.max(maxLevel, node.level);
+    counts.set(node.level, (counts.get(node.level) ?? 0) + 1);
+  }
 
-  for (let level = 0; level <= maxLevel + 1; level++) {
+  for (let level = startLevel; level <= maxLevel + 1; level++) {
     const threshold = thresholdForLevel(level);
-    if (!threshold || threshold < 2) continue;
+    if (!threshold || threshold < 2 || (level > 0 && (counts.get(level) ?? 0) < threshold)) continue;
 
     // 一次同步检测共用覆盖索引；真正生成新节点后才为下一层重建，避免使用异步前的旧森林。
     roots ??= autoSummaryRoots(chat);
@@ -1761,6 +1802,7 @@ export async function checkResummary(manual = false, confirm?: ConfirmMergeSourc
       return made;
     }
 
+    const preview = apiSettings.summarySuccessPreviewEnabled;
     const responseGuard = summaryResponseGuard(chat, batch[batch.length - 1].floorHi, batch.map(n => n.id));
     const { content, hints } = joinNodesForResummary(batch);
     // 传输出层级：L1 采用档位字数，L2 及以上按输入长度计算。
@@ -1779,7 +1821,7 @@ export async function checkResummary(manual = false, confirm?: ConfirmMergeSourc
       const evidence = await mergeEvidence(batch, responseGuard, manual ? confirm : undefined);
       responseGuard();
       // 发请求 + 解析,失败按设置重试(请求报错或 JSON 无效/缺 summary 都算失败)
-      await trackedSummary(`${preview ? "手动" : "自动"} L${level + 1} 总结`, sender, messages, raw => {
+      await trackedSummary(`${manual ? '手动' : '自动'} L${level + 1} 总结`, sender, messages, raw => {
         const d = extractJsonObject<{ summary?: string }>(raw);
         const summary = llmString(d?.summary);
         if (!summary) {
@@ -1808,8 +1850,12 @@ export async function checkResummary(manual = false, confirm?: ConfirmMergeSourc
         });
         made += 1;
         refreshInjection();
-      }, responseGuard, preview, manual);
+      }, responseGuard, preview, manual, record => {
+        if (!manual) record.autoLevel = level + 1;
+        pendingThresholdReviews.set(chat, { record, guard: responseGuard });
+      });
       if (preview) return 'pending';
+      counts.set(level + 1, (counts.get(level + 1) ?? 0) + 1);
       roots = undefined;
       // 不 break:继续外层 for,上一层可能也攒够了 → 连锁压更高层
     } catch (e) {

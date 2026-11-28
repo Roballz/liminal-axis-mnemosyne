@@ -232,7 +232,7 @@ export interface ApiSettings {
   autoHideEnabled: boolean;
   /** 编辑后在聊天界面提示保留/更新受影响摘要。 */
   summaryEditPromptEnabled: boolean;
-  /** 手动摘要/总结成功后先预览编辑；默认关闭，失败返回仍保留。 */
+  /** 手动摘要、手动和自动高层总结成功后先预览编辑；默认关闭。 */
   summarySuccessPreviewEnabled: boolean;
   /**
    * 仅摘要模式。继续分析、保存结构化状态,但不向主模型注入当前状态,

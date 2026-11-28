@@ -7,7 +7,7 @@ import * as settings from '@/api/settings';
 import * as context from '@/st/context';
 import type { STContext, STMessage } from '@/st/context';
 import * as notices from '@/st/toast';
-import { recoverSummaryResponse, regenerateFloor, batchBackfill, checkResummary, currentSummaryPromise, engineState, handleGenerationIntercept, maybeSummarizePrevAi, syncHiddenNow, openingPendingFloor, planBatches, summarizeFloor as prepareSummaryFloor, summarizeSelected as prepareSelected, resummarizeNow, draftFloorCorrection, draftHigherCorrection } from './engine';
+import { recoverSummaryResponse, regenerateFloor, batchBackfill, checkResummary, currentAutoSummaryPromise, currentSummaryPromise, engineState, handleGenerationIntercept, maybeSummarizePrevAi, syncHiddenNow, openingPendingFloor, planBatches, summarizeFloor as prepareSummaryFloor, summarizeSelected as prepareSelected, resummarizeNow, draftFloorCorrection, draftHigherCorrection } from './engine';
 import { selectInjectionNodes } from './inject';
 import { buildBatchThinking, buildResummaryPrompt, buildSummaryThinking, RESUMMARY_THINKING_CHECKLIST, RESUMMARY_THINKING_PREFILL, RULE_SUMMARY_COMPOSITION, SUMMARY_OUTPUT_PROTOCOL } from './prompts';
 import { renderSourceHints, SOURCE_HINTS_HEADER } from './sourceHints';
@@ -682,6 +682,7 @@ describe.each(['automatic', 'manual'] as const)('compression audit output (%s)',
 
   beforeEach(() => {
     Object.assign(settings.apiSettings.prompts, { resummary: '', resummary2: '' });
+    settings.apiSettings.summarySuccessPreviewEnabled = mode === 'manual';
     Object.assign(settings.apiSettings, {
       leafBatchThreshold: 2,
       leafKeepRecent: 0,
@@ -812,7 +813,7 @@ describe('automatic contiguous compression', () => {
   beforeEach(() => {
     Object.assign(settings.apiSettings, {
       leafBatchThreshold: 8, leafKeepRecent: 0, resummaryThreshold: 5,
-      higherResummaryThreshold: 3, summaryMaxRetries: 0,
+      higherResummaryThreshold: 3, summaryMaxRetries: 0, summarySuccessPreviewEnabled: false,
     });
   });
   afterEach(() => Object.assign(settings.apiSettings, original));
@@ -947,6 +948,80 @@ describe('automatic contiguous compression', () => {
     const [newL1, newL2] = memory.summaries.slice(-2);
     expect(newL1).toMatchObject({ level: 1, childIds: range(8, 8).map(leafId) });
     expect(newL2).toMatchObject({ level: 2, childIds: [...previous, newL1.id] });
+  });
+
+  it('自动 L0 直接写入；L1、L2、L3 各自等确认，后续层使用人工修订稿', async () => {
+    Object.assign(settings.apiSettings, { summarySuccessPreviewEnabled: true, leafBatchThreshold: 2,
+      resummaryThreshold: 2, higherResummaryThreshold: 2 });
+    const chat = seedLeaves(range(0, 7));
+    chat.push(message(), message(true));
+    group('a', 1, [0, 1]); group('b', 1, [2, 3]); group('c', 1, [4, 5]);
+    memory.summaries.push({ id: 'ab', level: 2, text: '早期总结', auto: true, createdAt: 0, childIds: ['a', 'b'] });
+    await maybeSummarizePrevAi(false);
+    expect(chat[7].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(memory.summaries).toHaveLength(4);
+    const evidence = vi.spyOn(bridge, 'captureSummaryEvidence');
+    for (const level of [1, 2, 3]) {
+      const draft = summaryResponses[0];
+      expect(draft).toMatchObject({ title: `自动 L${level} 总结`, applied: false });
+      expect(summaryResponseUi.selectedId).toBe(draft.id);
+      expect(engineState.running).toBe(false);
+      expect(currentSummaryPromise()).toBeNull();
+      summaryResponseUi.selectedId = 0;
+      evidence.mockClear();
+      expect(await checkResummary()).toBe('pending');
+      expect(evidence).not.toHaveBeenCalled();
+      expect(summaryResponseUi.selectedId).toBe(0);
+      expect(await resummarizeNow()).toBe('pending');
+      expect(summaryResponseUi.selectedId).toBe(draft.id);
+      expect(client.requestViaMainApi).toHaveBeenCalledTimes(level + 1);
+      await recoverSummaryResponse(draft, JSON.stringify({ summary: `人工确认第${level}层` }));
+      expect(memory.summaries.at(-1)).toMatchObject({ level, text: `人工确认第${level}层` });
+      if (level < 3) {
+        await vi.waitFor(() => expect(summaryResponses[0]).toMatchObject({
+          title: `自动 L${level + 1} 总结`, attempts: [{ kind: 'ready' }],
+        }));
+        expect(vi.mocked(client.requestViaMainApi).mock.calls.at(-1)![0].at(-3)?.content).toContain(`人工确认第${level}层`);
+      }
+    }
+    expect(client.requestViaMainApi).toHaveBeenCalledTimes(4);
+  });
+
+  it('L2 正在生成时仍可继续聊天并写 L0，同批高层只请求一次', async () => {
+    Object.assign(settings.apiSettings, { summarySuccessPreviewEnabled: true, leafBatchThreshold: 2, resummaryThreshold: 2 });
+    const chat = seedLeaves(range(0, 4));
+    group('existing', 1, [0, 1]);
+    await checkResummary();
+    let finish!: (raw: string) => void;
+    vi.mocked(client.requestViaMainApi).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await recoverSummaryResponse(summaryResponses[0], '{"summary":"第一层"}');
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    expect(engineState.running).toBe(false);
+    chat.push(message(true), message(), message(true));
+    await maybeSummarizePrevAi(false);
+    expect(chat[5].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(currentAutoSummaryPromise()).toBeNull();
+    expect(client.requestViaMainApi).toHaveBeenCalledTimes(3);
+    finish('{"summary":"第二层待确认"}');
+    await vi.waitFor(() => expect(summaryResponses.find(r => r.title === '自动 L2 总结')?.attempts[0].kind).toBe('ready'));
+    expect(memory.summaries.every(node => node.level === 1)).toBe(true);
+  });
+
+  it('自动总结失败保留原文；失效草稿不会写入或阻止为新来源生成', async () => {
+    settings.apiSettings.summarySuccessPreviewEnabled = true;
+    const chat = seedLeaves(range(0, 8));
+    vi.mocked(client.requestViaMainApi).mockResolvedValueOnce('invalid');
+    expect(await checkResummary()).toBe(0);
+    expect(summaryResponseUi.selectedId).toBe(0);
+    expect(summaryResponses[0].attempts[0].raw).toBe('invalid');
+    await checkResummary();
+    const draft = summaryResponses[0];
+    chat[0].extra!.bbs_leaf!.text += ' 已修改';
+    await expect(recoverSummaryResponse(draft, '{"summary":"旧草稿"}')).rejects.toThrow('已改变');
+    expect(memory.summaries).toHaveLength(0);
+    expect(await checkResummary()).toBe('pending');
+    expect(summaryResponses[0].id).not.toBe(draft.id);
+    expect(client.requestViaMainApi).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -3,7 +3,7 @@ import { computed, ref, watch, nextTick } from 'vue';
 import ModalMask from './ModalMask.vue';
 import TableTextField from './TableTextField.vue';
 import { eventJsonText } from '@/mnemosyne/event-response';
-import { summaryResponses, summaryResponseUi, summaryResponseError, type SummaryResponse, type SummaryAttempt } from '@/memory/summary-response';
+import { closeSummaryResponse, openSummaryResponse, summaryResponses, summaryResponseUi, summaryResponseError, type SummaryResponse, type SummaryAttempt } from '@/memory/summary-response';
 import { recoverSummaryResponse, engineState } from '@/memory/engine';
 import { hostScope, dailyState } from '@/mnemosyne/bridge';
 import { derivedMeta } from '@/memory/store';
@@ -17,13 +17,13 @@ const selected = computed({
     return record && attempt ? { record, attempt } : null;
   },
   set: (value: { record: SummaryResponse; attempt: SummaryAttempt } | null) => {
-    summaryResponseUi.selectedId = value?.record.id ?? 0;
-    summaryResponseUi.attempt = value ? value.record.attempts.indexOf(value.attempt) : 0;
+    if (value) openSummaryResponse(value.record, value.record.attempts.indexOf(value.attempt));
+    else closeSummaryResponse(scope.value);
   },
 });
 const saving = ref(false), saveError = ref('');
 const panel = ref<HTMLElement | null>(null);
-watch(selected, async value => { saveError.value = ''; if (value) { await nextTick(); panel.value?.focus?.({ preventScroll: true }); } });
+watch(() => selected.value?.attempt, async attempt => { saveError.value = ''; if (attempt) { await nextTick(); panel.value?.focus?.({ preventScroll: true }); } });
 function trapFocus(event: KeyboardEvent) {
   const targets = [...(panel.value?.querySelectorAll<HTMLElement>('button:not(:disabled), textarea:not(:disabled), summary') ?? [])]
     .filter(el => el.getClientRects().length);
@@ -38,7 +38,7 @@ const draft = computed({
   set: text => { if (selected.value) selected.value.attempt.draft = text; },
 });
 const error = computed(() => selected.value ? summaryResponseError(selected.value.record, draft.value) : '');
-watch(scope, () => { selected.value = null; saveError.value = ''; });
+watch(scope, () => { summaryResponseUi.selectedId = 0; saveError.value = ''; });
 function open(record: SummaryResponse, attempt: SummaryAttempt) {
   if (saving.value) return;
   if (attempt.draft === undefined) attempt.draft = eventJsonText(attempt.raw ?? '');
@@ -75,6 +75,7 @@ const labels = { api: 'API 请求失败（未取得正文）', empty: '返回为
       <header><h3>审阅摘要返回</h3><small>{{ selected.record.title }}</small></header>
       <div class="mn-dialog-body">
         <p v-if="selected.record.applied">本次请求已经应用。这里保留各次返回供诊断，不会重复覆盖摘要。</p>
+        <p v-else-if="selected.record.autoLevel">可编辑下方总结。确认后保存这一层，再检查下一层是否达到总结阈值。</p>
         <p v-else>可修改返回 JSON，确认后使用同一次请求的来源重新校验并写入，不再调用 API。来源或目标已改变时会拒绝旧结果。</p>
         <p v-if="selected.attempt.error" class="bbs-error">原始失败：{{ selected.attempt.error }}</p>
         <p v-if="selected.attempt.raw === null">API 请求未提供正文，无法复用返回。请检查 API 错误后重新生成。</p>
@@ -91,7 +92,7 @@ const labels = { api: 'API 请求失败（未取得正文）', empty: '返回为
       <footer>
         <button type="button" :disabled="saving" @click="selected = null">关闭（不保存，保留草稿）</button>
         <button v-if="!selected.record.applied && selected.attempt.raw !== null" class="mn-primary"
-          :disabled="saving || engineState.running || selected.record.running || !!error">{{ saving ? '正在应用…' : '确认应用（不调用 API）' }}</button>
+          :disabled="saving || engineState.running || selected.record.running || !!error">{{ saving ? '正在应用…' : selected.record.autoLevel ? '确认并保存' : '确认应用（不调用 API）' }}</button>
       </footer>
     </form>
   </ModalMask>

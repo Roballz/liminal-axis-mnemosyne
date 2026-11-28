@@ -14,12 +14,24 @@ export interface SummaryResponse {
   attempts: SummaryAttempt[];
   applied: boolean;
   running: boolean;
+  autoLevel?: number;
+  waitingToOpen?: boolean;
 }
 export const summaryResponses = reactive<SummaryResponse[]>([]);
 export const summaryResponseUi = reactive({ selectedId: 0, attempt: 0 });
 let sequence = 0;
 const operations = new Map<number, { parse: (raw: string) => unknown; apply: (value: any) => Promise<void>; guard: () => void }>();
 const message = (e: unknown) => e instanceof Error ? e.message : String(e);
+export function openSummaryResponse(record: SummaryResponse, attempt = record.attempts.length - 1) {
+  record.waitingToOpen = false;
+  summaryResponseUi.selectedId = record.id;
+  summaryResponseUi.attempt = attempt;
+}
+export function closeSummaryResponse(scope: string) {
+  summaryResponseUi.selectedId = 0;
+  const next = summaryResponses.findLast(r => r.scope === scope && r.waitingToOpen && !r.applied);
+  if (next) openSummaryResponse(next);
+}
 export function summaryResponseError(record: SummaryResponse, text: string): string {
   try {
     const operation = operations.get(record.id);
@@ -43,6 +55,7 @@ export async function applySummaryResponse(record: SummaryResponse, text: string
 }
 export async function requestSummaryResponse<T>(options: {
   scope: string; title: string; retries: number; preview?: boolean; reviewFailures?: boolean;
+  onPreview?: (record: SummaryResponse) => void;
   send: (messages: ChatMsg[]) => Promise<string>; messages: ChatMsg[];
   parse: (raw: string) => T; apply: (value: T) => Promise<void>; guard: () => void;
 }): Promise<T> {
@@ -89,9 +102,12 @@ export async function requestSummaryResponse<T>(options: {
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   } finally {
     record.running = false;
-    if ((options.preview || (options.reviewFailures && !record.applied)) && record.attempts.length) {
-      summaryResponseUi.selectedId = record.id;
-      summaryResponseUi.attempt = record.attempts.length - 1;
+    const ready = record.attempts.at(-1)?.kind === 'ready';
+    if (ready) options.onPreview?.(record);
+    if ((ready || ((options.reviewFailures ?? options.preview) && !record.applied)) && record.attempts.length) {
+      const current = summaryResponses.find(r => r.id === summaryResponseUi.selectedId);
+      if (current && current.scope === record.scope && !current.applied) record.waitingToOpen = true;
+      else openSummaryResponse(record);
     }
   }
 }

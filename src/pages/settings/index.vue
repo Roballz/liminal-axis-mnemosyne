@@ -1074,7 +1074,7 @@ function exportPublicApiDocument() {
           <span class="bbs-field-label">成功后预览编辑</span>
           <input v-model="apiSettings.summarySuccessPreviewEnabled" type="checkbox" class="bbs-checkbox" />
         </label>
-        <p class="bbs-field-hint">默认关闭：手动摘要/总结成功后直接保存。开启后先预览编辑，确认格式正确才保存。仅影响新请求；失败原文与编辑复用始终保留，自动/批量成功不弹窗。</p>
+        <p class="bbs-field-hint">开启后，手动摘要和总结、自动生成的 L1 及以上总结都会在聊天界面弹出预览，确认后保存。自动单楼摘要和批量补摘的 L0 直接保存。默认关闭，仅影响新请求。</p>
         <label class="bbs-num-row">
           <span class="bbs-field-label">失败重试次数</span>
           <input v-model.number="apiSettings.summaryMaxRetries" class="bbs-input bbs-num" type="number" min="0" />
